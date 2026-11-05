@@ -248,23 +248,23 @@ class FilesBrowserPresentationTest {
             AgentBrowserControlTest.LocalPage().use { page ->
                 assertTrue(rpc("request_control").getBoolean("ok"))
                 assertNull(controller.state.value.authorizedClient)
-                find("网页操作待授权"); screenshot("browser-request-banner.png")
+                find("浏览器有待处理请求"); screenshot("browser-request-banner.png")
                 click("查看请求"); assertNull(controller.state.value.authorizedClient)
-                find("交回 AI"); screenshot("browser-request.png")
-                click("交回 AI"); await { controller.state.value.authorizedClient == client }
+                find("浏览器控制"); screenshot("browser-request.png")
+                click("浏览器控制"); await { controller.state.value.authorizedClient == client }
                 assertTrue(rpc("navigate", JSONObject().put("url", page.url)).getBoolean("ok"))
                 await { controller.state.value.url == page.url && !controller.state.value.loading }
                 find("Browser fixture"); screenshot("browser-controlled-page.png")
-                click("撤销 AI 操作权限"); assertNull(controller.state.value.authorizedClient)
+                click("浏览器控制"); assertNull(controller.state.value.authorizedClient)
                 assertTrue(rpc("snapshot").getBoolean("ok")); assertFalse(rpc("back").getBoolean("ok"))
-                assertTrue(rpc("request_control").getBoolean("ok")); click("交回 AI")
+                assertTrue(rpc("request_control").getBoolean("ok")); click("浏览器控制")
                 click("文件"); await { !controller.state.value.visible }
                 assertEquals(client, controller.state.value.authorizedClient)
                 assertTrue(rpc("snapshot").getJSONObject("result").getString("text").contains("Browser fixture"))
                 click("浏览器"); find("Browser fixture")
                 assertEquals(page.url, controller.state.value.url)
                 assertEquals(client, controller.state.value.authorizedClient)
-                click("撤销 AI 操作权限"); assertNull(controller.state.value.authorizedClient)
+                click("浏览器控制"); assertNull(controller.state.value.authorizedClient)
                 click("浏览器菜单"); click("历史记录"); find("Browser fixture"); screenshot("browser-history.png"); click("返回浏览器")
                 click("设置"); find("返回上一页"); click("返回上一页"); find("Browser fixture")
             }

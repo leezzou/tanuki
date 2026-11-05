@@ -37,6 +37,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+private const val IDLE_RETURN_NOTICE = "30 秒未操作，浏览器权限已交回 AI"
+
 // The transport capability and connection identity are never exposed to a web page.
 class BrowserConnection(val port: Int, val token: String, val clientId: String = UUID.randomUUID().toString())
 data class BrowserTabInfo(val id: String, val url: String, val title: String, val loading: Boolean)
@@ -71,10 +73,6 @@ internal class BrowserPermissionGate {
     }
     @Synchronized fun grant(client: String): Boolean {
         if (closed || !visible || pending != client) return false
-        generation++; granted = client; pending = null; return true
-    }
-    @Synchronized fun grantFromNativeConfirmation(client: String): Boolean {
-        if (closed || !visible) return false
         generation++; granted = client; pending = null; return true
     }
     @Synchronized fun grantProcessConnection(client: String): Boolean {
@@ -121,7 +119,7 @@ class AgentBrowserController(private val context: Context, val library: BrowserL
                 takeoverClient = null
                 if (gate.grantProcessConnection(client)) {
                     granted(client)
-                    update { copy(notice = "30 秒未操作，浏览器权限已交回 AI") }
+                    update { copy(notice = IDLE_RETURN_NOTICE) }
                 }
                 return
             }
@@ -537,7 +535,8 @@ class AgentBrowserController(private val context: Context, val library: BrowserL
         granted(clientId)
     }
     fun grantConnection() {
-        uiThread(); if (rendererGone || !gate.grantFromNativeConfirmation(connection.clientId)) return
+        // 全局原生按钮可在其他页明确授权当前连接，不以网页可见性冒充用户许可。
+        uiThread(); if (rendererGone || !gate.grantProcessConnection(connection.clientId)) return
         library.setAiControlEnabled(true)
         granted(connection.clientId)
     }
@@ -647,7 +646,12 @@ class AgentBrowserController(private val context: Context, val library: BrowserL
         try { action(); refresh() } catch (_: Exception) { failPage("操作未完成，请检查网页或重新打开") }
     }
     private fun uiThread() { check(Looper.myLooper() == Looper.getMainLooper()) { "Browser UI requires main thread" } }
-    private fun update(block: BrowserState.() -> BrowserState) { mutableState.value = mutableState.value.block() }
+    private fun update(block: BrowserState.() -> BrowserState) {
+        val next = mutableState.value.block()
+        // 交回提示必须与当前可操作状态一致；再次接管/撤权后不能留下旧授权结论，其他通知不清除。
+        mutableState.value = if (next.notice == IDLE_RETURN_NOTICE &&
+            (next.authorizedClient == null || next.privatePage || next.closed || next.rendererFailed)) next.copy(notice = null) else next
+    }
     private fun log(message: String) { update { copy(operations = (operations + message).takeLast(20)) } }
     private fun failPage(message: String) { if (tabs.isNotEmpty()) { current.error = message; current.loading = false; publishTabs() } }
     private fun invalidateDocument() { permit.set(null); documentId = UUID.randomUUID().toString(); nodeKey = "__hp_${UUID.randomUUID().toString().replace("-", "")}" }

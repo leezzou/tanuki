@@ -168,7 +168,7 @@ class AgentBrowserControlTest {
     }
     @Test fun proactiveNativeGrantIsForKnownConnectionAndCannotBeInvokedByRpc() {
         assertEquals("unknown_method", code(rpc("grant")))
-        ui { controller.grantConnection() }
+        ui { controller.setVisible(false); controller.grantConnection() }
         assertEquals(controller.connection.clientId, controller.state.value.authorizedClient)
         assertTrue(rpc("tabs", who = controller.connection.clientId).getBoolean("ok"))
         assertEquals("permission_required", code(rpc("tabs")))
@@ -182,10 +182,18 @@ class AgentBrowserControlTest {
         LocalPage().use { page ->
             ui { controller.navigate(page.url) }
             repeat(100) { if (controller.state.value.loading || controller.state.value.title != "Browser fixture") Thread.sleep(50) }
+            // 标题/加载状态不代表首帧已绘制；权限断言前等待实际可截图的合成页。
+            val frame = CountDownLatch(1)
+            ui { controller.webView.postVisualStateCallback(1, object : android.webkit.WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) { frame.countDown() }
+            }) }
+            assertTrue("Synthetic page visual frame", frame.await(5, TimeUnit.SECONDS))
             val canonical = controller.connection.clientId
             fun assertReadOnly() {
                 assertTrue(rpc("snapshot", who = canonical).getJSONObject("result").getString("text").contains("Browser fixture"))
-                assertTrue(rpc("screenshot", who = canonical).getJSONObject("result").getInt("width") > 0)
+                val shot = rpc("screenshot", who = canonical)
+                assertTrue("Screenshot failed: ${shot.optJSONObject("error")?.optString("code")}", shot.getBoolean("ok"))
+                assertTrue(shot.getJSONObject("result").getInt("width") > 0)
                 assertTrue(rpc("tabs", who = canonical).getBoolean("ok"))
                 for (method in listOf("navigate", "click", "type", "scroll", "back", "forward", "reload", "new_tab", "select_tab", "close_tab", "find", "zoom"))
                     assertEquals(method, "permission_required", code(rpc(method, who = canonical)))

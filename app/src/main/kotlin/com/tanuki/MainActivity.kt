@@ -31,6 +31,7 @@ import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
 import com.tanuki.ui.AgentBrowserPage
+import com.tanuki.ui.BrowserControlUiState
 import com.tanuki.ui.WorkspaceFilesPage
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
@@ -198,10 +199,22 @@ class MainActivity : ComponentActivity() {
                 // Pointer/scroll/progress updates in the browser must not recompose DSH.
                 val browserAttention = remember(agentBrowser) {
                     agentBrowser?.state?.map { state ->
-                        (state.pendingClient != null || state.downloadRequest != null) to (state.authorizedClient != null)
+                        BrowserControlUiState(
+                            aiControlled = state.authorizedClient != null && !state.privatePage && !state.closed && !state.rendererFailed,
+                            enabled = !state.closed && !state.rendererFailed && !state.privatePage,
+                            description = when {
+                                state.closed || state.rendererFailed -> "浏览器不可用"
+                                state.privatePage -> "登录授权页，AI 不可查看或操作"
+                                state.takeoverRequested -> "AI 操作已暂停，等待接管选择"
+                                state.authorizedClient != null -> "AI 可操作浏览器"
+                                state.idleReturnSeconds != null -> "你在临时操作，空闲30秒后交回 AI"
+                                else -> "你在操作，AI 仅可查看"
+                            },
+                            requestPending = state.pendingClient != null || state.downloadRequest != null,
+                        )
                     }?.distinctUntilChanged()
                 }
-                val browserFlags = browserAttention?.collectAsState(initial = false to false)?.value ?: (false to false)
+                val browserControl = browserAttention?.collectAsState(initial = BrowserControlUiState())?.value ?: BrowserControlUiState()
                 LaunchedEffect(dark, colors.background, colors.surface) {
                     window.statusBarColor = colors.background.toArgb()
                     window.navigationBarColor = colors.surface.toArgb()
@@ -278,7 +291,14 @@ class MainActivity : ComponentActivity() {
                             (application as TanukiApp).hideBrowserOverlay()
                             (application as TanukiApp).startBrowserBackground()
                         },
-                        revokeBrowser = { agentBrowser?.takeControl() },
+                        toggleBrowserControl = {
+                            agentBrowser?.let { controller ->
+                                val state = controller.state.value
+                                if (!state.closed && !state.rendererFailed && !state.privatePage) {
+                                    if (state.authorizedClient != null) controller.takeControl() else controller.grantConnection()
+                                }
+                            }
+                        },
                         openBrowserOverlay = ::requestBrowserOverlay,
                         checkAppUpdates = appUpdates::check,
                         downloadAppUpdate = appUpdates::download,
@@ -287,9 +307,7 @@ class MainActivity : ComponentActivity() {
                     ),
                     browserView = browser.view,
                     browserOpenRequest = browserOpenRequest,
-                    browserRequest = browserFlags.first,
-                    browserAuthorized = browserFlags.second,
-                    browserAvailable = agentBrowser != null,
+                    browserControl = browserControl,
                     filesPage = { modifier, bottomInset ->
                         WorkspaceFilesPage(workspaceFiles,
                             onImport = { importFiles.launch(arrayOf("*/*")) },
@@ -302,7 +320,9 @@ class MainActivity : ComponentActivity() {
                             onShowOverlay = ::requestBrowserOverlay,
                             onHideOverlay = { (application as TanukiApp).hideBrowserOverlay() }, openRequest = browserOpenRequest,
                             fullscreen = browserFullscreen, onFullscreen = onBrowserFullscreen,
-                            onSettings = onOpenSettings, bottomInset = bottomInset) }
+                            onSettings = onOpenSettings, bottomInset = bottomInset,
+                            // 完整工作区使用中央按钮，独立小窗仍保留本地控制入口。
+                            showControlBar = onOpenSettings == null) }
                             ?: Column(modifier) {
                                 Text(browserUnavailable ?: "浏览器暂不可用")
                                 if (onOpenSettings != null) TextButton(onClick = onOpenSettings) { Text("设置") }

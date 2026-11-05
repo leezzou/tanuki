@@ -72,7 +72,7 @@ private fun browserFileSize(bytes: Long): String = when {
 fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Modifier, connectionError: String? = null,
     onShowOverlay: (() -> Unit)? = null, onHideOverlay: () -> Unit = {}, openRequest: Int = 0,
     fullscreen: Boolean = false, onFullscreen: (Boolean) -> Unit = {},
-    onSettings: (() -> Unit)? = null, bottomInset: Dp = 0.dp) {
+    onSettings: (() -> Unit)? = null, bottomInset: Dp = 0.dp, showControlBar: Boolean = true) {
     val state by controller.state.collectAsState()
     val interactionModifier = modifier.pointerInput(controller) {
         awaitPointerEventScope {
@@ -194,7 +194,9 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
                 IconButton(onClick = { focus.clearFocus(); keyboard?.hide(); onFullscreen(true) }) { TanukiIcon(TanukiGlyph.Expand, "浏览器进入全屏") }
                 IconButton(onClick = { menu = "main" }) { Icon(Icons.Default.Menu, "浏览器菜单") }
             }
-            if (!fullscreen) Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            if (!fullscreen && !showControlBar && state.privatePage) Text("登录授权页 · AI 不可查看或操作",
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
+            if (!fullscreen && showControlBar) Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (state.authorizedClient != null) Icons.Default.SmartToy else Icons.Default.Person, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(if (state.privatePage) "登录授权页 · AI 不可查看或操作" else if (state.takeoverRequested) "AI 可查看，操作已暂停" else if (state.authorizedClient != null) "AI 可操作 · 点网页可临时接管"
@@ -385,7 +387,7 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
             }
         }
     }
-    menu?.let { page -> BrowserMenuSheet(page == "tools", state.url.isNotEmpty() && !state.loading, state.authorizedClient != null,
+    menu?.let { page -> BrowserMenuSheet(page == "tools", state.url.isNotEmpty() && !state.loading,
         onBack = { menu = "main" }, onDismiss = { menu = null }, onChoose = { name ->
             when (name) {
                 "工具箱" -> menu = "tools"
