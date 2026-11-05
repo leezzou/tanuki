@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261105-1204-release-016.md",
-  "recordSha256": "54a0f7e72796ff0dbdbcb449822c1655c542141e8c951631be03d7f47f0a2483",
-  "sourceFingerprint": "98737b833dc5696504cb6df074bf1aff2346f72b7b54f9f42bbd6fead8b026cf",
-  "fileCount": 400
+  "record": "docs/handoffs/20261105-1503-live-file-manager.md",
+  "recordSha256": "215bf61b9b267209088787b8296023d06193853c7c77c20b5c88f950a1dbc7b6",
+  "sourceFingerprint": "bcb2dffff430e9b411505f56e7627f88df6fa344bcdb05d7a52d150e82a2cfbe",
+  "fileCount": 411
 }

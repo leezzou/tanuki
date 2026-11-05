@@ -26,6 +26,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.tanuki.runtime.*
 import com.tanuki.storage.DataSnapshots
+import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.browser.AgentBrowserController
@@ -75,7 +76,47 @@ class MainActivity : ComponentActivity() {
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
                 "请先停止 DSH，再管理文件；避免与 Agent 同时修改文件。"
             }
-        }, manager.workspaceStorage)
+        }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) })
+    }
+    private var phoneStorageGranted by mutableStateOf(false)
+    private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+    }
+    private val phoneStorageSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+    }
+    private fun requestPhoneStoragePermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            val intent = PhoneStorageAccess.permissionIntent(this)
+            try { phoneStorageSettings.launch(intent) }
+            catch (_: android.content.ActivityNotFoundException) {
+                try { phoneStorageSettings.launch(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                catch (_: android.content.ActivityNotFoundException) { manager.event("此设备未提供所有文件访问设置，可使用系统文件选择器导入和导出") }
+            }
+        } else phoneStoragePermission.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    override fun onResume() {
+        super.onResume()
+        phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+    }
+    private var pendingFileExport: Pair<WorkspaceFileManager, String>? = null
+    private val exportSingleFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val source = pendingFileExport; pendingFileExport = null
+        if (uri != null && source != null) lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                manager.fileTransfers.track("导出文件") { id ->
+                    contentResolver.openOutputStream(uri, "w")!!.use { output ->
+                        source.first.exportFile(source.second, output) { received, total -> manager.fileTransfers.update(id, received, total) }
+                    }
+                }
+                manager.event("文件导出完成")
+            } catch (cancelled: CancellationException) { discardIncompleteExport(uri); throw cancelled }
+            catch (error: Exception) { discardIncompleteExport(uri); manager.fail(error) }
+        }
+    }
+    private fun discardIncompleteExport(uri: Uri) {
+        runCatching { check(android.provider.DocumentsContract.deleteDocument(contentResolver, uri)) }
+            .onFailure { manager.event("未完整导出的目标文件无法自动删除，请在目标位置检查") }
     }
     private var filesCallback: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
@@ -85,16 +126,16 @@ class MainActivity : ComponentActivity() {
     }
     private val importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) lifecycleScope.launch(Dispatchers.IO) {
-            try { manager.fileTransfers.track("导入项目文件") { importProjectFiles(uris) } }
+            try { manager.fileTransfers.track("导入项目文件") { id -> importProjectFiles(uris, id) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { manager.fail(error) }
         }
     }
     private val exportProject = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { destination -> lifecycleScope.launch(Dispatchers.IO) {
-            try { manager.fileTransfers.track("导出项目 ZIP") { exportProjects(destination) } }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { manager.fail(error) }
+            try { manager.fileTransfers.track("导出项目 ZIP") { id -> exportProjects(destination, id) } }
+            catch (cancelled: CancellationException) { discardIncompleteExport(destination); throw cancelled }
+            catch (error: Exception) { discardIncompleteExport(destination); manager.fail(error) }
         } }
     }
     private val downloadFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -313,7 +354,12 @@ class MainActivity : ComponentActivity() {
                             onImport = { importFiles.launch(arrayOf("*/*")) },
                             onExport = { confirmation = "EXPORT" }, modifier = modifier, bottomInset = bottomInset,
                             runtimeRunning = s.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING),
-                            onStop = { confirmation = "STOP" })
+                            onStop = { confirmation = "STOP" },
+                            phoneStorageGranted = phoneStorageGranted,
+                            onRequestStoragePermission = ::requestPhoneStoragePermission,
+                            onExportFile = { files, path, name ->
+                                if (pendingFileExport == null) { pendingFileExport = files to path; exportSingleFile.launch(name) }
+                            })
                     },
                     agentBrowserPage = { modifier, browserFullscreen, onBrowserFullscreen, onOpenSettings, bottomInset ->
                         agentBrowser?.let { AgentBrowserPage(it, modifier, browserUnavailable,
@@ -441,7 +487,7 @@ class MainActivity : ComponentActivity() {
         "DSH_UNINSTALL" -> "卸载 DSH ${release?.version ?: manager.paths.metadata().optString("dsh","当前版本")} 的引擎程序，保留配置、会话、插件、Skill、项目和其他已安装版本。关联快照恢复前需要先重装匹配的引擎。请先停止服务。"
         "DSH_STAGE" -> "下载并安装官方 DSH ${release?.version ?: "所选版本"} 程序，使用隔离目录检查启动；不打开正式会话，不更改当前版本或数据。较旧版本可先安装为备用，再恢复匹配的数据快照。请先停止服务。"
         "DSH_REINSTALL" -> "移除并重新安装当前 DSH ${release?.version ?: ""} 的官方程序与依赖。配置、会话、插件和项目保留；若下载失败，引擎会保持待安装，可重试。请先停止服务。"
-        "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。请先停止服务以获得一致结果，仍需检查源文件中的敏感内容。"
+        "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。运行中可以导出；发现文件在读取期间变化时会提示重试。整个工作区不是同一时刻的快照，仍需检查源文件中的敏感内容。"
         "CACHE" -> "只删除下载压缩包和未完成下载，不删除环境或项目。"
         "UPDATE" -> "安装官方 DSH ${release?.version ?: "所选版本"}，先进行候选启动检查、备份，再切换。请先停止服务。检查不使用正式模型凭据，正式服务保留官方调度设置。"
         "BACKUP" -> "请先停止服务。快照包含私有凭据与会话，仅保存在 App 内；卸载会丢失，不能作为跨设备备份。"
@@ -594,23 +640,21 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, "无法打开系统文件选择器，请稍后重试", android.widget.Toast.LENGTH_LONG).show()
     }
 
-    private suspend fun importProjectFiles(uris: List<Uri>) = manager.mutation.withLock {
-        check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) { "请先停止服务再导入文件" }
+    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) = manager.mutation.withLock {
         val names = uris.mapIndexed { index, uri ->
             currentCoroutineContext().ensureActive()
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: "file-$index"
         }
-        val destination = manager.workspaceStorage.importFiles(names) { index ->
+        val destination = manager.workspaceStorage.importFiles(names, onProgress = { manager.fileTransfers.update(transferId, it) }) { index ->
             contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件")
         }
         manager.event("已导入新项目 ${destination.name}")
     }
-    private suspend fun exportProjects(uri: Uri) = manager.mutation.withLock {
-        check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) { "请先停止服务再导出，以避免写入中断" }
+    private suspend fun exportProjects(uri: Uri, transferId: Long) = manager.mutation.withLock {
         contentResolver.openOutputStream(uri, "w")!!.use { output ->
-            com.tanuki.storage.ProjectArchive.write(manager.paths.workspaces, manager.paths.base, output)
+            com.tanuki.storage.ProjectArchive.write(manager.paths.workspaces, manager.paths.base, output) { manager.fileTransfers.update(transferId, it) }
         }
         manager.event("项目导出完成，不含 DSH 私有数据")
     }

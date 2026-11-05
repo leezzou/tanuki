@@ -106,7 +106,7 @@ bash scripts/verify-workspace.sh \
 | DSH网页/认证/紧凑/导出 | `app/src/main/kotlin/com/tanuki/web/DshWebView.kt`、`DshViewport.kt`、`OriginPolicy.kt`、`BlobDownloads.kt` |
 | 独立浏览器/工具RPC | `app/src/main/kotlin/com/tanuki/browser/AgentBrowserController.kt`、`BrowserIntegration.kt`、`BrowserLibrary.kt` |
 | 系统悬浮窗/后台 | `app/src/main/kotlin/com/tanuki/browser/BrowserService.kt`、`BrowserOverlayWindow.kt`、`BrowserOverlayGeometry.kt` |
-| 文件/软预算/模拟链接 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`、`WorkspaceStorage.kt`、`L2sStore.kt` |
+| 文件/存储权限/阅读器 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`、`PhoneStorageAccess.kt`、`TextFileReader.kt`、`WorkspaceStorage.kt`、`L2sStore.kt`；界面见 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt`、`WorkspaceFileViewer.kt` |
 | 快照/安全解包/DSH 更新 | `app/src/main/kotlin/com/tanuki/storage/DataSnapshots.kt`、`SafeTar.kt`、`update/UpdateManager.kt` |
 | Tanuki APK 更新/版本打包 | `app/src/main/kotlin/com/tanuki/update/ApplicationUpdateManager.kt`、`AppReleaseManifest.kt`、`AppUpdatePolicy.kt`、`scripts/prepare-app-release.py`；见 [应用内更新](APP-UPDATES.md) / [发布](RELEASE.md) |
 | Android原生启动链 | `app/src/main/cpp/supervisor.c`、`runtime/build-native-runtime.sh`、`runtime/patches/proot-exitkill.patch` |
@@ -127,15 +127,15 @@ bash scripts/verify-workspace.sh \
 
 ## 7. 完成与交付
 
-本次用户已确认0.1.6/code8，沿用workspacecheck开发证书、non-debuggable、ARM64、minSdk26/targetSdk34；code8高于已核对的公开/设备最高7。用户合入PR #5后的main/f1fb102在合并点与已测head862e510完整源码树相同，但不能据此把debug结果算作本轮release验证；实际结果见[测试现状](TEST-REPORT.md)。
+用户本次已确认0.1.7，候选versionCode为9；封装前重新核对公开、已安装和归档版本上限，确保严格递增。沿用workspacecheck开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。文件管理新行为、手机共享存储权限及文本/媒体格式边界见[项目存储说明](WORKSPACE-STORAGE.md)。候选release须独立执行适用测试，debug与0.1.6历史结果不能代替；实际范围见[测试现状](TEST-REPORT.md)。
 
 1. 完成本次交接记录并更新 `AGENT-STATE.md`，诚实写明实际验证及未测范围。每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、删除已过期交接并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
 2. `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md`，再不带参数检查。
-3. `python3 scripts/check-publication.py --git` 检查实际Git候选；`python3 scripts/package-source.py --version 0.1.6` 生成 `artifacts/sources/Tanuki-0.1.6-source.zip`，再检查ZIP内容、嵌套附件与 `artifacts/SOURCE-SHA256SUMS`。
+3. `python3 scripts/check-publication.py --git` 检查实际Git候选；`python3 scripts/package-source.py --version 0.1.7` 生成 `artifacts/sources/Tanuki-0.1.7-source.zip`，再检查ZIP内容、嵌套附件与 `artifacts/SOURCE-SHA256SUMS`。
 4. APK有变化才更新其交付副本/校验并核对包名、签名和安装目标。仅文档/宿主脚本变化，不声称业务APK已重编译或设备测试全套重跑。
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。
 6. 最终答复给清楚的产物路径、完成项、暂停/阻塞项和下一步，不留下只存在聊天里的必要信息。
 
-本轮发布须先完成全部适用测试和上述文档/清理/公开检查，再统一一次commit/push，推送成功后使用[发布说明](RELEASE.md)的verified参数封装已测SHA至 `artifacts/releases/0.1.6/`。0.1.5历史附件保持原样；用户在网页创建Pre-release并上传完整6附件，Agent不自动创建tag或Release。
+本轮发布须先完成全部适用测试和上述文档/清理/公开检查，再统一一次commit/push，推送成功后使用[发布说明](RELEASE.md)的verified参数封装已测SHA至 `artifacts/releases/0.1.7/`。0.1.6及更早历史附件保持原样；用户在网页创建Pre-release并上传完整6附件，Agent不自动创建tag或Release。
 
-本仓库main保护要求经过PR，本轮直推被GH013拒绝；发布收尾改推 `release/0.1.6`，再由用户创建并合入发布PR，不修改保护规则。PR5功能已经合并；最终附件在发布分支推送成功后封装。
+本次工作分支为 `feature/live-file-manager-017`。完成适用release测试、文档与交接、过期记录清理、公开源码候选及实际index检查后，统一一次commit/push该新分支；推送成功后按verified模式封装同一已测APK。main通过PR合入，由用户自行创建并合并PR、创建tag及发布Pre-release；Agent不直推main或修改保护规则。0.1.6及更早已交付附件保持原样。

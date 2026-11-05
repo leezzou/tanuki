@@ -18,8 +18,8 @@ object DirectoryUsage {
         val incompleteReason: String? = null
     )
 
-    suspend fun measure(directory: File, maxEntries: Int = 250000, maxMillis: Long = 15000, stopAfterBytes: Long? = null, linkedFilesRoot: File = directory): Usage {
-        require(maxEntries > 0 && maxMillis in 1..60000 && (stopAfterBytes == null || stopAfterBytes >= 0))
+    suspend fun measure(directory: File, maxEntries: Int? = null, maxMillis: Long = 15000, stopAfterBytes: Long? = null, linkedFilesRoot: File = directory): Usage {
+        require((maxEntries == null || maxEntries > 0) && maxMillis in 1..60000 && (stopAfterBytes == null || stopAfterBytes >= 0))
         if (!directory.exists()) return Usage(0, 0)
         val coroutine = currentCoroutineContext()
         val started = System.nanoTime()
@@ -30,7 +30,7 @@ object DirectoryUsage {
         var incomplete: String? = null
         fun withinBudget(): Boolean {
             coroutine.ensureActive()
-            if (entries >= maxEntries) incomplete = "目录条目超过单次统计上限"
+            if (maxEntries != null && entries >= maxEntries) incomplete = "目录条目超过单次统计上限"
             if (System.nanoTime() - started >= maxMillis * 1000000L) incomplete = "目录统计超时，请稍后重试"
             return incomplete == null
         }

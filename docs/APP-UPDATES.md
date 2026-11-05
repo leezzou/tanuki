@@ -30,21 +30,21 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。本次用户确认 `v0.1.6`，对应 `versionName=0.1.6` / `versionCode=8`，高于已核对的公开/设备最高code7，沿用原workspacecheck开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。本次用户确认 `v0.1.7`，候选对应 `versionName=0.1.7` / `versionCode=9`；封装前须核对公开、已安装及归档上限，确保code9严格递增。沿用原workspacecheck开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
-用户已将PR #5合入 `main/f1fb102`，合并点完整源码树与已测PR head `862e510` 相同；此前debug验证不能替代本轮release验证。完成候选测试、文档与交接、过期记录清理和公开检查后，统一一次commit/push，再按已测SHA封装最终附件。打包、源码推送、创建tag和上传Release是不同授权；本次Release由用户在网页发布。
+本次文件管理增强及手机共享存储权限见[项目存储说明](WORKSPACE-STORAGE.md)。候选release须独立完成适用测试；debug或0.1.6历史结果不能替代。本次完成全部验证、文档与交接、过期记录清理及公开/实际index检查后，统一一次commit/push新分支 `feature/live-file-manager-017`，再按已测SHA封装最终附件。由用户自行合并PR并在网页发布Release，Agent不创建tag或上传Release。
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.6 --version-code 8 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.7 --version-code 9 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
-脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.6/`：
+脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.7/`：
 
-- `Tanuki-0.1.6-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
-- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.6` 的同一个 Release，不能只上传 APK。
-- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.6-source.zip`、原生对应源码与校验文件。
+- `Tanuki-0.1.7-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
+- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.7` 的同一个 Release，不能只上传 APK。
+- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.7-source.zip`、原生对应源码与校验文件。
 
 清单结构为 `schemaVersion:1` / `packages` 数组，每个包包含 `packageName`、`versionName`、整数 `versionCode/minSdk/bytes`、`assetName`、`sha256`、`certificateSha256`。不要把文档示例或其他包/版本的元数据当成实际附件。更换/重打 APK 后必须重跑生成和外部散列检查。
 
@@ -52,8 +52,8 @@ python3 scripts/prepare-app-release.py --version 0.1.6 --version-code 8 --channe
 
 ## 验证范围
 
-既有回归覆盖公开Feed、清单、来源/大小/哈希、APK身份、缓存文件与签名边界；早期ARM64 API34模拟器曾实际进入更新页并点击检查，得到「暂无可用于应用内更新的Release」，而非API限流。这是历史结果，不代表当前公开Release状态或0.1.6已通过验证；本轮候选的实际命令和结果以[测试现状](TEST-REPORT.md)为准。网络始终不可达时仍会失败，不承诺GitHub全球可用。
+既有回归覆盖公开Feed、清单、来源/大小/哈希、APK身份、缓存文件与签名边界；早期ARM64 API34模拟器曾实际进入更新页并点击检查，得到「暂无可用于应用内更新的Release」，而非API限流。这是历史结果，不代表当前公开Release状态或0.1.7已通过验证；本轮候选的实际命令和结果以[测试现状](TEST-REPORT.md)为准。网络始终不可达时仍会失败，不承诺GitHub全球可用。
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-本仓库main保护要求经过PR，本轮直推被GH013拒绝；发布收尾改推 `release/0.1.6`，再由用户创建并合入发布PR，不修改保护规则。PR5功能已经合并；最终附件在发布分支推送成功后封装。
+本次工作分支为 `feature/live-file-manager-017`。完成适用release测试、文档与交接、过期记录清理、公开源码候选及实际index检查后，统一一次commit/push该新分支；推送成功后按verified模式封装同一已测APK。main通过PR合入，由用户自行创建并合并PR、创建tag及发布Pre-release；Agent不直推main或修改保护规则。0.1.6及更早已交付附件保持原样。

@@ -28,6 +28,6 @@ Tanuki APK 更新只使用本仓库 HTTPS 公开 Release/附件，不调用 GitH
 
 官方启动 token 仅保留在当前进程内存，不写入日志或 state 元数据。签名 cookie 由 WebView 与官方服务处理；启动 URL 在进入网页后由官方重定向清理。运行日志过滤已知 Key、token、Bearer 等格式，但模式过滤不能保证识别任意插件输出的所有敏感信息，因此默认不公开导出任意 DSH 错误日志。系统 logcat 只记录运行身份和退出码，测试输出仅用于专用无密钥环境。
 
-API Key 通过官方 Web UI 配置，不编译入 APK 或写进仓库。账号和会话保存在 App 私有空间；关闭 Android 自动备份，并通过 dataExtractionRules 排除云备份和设备迁移。内部快照可能包含凭据，不能直接明文分享。SAF 项目导出不含 userdata，排除常见凭据文件；源文件仍需用户自行检查。没有请求全盘存储访问权限。
+API Key 通过官方 Web UI 配置，不编译入 APK 或写进仓库。账号和会话保存在 App 私有空间；关闭 Android 自动备份，并通过 dataExtractionRules 排除云备份和设备迁移。内部快照可能包含凭据，不能直接明文分享。SAF 项目导出不含 userdata，排除常见凭据文件；源文件仍需用户自行检查。文件管理器按用户要求声明所有文件访问权限（Android 11+由系统设置明确授权，旧版为读取存储权限），用于原生手机共享存储浏览；不因此开放其他应用私有数据、网页读取桥或 DSH 自动挂载。外部应用只获得用户选中单文件缓存副本的临时只读 URI，专用 FileProvider 不接受写模式，不共享工作区或整个存储根。权限范围以 [Android 官方说明](https://developer.android.com/training/data-storage/manage-all-files) 为准。
 
 停止只作用于本 App 记录的 Java Process 与相应进程组，发送信号前检查 /proc starttime，防止 PID 重用；不使用 killall node。supervisor 设置独立 session 和 parent-death 信号，PRoot 额外启用 PTRACE_O_EXITKILL，避免 tracer 消失后客体失去路径转换仍继续执行。进程退出后不自动重放用户操作。系统强制停止后的恢复以实际文件和新进程检查为准。

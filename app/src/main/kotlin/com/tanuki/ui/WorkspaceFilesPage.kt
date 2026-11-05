@@ -3,7 +3,6 @@ package com.tanuki.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -14,7 +13,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -23,8 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -34,19 +30,31 @@ import androidx.compose.ui.unit.dp
 import com.tanuki.storage.FileLocation
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
+private class FileDisplayRequest(
+    val entries: List<WorkspaceFileManager.Entry>, val query: String, val hidden: Boolean, val sort: Int,
+)
+private class FileDisplayResult(val request: FileDisplayRequest, val entries: List<WorkspaceFileManager.Entry>)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WorkspaceFilesPage(
     manager: WorkspaceFileManager, onImport: () -> Unit, onExport: () -> Unit,
-    modifier: Modifier = Modifier, runtimeRunning: Boolean = false, onStop: () -> Unit = {}, bottomInset: Dp = 0.dp
+    modifier: Modifier = Modifier, runtimeRunning: Boolean = false, onStop: () -> Unit = {}, bottomInset: Dp = 0.dp,
+    onRequestStoragePermission: () -> Unit = {}, phoneStorageGranted: Boolean = false,
+    onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> }
 ) {
     var location by rememberSaveable { mutableStateOf(FileLocation.WORKSPACE) }
     val files = remember(manager, location) { manager.inLocation(location) }
+    val canBrowse = location != FileLocation.PHONE || phoneStorageGranted
     var directory by rememberSaveable(location) { mutableStateOf("") }
     var entries by remember(files) { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var selected by remember(files) { mutableStateOf(emptySet<String>()) }
@@ -58,8 +66,7 @@ fun WorkspaceFilesPage(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var feedback by remember { mutableStateOf<String?>(null) }
-    var preview by remember { mutableStateOf<WorkspaceFileManager.Preview?>(null) }
-    var previewEntry by remember { mutableStateOf<WorkspaceFileManager.Entry?>(null) }
+    var openedEntry by remember(files) { mutableStateOf<WorkspaceFileManager.Entry?>(null) }
     var action by remember { mutableStateOf<String?>(null) }
     var actionEntries by remember { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var name by remember { mutableStateOf("") }
@@ -92,6 +99,7 @@ fun WorkspaceFilesPage(
         directory = path; entries = loaded; selected = emptySet(); query = ""
     }
     fun begin(kind: String, targets: List<WorkspaceFileManager.Entry> = emptyList()) {
+        if (runtimeRunning) { error = "请先停止 DSH，再修改文件。浏览、导入和导出不受影响。"; menu = false; return }
         actionEntries = targets; name = targets.singleOrNull()?.name.orEmpty(); content = ""; draftOriginal = ""
         error = null; action = kind; menu = false
         destinationPicker = kind == "复制" || kind == "移动"
@@ -99,29 +107,65 @@ fun WorkspaceFilesPage(
     fun dismissEditor() {
         if (!busy) { if (content != draftOriginal && (action == "编辑文本" || action == "新建文本文件")) discard = true else action = null }
     }
-    fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = "已复制 Agent 可用的路径" }
+    fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机文件路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
-    LaunchedEffect(files, runtimeRunning) {
-        error = null; selected = emptySet(); preview = null
-        if (runtimeRunning) { entries = emptyList(); return@LaunchedEffect }
+    LaunchedEffect(files, runtimeRunning, phoneStorageGranted) {
+        error = null; selected = emptySet()
+        if (!canBrowse) { entries = emptyList(); busy = false; return@LaunchedEffect }
         busy = true
         try { entries = files.list(directory) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { report(e) }
         finally { busy = false }
     }
-    BackHandler(enabled = action == null && preview == null && (selected.isNotEmpty() || searching || directory.isNotEmpty())) {
+    BackHandler(enabled = action == null && openedEntry == null && (selected.isNotEmpty() || searching || directory.isNotEmpty())) {
         when { selected.isNotEmpty() -> selected = emptySet(); searching -> { searching = false; query = "" }
             !busy -> navigate(directory.substringBeforeLast('/', "")) }
     }
-    val shown = remember(entries, query, hidden, sort) {
-        val ordering = when (sort) {
-            1 -> compareByDescending<WorkspaceFileManager.Entry> { it.modified }
-            2 -> compareByDescending { it.bytes }
-            else -> compareBy { it.name.lowercase(Locale.ROOT) }
+    // 每次路径或筛选变化生成独立请求，旧请求的结果不能作为新目录的显示内容。
+    val displayRequest = remember(files, directory, entries, query, hidden, sort) {
+        FileDisplayRequest(entries, query, hidden, sort)
+    }
+    var display by remember(files) { mutableStateOf<FileDisplayResult?>(null) }
+    val sorting = display?.request !== displayRequest
+    val shown = if (sorting) emptyList() else display!!.entries
+    LaunchedEffect(displayRequest) {
+        val prepared = withContext(Dispatchers.Default) {
+            val context = currentCoroutineContext()
+            val visible = ArrayList<WorkspaceFileManager.Entry>()
+            for ((index, entry) in displayRequest.entries.withIndex()) {
+                if (index % 256 == 0) context.ensureActive()
+                if ((displayRequest.hidden || !entry.name.startsWith('.')) && entry.name.contains(displayRequest.query, ignoreCase = true)) visible += entry
+            }
+            val ordering = when (displayRequest.sort) {
+                1 -> compareByDescending<WorkspaceFileManager.Entry> { it.modified }
+                2 -> compareByDescending { it.bytes }
+                else -> compareBy { it.name.lowercase(Locale.ROOT) }
+            }
+            val comparator = compareByDescending<WorkspaceFileManager.Entry> { it.directory }.then(ordering).thenBy { it.name }
+            var comparisons = 0
+            visible.sortWith { left, right ->
+                if (comparisons++ % 256 == 0) context.ensureActive()
+                comparator.compare(left, right)
+            }
+            context.ensureActive()
+            visible.toList()
         }
-        entries.filter { (hidden || !it.name.startsWith('.')) && it.name.contains(query, ignoreCase = true) }
-            .sortedWith(compareByDescending<WorkspaceFileManager.Entry> { it.directory }.then(ordering).thenBy { it.name })
+        currentCoroutineContext().ensureActive()
+        display = FileDisplayResult(displayRequest, prepared)
+    }
+    openedEntry?.let { entry ->
+        WorkspaceFileViewer(files, entry, modifier, bottomInset, actionError = error,
+            canEdit = location.writable && !runtimeRunning && !entry.linked,
+            onClose = { openedEntry = null },
+            onExport = { onExportFile(files, entry.path, entry.name) },
+            onEdit = { runTask {
+                val editable = files.preview(entry.path)
+                check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
+                begin("编辑文本", listOf(entry)); content = editable.text
+                draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
+            } })
+        return
     }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().imePadding()) {
@@ -135,8 +179,8 @@ fun WorkspaceFilesPage(
                         }
                     }
                 }
-                IconButton(onClick = { searching = !searching; query = "" }, enabled = !busy && !runtimeRunning) { Icon(Icons.Default.Search, "搜索当前文件夹") }
-                IconButton(onClick = { navigate(directory) }, enabled = !busy && !runtimeRunning) { TanukiIcon(TanukiGlyph.Refresh, "刷新文件") }
+                IconButton(onClick = { searching = !searching; query = "" }, enabled = !busy && canBrowse) { Icon(Icons.Default.Search, "搜索当前文件夹") }
+                IconButton(onClick = { navigate(directory) }, enabled = !busy && canBrowse) { TanukiIcon(TanukiGlyph.Refresh, "刷新文件") }
                 Box {
                     IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Menu, "排序与显示") }
                     DropdownMenu(sortMenu, { sortMenu = false }) {
@@ -147,13 +191,13 @@ fun WorkspaceFilesPage(
                     }
                 }
                 Box {
-                    IconButton(onClick = { menu = true }, enabled = !busy && !runtimeRunning) { Icon(Icons.Default.MoreVert, "文件操作") }
+                    IconButton(onClick = { menu = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "文件操作") }
                     DropdownMenu(menu, { menu = false }) {
                         if (location.writable) {
-                            listOf("新建文件夹", "新建文本文件").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = { begin(label) }) }
-                            DropdownMenuItem(text = { Text("导入文件到工作区") }, onClick = { menu = false; onImport() })
+                            listOf("新建文件夹", "新建文本文件").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { begin(label) }) }
                             DropdownMenuItem(text = { Text("导出整个工作区") }, onClick = { menu = false; onExport() })
                         }
+                        DropdownMenuItem(text = { Text("导入文件到工作区") }, onClick = { menu = false; onImport() })
                         DropdownMenuItem(text = { Text("复制当前目录路径") }, onClick = { menu = false; copyPath(directory) })
                     }
                 }
@@ -161,8 +205,8 @@ fun WorkspaceFilesPage(
             if (searching) OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true, shape = MaterialTheme.shapes.extraLarge, label = { Text("搜索当前文件夹") }, trailingIcon = { IconButton(onClick = { query = ""; searching = false }) { Icon(Icons.Default.Close, "关闭搜索") } })
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (directory.isNotEmpty()) IconButton(onClick = { navigate(directory.substringBeforeLast('/', "")) }, enabled = !busy && !runtimeRunning) { TanukiIcon(TanukiGlyph.Back, "返回上一级") }
-                TextButton(onClick = { navigate("") }, enabled = !busy && !runtimeRunning) { Text(location.guestPath) }
+                if (directory.isNotEmpty()) IconButton(onClick = { navigate(directory.substringBeforeLast('/', "")) }, enabled = !busy) { TanukiIcon(TanukiGlyph.Back, "返回上一级") }
+                TextButton(onClick = { navigate("") }, enabled = !busy) { Text(location.guestPath) }
                 val parts = directory.split('/').filter { it.isNotEmpty() }
                 parts.forEachIndexed { index, part ->
                     Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -175,12 +219,15 @@ fun WorkspaceFilesPage(
                 color = MaterialTheme.colorScheme.secondaryContainer,
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("DSH 正在使用文件。停止后可安全管理，项目内容会保留。")
+                    Text("DSH 运行中，可浏览、打开、导入和导出。修改已有文件请先停止 DSH。", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = onStop) { Text("停止 DSH") }
                 }
-            } else if (!location.writable) Text("只读位置 · 按 Agent 实际挂载路径显示，不修改运行环境", Modifier.padding(horizontal = 16.dp),
+            } else if (!location.writable) Text(if (location == FileLocation.PHONE) "手机共享存储 · 只读浏览，可打开或导出文件" else "只读位置 · 按 Agent 实际挂载路径显示，不修改运行环境", Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy || sorting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (canBrowse) Text(if (sorting) "正在整理 ${entries.size} 项…" else "显示 ${shown.size} 项 · 共 ${entries.size} 项",
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (action == null) error?.let { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.error) }
             feedback?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             if (selected.isNotEmpty()) Surface(
@@ -192,7 +239,7 @@ fun WorkspaceFilesPage(
                     IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "取消选择") }
                     Text("已选 ${selected.size}", style = MaterialTheme.typography.labelLarge)
                     TextButton(onClick = { selected = shown.map { it.path }.toSet() }) { Text("全选") }
-                    if (location.writable) listOf("复制", "移动", "删除").forEach { label -> TextButton(onClick = { begin(label, entries.filter { it.path in selected }) }, enabled = !busy) { Text(label) } }
+                    if (location.writable) listOf("复制", "移动", "删除").forEach { label -> TextButton(onClick = { begin(label, entries.filter { it.path in selected }) }, enabled = !busy && !runtimeRunning) { Text(label) } }
                 }
             }
             val row: @Composable (WorkspaceFileManager.Entry, Boolean) -> Unit = { entry, tile ->
@@ -205,7 +252,7 @@ fun WorkspaceFilesPage(
                 Surface(color = rowColor, shape = RoundedCornerShape(if (tile) 24.dp else 18.dp)) {
                     Column(Modifier.fillMaxWidth().combinedClickable(enabled = !busy,
                         onClick = { if (selected.isNotEmpty()) toggle(entry.path) else if (entry.directory) navigate(entry.path)
-                            else runTask { preview = files.preview(entry.path); previewEntry = entry } },
+                            else openedEntry = entry },
                         onLongClick = { toggle(entry.path) }).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (selected.isNotEmpty()) Checkbox(checked = entry.path in selected, onCheckedChange = { toggle(entry.path) })
@@ -218,9 +265,10 @@ fun WorkspaceFilesPage(
                             Box {
                                 IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "${entry.name}的操作") }
                                 DropdownMenu(expanded, { expanded = false }) {
-                                    DropdownMenuItem(text = { Text("复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
+                                    DropdownMenuItem(text = { Text(if (location == FileLocation.PHONE) "复制文件路径" else "复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
+                                    if (!entry.directory) DropdownMenuItem(text = { Text("导出此文件") }, onClick = { expanded = false; onExportFile(files, entry.path, entry.name) })
                                     DropdownMenuItem(text = { Text("选择") }, onClick = { expanded = false; toggle(entry.path) })
-                                    if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, onClick = { expanded = false; begin(label, listOf(entry)) }) }
+                                    if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { expanded = false; begin(label, listOf(entry)) }) }
                                 }
                             }
                         }
@@ -229,7 +277,16 @@ fun WorkspaceFilesPage(
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (shown.isEmpty() && !busy && error == null && !runtimeRunning) Column(
+                if (!canBrowse) Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset),
+                    verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                ) {
+                    TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("浏览手机文件", style = MaterialTheme.typography.headlineSmall)
+                    Text("授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = onRequestStoragePermission) { Text("授权访问手机文件") }
+                    Text("不授权也可通过文件操作菜单，从系统文件选择器导入文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (shown.isEmpty() && !busy && !sorting && error == null) Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 32.dp, end = 32.dp, top = 32.dp, bottom = 32.dp + bottomInset),
                     verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                 ) {
@@ -253,14 +310,6 @@ fun WorkspaceFilesPage(
                 }
             }
         }
-    }
-    preview?.let { current ->
-        AlertDialog(onDismissRequest = { preview = null }, title = { Text(previewEntry?.name.orEmpty(), maxLines = 2) },
-            text = { FilePreview(current, Modifier.fillMaxWidth().heightIn(max = 420.dp)) },
-            dismissButton = { if (location.writable && current.text != null && previewEntry?.linked == false) TextButton(onClick = {
-                begin("编辑文本", listOf(previewEntry!!)); content = current.text; draftOriginal = content; draftRevision = current.revision.orEmpty(); preview = null
-            }) { Text("编辑") } },
-            confirmButton = { TextButton(onClick = { preview = null }) { Text("关闭") } })
     }
     if (destinationPicker) DirectoryPicker(files, action.orEmpty(), directory, actionEntries.map { it.path }, busy,
         onDismiss = { if (!busy) { destinationPicker = false; action = null } }, onChoose = { target ->
@@ -290,7 +339,7 @@ fun WorkspaceFilesPage(
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         }, dismissButton = { TextButton(onClick = ::dismissEditor, enabled = !busy) { Text("取消") } }, confirmButton = {
-            TextButton(enabled = !busy && (kind == "删除" || kind == "编辑文本" || name.isNotBlank()), onClick = { runTask {
+            TextButton(enabled = !busy && !runtimeRunning && (kind == "删除" || kind == "编辑文本" || name.isNotBlank()), onClick = { runTask {
                 when (kind) {
                     "新建文件夹" -> files.createFolder(directory, name)
                     "新建文本文件" -> files.createText(directory, name, content)
@@ -358,11 +407,6 @@ private fun DirectoryPicker(files: WorkspaceFileManager, operation: String, init
     })
 }
 
-@Composable
-private fun FilePreview(preview: WorkspaceFileManager.Preview, modifier: Modifier) {
-    if (preview.image != null) Image(preview.image.asImageBitmap(), "文件图片预览", modifier, contentScale = ContentScale.Fit)
-    else SelectionContainer(modifier.verticalScroll(rememberScrollState())) { Text(preview.text.orEmpty(), style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)) }
-}
 private fun fileSize(bytes: Long): String = when {
     bytes < 0 -> "无法读取大小"; bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f KiB", bytes / 1024.0)
