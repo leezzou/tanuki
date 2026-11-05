@@ -227,8 +227,8 @@ class WorkspaceStorage(private val paths: Paths) {
         check(!sample.lowDisk) { "导入后设备剩余空间不足，已保留原有项目" }
     }
 
-    /** Caller holds RuntimeManager.mutation and has confirmed that DSH is stopped. */
-    suspend fun importFiles(names: List<String>, openSource: (Int) -> InputStream): File = withContext(Dispatchers.IO) {
+    /** 调用方持有环境事务锁；运行中导入只提交独立的新项目，不覆盖已有文件。 */
+    suspend fun importFiles(names: List<String>, onProgress: (Long) -> Unit = {}, openSource: (Int) -> InputStream): File = withContext(Dispatchers.IO) {
         val token = java.util.UUID.randomUUID().toString()
         val stage = File(paths.workspaces, ".import-$token")
         val allowance = beginImport(names.size)
@@ -236,7 +236,9 @@ class WorkspaceStorage(private val paths: Paths) {
         var stageOwned = false
         var committed = false
         var originalFailure: Throwable? = null
+        var received = 0L
         try {
+            onProgress(0)
             check(!Files.exists(stage.toPath(), LinkOption.NOFOLLOW_LINKS)) { "导入临时目录已存在" }
             val record = JSONObject().put("schema", 1).put("stage", stage.name)
             val output = importJournal.startWrite()
@@ -258,6 +260,8 @@ class WorkspaceStorage(private val paths: Paths) {
                         if (count < 0) break
                         allowance.beforeWrite(count)
                         output.write(buffer, 0, count)
+                        received += count
+                        onProgress(received)
                     }
                 } }
             }

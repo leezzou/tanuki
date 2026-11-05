@@ -1,26 +1,23 @@
 # Tanuki 当前状态
 
-**仓库规则变更处置：** 本轮直接push main被GitHub GH013拒绝，规则要求所有变更通过PR；没有绕过或改保护。改用 `release/0.1.6` 推送同一版本/QA/文档提交，再由用户创建并合入PR。PR5功能已由用户合并，不重复合功能。当前无可用已授权GitHub PR API/浏览器控制入口，提供比较链接供用户创建PR；不宣称PR已创建。发布分支推送成功后仍可按已测字节封装0.1.6；main须等用户合入发布PR。
+最新交接：[0.1.7运行中文件管理与手机存储](handoffs/20261105-1503-live-file-manager.md)。文件功能与独立release候选验证已完成，记录冻结于一次提交前；交付分支为 `feature/live-file-manager-017`，用户自行合PR和发布Pre-release，Agent不直推main、代合、创建tag或上传Release。
 
-先读[当前交接](handoffs/20261105-1204-release-016.md)、[上手指南](AGENT-QUICKSTART.md)、[测试现状](TEST-REPORT.md)与[安全](SECURITY.md)。
+## 当前产品与已验证状态
 
-## 当前任务
+- 版本已由用户确认 **0.1.7/code9**，沿用 `com.tanuki.modern.workspacecheck` 开发证书、ARM64、non-debuggable release、min26/target34；code9高于公开/设备/本地最高8。0.1.6及更早发布附件保持原样。
+- 已实现：DSH运行中浏览/预览/导入导出，手机共享存储授权、多卷入口、只读打开/单文件导出；分页多编码文本、当前段搜索/字号/换行/复制；图片/原生音视频与系统应用打开；取消目录固定数量上限，后台筛选/排序。修改已有文件仍需停止DSH；导入新UUID项目不覆盖；导出检测逐文件变化，不承诺全工作区原子快照。
+- 新跑release构建、**100 JVM、49宿主、52项release设备方法全通过**，lint0错误/75警告/1Hint。此前debug44项最终通过、初次路径/夹具失败、权限恢复中断与旧完整环境下载失败均在[测试现状](TEST-REPORT.md)保留，不能混算。
+- 已测release APK10,424,304字节，SHA256 `aaf92f12bdd407bfa7a9b27be6634d6308a1cc594d43e0accfc63cb0f5ab34ca`；证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。升级覆盖前合成私有标记已读回验证；不是完整Ubuntu/真实账号数据升级验收。
+- 使用入口：文件 → 位置下拉 → 手机存储 → 授权访问手机文件。Android11+所有文件访问、旧版读取权限；其他App私有数据和系统受限目录仍不可访问，不自动将共享存储挂给DSH或浏览器AI。格式/字节限制见[项目存储](WORKSPACE-STORAGE.md)，原安全/浏览器规则保持。
 
-用户已自行合并PR5，main已快进至f1fb102，完整tree与已测head862e510相同。用户授权按顺序完成release验证与文档、统一一次commit/push发布分支、再封装 **0.1.6/code8**；版本已确认，无需重建PR5功能分支或再次询问。仅新增版本、QA认证宿主夹具和文档，没有新增产品逻辑/依赖。
+## 环境、未验与暂停
 
-**已实现、已验证：** 0.1.6 workspacecheck开发签名non-debuggable release；97 JVM、49宿主用例通过，lint0错误/71警告/1Hint；57个不同release设备用例最终通过。关联首跑有2项合成HTML载入超时，原APK/原测试独立复跑2项通过，根因未确定，详见测试现状。另宽屏单项通过，显示已还原。旧code7私有合成标记经code8同证书覆盖保留。APK身份/签名、provider、原生ABI及许可独立核验通过。
+- 本机复用Pixel_7_API_34_arm64/emulator-5572，ARM64/API34/WebView159，52项后MANAGE AppOp已由宿主恢复原default；最终保留本轮release0.1.7/9及测试APK。没有卸载/清数据/wipe/恢复快照，不碰真机或已卸载旧.modern。
+- **用户暂停：** API Key保存。**未验：** 真机/MIUI、低API、SD/USB实物、更多媒体编码、真实账号/模型/DSH任务、完整运行环境升级与长期压力。当前无外部阻塞，不以合成RUNNING测试冒充实际模型任务。
 
-已测APK 10,375,252字节，SHA256 `802d1f49db4f56d2cc737cf95242fcd86ab6abebe7f0a5acf1a559d97147138e`。code8高于设备和公开已知最高7；同开发证书，min26/target34。候选验证完成后不再重编不同字节；版本/文档/交接和公开检查一并冻结后统一推送，随后verified封装六附件。此记录冻结于统一提交前；实际推送提交可核 `git ls-remote origin refs/heads/release/0.1.6`，最终交付以 `artifacts/releases/0.1.6/RELEASE-SHA256SUMS` 和实际六附件为准，不为回填提交自身再造第二次push。
+## Git、交接与交付
 
-## 环境与范围
-
-- 复用Pixel_7_API_34_arm64/emulator-5572，ARM64/API34/WebView159；无node/proot/apt/dpkg/真实任务。仅同包同证书覆盖、不卸载/清数据/快照/wipe，不碰真机或已卸载旧.modern。宽屏后已还原1080x2400/420dpi。
-- 浏览器普通当前页可读与操作权限分离、私有页保护、30秒临时交回/显式撤销持续有效。DSH底部保护保留，浏览器底部避让由用户开关控制。
-- **用户暂停：** API Key保存。**待验证：** MIUI/其他真机、低API、真实账号/模型/DSH任务、完整运行环境升级、长期压力及private/notice全矩阵；原始图标滞后未全面复现，RTL200轻微折射不称视觉无瑕。当前无外部阻塞。
-- 1937另一会话未落盘提示不作证据。0.1.5及更早附件不改写。
-
-## 交接与发布边界
-
-旧1632/1009/1134/1118必要事实已归TEST-REPORT，审计后清理，仅保留当前1204/TEMPLATE/CURRENT。已应用QA patch不重复留档，链接指向实际测试源码。此前误代合PR3的事实保留于历史测试节；PR4/5均用户自行合并，本次push是后续明确授权。
-
-源码与打包顺序见[发布说明](RELEASE.md)。workspacecheck标Pre-release，不使用正式密钥，不自动tag或上传GitHub Release。最终六附件取包入口见[取包说明](ARTIFACTS.md)，源码和原生对应源码必须一同交付。
+- 用户合入0.1.6 PR #6后的最新origin/main为1024eeb，完整树等于原release/0.1.6；本轮从该main建立新功能分支，保留已有改动。旧016已推送b3e5d468并封装核验，其97/49/57与首败/复跑历史证据完整保留TEST-REPORT。
+- 本次提交前逐项迁移并清理1204（旧发布验证与完成收尾归TEST-REPORT）、1323（规则完整参数/官方证据归RELEASE）、1458（全禁旧策略被替代，归WORKSPACE-STORAGE）；仅保留当前1503/TEMPLATE/CURRENT，不依赖Git历史或.build接手。原1632/1009/1134/1118证据仍在TEST-REPORT。
+- 完成全部版本/测试/专题/交接、公开候选包和实际index检查后统一一次提交push **feature/live-file-manager-017**，再用prepare-app-release.py的verified参数封装上述同一已测字节。公共记录在提交前冻结；推送与封装是否完成以远端该分支等于本地HEAD、`artifacts/releases/0.1.7/`实际六附件和RELEASE-SHA256SUMS为准，不仅凭此记录推断成功，不为回填提交自身再造第二次push。
+- 完整取包入口见[ARTIFACTS](ARTIFACTS.md)，流程见[RELEASE](RELEASE.md)/[PUBLICATION](PUBLICATION.md)；用户在网页合PR后发布v0.1.7开发签名Pre-release，上传全部6附件。审批规则历史与官方链接已归发布专题，不把过去参数当当前设置。

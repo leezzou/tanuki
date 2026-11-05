@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -360,6 +361,105 @@ class FilesBrowserPresentationTest {
             val node = find("新建文件夹")
             val bounds = Rect().also(node::getBoundsInScreen)
             assertTrue(bounds.left >= 0 && bounds.right <= context.resources.displayMetrics.widthPixels)
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+    @Test fun runningFilePageKeepsBrowsingTextAndTransferActionsAvailable() {
+        val folder = fixture()
+        val activity = launch()
+        var imports = 0
+        var exports = 0
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme {
+                        WorkspaceFilesPage(WorkspaceFileManager(runtime.paths), { imports++ }, { exports++ },
+                            Modifier.fillMaxSize().safeDrawingPadding(), runtimeRunning = true)
+                    }
+                }
+            }
+            click(folder.name); click("hello.txt")
+            find("original text"); find("查找文本"); find("增大字号")
+            click("增大字号"); click("关闭文件")
+            click("文件操作")
+            var createControl: AccessibilityNodeInfo? = find("新建文件夹")
+            // 文本子节点不继承禁用状态，沿父链检查真正承载点击或禁用语义的控件。
+            while (createControl != null && createControl.isEnabled && !createControl.isClickable &&
+                createControl.className?.toString() != "android.widget.Button" &&
+                createControl.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
+                createControl = createControl.parent
+            }
+            val disabledCreate = requireNotNull(createControl) { "找不到新建文件夹的操作控件" }
+            assertFalse("运行中仍禁止创建已有工作区内容", disabledCreate.isEnabled)
+            disabledCreate.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            instrumentation.waitForIdleSync()
+            assertFalse("禁用入口收到点击动作后也不能打开新建编辑器", nodes().any { it.isEditable && it.isVisibleToUser })
+            find("导入文件到工作区")
+            click("导入文件到工作区"); await { imports == 1 }
+            click("文件操作"); click("导出整个工作区"); await { exports == 1 }
+            find("hello.txt")
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+    @Test fun textViewerCanReadPastEditorLimitAndUnknownFilesOfferOpenWith() {
+        val folder = fixture()
+        File(folder, "large.txt").writeText("start of document\n" + "分段阅读内容\n".repeat(40000) + "end of document")
+        File(folder, "document.pdf").writeBytes("%PDF-1.4\nsynthetic document\n".toByteArray())
+        val activity = launch()
+        try {
+            click("文件"); click(folder.name); click("large.txt")
+            find("下一段"); find("文本编码"); find("使用其他应用打开")
+            click("下一段"); find("上一段"); click("关闭文件")
+            click("document.pdf"); find("application/pdf"); find("使用其他应用打开")
+            click("关闭文件"); find("large.txt")
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+    @Test fun phoneLocationExplainsPermissionAndLoadsGrantedVolume() {
+        val folder = fixture()
+        val activity = launch()
+        val granted = mutableStateOf(false)
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme {
+                        WorkspaceFilesPage(WorkspaceFileManager(runtime.paths, phoneRoots = { mapOf("internal" to folder) }), {}, {},
+                            Modifier.fillMaxSize().safeDrawingPadding(),
+                            onRequestStoragePermission = { granted.value = true }, phoneStorageGranted = granted.value)
+                    }
+                }
+            }
+            click("工作区"); click("手机存储 · 只读")
+            find("浏览手机文件"); click("授权访问手机文件")
+            find("内部共享存储"); click("内部共享存储"); click("hello.txt")
+            find("original text"); find("导出此文件"); click("关闭文件")
+            click("文件操作"); find("导入文件到工作区")
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+    @Test fun audioFileOpensWithNativePlaybackControls() {
+        val folder = fixture()
+        val activity = launch()
+        val sampleBytes = 44100 * 2 * 5
+        val wave = java.nio.ByteBuffer.allocate(44 + sampleBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        wave.put("RIFF".toByteArray()).putInt(36 + sampleBytes).put("WAVEfmt ".toByteArray()).putInt(16)
+            .putShort(1).putShort(1).putInt(44100).putInt(88200).putShort(2).putShort(16)
+            .put("data".toByteArray()).putInt(sampleBytes)
+        File(folder, "silence.wav").writeBytes(wave.array())
+        try {
+            click("文件"); click(folder.name); click("silence.wav")
+            find("播放"); click("播放"); find("暂停")
+            click("暂停"); find("播放"); click("关闭文件")
+            find("silence.wav")
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+    @Test fun largeDirectoryUsesLatestFilterAndNeverShowsPreviousDirectoryResults() {
+        val folder = fixture()
+        repeat(6000) { index -> File(folder, "entry${index.toString().padStart(4, '0')}.txt").writeText("synthetic $index") }
+        val activity = launch()
+        try {
+            click("文件"); click(folder.name)
+            find("显示 6002 项 · 共 6003 项")
+            click("搜索当前文件夹"); input("entry5999"); input("missing"); input("entry5999")
+            find("显示 1 项 · 共 6003 项"); find("entry5999.txt")
+            click("返回上一级"); find(folder.name)
+            assertFalse("切换目录后不能保留旧目录的筛选结果", nodes().any { it.text?.toString() == "entry5999.txt" })
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
 }

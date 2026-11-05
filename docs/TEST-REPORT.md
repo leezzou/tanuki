@@ -1,11 +1,41 @@
 # 测试现状
 
-**仓库规则变更处置：** 本轮直接push main被GitHub GH013拒绝，规则要求所有变更通过PR；没有绕过或改保护。改用 `release/0.1.6` 推送同一版本/QA/文档提交，再由用户创建并合入PR。PR5功能已由用户合并，不重复合功能。当前无可用已授权GitHub PR API/浏览器控制入口，提供比较链接供用户创建PR；不宣称PR已创建。发布分支推送成功后仍可按已测字节封装0.1.6；main须等用户合入发布PR。
+本轮发布目标为0.1.7/code9，文件管理功能debug结果和独立release结果分别记录。新分支由用户合并，Agent不直推main或创建Release。0.1.6已由用户合入PR #6，相关历史测试保留。
 
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
 
+## 0.1.7文件管理发布候选验证（2026-11-05）
+
+- 用户明确确认0.1.7，并要求push新分支后由用户合PR/发布。已fetch main/1024eeb（用户合入PR #6），其完整树等于原016发布分支，保留本地改动创建feature/live-file-manager-017。公开Atom/016更新清单、设备及本地最高code8，本次9；同workspacecheck开发证书，non-debuggable、ARM64、min26/target34。不是生产签名。
+- 候选10,424,304字节，SHA256 `aaf92f12bdd407bfa7a9b27be6634d6308a1cc594d43e0accfc63cb0f5ab34ca`，证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。实际APK/测试target、版本/SDK/非debug/签名独立核验，固定副本用于测试与最终verified封装；不因推送后的AGP提交号元数据重编另一份APK。
+- 独立release/app-test、release JVM/lint单次Gradle3分2秒、95任务成功；**100 JVM，0失败/错误/跳过；release lint0错误/75警告/1Hint**。另49宿主项（发布18、工作流12、公开19）全通过，分别0.576/12.011/2.416秒；不混算下节debug结果或前轮release97项。
+- 复用Pixel_7_API_34_arm64/emulator-5572，旧debug code8先种合成私有标记单项通过（0.007秒），核身份后仅install-r覆盖同证书code9/app-test。宿主在仪器外暂时allow共享存储，运行下节44个文件目标，再加ApplicationUpdateNative3与ApkInstallAccess5，带verifyUpgradeMarker=true；**OK (52 tests)，66.258秒，无失败/跳过/中断**。原标记读回后清理，实际系统安装器预读/只读授权回收与provider隔离通过，没有点击系统安装器最终安装确认。结束后宿主恢复原MANAGE AppOp default，无真实任务被停止。
+- 本轮release这52项首跑全过；下节debug曾失败的路径/夹具与旧环境下载失败记录均保留，不改写历史。手机卷使用自有UUID Downloads文件，SAF真实往返、视频真实播放时钟推进；RUNNING场景仍为合成状态/并发文件回调，不冒充真实DSH/模型任务。
+- 本次无新增依赖，原生对应源码按固定构建来源封装。旧0.1.6六附件及其RELEASE/native清单只读复核匹配、不改写。未验真机/MIUI/低API、SD/USB实物、真实账号/模型/完整环境升级及更多媒体编码；API Key保存继续暂停。由用户自行合并与发布，不直推main/tag/上传Release。
+
+实际release命令：
+
+```bash
+./gradlew -PtestBuildType=release -PdevelopmentReleaseSigning=true \
+  -PtanukiVersionName=0.1.7 -PtanukiVersionCode=9 \
+  -I scripts/workspace-verification.init.gradle \
+  :app:assembleModernRelease :app:assembleModernReleaseAndroidTest \
+  :app:testModernReleaseUnitTest :app:lintModernRelease
+```
+
+## 运行中浏览、手机存储与多格式文件查看（2026-11-05，本次debug）
+
+- 产品改动及实际命令见[本轮交接](handoffs/20261105-1503-live-file-manager.md)与[项目存储](WORKSPACE-STORAGE.md)。独立workspacecheck、debug 0.1.6/8、min26/target34、ARM64；本次不是发布。APK 14,916,433字节，SHA256 `c386a91a682c1797f32a47235ff9301d9e51732087b4c3770f088db09a622100`。
+- 本轮新跑modern debug/app-test构建、100项JVM（0失败/错误/跳过）、lint0错误/75警告/1Hint。初次provider可空返回编译失败，修正后构建通过；末次产品构建2分45秒，测试夹具收尾编译/lint1分2秒。无新增依赖；专用只读provider、权限maxSdk/legacy在实际APK核验。
+- 复用Pixel_7_API_34_arm64/emulator-5572，API34，明确无真实任务。按最终方法集合去重 **44个目标设备方法最终通过**：WorkspaceFileManager12、WorkspaceStorage8、FilesystemSemantics前2个合成方法、LiveProjectTransfer10、PhoneStorageAccess3；FilesBrowserPresentation的2个原文件方法和5个新增方法、WorkspaceVideoPresentation1、FileTransferPresentation1。不含浏览器无关方法和完整guest环境安装用例；不是前轮release57项或首轮全绿。
+- 首批36项有24过/9败后权限恢复导致仪器中断。8败与新增导出路径未统一Android `/data/user/0` / `/data/data`别名及派生断言有关，已修正；旧完整环境原子发布方法触发下载中断，未修/未重试、不计本轮通过。权限授予/恢复改宿主在仪器外执行后，目标35项29.905秒为34过/1项manifest夹具失败；UI9项45.710秒为7过/2项断言失败。修正目标/测试manifest混合资产解析、实际控件disabled语义及视频固定250ms假设，保持产品字节不变，仅复查3项 **OK (3 tests)，6.945秒**。视频实际isPlaying、duration、非零尺寸及播放时钟推进均断言；未确定首轮短等待未推进的根因。
+- 实测5051目录读取、5001工作区ZIP、6000项UI筛选切目录、UTF8/UTF16/GB18030/Big5分页、256KiB以上文本查看、音频播放暂停、3秒合成H264原生播放、真实DocumentsUI单文件导出和导入新项目，以及授权后自建Downloads目录读/只读URI字节。导出并发追加/改写/删除/同大小同mtime替换拒绝、取消和导入失败回滚均通过。SAF运行场景使用合成service=RUNNING、无真实子进程；并发写由测试合成回调执行，不能称真实DSH模型任务验收。
+- 临时MANAGE AppOp由宿主在全部仪器结束后恢复原default；合成文件由夹具清理。无卸载/清数据/快照/wipe，不碰真机或真实账号。未验低API、SD/USB、MIUI真机、更多媒体编码、长期压力/真实DSH/完整环境升级。文本搜索仅当前段，外部文档与媒体能力仍依系统/已装应用；API Key保存暂停。正式0.1.6 release附件未改写。
+
 ## 0.1.6 合并后发布候选验证（2026-11-05）
 
+
+0.1.6收尾已完成：release/0.1.6已推送b3e5d46876f15fe791f9eb60e7bd94bb07f52f41，六附件按下述已测字节封装；本轮只读复核六文件、RELEASE五项及原生清单全部匹配，旧目录未改写。2026-11-05再次fetch确认用户通过PR #6合入origin/main `1024eeb`，完整树与该发布分支HEAD相同；新功能分支从此main建立，未重复合入产品。此前1632/1009/1134/1118记录的误代合流程、015封装、PR4/5失败/复跑、宽屏和未验边界均已归本报告及发布/产物专题；1204旧发布交接在本轮提交前据此清理。
 - 用户自行合入PR #5后，主目录main快进到 `f1fb10296df72cda6fc728d218774ddad6dfcbd4`；其完整tree `74ba29a9c227913097a3af3a9efa718599687b31` 与已测head `862e510` 相同。本轮仅更新0.1.6/code8、应用下节已验证的外链QA宿主夹具并整理文档，没有新增产品逻辑或依赖。用户授权全部适用验证收尾后统一一次push，再封装同一已测APK；无需重建PR5功能分支。
 - 本轮新跑：modern release与配套release AndroidTest、compat debug编译、release JVM/lint单次Gradle **4分38秒、134任务成功**；**JVM97，0失败/错误/跳过；release lint0错误、71警告、1Hint**。宿主发布18项、交接工作流12项、公开边界19项均通过（分别1.236/11.894/3.046秒），共49个不同宿主用例。不得混算为设备测试。
 - 复用 `Pixel_7_API_34_arm64/emulator-5572`，ARM64/API34/WebView159，已确认专用合成数据且无node/proot/apt/dpkg/真实任务。核实app/test身份、target和证书后仅同包覆盖；不卸载、清数据、wipe或恢复快照。已安装及公开可发现清单最高code7，旧011/010无清单，结合既有实际code3/1与tag核查，选择递增code8。

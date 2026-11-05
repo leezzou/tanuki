@@ -32,7 +32,7 @@ git diff --cached --stat
 
 `check-publication.py --git` 分别检查索引blob和工作树候选，已暂存内容即使在工作树被清理也不会漏扫；不打开被忽略的凭据，已跟踪文件若违反忽略/公开边界只报告、不代删。检查本机身份路径、常见API/云/平台凭据格式、非示例邮箱和文档链接；归档检查包含ZIP/APK/TAR成员、TAR身份元数据与嵌套累计预算。输出文件位置也先脱敏，**不输出匹配值**。必要第三方许可/固定上游源码署名保留，第一方文件不作整包豁免。
 
-交付附件独立放在被忽略的artifacts；0.1.5及更早历史包与校验保持原样。本机配置、生成缓存、原始日志/截图、JDK、AVD数据/控制文件和其他任务的暂存不进入公开源码，不因整理本轮源码而删除历史交付、wipe设备或杀进程。
+交付附件独立放在被忽略的artifacts；0.1.6及更早历史包与校验保持原样。本机配置、生成缓存、原始日志/截图、JDK、AVD数据/控制文件和其他任务的暂存不进入公开源码，不因整理本轮源码而删除历史交付、wipe设备或杀进程。
 
 这不是全能Secret Scanner：不能识别所有姓名、任意插件输出、自定义凭据格式、所有图片像素或Git历史。历史截图/原始诊断已从docs清理；新增图片/附件必须人工检查像素、EXIF和内容。示例只能使用合成值/保留域名。
 
@@ -49,12 +49,12 @@ git config --local user.email "<GitHub提供的隐私邮箱>"
 
 ## 源码归档与二进制
 
-本次版本为0.1.6/code8；用户已将PR #5合入main/f1fb102，合并点完整源码树与已测head862e510相同。沿用同workspacecheck开发证书、non-debuggable、ARM64、minSdk26/targetSdk34，code8高于已核对的公开/设备最高7。旧debug结果不能替代本轮release验证，实际结果见[测试现状](TEST-REPORT.md)。
+用户本次确认0.1.7，候选versionCode为9；发布前须重新核对公开/设备/归档版本上限，确保严格递增。沿用同workspacecheck开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。本次文件管理功能与权限边界见[项目存储说明](WORKSPACE-STORAGE.md)，候选release须独立验证；debug或0.1.6历史测试不能替代本轮结果，实际范围见[测试现状](TEST-REPORT.md)。
 
 ```bash
 python3 scripts/check-publication.py
-python3 scripts/package-source.py --version 0.1.6
-python3 scripts/check-publication.py --archive artifacts/sources/Tanuki-0.1.6-source.zip
+python3 scripts/package-source.py --version 0.1.7
+python3 scripts/check-publication.py --archive artifacts/sources/Tanuki-0.1.7-source.zip
 (cd artifacts && shasum -a 256 -c SOURCE-SHA256SUMS)
 ```
 
@@ -62,6 +62,6 @@ Git检出不依赖本机构建附件。源码ZIP按明确目录清单生成；�
 
 修改任何公开文件后都要更新交接/指纹并重打源码包，旧ZIP不能当作新版本。APK、用户数据和原始日志不提交Git；需要正式Release时另行验收、签名与授权发布。
 
-固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。最终目录为 `artifacts/releases/0.1.6/`，0.1.5及更早历史附件保持原样；用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
+固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。最终目录为 `artifacts/releases/0.1.7/`，0.1.6及更早历史附件保持原样；用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
 
-本仓库main保护要求经过PR，本轮直推被GH013拒绝；发布收尾改推 `release/0.1.6`，再由用户创建并合入发布PR，不修改保护规则。PR5功能已经合并；最终附件在发布分支推送成功后封装。
+本次工作分支为 `feature/live-file-manager-017`。完成适用release测试、文档与交接、过期记录清理、公开源码候选及实际index检查后，统一一次commit/push该新分支；推送成功后按verified模式封装同一已测APK。main通过PR合入，由用户自行创建并合并PR、创建tag及发布Pre-release；Agent不直推main或修改保护规则。0.1.6及更早已交付附件保持原样。

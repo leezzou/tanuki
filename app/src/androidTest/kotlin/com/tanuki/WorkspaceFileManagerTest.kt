@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.tanuki.runtime.Paths
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
@@ -28,6 +29,79 @@ class WorkspaceFileManagerTest {
     private suspend fun rejected(block: suspend () -> Unit) {
         try { block() } catch (_: Exception) { return }
         fail("Expected operation to fail")
+    }
+    @Test fun runningServiceAllowsReadingAndUnlimitedDirectoryButStillBlocksEdits(): Unit = runBlocking {
+        fixture { paths, _ ->
+            File(paths.workspaces, "read.txt").writeText("运行中可阅读")
+            repeat(5_050) { File(paths.workspaces, "entry-$it").writeText("") }
+            val manager = WorkspaceFileManager(paths, Mutex(), { error("服务仍运行") })
+            assertEquals(5_051, manager.list().size)
+            assertEquals("运行中可阅读", manager.preview("read.txt").text)
+            assertEquals("运行中可阅读", manager.readTextPage("read.txt").text)
+            assertEquals(WorkspaceFileManager.FileKind.TEXT, manager.describe("read.txt").kind)
+            rejected { manager.delete("read.txt") }
+            rejected { manager.createText("", "blocked.txt", "不应写入") }
+            assertFalse(File(paths.workspaces, "blocked.txt").exists())
+        }
+    }
+
+    @Test fun selectedMediaGetsOnlyReadonlyCacheUriAndKeepsSourcePrivate(): Unit = runBlocking {
+        fixture { paths, manager ->
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val expected = byteArrayOf(1, 2, 3, 4)
+            File(paths.workspaces, "synthetic.mp4").writeBytes(expected)
+            assertEquals(WorkspaceFileManager.FileKind.VIDEO, manager.describe("synthetic.mp4").kind)
+            val intent = manager.prepareOpen(context, "synthetic.mp4")
+            val uri = requireNotNull(intent.data)
+            try {
+                assertEquals("content", uri.scheme)
+                assertEquals(context.packageName + ".workspaceopen", uri.authority)
+                assertEquals("video/mp4", intent.type)
+                assertEquals(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION, intent.flags)
+                assertEquals(uri, intent.clipData!!.getItemAt(0).uri)
+                assertFalse(uri.toString().contains(paths.workspaces.absolutePath))
+                assertArrayEquals(expected, context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+                rejected { context.contentResolver.openFileDescriptor(uri, "rw")?.close() }
+                assertArrayEquals(expected, File(paths.workspaces, "synthetic.mp4").readBytes())
+            } finally { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
+    @Test fun liveSingleFileExportDetectsChangesInsteadOfReportingAnIncompleteCopy(): Unit = runBlocking {
+        fixture { paths, _ ->
+            val source = File(paths.workspaces, "export.txt").apply { writeText("x".repeat(150_000)) }
+            val manager = WorkspaceFileManager(paths, Mutex(), { error("服务仍运行") })
+            val output = java.io.ByteArrayOutputStream()
+            manager.exportFile("export.txt", output)
+            assertArrayEquals(source.readBytes(), output.toByteArray())
+            var changed = false
+            rejected {
+                manager.exportFile("export.txt", java.io.ByteArrayOutputStream()) { copied, _ ->
+                    if (copied > 0 && !changed) { changed = true; source.appendText("changed") }
+                }
+            }
+            assertTrue(changed)
+            assertTrue(source.readText().endsWith("changed"))
+        }
+    }
+
+    @Test fun sharedPhoneVolumesUseSeparateReadonlyRootsAndNeverFollowLinks(): Unit = runBlocking {
+        fixture { paths, _ ->
+            val volume = File(paths.base, "phone-fixture").apply { mkdirs() }
+            File(volume, "movie.mp4").writeBytes(byteArrayOf(1, 2, 3))
+            File(volume, "notes.txt").writeText("手机共享文件")
+            val manager = WorkspaceFileManager(paths, phoneRoots = { mapOf("internal" to volume) })
+                .inLocation(com.tanuki.storage.FileLocation.PHONE)
+            assertEquals(listOf("internal"), manager.list().map { it.path })
+            assertEquals("手机共享文件", manager.readTextPage("internal/notes.txt").text)
+            assertEquals(File(volume, "notes.txt").absolutePath, manager.guestPath("internal/notes.txt"))
+            rejected { manager.createText("internal", "blocked", "bad") }
+            rejected { manager.list("internal/../outside") }
+            Files.createSymbolicLink(File(volume, "redirect").toPath(), paths.workspaces.toPath())
+            rejected { manager.list("internal/redirect") }
+            Files.createSymbolicLink(File(volume, "outside.txt").toPath(), File(paths.workspaces, "missing").toPath())
+            rejected { manager.readTextPage("internal/outside.txt") }
+        }
     }
     @Test fun ordinaryOperationsAndDirectoryOrdering(): Unit = runBlocking {
         fixture { _, manager ->

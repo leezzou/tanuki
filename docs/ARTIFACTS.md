@@ -1,13 +1,13 @@
 # Tanuki 构建产物：从哪里取包
 
-**当前准备发布的是 v0.1.6（versionCode 8）。** 候选须完成本轮release验证、文档与交接、过期记录清理和公开检查，统一一次commit/push成功后，再按已测APK的SHA使用verified模式生成最终六附件；不能用此前debug结果代替。
+**本次发布目标为 v0.1.7（候选versionCode 9）。** 候选须完成本轮release验证、文档与交接、过期记录清理和公开检查，统一一次commit/push成功后，再按已测APK的SHA使用verified模式生成最终六附件；不能用此前debug结果代替。
 
-- 安装 APK：`artifacts/releases/0.1.6/Tanuki-0.1.6-workspacecheck-arm64-release.apk`
-- GitHub 发布：由用户在网页创建 `v0.1.6` 的 **Pre-release**，只上传 `artifacts/releases/0.1.6/` 内全部 **6 个附件**，包含 `app-update.json`、完整源码、原生对应源码及散列。
-- 当前是同一开发证书的 `com.tanuki.modern.workspacecheck` 包，ARM64、non-debuggable、minSdk26/targetSdk34；不是正式签名，也没有由Agent自动发布。code8高于已核对的公开和设备最高code7。
-- 根目录不再放APK/ZIP。`archive/`中的旧0.1.0和已撤回、未发布的旧候选0.1.2/code3 **不要拿来安装或发布**；本次新包取 `releases/0.1.6/`，不能只按版本名称猜测当前附件。0.1.5/code7及更早历史发布目录、旧包与校验保留原样。
+- 安装 APK：`artifacts/releases/0.1.7/Tanuki-0.1.7-workspacecheck-arm64-release.apk`
+- GitHub 发布：由用户在网页创建 `v0.1.7` 的 **Pre-release**，只上传 `artifacts/releases/0.1.7/` 内全部 **6 个附件**，包含 `app-update.json`、完整源码、原生对应源码及散列。
+- 当前是同一开发证书的 `com.tanuki.modern.workspacecheck` 包，ARM64、non-debuggable、minSdk26/targetSdk34；不是正式签名，也没有由Agent自动发布。封装前须核对code9严格高于公开、已安装及归档版本上限。
+- 根目录不再放APK/ZIP。`archive/`中的旧0.1.0和已撤回、未发布的旧候选0.1.2/code3 **不要拿来安装或发布**；本次新包取 `releases/0.1.7/`，不能只按版本名称猜测当前附件。0.1.6/code8及更早历史发布目录、旧包与校验保留原样。
 
-用户已将PR #5合入 `main/f1fb102`，合并点完整源码树与已测head `862e510` 相同。当前源码准备区对应本次工作树，实际release验证结果见[测试现状](TEST-REPORT.md)。2026-11-04的PR #2组合包仍在 `artifacts/builds/workspacecheck/pr2-upload-browser/Tanuki-pr2-upload-browser-debug.apk`，是历史0.1.3/5开发debug包，不是本次release。
+本版包含运行中文件访问、手机共享存储与多格式查看改进，行为和权限说明见[项目存储说明](WORKSPACE-STORAGE.md)。当前源码准备区对应本次工作树；最终发布目录须在release验证和新分支推送成功后生成，是否齐全以实际六附件及`RELEASE-SHA256SUMS`为准，验证范围见[测试现状](TEST-REPORT.md)。2026-11-04的PR #2组合包仍在 `artifacts/builds/workspacecheck/pr2-upload-browser/Tanuki-pr2-upload-browser-debug.apk`，是历史0.1.3/5开发debug包，不是本次release。
 
 ## 目录约定
 
@@ -22,9 +22,10 @@ artifacts/
 │   ├── 0.1.3/                 # 既有发布附件，原样保留
 │   ├── 0.1.4/                 # 既有发布附件，原样保留
 │   ├── 0.1.5/                 # 已交付历史附件（code7），保持原样
-│   └── 0.1.6/                 # 本次最终封装目录（6 个文件，code8）
+│   ├── 0.1.6/                 # 已交付历史附件（code8），保持原样
+│   └── 0.1.7/                 # 本次最终封装目标（6 个文件，code9）
 ├── sources/
-│   ├── Tanuki-0.1.6-source.zip # 当前工作树源码的打包副本
+│   ├── Tanuki-0.1.7-source.zip # 当前工作树源码的打包副本
 │   └── native/                # 原生对应源码和同目录校验清单
 ├── builds/
 │   ├── production/<版本>/     # 正式签名脚本的中间 APK/签名报告，非完整发布包
@@ -46,7 +47,7 @@ artifacts/
 ```bash
 (cd artifacts && shasum -a 256 -c SOURCE-SHA256SUMS)
 (cd artifacts/sources/native && shasum -a 256 -c native-source-SHA256SUMS)
-(cd artifacts/releases/0.1.6 && shasum -a 256 -c RELEASE-SHA256SUMS && shasum -a 256 -c native-source-SHA256SUMS)
+(cd artifacts/releases/0.1.7 && shasum -a 256 -c RELEASE-SHA256SUMS && shasum -a 256 -c native-source-SHA256SUMS)
 (cd artifacts/archive && shasum -a 256 -c ARCHIVE-SHA256SUMS)
 ```
 
@@ -59,4 +60,4 @@ artifacts/
 - 只改文档/脚本时不重编 APK，但必须重打源码、刷新待交付版本目录的源码副本与散列。已发布的历史附件不要静默改写。
 - `artifacts/` 全部是被Git忽略的生成产物；本说明的源码为 `docs/ARTIFACTS.md`。既有历史包和校验保持原样，不因本次版本入口更新而删除或改写。
 
-本仓库main保护要求经过PR，本轮直推被GH013拒绝；发布收尾改推 `release/0.1.6`，再由用户创建并合入发布PR，不修改保护规则。PR5功能已经合并；最终附件在发布分支推送成功后封装。
+本次工作分支为 `feature/live-file-manager-017`。完成适用release测试、文档与交接、过期记录清理、公开源码候选及实际index检查后，统一一次commit/push该新分支；推送成功后按verified模式封装同一已测APK。main通过PR合入，由用户自行创建并合并PR、创建tag及发布Pre-release；Agent不直推main或修改保护规则。0.1.6及更早已交付附件保持原样。
