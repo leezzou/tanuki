@@ -1,5 +1,7 @@
 # 签名、打包与 GitHub Release
 
+当前视频/手机文件独立写授权已完成debug目标验证；用户追加授权推送新分支 `fix/video-phone-file-permissions`，由用户自行合并。未要求新版本，下述0.1.7/code9为上一轮已完成交付，不覆盖其发布目录；当前状态以[交接](AGENT-STATE.md)为准。
+
 **用户说要发布时，先询问版本号；已经明确的版本不重复问。** 用户本次已确认 **v0.1.7**，候选使用 `versionName=0.1.7`、`versionCode=9` 与原有workspacecheck开发证书。封装前须重新核对公开、已安装及归档版本上限，确保code9严格递增；不能只依据本地默认值判断。
 
 本版目标为文件管理增强：DSH运行中浏览与导入导出、手机共享存储授权浏览、多格式文件打开、分段文本阅读及取消固定文件数量上限，具体行为和Android访问边界见[项目存储说明](WORKSPACE-STORAGE.md)。候选release须独立执行适用测试，不能以本轮debug或0.1.6历史结果代替；实际命令、结果及未验范围见[测试现状](TEST-REPORT.md)。用户授权完成验证与全部文档检查后一次push新分支 `feature/live-file-manager-017`，再封装已测字节；由用户自行合并PR及发布Release。

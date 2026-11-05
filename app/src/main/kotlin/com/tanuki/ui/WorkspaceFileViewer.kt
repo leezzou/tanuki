@@ -5,8 +5,6 @@ import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.SystemClock
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
@@ -36,7 +34,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
@@ -58,6 +55,8 @@ internal fun WorkspaceFileViewer(
     onClose: () -> Unit,
     onExport: () -> Unit,
     onEdit: () -> Unit,
+    fullscreen: Boolean = false,
+    onFullscreen: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -121,10 +120,12 @@ internal fun WorkspaceFileViewer(
     }
     val loadedBitmap = image?.image
     DisposableEffect(loadedBitmap) { onDispose { loadedBitmap?.takeUnless { it.isRecycled }?.recycle() } }
-    BackHandler(onBack = onClose)
+    val currentFullscreenCallback by rememberUpdatedState(onFullscreen)
+    DisposableEffect(Unit) { onDispose { currentFullscreenCallback(false) } }
+    BackHandler { if (fullscreen) onFullscreen(false) else onClose() }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().padding(bottom = bottomInset).imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxSize().padding(bottom = if (fullscreen) 0.dp else bottomInset).imePadding()) {
+            if (!fullscreen) Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "关闭文件") }
                 Column(Modifier.weight(1f)) {
                     Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -144,13 +145,13 @@ internal fun WorkspaceFileViewer(
             (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
             if (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT) {
                 TextFileReader(files, entry.path, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
-            } else Box(Modifier.weight(1f).fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+            } else Box(Modifier.weight(1f).fillMaxWidth().padding(if (fullscreen) 0.dp else 16.dp), contentAlignment = Alignment.Center) {
                 when (info?.kind) {
                     WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let {
                         Image(it.asImageBitmap(), entry.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                     }
                     WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
-                    WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { NativeVideoPlayer(it) }
+                    WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
                     WorkspaceFileManager.FileKind.OTHER -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
                         Text(info?.mimeType.orEmpty(), style = MaterialTheme.typography.titleMedium)
@@ -160,8 +161,8 @@ internal fun WorkspaceFileViewer(
                     else -> Unit
                 }
             }
-            HorizontalDivider()
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
+            if (!fullscreen) HorizontalDivider()
+            if (!fullscreen) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
                 TextButton(onClick = onExport, enabled = !opening && !loading && info != null, modifier = Modifier.heightIn(min = 48.dp)) {
                     TanukiIcon(TanukiGlyph.Download); Spacer(Modifier.width(8.dp)); Text("导出此文件")
                 }
@@ -276,31 +277,6 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
 }
 
 @Composable
-private fun NativeVideoPlayer(uri: Uri) {
-    var view by remember { mutableStateOf<VideoView?>(null) }
-    var ready by remember(uri) { mutableStateOf(false) }
-    var failed by remember(uri) { mutableStateOf(false) }
-    DisposableEffect(uri) { onDispose { view?.stopPlayback() } }
-    MediaPlaybackLifecycle { view?.pause() }
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        AndroidView(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f), factory = { context ->
-            VideoView(context).apply {
-                view = this
-                val controls = MediaController(context)
-                controls.setAnchorView(this)
-                setMediaController(controls)
-                setOnPreparedListener { ready = true }
-                setOnErrorListener { _, _, _ -> failed = true; true }
-                setVideoURI(uri)
-            }
-        })
-        if (failed) Text("设备无法解码此视频，请使用其他应用打开。", color = MaterialTheme.colorScheme.error)
-        else if (!ready) LinearProgressIndicator(Modifier.fillMaxWidth())
-        else OutlinedButton(onClick = { view?.start() }) { Text("播放视频") }
-    }
-}
-
-@Composable
 private fun NativeAudioPlayer(uri: Uri) {
     val context = LocalContext.current
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -346,7 +322,7 @@ private fun NativeAudioPlayer(uri: Uri) {
 
 /** 查看器离开前台时暂停媒体，避免通过外部应用打开后两路声音重叠。 */
 @Composable
-private fun MediaPlaybackLifecycle(onBackground: () -> Unit) {
+internal fun MediaPlaybackLifecycle(onBackground: () -> Unit) {
     val context = LocalContext.current
     val currentAction by rememberUpdatedState(onBackground)
     val owner = remember(context) {

@@ -94,7 +94,7 @@ class WorkspaceFileManagerTest {
                 .inLocation(com.tanuki.storage.FileLocation.PHONE)
             assertEquals(listOf("internal"), manager.list().map { it.path })
             assertEquals("手机共享文件", manager.readTextPage("internal/notes.txt").text)
-            assertEquals(File(volume, "notes.txt").absolutePath, manager.guestPath("internal/notes.txt"))
+            assertEquals(com.tanuki.storage.PhoneStorageAccess.guestPath(volume, "notes.txt"), manager.guestPath("internal/notes.txt"))
             rejected { manager.createText("internal", "blocked", "bad") }
             rejected { manager.list("internal/../outside") }
             Files.createSymbolicLink(File(volume, "redirect").toPath(), paths.workspaces.toPath())

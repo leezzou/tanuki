@@ -1,8 +1,29 @@
 # 测试现状
 
-本轮发布目标为0.1.7/code9，文件管理功能debug结果和独立release结果分别记录。新分支由用户合并，Agent不直推main或创建Release。0.1.6已由用户合入PR #6，相关历史测试保留。
+最新任务是视频控制与DSH默认只读手机文件通道，完成debug验证后，用户追加授权push新分支，由用户自行合并；未要求新版本。既有0.1.7/code9发布交付与本轮debug分别记录；0.1.6已由用户合入PR #6，相关历史测试保留。
 
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
+
+## 视频控制与DSH手机文件独立写许可（2026-11-05，本次debug）
+
+- 用户最终更正为“默认给读权限，写权限需要专门给”。实现与范围见[本轮交接](handoffs/20261105-1625-video-shared-storage.md)和[项目存储](WORKSPACE-STORAGE.md)：真实共享卷不直接绑定Ubuntu，DSH通过受管手机文件Skill/原生RPC默认读取；原生本次写许可可撤销，停止或重启恢复只读，旧请求及异步权限回调不能借用新运行期许可。官方DSH审批/沙箱设置未变。
+- 最终串行modern debug/app-test/JVM/lint构建1分53秒、86任务通过；**104 JVM，0失败/错误/跳过；lint0错误/79警告/1Hint**。另客户端13项宿主HTTP/CLI回归通过（1.041秒，零失败/取消/跳过），包含分块、版本冲突不重试覆盖、20/120秒有界超时及不输出能力凭据。
+- 最终验证APK为workspacecheck、debuggable=true、0.1.7/code9、min26/target34、ARM64，14,813,669字节，SHA256 `6d2a91ff4ae1e075446c07836a61790fe982b77d220fcc4ff5cf54417fe5bf3e`，沿用开发证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；配套test APK实际target独立核验后install-r。不把它当新release，已交付0.1.7六附件保持原样。
+- 按方法去重，**48个不同目标设备用例最终通过，无跳过**。复用Pixel_7_API_34_arm64/emulator-5572、ARM64/API34；最终47项授权组44过/3败（137.269秒），原样3项复查2过/1败（26.135秒），无权限单项通过（0.143秒）。仅修正视频测试的滑块动作节点等待/定位及不同目标选择，app-test/lint重建1分10秒通过，产品APK SHA保持不变；视频整类3项通过（12.688秒）。两项旧UI原样复查通过，首败原因未定位；不能称首组全绿。
+- 实测默认只读、独立原生确认/取消/撤销、重启失效及旧runId拒绝、提交中撤销、真实Socket延迟旧请求体、文件版本冲突保护及无系统权限拒绝；视频核对封面中心真实像素、0.5/1.5原生播放速度、真实进度跳转/边界、暂停与播放全屏的同View/同MediaPlayer及系统栏恢复、暗色窄屏大字。浏览器/DSH WebView全屏关联回归通过；DSH页面和RUNNING状态仍为合成，不是实际模型任务。安装前无node/proot/apt/dpkg/仪器或真实任务；仅用UUID共享目录/工作区与合成媒体，宿主在仪器结束后恢复MANAGE AppOp default，无卸载/清数据/wipe/快照恢复。
+- 首轮测试编译因ACTION_SET_PROGRESS引用位置错误失败，修正为AccessibilityAction常量后成功。设备首轮权限11项和无权限单项通过；关联UI34项33通过/1失败：暂停后MediaPlayer返回native speed=0。修复为独立保存所选倍速、恢复播放重设参数；测试暂停时断言未播及UI选择，真实播放再核对原生速度，不改造原生getter伪造结果。随后静态发现延迟请求体跨重启可能借用新写许可，补逐请求/逐操作有效性检查与真实Socket回归。最终进度测试先前只按可见标签提交动作并稳定返回false，改为等待启用且承载SetProgress的局部节点、选择不同目标后，保留真实原生跳转断言并通过；不能据此确定原false是标签层、时序还是目标等值。未将此前测试改写成全绿。
+- 本机Ubuntu和Node均不存在，`PhoneFileGuestClientTest#existingUbuntuNodeClientReadsAndRequiresNativeWriteGrant`只新增/编译，**未运行**；不自动下载环境，不计跳过为通过。未验真实Ubuntu/DSH/模型任务、真机/MIUI、低API权限弹窗、SD/USB实物、更多媒体编码及长期压力。API Key保存继续用户暂停。旧系统异步回调仅静态核对与通用runId回归，不能称API29设备验收。
+
+实际构建与宿主命令：
+
+```bash
+./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle \
+  :app:assembleModernDebug :app:assembleModernDebugAndroidTest \
+  :app:testModernDebugUnitTest :app:lintModernDebug
+node scripts/test-phone-client.mjs
+```
+
+最终目标设备集合（完整类名前缀`com.tanuki.`）为：PhoneFileAccessTest整类5、PhoneStorageAccessTest整类4、PhoneFileServiceTest除noSystemStorageGrantMeansNoPhoneReadOrWrite的4项；WorkspaceVideoPresentationTest整类3、WorkspaceFileManagerTest整类12、WorkspaceStorageTest整类8；FilesBrowserPresentationTest的fileEditingCopyPickerAndSelectionWorkThroughActualActivity、fileControlsRemainReachableInDarkThemeAtTwoHundredPercent、runningFilePageKeepsBrowsingTextAndTransferActionsAvailable、textViewerCanReadPastEditorLimitAndUnknownFilesOfferOpenWith、phoneLocationExplainsPermissionAndLoadsGrantedVolume、audioFileOpensWithNativePlaybackControls、largeDirectoryUsesLatestFilterAndNeverShowsPreviousDirectoryResults；BrowserWorkspacePresentationTest的fullscreenRoundTripsRestoreChromePositionWithoutReload、newBrowserPageDefaultsToWindowsAndFullscreenKeepsTheDocument、emptyBrowserCanExitFullscreenWithoutFocusingAMissingAddressField；SetupPresentationTest#actualDshWebViewSurvivesFullscreenWithoutReload。无系统授权方法在宿主恢复MANAGE AppOp default后单独运行，不在仪器中改AppOp中断自身。
 
 ## 0.1.7文件管理发布候选验证（2026-11-05）
 
@@ -25,12 +46,14 @@ Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanu
 
 ## 运行中浏览、手机存储与多格式文件查看（2026-11-05，本次debug）
 
-- 产品改动及实际命令见[本轮交接](handoffs/20261105-1503-live-file-manager.md)与[项目存储](WORKSPACE-STORAGE.md)。独立workspacecheck、debug 0.1.6/8、min26/target34、ARM64；本次不是发布。APK 14,916,433字节，SHA256 `c386a91a682c1797f32a47235ff9301d9e51732087b4c3770f088db09a622100`。
+- 产品改动及实际命令归于本节与[项目存储](WORKSPACE-STORAGE.md)。独立workspacecheck、debug 0.1.6/8、min26/target34、ARM64；本次不是发布。APK 14,916,433字节，SHA256 `c386a91a682c1797f32a47235ff9301d9e51732087b4c3770f088db09a622100`。
 - 本轮新跑modern debug/app-test构建、100项JVM（0失败/错误/跳过）、lint0错误/75警告/1Hint。初次provider可空返回编译失败，修正后构建通过；末次产品构建2分45秒，测试夹具收尾编译/lint1分2秒。无新增依赖；专用只读provider、权限maxSdk/legacy在实际APK核验。
 - 复用Pixel_7_API_34_arm64/emulator-5572，API34，明确无真实任务。按最终方法集合去重 **44个目标设备方法最终通过**：WorkspaceFileManager12、WorkspaceStorage8、FilesystemSemantics前2个合成方法、LiveProjectTransfer10、PhoneStorageAccess3；FilesBrowserPresentation的2个原文件方法和5个新增方法、WorkspaceVideoPresentation1、FileTransferPresentation1。不含浏览器无关方法和完整guest环境安装用例；不是前轮release57项或首轮全绿。
 - 首批36项有24过/9败后权限恢复导致仪器中断。8败与新增导出路径未统一Android `/data/user/0` / `/data/data`别名及派生断言有关，已修正；旧完整环境原子发布方法触发下载中断，未修/未重试、不计本轮通过。权限授予/恢复改宿主在仪器外执行后，目标35项29.905秒为34过/1项manifest夹具失败；UI9项45.710秒为7过/2项断言失败。修正目标/测试manifest混合资产解析、实际控件disabled语义及视频固定250ms假设，保持产品字节不变，仅复查3项 **OK (3 tests)，6.945秒**。视频实际isPlaying、duration、非零尺寸及播放时钟推进均断言；未确定首轮短等待未推进的根因。
 - 实测5051目录读取、5001工作区ZIP、6000项UI筛选切目录、UTF8/UTF16/GB18030/Big5分页、256KiB以上文本查看、音频播放暂停、3秒合成H264原生播放、真实DocumentsUI单文件导出和导入新项目，以及授权后自建Downloads目录读/只读URI字节。导出并发追加/改写/删除/同大小同mtime替换拒绝、取消和导入失败回滚均通过。SAF运行场景使用合成service=RUNNING、无真实子进程；并发写由测试合成回调执行，不能称真实DSH模型任务验收。
 - 临时MANAGE AppOp由宿主在全部仪器结束后恢复原default；合成文件由夹具清理。无卸载/清数据/快照/wipe，不碰真机或真实账号。未验低API、SD/USB、MIUI真机、更多媒体编码、长期压力/真实DSH/完整环境升级。文本搜索仅当前段，外部文档与媒体能力仍依系统/已装应用；API Key保存暂停。正式0.1.6 release附件未改写。
+
+0.1.7旧交接1503已在后续提交前清理，必要实现/验证与首败过程归本节和上一节，边界归WORKSPACE-STORAGE/SECURITY，发布流程归RELEASE。合成3秒H.264素材随源码分发（3056字节，SHA256 `a57bbcbe20e0a9bf80b6b1912ffdc075978d51742d96a10a53ff328172431735`），不依赖.build生成器；开发并发中曾印章刷新后立即过期，冻结源文件后重新刷新，不作产品测试结果。无独有未完成事项遗留于已删除记录。
 
 ## 0.1.6 合并后发布候选验证（2026-11-05）
 

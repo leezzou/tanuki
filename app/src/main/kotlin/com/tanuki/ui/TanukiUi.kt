@@ -85,7 +85,8 @@ data class TanukiUiModel(
     val transfers: List<FileTransferProgress> = emptyList(),
     val liveLogs: kotlinx.coroutines.flow.StateFlow<List<String>>? = null,
     val appUpdate: com.tanuki.update.AppUpdateState = com.tanuki.update.AppUpdateState(),
-    val appInstallAllowed: Boolean = false
+    val appInstallAllowed: Boolean = false,
+    val fileFullscreen: Boolean = false
 )
 
 data class TanukiUiCallbacks(
@@ -144,7 +145,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     val pageStates = rememberSaveableStateHolder()
     var fullscreen by rememberSaveable { mutableStateOf(false) }
     var browserFullscreen by rememberSaveable { mutableStateOf(false) }
-    val activeFullscreen = (fullscreen && tab == 1) || (browserFullscreen && tab == 3)
+    val activeFullscreen = (fullscreen && tab == 1) || (browserFullscreen && tab == 3) || (model.fileFullscreen && tab == 2)
     var floatingBrowser by rememberSaveable { mutableStateOf(false) }
     fun navigate(index: Int) {
         if (index == 3) { callbacks.openBrowser(); floatingBrowser = false }
@@ -219,7 +220,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                                 TextButton(onClick = { navigate(3) }) { Text("查看请求") }
                             }
                         }
-                        OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
+                        if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
                             modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
                                 else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }

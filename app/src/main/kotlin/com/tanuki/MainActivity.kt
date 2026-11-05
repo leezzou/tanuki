@@ -78,9 +78,27 @@ class MainActivity : ComponentActivity() {
             }
         }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) })
     }
+    private var fileViewerFullscreen by mutableStateOf(false)
     private var phoneStorageGranted by mutableStateOf(false)
     private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+    }
+    private var pendingPhoneWriteRun: Long? = null
+    private val phoneWritePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val requestedRun = pendingPhoneWriteRun; pendingPhoneWriteRun = null
+        if (granted && requestedRun != null && manager.state.value.service == ServiceState.RUNNING) enablePhoneWrites(requestedRun)
+    }
+    private fun grantPhoneWriteForCurrentRun() {
+        if (!PhoneStorageAccess.isGranted(this) || manager.state.value.service != ServiceState.RUNNING) return
+        val requestedRun = manager.phoneFiles.currentRunId() ?: return
+        if (android.os.Build.VERSION.SDK_INT <= 29 && !PhoneStorageAccess.isWriteGranted(this)) {
+            pendingPhoneWriteRun = requestedRun
+            phoneWritePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else enablePhoneWrites(requestedRun)
+    }
+    private fun enablePhoneWrites(requestedRun: Long) {
+        runCatching { manager.phoneFiles.setWriteAllowed(true, requestedRun) }
+            .onFailure { manager.event("手机写入权限尚未可用，DSH 保持只读；请检查系统存储权限。") }
     }
     private val phoneStorageSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
@@ -98,6 +116,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        if (!PhoneStorageAccess.isWriteGranted(this)) manager.phoneFiles.setWriteAllowed(false)
     }
     private var pendingFileExport: Pair<WorkspaceFileManager, String>? = null
     private val exportSingleFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -214,6 +233,7 @@ class MainActivity : ComponentActivity() {
                 val npmSources=remember(npmSelection.version) { manager.npmSources.sources(npmSelection.version) }
                 val tools by manager.requiredTools.collectAsState()
                 val transfers by manager.fileTransfers.state.collectAsState()
+                val phoneWriteAllowed by manager.phoneFiles.writeAllowed.collectAsState()
                 val appUpdate by appUpdates.state.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
                 val ubuntuSources=remember(components.selectedUbuntuVersion) { manager.components.sources(RuntimeComponent.UBUNTU) }
@@ -270,7 +290,7 @@ class MainActivity : ComponentActivity() {
                         components=components,ubuntuSources=ubuntuSources,nodeSources=nodeSources,
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
-                        appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed()),
+                        appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -355,8 +375,14 @@ class MainActivity : ComponentActivity() {
                             onExport = { confirmation = "EXPORT" }, modifier = modifier, bottomInset = bottomInset,
                             runtimeRunning = s.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING),
                             onStop = { confirmation = "STOP" },
+                            fullscreen = fileViewerFullscreen,
+                            onFullscreen = { fileViewerFullscreen = it },
                             phoneStorageGranted = phoneStorageGranted,
                             onRequestStoragePermission = ::requestPhoneStoragePermission,
+                            phoneWriteAllowed = phoneWriteAllowed,
+                            phoneWritingAvailable = phoneStorageGranted && s.service == ServiceState.RUNNING,
+                            onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
+                            onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
                             onExportFile = { files, path, name ->
                                 if (pendingFileExport == null) { pendingFileExport = files to path; exportSingleFile.launch(name) }
                             })

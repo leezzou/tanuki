@@ -40,6 +40,7 @@ class RuntimeManager(val context: Context) {
     val launcher = Launcher(context, paths, log)
     val state = MutableStateFlow(Snapshot())
     val fileTransfers = FileTransfers { android.os.SystemClock.elapsedRealtime() }
+    val phoneFiles = com.tanuki.storage.PhoneFileService(context, paths, fileTransfers)
     val mutation = Mutex()
     private val stopMutex = Mutex()
     private var job: Job? = null
@@ -552,7 +553,9 @@ class RuntimeManager(val context: Context) {
                         val v = paths.metadata().getString("dsh")
                         components.checkDshNodeCompatibility(v)
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
-                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"))
+                        // 只给客体受控客户端，不直接绑定真实手机卷，写权限默认关闭。
+                        phoneFiles.start()
+                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true)
                         child = c
                         monitorWorkspace(c)
                         // Collection lives independently of the Activity and of the environment mutex.
@@ -583,6 +586,7 @@ class RuntimeManager(val context: Context) {
                                 CommandResult(-1, "", Redact.text(t.message ?: "日志管道异常"))
                             }
                             if (child === c && !stopping) {
+                                phoneFiles.stop()
                                 child = null; authenticatedUrl = null; origin = null
                                 val stopped = state.value.service == ServiceState.STOPPING
                                 state.update { it.copy(service = if (stopped) ServiceState.STOPPED else ServiceState.INTERRUPTED, webHealthy = false, web = WebState.DISCONNECTED, error = if (stopped) it.error else "DSH 退出 ${result.exitCode}；任务最终状态无法确认，不自动重放") }
@@ -593,6 +597,7 @@ class RuntimeManager(val context: Context) {
                         val cleanup = runCatching {
                             withContext(NonCancellable) {
                                 child?.stop()
+                                phoneFiles.stop()
                                 child = null; authenticatedUrl = null; origin = null
                             }
                         }.exceptionOrNull()
@@ -657,6 +662,7 @@ class RuntimeManager(val context: Context) {
             if ((expected != null && child !== expected) || (expectedGeneration != null && runtimeGeneration != expectedGeneration)) return@withLock
             val previous = state.value.service
             stopping = true
+            phoneFiles.setWriteAllowed(false)
             state.update { it.copy(service = ServiceState.STOPPING) }
             previous
         }
@@ -669,6 +675,7 @@ class RuntimeManager(val context: Context) {
                 serverJob?.cancelAndJoin()
                 serverJob = null
                 child?.stop()
+                phoneFiles.stop()
                 child = null
                 workspaceMonitor = null
                 authenticatedUrl = null

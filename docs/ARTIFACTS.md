@@ -1,13 +1,13 @@
 # Tanuki 构建产物：从哪里取包
 
-**本次发布目标为 v0.1.7（候选versionCode 9）。** 候选须完成本轮release验证、文档与交接、过期记录清理和公开检查，统一一次commit/push成功后，再按已测APK的SHA使用verified模式生成最终六附件；不能用此前debug结果代替。
+**已交付发布包为 v0.1.7/code9。** 本次视频/手机文件独立写授权通过debug目标验证，按用户追加授权推送 `fix/video-phone-file-permissions`，尚未发布新版本；既有release六附件保持原样。
 
 - 安装 APK：`artifacts/releases/0.1.7/Tanuki-0.1.7-workspacecheck-arm64-release.apk`
 - GitHub 发布：由用户在网页创建 `v0.1.7` 的 **Pre-release**，只上传 `artifacts/releases/0.1.7/` 内全部 **6 个附件**，包含 `app-update.json`、完整源码、原生对应源码及散列。
-- 当前是同一开发证书的 `com.tanuki.modern.workspacecheck` 包，ARM64、non-debuggable、minSdk26/targetSdk34；不是正式签名，也没有由Agent自动发布。封装前须核对code9严格高于公开、已安装及归档版本上限。
+- 当前是同一开发证书的 `com.tanuki.modern.workspacecheck` 包，ARM64、non-debuggable、minSdk26/targetSdk34；不是正式签名，也没有由Agent自动发布。后续发布须重新确认版本并核对code严格递增。
 - 根目录不再放APK/ZIP。`archive/`中的旧0.1.0和已撤回、未发布的旧候选0.1.2/code3 **不要拿来安装或发布**；本次新包取 `releases/0.1.7/`，不能只按版本名称猜测当前附件。0.1.6/code8及更早历史发布目录、旧包与校验保留原样。
 
-本版包含运行中文件访问、手机共享存储与多格式查看改进，行为和权限说明见[项目存储说明](WORKSPACE-STORAGE.md)。当前源码准备区对应本次工作树；最终发布目录须在release验证和新分支推送成功后生成，是否齐全以实际六附件及`RELEASE-SHA256SUMS`为准，验证范围见[测试现状](TEST-REPORT.md)。2026-11-04的PR #2组合包仍在 `artifacts/builds/workspacecheck/pr2-upload-browser/Tanuki-pr2-upload-browser-debug.apk`，是历史0.1.3/5开发debug包，不是本次release。
+本版包含运行中文件访问、手机共享存储与多格式查看改进，行为和权限说明见[项目存储说明](WORKSPACE-STORAGE.md)。当前源码准备区 `sources/Tanuki-0.1.7-source.zip` 对应本地工作树，包含尚未发布的后续改动；已交付源码快照取 `releases/0.1.7/Tanuki-0.1.7-source.zip`。发布目录是否齐全以实际六附件及`RELEASE-SHA256SUMS`为准，验证范围见[测试现状](TEST-REPORT.md)。2026-11-04的PR #2组合包仍在 `artifacts/builds/workspacecheck/pr2-upload-browser/Tanuki-pr2-upload-browser-debug.apk`，是历史0.1.3/5开发debug包，不是本次release。
 
 ## 目录约定
 
