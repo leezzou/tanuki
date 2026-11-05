@@ -464,6 +464,22 @@ class SetupPresentationTest {
         return changed
     }
 
+    private fun GlassTouch.holdOverCenter(control: Rect, side: String, targetX: Float, name: String) {
+        val tab = glassTabBounds(side)
+        moveTo(tab.exactCenterX()); SystemClock.sleep(500)
+        val before = screenshot("$name-side.png")
+        var held: Bitmap? = null
+        try {
+            moveTo(targetX); SystemClock.sleep(700)
+            held = screenshot("$name-held.png")
+            // 保持同一按压状态对照中央像素：不能只验证松手回调而漏掉提前吸附。
+            val center = Rect(control.left, tab.top, control.right, tab.bottom)
+            val changed = changedGlassPixels(before, held, center)
+            assertTrue("Held lens must enter the center before release: changed=$changed",
+                changed > center.width() * center.height() / 20)
+        } finally { before.recycle(); held?.recycle() }
+    }
+
     @Test(timeout = 120_000) fun browserControlWithoutGlassRejectsDragButAcceptsClick() {
         val activity = launch(); cancelSourceTests()
         val clicks = java.util.concurrent.atomic.AtomicInteger()
@@ -500,7 +516,7 @@ class SetupPresentationTest {
             GlassTouch(control.exactCenterX(), control.exactCenterY()).use { it.moveTo(glassTabBounds("浏览器").exactCenterX()); it.finish() }
             assertEquals(1, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
             GlassTouch(glassTabBounds("工作台").exactCenterX(), control.exactCenterY()).use {
-                it.moveTo(control.exactCenterX() - control.width() / 4f)
+                it.holdOverCenter(control, "DSH", control.exactCenterX() - control.width() / 4f, "glass-release-left")
                 assertGlassSelection(fixture, 0, emptyList()); assertEquals(1, fixture.controlClicks.get())
                 it.finish()
             }
@@ -509,7 +525,9 @@ class SetupPresentationTest {
             val bar = requireNotNull(fixture.bounds.get())
             assertTrue("Lens must settle on DSH, not the center action", changedGlassPixels(reference!!, settled!!, bar) < bar.width() * bar.height() / 20)
             GlassTouch(glassTabBounds("浏览器").exactCenterX(), control.exactCenterY()).use {
-                it.moveTo(control.exactCenterX() + control.width() / 4f); it.finish()
+                it.holdOverCenter(control, "文件", control.exactCenterX() + control.width() / 4f, "glass-release-right")
+                assertGlassSelection(fixture, 1, listOf(1)); assertEquals(1, fixture.controlClicks.get())
+                it.finish()
             }
             assertGlassSelection(fixture, 2, listOf(1, 2)); assertEquals(1, fixture.controlClicks.get())
             GlassTouch(glassTabBounds("文件").exactCenterX(), control.exactCenterY()).use {
@@ -537,11 +555,15 @@ class SetupPresentationTest {
             }
             assertEquals(0, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
             GlassTouch(glassTabBounds("工作台").exactCenterX(), control.exactCenterY()).use {
-                it.moveTo(control.exactCenterX() - control.width() / 4f); it.finish()
+                it.holdOverCenter(control, "文件", control.exactCenterX() - control.width() / 4f, "glass-release-rtl-left")
+                assertGlassSelection(fixture, 0, emptyList()); assertEquals(0, fixture.controlClicks.get())
+                it.finish()
             }
             assertGlassSelection(fixture, 2, listOf(2))
             GlassTouch(glassTabBounds("浏览器").exactCenterX(), control.exactCenterY()).use {
-                it.moveTo(control.exactCenterX() + control.width() / 4f); it.finish()
+                it.holdOverCenter(control, "DSH", control.exactCenterX() + control.width() / 4f, "glass-release-rtl-right")
+                assertGlassSelection(fixture, 2, listOf(2)); assertEquals(0, fixture.controlClicks.get())
+                it.finish()
             }
             assertGlassSelection(fixture, 1, listOf(2, 1)); assertEquals(0, fixture.controlClicks.get())
             screenshot("glass-center-rtl-font200.png")

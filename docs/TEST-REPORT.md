@@ -2,6 +2,14 @@
 
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
 
+## 中央镜片仅松手吸附（2026-11-05，独立debug）
+
+- 用户指出此前理解错误：按住时应能停在中央，松手才避让。GlassNavigationBar移除拖动中的吸附状态，预览保持原始指针位置；沿用释放时最近侧判定及弹簧，不改按钮、权限或WebView。
+- SetupPresentationTest在同一按压中对照侧栏位/中央区域实际像素，验证按住时不提前吸附，同时保留松手位置、取消、精确回调/控制点击次数。旧版LTR先失败`changed=0`；首轮RTL通过，随后统一将像素差阈值强化为中央区域5%，不把此前未触发的RTL计为缺陷复现。
+- 本轮双debug/modern AndroidTest、**97 JVM无失败/跳过，lint0错误/71警告/1提示**。复用Tanuki_UI_API36/emulator-5554、ARM64/API36/WebView133及独立uipolish.workspacecheck包，核对版本/签名/target后覆盖；**11项设备专项通过，162.2秒**，无跳过/超时。
+- 实际选择（类前缀com.tanuki.）：SetupPresentationTest的`glassCenterOnlyClicksAndDragsSnapPastTheAction`、`glassCenterSkipsRtlGapAtLargeFontsAndCancelsVerticalPress`、`browserControlWithoutGlassRejectsDragButAcceptsClick`、`glassNavigationDragPreviewsThenCommitsOnceAndCancels`、`glassNavigationNullBackdropDragsInRtlAndKeepsLargeTabsClickable`、`glassNavigationBlursPixelsAndKeepsTabsClickable`、`actualDshWebViewSurvivesFullscreenWithoutReload`；BrowserWorkspacePresentationTest的`navigationControlTogglesFromEveryPageWithoutSwitchingOrReloading`、`navigationControlCannotGrantOnPrivateLoginPage`、`fullscreenRoundTripsRestoreChromePositionWithoutReload`、`optionalBottomAvoidanceKeepsFixedControlsClickableWithoutReload`。
+- 独立debug副本在artifacts/builds/navigation-release-snap，不覆盖旧d1a6989验证包或正式release。未重跑前轮全部25项，不宣称真机/低API/完整宽屏或真实模型验收；本轮未提交/推送。
+
 ## 导航中央控制（2026-11-04，独立debug）
 
 - `feat/navigation-browser-control`基于修复分支4a7bc31，保留悬浮与全屏修复。主导航中央/侧栏中部人、机器人按钮统一操作权状态；普通状态条移除，登录保护、请求/下载、接管询问及独立小窗入口保留。

@@ -68,12 +68,11 @@ internal fun GlassNavigationBar(
     val pressed = sources.map { it.collectIsPressedAsState().value }.getOrNull(selectedIndex) == true
     var dragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(0f) }
-    var snappingToSide by remember { mutableStateOf(false) }
     var lastSelectedSlot by remember { mutableIntStateOf(slotForIndex(selectedIndex.coerceIn(labels.indices))) }
     val selected = selectedIndex in labels.indices
     val position by animateFloatAsState(
         if (dragging) dragPosition else if (selected) slotForIndex(selectedIndex).toFloat() else lastSelectedSlot.toFloat(),
-        if (dragging && !snappingToSide) snap() else spring(dampingRatio = 0.8f, stiffness = 480f),
+        if (dragging) snap() else spring(dampingRatio = 0.8f, stiffness = 480f),
         label = "液态导航位置",
     )
     val pressure by animateFloatAsState(
@@ -101,13 +100,9 @@ internal fun GlassNavigationBar(
         val edgePixels = with(density) { 4.dp.toPx() }
         fun visualSlotAt(x: Float) = (x - edgePixels) / itemPixels - 0.5f
         fun positionAt(x: Float): Float {
-            val position = (if (direction == LayoutDirection.Rtl) lastSlot - visualSlotAt(x) else visualSlotAt(x))
+            // 按住时镜片连续跟手，中央也能停留；仅释放时排除中央页签。
+            return (if (direction == LayoutDirection.Rtl) lastSlot - visualSlotAt(x) else visualSlotAt(x))
                 .coerceIn(0f, lastSlot.toFloat())
-            // 中央物理槽不属于页签；按其到两侧页签中心的距离吸附，RTL 在换算前保持视觉方向。
-            snappingToSide = hasCenterAction && position >= 1.5f && position < 2.5f
-            return if (snappingToSide) {
-                if (position < 2f) 1f else 3f
-            } else position
         }
         fun finishDrag() {
             if (!dragging) return
