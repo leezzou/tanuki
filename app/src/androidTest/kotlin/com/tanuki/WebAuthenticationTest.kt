@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.webkit.CookieManager
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import com.tanuki.runtime.*
 import com.tanuki.web.DshWebView
@@ -97,6 +101,63 @@ class WebAuthenticationTest {
             try { withTimeout(20000) { while (!condition()) delay(25) } }
             catch (_: TimeoutCancellationException) { fail("$message 超时；forwarded=${pages.size}; web=${manager.state.value.web}") }
         }
+        fun diagnostic(stage: String, tapX: Float? = null, tapY: Float? = null): String {
+            val result = org.json.JSONObject().put("stage", stage).put("forwarded", pages.size)
+                .put("web", manager.state.value.web.name)
+            ui {
+                val location = IntArray(2); browser.view.getLocationOnScreen(location)
+                val rootLocation = IntArray(2); activity.window.decorView.getLocationOnScreen(rootLocation)
+                val visible = android.graphics.Rect(); browser.view.getGlobalVisibleRect(visible)
+                val bars = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    ?.getInsets(WindowInsetsCompat.Type.systemBars())
+                val safe = android.graphics.Rect(rootLocation[0] + (bars?.left ?: 0), rootLocation[1] + (bars?.top ?: 0),
+                    rootLocation[0] + activity.window.decorView.width - (bars?.right ?: 0),
+                    rootLocation[1] + activity.window.decorView.height - (bars?.bottom ?: 0))
+                result.put("shown", browser.view.isShown).put("windowFocus", browser.view.hasWindowFocus())
+                    .put("viewLocation", org.json.JSONArray(location.toList()))
+                    .put("viewSize", org.json.JSONArray(listOf(browser.view.width, browser.view.height)))
+                    .put("globalVisibleBounds", visible.toShortString())
+                    .put("systemBarsSafeBounds", safe.toShortString())
+                    .put("systemBarsInsets", org.json.JSONArray(listOf(bars?.left ?: 0, bars?.top ?: 0, bars?.right ?: 0, bars?.bottom ?: 0)))
+                @Suppress("DEPRECATION") val scale = browser.view.scale
+                result.put("deprecatedWebViewScale", scale)
+                if (tapX != null && tapY != null) result.put("screenTap", org.json.JSONArray(listOf(tapX, tapY)))
+                    .put("tapInsideSystemBarsSafeBounds", safe.contains(tapX.toInt(), tapY.toInt()))
+            }
+            // 仅记录合成页面的几何与事件，不读取URL、Cookie、启动token或网页存储。
+            val dom = js("""JSON.stringify((()=>{
+                const r=document.querySelector('#link').getBoundingClientRect(),v=window.visualViewport;
+                const cx=r.x+r.width/2,cy=r.y+r.height/2,e=document.elementFromPoint(cx,cy);
+                return {readyState:document.readyState,linkRect:[r.x,r.y,r.width,r.height],
+                    linkCenter:[cx,cy],elementAtLinkCenter:e?.id||e?.tagName,
+                    innerWidth,innerHeight,visualViewport:v?{width:v.width,height:v.height,scale:v.scale,offsetLeft:v.offsetLeft,offsetTop:v.offsetTop}:null,
+                    viewportMeta:document.querySelector('meta[name="viewport"]')?.content,
+                    events:window.__authLinkEvents||[],activation:{isActive:navigator.userActivation?.isActive,hasBeenActive:navigator.userActivation?.hasBeenActive}};
+            })())""")
+            result.put("dom", org.json.JSONObject(org.json.JSONTokener(dom).nextValue() as String))
+            val text = result.toString()
+            File(context.cacheDir, "auth-external-$stage.json").writeText(text)
+            runCatching {
+                val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                try { File(context.cacheDir, "auth-external-$stage.png").outputStream().use {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                } } finally { bitmap.recycle() }
+            }
+            android.util.Log.i("TANUKI_PROBE", "AUTH_LINK_DIAG $text")
+            return text
+        }
+        suspend fun awaitVisibleFrame() {
+            await("合成外链页可见并取得窗口焦点") {
+                var ready = false
+                ui { ready = browser.view.isShown && browser.view.hasWindowFocus() && browser.view.width > 0 && browser.view.height > 0 }
+                ready
+            }
+            val frame = CountDownLatch(1)
+            ui { browser.view.postVisualStateCallback(1, object : android.webkit.WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) { frame.countDown() }
+            }) }
+            assertTrue("合成外链页完成首帧绘制", frame.await(5, TimeUnit.SECONDS))
+        }
         try {
             ui {
                 browser = DshWebView(activity, manager, { _, callback -> callback.onReceiveValue(null) }, { _, _ -> }, { file, _ -> file.delete() }, { pages.add(it) })
@@ -104,21 +165,72 @@ class WebAuthenticationTest {
                 activity.setContentView(browser.view); browser.checkSupport(connectAfter = true)
             }
             await { manager.state.value.web == WebState.CONNECTED }
-            val epoch = js("performance.timeOrigin")
-            val position = org.json.JSONArray(js("JSON.stringify((function(){const r=document.querySelector('#link').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2];})())").let { org.json.JSONTokener(it).nextValue() as String })
-            var x = 0f; var y = 0f
+            awaitVisibleFrame()
+            js("""window.__authLinkEvents=[];['pointerdown','pointerup','click'].forEach(type=>document.addEventListener(type,event=>{
+                const events=window.__authLinkEvents;events.push({type,target:event.target?.id||event.target?.tagName,
+                    trusted:event.isTrusted,x:event.clientX,y:event.clientY,active:navigator.userActivation?.isActive});
+                if(events.length>20)events.shift();
+            },true));true""")
+            // 先留存裸WebView的原几何：edge-to-edge下链接中心可能落在系统状态栏里。
+            val originalPosition = org.json.JSONArray(org.json.JSONTokener(js("JSON.stringify((()=>{const r=document.querySelector('#link').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})())")).nextValue() as String)
+            var originalX = 0f; var originalY = 0f
             ui {
                 val location = IntArray(2); browser.view.getLocationOnScreen(location)
                 @Suppress("DEPRECATION") val scale = browser.view.scale
+                originalX = location[0] + originalPosition.getDouble(0).toFloat() * scale
+                originalY = location[1] + originalPosition.getDouble(1).toFloat() * scale
+            }
+            diagnostic("bare-host", originalX, originalY)
+            val epoch = js("performance.timeOrigin")
+            // 测试用裸宿主没有Compose消费系统栏，这里恢复夹具自身安全布局；不改MainActivity窗口策略。
+            lateinit var host: FrameLayout
+            var hostInsetsApplied = false
+            ui {
+                (browser.view.parent as? ViewGroup)?.removeView(browser.view)
+                host = FrameLayout(activity).apply { clipChildren = true; clipToPadding = true }
+                host.addView(browser.view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                ViewCompat.setOnApplyWindowInsetsListener(host) { _, insets ->
+                    val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                    host.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                    hostInsetsApplied = true
+                    insets
+                }
+                activity.setContentView(host)
+                ViewCompat.requestApplyInsets(host)
+            }
+            await("外链测试宿主系统栏避让") {
+                var applied = false
+                ui {
+                    val bars = ViewCompat.getRootWindowInsets(host)?.getInsets(WindowInsetsCompat.Type.systemBars())
+                    applied = hostInsetsApplied && bars != null && host.paddingLeft == bars.left && host.paddingTop == bars.top &&
+                        host.paddingRight == bars.right && host.paddingBottom == bars.bottom
+                }
+                applied
+            }
+            awaitVisibleFrame()
+            val position = org.json.JSONArray(js("JSON.stringify((function(){const r=document.querySelector('#link').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2];})())").let { org.json.JSONTokener(it).nextValue() as String })
+            var x = 0f; var y = 0f
+            val viewportWidth = js("window.innerWidth").toFloat()
+            ui {
+                val location = IntArray(2); browser.view.getLocationOnScreen(location)
+                val scale = browser.view.width / viewportWidth
                 x = location[0] + position.getDouble(0).toFloat() * scale
                 y = location[1] + position.getDouble(1).toFloat() * scale
             }
+            val beforeTap = org.json.JSONObject(diagnostic("before-tap", x, y))
+            assertTrue("合成外链中心必须位于系统栏之外的可点击区域", beforeTap.getBoolean("tapInsideSystemBarsSafeBounds"))
             val now = android.os.SystemClock.uptimeMillis()
             for ((action, time) in listOf(android.view.MotionEvent.ACTION_DOWN to now, android.view.MotionEvent.ACTION_UP to now + 80)) {
                 val event = android.view.MotionEvent.obtain(now,time,action,x,y,0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
                 try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
             }
-            await("普通外链") { pages.size == 1 }
+            try { await("普通外链") { pages.size == 1 } }
+            catch (error: AssertionError) {
+                val details = runCatching { diagnostic("failure", x, y) }.getOrElse { "diagnostic=${it.javaClass.simpleName}" }
+                throw AssertionError("$details; ${error.message}", error)
+            }
+            diagnostic("after-tap", x, y)
             assertEquals(public.base + "/ordinary?code=public-oauth", pages[0])
             js("document.querySelector('#popup').click();true")
             await("直接弹窗") { pages.size == 2 }
