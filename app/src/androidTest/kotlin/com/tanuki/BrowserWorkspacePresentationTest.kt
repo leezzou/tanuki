@@ -180,6 +180,69 @@ class BrowserWorkspacePresentationTest {
         assertEquals("permission_required", rpc(browser, "back").getJSONObject("error").getString("code"))
         screenshot("navigation-browser-control-human.png")
     }
+    @Test(timeout = 120_000) fun navigationControlTracksRealIdleReturnAndExplicitRevoke() = fixture { _, browser, server ->
+        val originalNotice = browser.state.value.notice
+        openPage(browser, server.base + "/")
+        ui { browser.grantConnection() }
+        fun description() = androidx.core.view.accessibility.AccessibilityNodeInfoCompat.wrap(find("浏览器控制")).stateDescription?.toString()
+        val images = mutableListOf<Bitmap>()
+        fun icon(): Bitmap {
+            instrumentation.waitForIdleSync(); SystemClock.sleep(350)
+            val r = Rect().also(find("浏览器控制")::getBoundsInScreen)
+            val inset = (8 * context.resources.displayMetrics.density).toInt(); r.inset(inset, inset)
+            val full = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            return Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height()).also { full.recycle(); images.add(it) }
+        }
+        fun changed(a: Bitmap, b: Bitmap): Int {
+            assertEquals(a.width, b.width); assertEquals(a.height, b.height)
+            var count = 0
+            for (y in 0 until a.height) for (x in 0 until a.width) {
+                val p = a.getPixel(x, y); val q = b.getPixel(x, y)
+                if (kotlin.math.abs(android.graphics.Color.red(p) - android.graphics.Color.red(q)) > 10 ||
+                    kotlin.math.abs(android.graphics.Color.green(p) - android.graphics.Color.green(q)) > 10 ||
+                    kotlin.math.abs(android.graphics.Color.blue(p) - android.graphics.Color.blue(q)) > 10) count++
+            }
+            return count
+        }
+        try {
+            await { description() == "AI 可操作浏览器" }; val ai = icon()
+            val location = IntArray(2); ui { browser.webView.getLocationOnScreen(location) }
+            val down = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                    location[0] + browser.webView.width / 2f, location[1] + 72 * context.resources.displayMetrics.density, 0)
+                try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+                SystemClock.sleep(60)
+            }
+            click("临时接管")
+            await { description() == "你在临时操作，空闲30秒后交回 AI" }
+            val human = icon(); assertTrue(changed(ai, human) > ai.width * ai.height / 4)
+            click("工作台"); await { !browser.state.value.visible }
+            // 切到原生玻璃页后真正静待30秒，不再触摸/切页或缩短计时；核对授权、语义与图标。
+            val deadline = SystemClock.elapsedRealtime() + 40_000
+            while (browser.state.value.authorizedClient == null && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100)
+            assertEquals(browser.connection.clientId, browser.state.value.authorizedClient)
+            await { description() == "AI 可操作浏览器" }
+            assertTrue("Robot pixels must return without user input", changed(ai, icon()) < ai.width * ai.height / 50)
+            assertEquals("30 秒未操作，浏览器权限已交回 AI", browser.state.value.notice)
+            click("浏览器"); await { browser.state.value.visible }
+            click("浏览器控制"); await { description() == "你在操作，AI 仅可查看" }
+            assertNull(browser.state.value.authorizedClient); assertNull(browser.state.value.idleReturnSeconds)
+            assertFalse(browser.library.state.value.aiControlEnabled)
+            assertTrue("Current UI must not retain an obsolete AI-return notice", nodes().none {
+                it.text?.toString() == "30 秒未操作，浏览器权限已交回 AI"
+            })
+            SystemClock.sleep(31_000)
+            assertNull(browser.state.value.authorizedClient)
+            assertEquals("你在操作，AI 仅可查看", description())
+            assertTrue(changed(human, icon()) < human.width * human.height / 50)
+            ui { browser.notify("合成下载提示"); browser.grantConnection(); browser.takeControl() }
+            assertEquals("Other notices survive authority changes", "合成下载提示", browser.state.value.notice)
+        } finally {
+            images.forEach { it.recycle() }
+            ui { if (originalNotice == null) browser.dismissNotice() else browser.notify(originalNotice) }
+        }
+    }
     @Test fun navigationControlCannotGrantOnPrivateLoginPage() = fixture { _, browser, server ->
         openPage(browser, server.base + "/")
         ui {

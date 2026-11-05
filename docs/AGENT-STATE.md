@@ -1,24 +1,24 @@
 # Tanuki 当前状态
 
-先读本页、[当前交接](handoffs/20261105-1029-control-return-sync.md)、[上手指南](AGENT-QUICKSTART.md)及任务专题。安全边界见[SECURITY](SECURITY.md)，验证与历史发布集中在[TEST-REPORT](TEST-REPORT.md)。
+先读本页、[当前交接](handoffs/20261105-1113-control-notice-push.md)、[上手指南](AGENT-QUICKSTART.md)及任务专题。安全边界见[SECURITY](SECURITY.md)，历史验证集中在[TEST-REPORT](TEST-REPORT.md)。
 
-## 仓库与当前交付
+## 分支与当前任务
 
-- 仅在根工程开发；origin为主仓库`https://github.com/leezzou/tanuki`（Git用SSH），不再使用fork。原功能/备份分支、stash及旧worktree保留，不自动清理。
-- 当前`feat/navigation-browser-control`，按用户要求基于修复分支4a7bc31，包含cbe9e9c悬浮/可选底部避让及全屏占位修复。2026-11-05 fetch复核主库main仍4509972、不含两笔修复；本分支保留两笔，不退回旧main、不强推。
-- **松手修正已验证，用户现已授权本地提交**：基于已推主库的d1a6989，按用户纠正，镜片按住时可停在中央，仅松手才吸附最近有效页签，取消回原页；拖动不切权。按钮/权限、登录保护、请求/下载及独立小窗不变。
-- 2026-11-05本轮双debug/AndroidTest、97 JVM、11项API36专项通过（162.2秒），lint0/71/1；新增按住中央像素断言在旧版LTR先失败。完整范围见TEST-REPORT，未重跑前轮全部25项。
-- 2026-11-04双debug/AndroidTest、97 JVM、25项不同设备专项通过；lint0错误/71警告/1提示。独立按钮误把拖动当点击先复现后修复；只读截图用例补可视帧同步后3次通过，不重复计数。具体失败、范围和方法见测试现状，前轮数字不冒充本轮。
+- 仅根工程开发；origin为主仓库https://github.com/leezzou/tanuki（SSH访问）。当前feat/navigation-browser-control，保留悬浮/全屏修复基线4a7bc31；本轮fetch确认主库main已到8b5776a（PR #4），其完整源码树与4a7bc31相同；不改写本分支历史、不强推。
+- 中央按钮功能d1a6989已推；用户授权的“按住中央、松手才吸附”修正已独立本地提交**4ad6661**，本轮与提示修正一起获授权推当前功能分支。旧分支/stash/worktree保留，不自动合main或发布。
+- **已修并验证，用户现已授权提交/推送**：自动交回提示曾在再次收回权限后残留，与人工状态矛盾；现在仅在当前可操作状态有效时保留，不清除下载等其他通知，不改变临时30秒/显式撤权持久策略。
+- **已验证/未复现须区分**：真实30秒中控制器授权、按钮语义和机器人像素会同步，浏览器页及切至工作台原生玻璃页均通过；未复现用户所述首次自动交回后图标仍为人，不能用已修的旧提示矛盾替代该原始场景结论。
+- 前一实现轮双debug/AndroidTest、97 JVM、11个不同API36设备专项最终通过；lint0错误/71警告/1提示。旧小窗测试入口适配后通过；重复计时用例不累计。前轮松手11项/中央25项另见测试现状，不冒充重跑全套。
 
-## 环境与数据边界
+## 环境与边界
 
-- Tanuki_UI_API36/emulator-5554，ARM64/API36/WebView133；仅独立`com.tanuki.modern.uipolish.workspacecheck`及合成页面。实际包/版本/签名/target核对，不清数据、不覆盖正常安装、不运行真实环境安装或模型任务。
-- AI合法连接可读普通当前页，操作需授权；读取不切页，OAuth页不给AI读写/列出。临时接管30秒归还，显式收回持续有效；页面/后台不自行改授权。
-- 保留官方DSH、TLS/哈希/审批；PRoot不是恶意代码沙箱。**API Key保存暂停**，不读/导出真实凭据。
+- Tanuki_UI_API36/emulator-5554，ARM64/API36/WebView133，仅独立com.tanuki.modern.uipolish.workspacecheck及合成页。安装前核对包/版本/签名/target及无运行任务，不清数据、卸载或覆盖正常安装。
+- AI合法连接可读普通当前页，操作需授权；读取不切页，OAuth页不给AI读写/列出。只有临时接管空闲30秒返回，中央按钮显式收回仍持续有效，后台/切页不自行改权。
+- 官方DSH、TLS/哈希/审批、进程级整页绘制不改；PRoot不是恶意代码沙箱。**API Key保存暂停**，不读真实凭据/会话。
 
 ## 产物与下一步
 
-- 当前修正后的独立debug APK在`artifacts/builds/navigation-release-snap`；旧d1a6989包仍在`artifacts/builds/navigation-control`，0.1.5/code7，可覆盖此前独立测试包，不覆盖常用包；当前源码候选为`artifacts/sources/Tanuki-0.1.5-source.zip`。校验见各SHA清单，不混用旧全屏/悬浮包作本次功能。
-- 正常Studio共享输出已恢复，普通包名及instrumentation target核对通过，未安装；已测独立APK固定副本另存。
-- 用户2026-11-05授权一次功能提交并普通推送至主库`feat/navigation-browser-control`，交付前核对远端SHA与本地HEAD一致；不改main、不建tag/Release或迁移旧fork PR。上次提交收尾的宿主12/19项不计本轮，远端d1a6989已核对。用户随后授权先本地提交松手修正，再排查临时接管30秒交回AI时中央按钮状态未同步的问题；新问题待复现/修复，不自动推送。
-- 待验：真机/低API、完整宽屏Activity、真实账号/模型、长期后台/大量复杂标签、完整运行环境升级及安装授权期限进程死亡恢复。本轮不是正式产品验收；上游API34发布证据见测试现状，不混计。
+- 当前独立debug候选在artifacts/builds/navigation-control-sync（含松手修正及提示一致性）；navigation-release-snap为4ad6661对应旧测试包，navigation-control为d1a6989旧包，均0.1.5/code7。新包可覆盖独立测试包，不覆盖常用安装。
+- 已测APK字节固定，最后扩展原生页测试使用固定副本；普通Studio共享输出恢复/核对但未安装。源码候选为artifacts/sources/Tanuki-0.1.5-source.zip，附外部SHA。
+- 等用户体验；若首次自动交回仍出现人图标，需确认进入人工的入口、所在页面/是否私有页、前后台与设备版本；只需导航/提示局部证据，不收集账号内容。用户已授权将提示修正与4ad6661一起普通推当前功能分支，交付前核对远端SHA与本地HEAD一致；本轮宿主工作流12项、公开边界19项通过，未重跑产品测试，不改main或发布。
+- 真机/低API/完整宽屏、真实账号/模型、长期后台/复杂标签、完整运行环境升级等仍未验收；不自动建PR、tag或Release。

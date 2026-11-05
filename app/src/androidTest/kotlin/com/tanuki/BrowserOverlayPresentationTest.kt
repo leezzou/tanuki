@@ -121,8 +121,7 @@ class BrowserOverlayPresentationTest {
         val oldGeometry = geometry.all
         check(geometry.edit().clear().commit())
         try {
-            // An earlier test may have explicitly stopped/revoked this connection. Re-grant
-            // through the visible native browser, not from the DSH page where the gate denies it.
+            // 前一用例可能已撤权；通过原生入口恢复当前连接，不借RPC自行授权。
             click("浏览器"); await { browser.state.value.visible }
             ui {
                 check(browser.newTab() != null); browser.grantConnection()
@@ -169,10 +168,10 @@ class BrowserOverlayPresentationTest {
         permission(true)
         ui { browser.navigate(server.base + "/") }
         await { !browser.state.value.loading && browser.state.value.title == "Browser laboratory" }
-        click("撤销 AI 操作权限")
+        click("浏览器控制")
         val view = browser.webView
         val epoch = js(browser, "performance.timeOrigin")
-        click("DSH"); find("AI 可查看 · 你在操作"); click("浏览器小窗")
+        click("DSH"); find("浏览器控制"); assertNull(browser.state.value.authorizedClient); click("浏览器小窗")
         await { browser.state.value.overlayFrame != null }
         find("Browser laboratory"); find("你在操作 · AI 可查看")
         val page = Rect()

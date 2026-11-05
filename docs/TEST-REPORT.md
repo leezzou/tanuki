@@ -2,6 +2,16 @@
 
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
 
+## 30秒交回与状态提示一致性（2026-11-05，独立debug）
+
+- 先按用户要求独立本地提交松手吸附为4ad6661。随后新回归真实等待临时接管30秒：旧版实际授权、按钮语义和机器人像素均恢复，**未复现自动交回后图标仍为人**；复现的是再次点击收回后仍显示旧“30秒未操作，浏览器权限已交回AI”提示，和当前人工状态矛盾。
+- AgentBrowserController集中更新状态时，仅清除失效的自动交回提示；无操作权、私有页、关闭或渲染失败均不展示该结论。保留有效交回提示、其他通知与原授权策略，不新增UI轮询/强刷或提前授权。
+- `BrowserWorkspacePresentationTest#navigationControlTracksRealIdleReturnAndExplicitRevoke`先失败于过期提示断言；修改后真实30秒交回及另等31秒确认显式撤权不恢复均通过，同时对照图标像素和语义、验证下载类通知不被误清。补夹具通知恢复后重跑通过；再将等待阶段切至工作台原生玻璃页，授权/语义/图标也正确，返回浏览器继续撤权断言通过，重复不累计。额外测试只安装固定已测APK，未用切回隔离构建后字节不同的重编译包替换附件。
+- 本轮双debug/modern AndroidTest、**97 JVM无失败/跳过，modern lint0错误/71警告/1提示**；Tanuki_UI_API36/emulator-5554、ARM64/API36/WebView133、独立uipolish.workspacecheck：**11个不同设备用例最终通过**。实际包/版本/签名/target核对后覆盖，不清数据或安装正常包。新用例约70秒，不缩短安全计时。
+- 其余10项：BrowserWorkspacePresentationTest的`navigationControlTogglesFromEveryPageWithoutSwitchingOrReloading`、`navigationControlCannotGrantOnPrivateLoginPage`、`defaultConnectionAndTouchTakeoverSurviveBackgroundAndRecreation`；AgentBrowserControlTest的`idleThirtySecondsReturnsTemporaryControlButNeverExplicitRevoke`、`canonicalReadSurvivesHumanControlWhileMutationsStayDenied`、`privateLoginIsHiddenFromReadAndControlEvenWhenGranted`、`proactiveNativeGrantIsForKnownConnectionAndCannotBeInvokedByRpc`；SetupPresentationTest的`glassCenterOnlyClicksAndDragsSnapPastTheAction`、`glassCenterSkipsRtlGapAtLargeFontsAndCancelsVerticalPress`；BrowserOverlayPresentationTest的`revokedAiCanStillOpenAndViewBrowserOverlay`（以上类前缀com.tanuki.）。
+- 小窗回归首跑误找已移除的主页面撤权按钮/DSH状态条，修改为中央按钮且保留撤权断言后通过；测试适配及清理重跑时产品APK字节未变。不把该测试失败算新产品缺陷。
+- 副本在artifacts/builds/navigation-control-sync，包含松手吸附；后续提交/推送状态见AGENT-STATE。真机/低API/完整宽屏及用户原始图标滞后场景仍未确认，不能将已复现的提示矛盾说成重现了所有图标问题；API Key保存暂停。
+
 ## 中央镜片仅松手吸附（2026-11-05，独立debug）
 
 - 用户指出此前理解错误：按住时应能停在中央，松手才避让。GlassNavigationBar移除拖动中的吸附状态，预览保持原始指针位置；沿用释放时最近侧判定及弹簧，不改按钮、权限或WebView。
