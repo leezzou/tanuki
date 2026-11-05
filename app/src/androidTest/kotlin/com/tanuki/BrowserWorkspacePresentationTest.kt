@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.tanuki.browser.*
@@ -120,6 +121,7 @@ class BrowserWorkspacePresentationTest {
                 browser.state.value.tabs.filter { tab -> before.tabs.none { it.id == tab.id } }.forEach { browser.closeTab(it.id) }
                 browser.selectTab(before.activeTab)
                 browser.library.setSearchEngine(BrowserSearchEngine.from(library.searchEngine))
+                browser.library.setAvoidBottomControls(library.avoidBottomControls)
                 browser.library.setAiControlEnabled(library.aiControlEnabled)
                 if (before.authorizedClient == browser.connection.clientId) {
                     browser.setVisible(true); browser.grantConnection(); browser.setVisible(false)
@@ -138,7 +140,8 @@ class BrowserWorkspacePresentationTest {
         await { !browser.state.value.loading && browser.state.value.title == "Browser laboratory" }
         find("Browser laboratory")
     }
-    @Test fun compactChromeSharesTitleRowAndWebViewportClearsNavigation() = fixture { _, browser, server ->
+    @Test fun compactChromeSharesTitleRowAndWebPixelsShowBehindNavigation() = fixture { _, browser, server ->
+        ui { browser.library.setAvoidBottomControls(false) }
         openPage(browser, server.base + "/")
         fun bounds(node: AccessibilityNodeInfo) = Rect().also(node::getBoundsInScreen)
         val address = bounds(find("网址输入框"))
@@ -154,7 +157,7 @@ class BrowserWorkspacePresentationTest {
         var nav = find("DSH")
         while (!nav.isClickable) nav = requireNotNull(nav.parent)
         val bottomTab = bounds(nav)
-        assertTrue("WebView viewport must end above floating navigation", location[1] + web.height <= bottomTab.top)
+        assertTrue("WebView must extend behind floating navigation", location[1] + web.height >= bottomTab.bottom)
         val origin = js(browser, "performance.timeOrigin")
         fun paint(color: String): Bitmap {
             js(browser, "document.documentElement.style.background='$color';document.body.style.background='$color'")
@@ -163,12 +166,15 @@ class BrowserWorkspacePresentationTest {
         }
         val red = paint("rgb(255,32,32)"); val blue = paint("rgb(32,32,255)")
         try {
-            // 取安全视口的底部像素，既核验网页实际绘制，也不要求控件落入导航遮挡区。
-            val x = bottomTab.centerX(); val y = location[1] + web.height - (2 * context.resources.displayMetrics.density).toInt()
+            // 同时核验导航前方及背后的真实网页像素，不以DOM存在替代绘制结果。
+            val x = bottomTab.centerX(); val y = bottomTab.top - (2 * context.resources.displayMetrics.density).toInt()
             assertTrue("Red web pixels paint at the safe viewport bottom", android.graphics.Color.red(red.getPixel(x, y)) - android.graphics.Color.red(blue.getPixel(x, y)) > 25)
             assertTrue("Blue web pixels paint at the safe viewport bottom", android.graphics.Color.blue(blue.getPixel(x, y)) - android.graphics.Color.blue(red.getPixel(x, y)) > 25)
+            val behind = bottomTab.top + (2 * context.resources.displayMetrics.density).toInt()
+            assertTrue("Red web pixels must also show behind navigation", android.graphics.Color.red(red.getPixel(x, behind)) - android.graphics.Color.red(blue.getPixel(x, behind)) > 25)
+            assertTrue("Blue web pixels must also show behind navigation", android.graphics.Color.blue(blue.getPixel(x, behind)) - android.graphics.Color.blue(red.getPixel(x, behind)) > 25)
         } finally { red.recycle(); blue.recycle() }
-        screenshot("browser-compact-safe-viewport.png")
+        screenshot("browser-compact-overlay.png")
         click("页面总览"); find("新建页面"); click("返回浏览器")
         click("设置"); find("返回上一页"); click("返回上一页")
         assertSame(web, browser.webView); assertEquals(origin, js(browser, "performance.timeOrigin"))
@@ -176,9 +182,26 @@ class BrowserWorkspacePresentationTest {
         assertSame(web, browser.webView); assertEquals(origin, js(browser, "performance.timeOrigin"))
     }
 
-    @Test fun fixedBottomHttpControlsAcceptRealTouchesWithoutChangingNavigation() = fixture { _, browser, _ ->
+    @Test fun optionalBottomAvoidanceKeepsFixedControlsClickableWithoutReload() = fixture { _, browser, _ ->
         FixedBottomControlsFixture.Server().use { server ->
+            ui { browser.library.setAvoidBottomControls(false) }
             openPage(browser, server.url)
+            val view = browser.webView
+            val origin = js(browser, "performance.timeOrigin")
+            val floatingHeight = view.height
+            fun toggleAvoidance() {
+                click("浏览器菜单"); click("浏览器设置"); click("通用")
+                click("避让网页底部控件"); click("返回浏览器"); click("返回浏览器")
+                val painted = CountDownLatch(1)
+                ui { view.postVisualStateCallback(1, object : android.webkit.WebView.VisualStateCallback() {
+                    override fun onComplete(requestId: Long) { painted.countDown() }
+                }) }
+                assertTrue("Resized document must finish drawing", painted.await(10, TimeUnit.SECONDS))
+            }
+            toggleAvoidance()
+            assertTrue(browser.library.state.value.avoidBottomControls)
+            await { view.height < floatingHeight }
+            assertSame(view, browser.webView); assertEquals(origin, js(browser, "performance.timeOrigin"))
             ui { browser.takeControl() }
             instrumentation.waitForIdleSync(); SystemClock.sleep(300)
             fun browserSelected(): Boolean = nodes().filter { it.text?.toString() == "浏览器" || it.contentDescription?.toString() == "浏览器" }
@@ -209,6 +232,11 @@ class BrowserWorkspacePresentationTest {
                 val selected = browserSelected()
                 assertTrue("Fixed-bottom $id must receive its center touch ($x,$y), event=$count, browserSelected=$selected", count == 1 && selected)
             }
+            toggleAvoidance()
+            assertFalse(browser.library.state.value.avoidBottomControls)
+            await { view.height == floatingHeight }
+            assertSame(view, browser.webView); assertEquals(origin, js(browser, "performance.timeOrigin"))
+            assertEquals(1, (js(browser, "window.__fixedBottomEvents.send") as Number).toInt())
         }
     }
 
@@ -340,6 +368,35 @@ class BrowserWorkspacePresentationTest {
         click("页面总览"); click("关闭此页"); click("返回浏览器")
         assertTrue(browser.state.value.tabs.isNotEmpty()); assertNull(browser.state.value.authorizedClient)
     }
+    @Test fun fullscreenRoundTripsRestoreChromePositionWithoutReload() = fixture { _, browser, server ->
+        openPage(browser, server.base + "/")
+        ui { browser.takeControl() }
+        val view = browser.webView
+        val origin = js(browser, "performance.timeOrigin")
+        js(browser, "document.querySelector('#draft').value='round-trip draft';true")
+        fun geometry(): List<Int> {
+            val address = Rect().also(find("网址输入框")::getBoundsInScreen)
+            val page = Rect()
+            ui { view.getGlobalVisibleRect(page) }
+            return listOf(address.top, page.top, page.height())
+        }
+        val before = geometry()
+        repeat(3) { cycle ->
+            click("浏览器进入全屏"); find("浏览器退出全屏")
+            await { view.height > before[2] }
+            if (cycle == 1) instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            else click("浏览器退出全屏")
+            // 先等原生栏恢复，避免通用查找器在过渡帧误滚动网页寻找不存在的控件。
+            await { nodes().any { it.contentDescription?.toString() == "网址输入框" && it.isVisibleToUser } }
+            find("网址输入框")
+            try { await { geometry() == before } }
+            catch (error: AssertionError) { throw AssertionError("Fullscreen cycle $cycle shifted chrome: before=$before after=${geometry()}", error) }
+            assertSame(view, browser.webView)
+            assertEquals(origin, js(browser, "performance.timeOrigin"))
+            assertEquals("round-trip draft", js(browser, "document.querySelector('#draft').value"))
+        }
+        screenshot("browser-fullscreen-roundtrip.png")
+    }
     @Test fun newBrowserPageDefaultsToWindowsAndFullscreenKeepsTheDocument() = fixture { activity, browser, server ->
         assertEquals("WINDOWS", browser.state.value.pageMode)
         openPage(browser, server.base + "/")
@@ -348,6 +405,17 @@ class BrowserWorkspacePresentationTest {
         val view = browser.webView
         val epoch = js(browser, "performance.timeOrigin")
         js(browser, "document.querySelector('#draft').value='fullscreen draft';true")
+        fun barVisibility(): List<Boolean> {
+            var result = emptyList<Boolean>()
+            ui {
+                val insets = WindowInsetsCompat.toWindowInsetsCompat(requireNotNull(activity.window.decorView.rootWindowInsets), activity.window.decorView)
+                result = listOf(WindowInsetsCompat.Type.statusBars(), WindowInsetsCompat.Type.navigationBars(),
+                    WindowInsetsCompat.Type.captionBar(), WindowInsetsCompat.Type.systemBars()).map(insets::isVisible)
+            }
+            return result
+        }
+        val initialBars = barVisibility()
+        assertTrue("Status/navigation bars must initially be visible", initialBars.take(2).all { it })
         var beforeHeight = 0
         ui { beforeHeight = view.height }
         click("浏览器进入全屏")
@@ -357,25 +425,17 @@ class BrowserWorkspacePresentationTest {
         assertEquals(epoch, js(browser, "performance.timeOrigin"))
         assertEquals("fullscreen draft", js(browser, "document.querySelector('#draft').value"))
         ui { assertEquals(android.view.View.LAYER_TYPE_HARDWARE, view.layerType) }
-        await {
-            var hidden = false
-            ui { hidden = activity.window.decorView.rootWindowInsets?.let {
-                !androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(it, activity.window.decorView)
-                    .isVisible(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            } == true }
-            hidden
-        }
+        // 手机没有captionBar，不能把组合systemBars的false当作状态栏/导航栏都已隐藏。
+        await { barVisibility().take(2).none { it } }
         screenshot("browser-immersive-windows.png")
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        await { nodes().any { it.contentDescription?.toString() == "浏览器进入全屏" && it.isVisibleToUser } }
         find("浏览器进入全屏")
         ui { assertEquals(android.view.View.LAYER_TYPE_NONE, view.layerType) }
-        await {
-            var visible = false
-            ui { visible = activity.window.decorView.rootWindowInsets?.let {
-                androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(it, activity.window.decorView)
-                    .isVisible(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-            } == true }
-            visible
+        try {
+            await { barVisibility() == initialBars }
+        } catch (error: AssertionError) {
+            throw AssertionError("System bar visibility [status,navigation,caption,combined]: initial=$initialBars restored=${barVisibility()}", error)
         }
         assertEquals(epoch, js(browser, "performance.timeOrigin"))
         assertEquals("fullscreen draft", js(browser, "document.querySelector('#draft').value"))
