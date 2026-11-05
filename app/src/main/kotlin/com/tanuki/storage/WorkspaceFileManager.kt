@@ -30,7 +30,7 @@ import java.util.UUID
  */
 enum class FileLocation(val title: String, val guestPath: String, val writable: Boolean) {
     WORKSPACE("工作区", "/workspaces", true), HOME("用户目录", "/home/tanuki", false),
-    UBUNTU("Ubuntu 文件", "/", false), PHONE("手机存储", "/storage", false)
+    UBUNTU("Ubuntu 文件", "/", false), PHONE("手机存储", "/phone", false)
 }
 
 class WorkspaceFileManager(
@@ -52,7 +52,7 @@ class WorkspaceFileManager(
         if (location == FileLocation.PHONE && relative.isNotEmpty()) {
             val key = relative.substringBefore('/')
             val root = phoneRoots()[key]
-            if (root != null) return root.absolutePath.trimEnd('/') + relative.removePrefix(key)
+            if (root != null) return PhoneStorageAccess.guestPath(root, relative.removePrefix(key).removePrefix("/"))
         }
         return (location.guestPath.trimEnd('/') + if (relative.isEmpty()) "" else "/$relative").ifEmpty { "/" }
     }

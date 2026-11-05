@@ -50,8 +50,12 @@ fun WorkspaceFilesPage(
     manager: WorkspaceFileManager, onImport: () -> Unit, onExport: () -> Unit,
     modifier: Modifier = Modifier, runtimeRunning: Boolean = false, onStop: () -> Unit = {}, bottomInset: Dp = 0.dp,
     onRequestStoragePermission: () -> Unit = {}, phoneStorageGranted: Boolean = false,
-    onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> }
+    onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> },
+    fullscreen: Boolean = false, onFullscreen: (Boolean) -> Unit = {},
+    phoneWriteAllowed: Boolean = false, phoneWritingAvailable: Boolean = false,
+    onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {}
 ) {
+    var writePermissionDialog by remember { mutableStateOf(false) }
     var location by rememberSaveable { mutableStateOf(FileLocation.WORKSPACE) }
     val files = remember(manager, location) { manager.inLocation(location) }
     val canBrowse = location != FileLocation.PHONE || phoneStorageGranted
@@ -107,7 +111,7 @@ fun WorkspaceFilesPage(
     fun dismissEditor() {
         if (!busy) { if (content != draftOriginal && (action == "编辑文本" || action == "新建文本文件")) discard = true else action = null }
     }
-    fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机文件路径" else "已复制 Agent 可用的路径" }
+    fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机工具路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
     LaunchedEffect(files, runtimeRunning, phoneStorageGranted) {
         error = null; selected = emptySet()
@@ -154,10 +158,15 @@ fun WorkspaceFilesPage(
         currentCoroutineContext().ensureActive()
         display = FileDisplayResult(displayRequest, prepared)
     }
+    if (writePermissionDialog) AlertDialog(onDismissRequest = { writePermissionDialog = false },
+        title = { Text("允许 DSH 写入手机文件？") },
+        text = { Text("允许本次 DSH 运行期间新建、修改、重命名和删除系统已授权的手机共享文件。可以随时撤销，停止 DSH 后自动恢复只读。") },
+        dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
+        confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
     openedEntry?.let { entry ->
-        WorkspaceFileViewer(files, entry, modifier, bottomInset, actionError = error,
+        WorkspaceFileViewer(files, entry, modifier, bottomInset, actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
             canEdit = location.writable && !runtimeRunning && !entry.linked,
-            onClose = { openedEntry = null },
+            onClose = { onFullscreen(false); openedEntry = null },
             onExport = { onExportFile(files, entry.path, entry.name) },
             onEdit = { runTask {
                 val editable = files.preview(entry.path)
@@ -213,6 +222,16 @@ fun WorkspaceFilesPage(
                     TextButton(onClick = { navigate(parts.take(index + 1).joinToString("/")) }, enabled = !busy) { Text(part, maxLines = 1) }
                 }
             }
+            if (location == FileLocation.PHONE && phoneStorageGranted) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (phoneWriteAllowed) "DSH 已获本次写入权限" else "DSH 默认只读", style = MaterialTheme.typography.titleSmall)
+                    Text("把手机工具路径发给 DSH，通过“手机文件”技能读取。写入需在此单独授权，停止 DSH 后恢复只读。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (phoneWriteAllowed) OutlinedButton(onClick = onRevokePhoneWrite) { Text("撤销 DSH 写入权限") }
+                    else OutlinedButton(onClick = { writePermissionDialog = true }, enabled = phoneWritingAvailable) { Text("授权 DSH 写入") }
+                    if (!phoneWritingAvailable && !phoneWriteAllowed) Text("启动 DSH 后可单独授权写入。", style = MaterialTheme.typography.bodySmall)
+                }
+            }
             if (runtimeRunning) Surface(
                 Modifier.fillMaxWidth().padding(16.dp),
                 shape = MaterialTheme.shapes.large,
@@ -265,7 +284,7 @@ fun WorkspaceFilesPage(
                             Box {
                                 IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "${entry.name}的操作") }
                                 DropdownMenu(expanded, { expanded = false }) {
-                                    DropdownMenuItem(text = { Text(if (location == FileLocation.PHONE) "复制文件路径" else "复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
+                                    DropdownMenuItem(text = { Text(if (location == FileLocation.PHONE) "复制手机工具路径" else "复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
                                     if (!entry.directory) DropdownMenuItem(text = { Text("导出此文件") }, onClick = { expanded = false; onExportFile(files, entry.path, entry.name) })
                                     DropdownMenuItem(text = { Text("选择") }, onClick = { expanded = false; toggle(entry.path) })
                                     if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { expanded = false; begin(label, listOf(entry)) }) }

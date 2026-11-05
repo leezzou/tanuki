@@ -13,9 +13,32 @@ import java.io.File
 
 /** 手机共享存储需要用户授权；权限不会开放其他应用的私有数据。 */
 object PhoneStorageAccess {
+    /** 文件页复制的是原生手机工具的逻辑路径，不是可由客体直接打开的挂载路径。 */
+    fun guestPath(root: File, relative: String = ""): String =
+        SharedStoragePaths.guestPath(root, Environment.getExternalStorageDirectory(), relative)
+
+    /** 只枚举系统报告且已获授权的共享卷，供原生 RPC 匹配，不创建客体挂载。 */
+    fun toolRoots(context: Context): Map<String, File> {
+        val volumes = roots(context)
+        if (volumes.isEmpty()) return emptyMap()
+        val privateRoot = File(context.applicationInfo.dataDir).canonicalFile.toPath()
+        val result = linkedMapOf<String, File>()
+        for (volume in volumes.values) {
+            val root = volume.canonicalFile
+            if (!root.isDirectory || root.toPath().startsWith(privateRoot) || root.path.any { it == ':' || it == '\u0000' }) continue
+            result[guestPath(root)] = root
+        }
+        // 权限可在枚举期间被系统收回；不把旧枚举结果当成仍然有效的授权。
+        return if (isGranted(context)) result.toSortedMap() else emptyMap()
+    }
+
     fun isGranted(context: Context): Boolean = if (Build.VERSION.SDK_INT >= 30) {
         Environment.isExternalStorageManager()
     } else context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+    /** 旧系统把系统读取和写入授权分开；原生应用内的 AI 写授权还需单独检查。 */
+    fun isWriteGranted(context: Context): Boolean = isGranted(context) && (Build.VERSION.SDK_INT >= 30 ||
+        context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
 
     fun permissionIntent(context: Context): Intent = Intent(
         Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,

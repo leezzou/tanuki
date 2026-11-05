@@ -60,6 +60,24 @@ class PhoneStorageAccessTest {
         assertNotNull("当前系统应提供本应用所有文件访问权限页", intent.resolveActivity(context.packageManager))
     }
 
+    @Test fun phoneToolRootsExposeOnlyCurrentlyAuthorizedSystemVolumes() {
+        requireVerificationPackage()
+        val bindings = PhoneStorageAccess.toolRoots(context)
+        if (!PhoneStorageAccess.isGranted(context)) {
+            assertTrue("未授权时不得提供手机工具卷根", bindings.isEmpty())
+            return
+        }
+        val allowed = PhoneStorageAccess.roots(context).values.map { it.canonicalFile }.toSet()
+        assertTrue("本测试设备授权后应提供至少一个共享卷", bindings.isNotEmpty())
+        val privateRoot = File(context.applicationInfo.dataDir).canonicalFile.toPath()
+        for ((guest, host) in bindings) {
+            assertTrue("手机工具卷根只能使用固定 /phone 命名", guest.matches(Regex("/phone/(primary|volume-[a-f0-9]{16})")))
+            assertTrue("仅绑定系统报告的共享卷", host.canonicalFile in allowed)
+            assertFalse("不能将应用私有数据作为共享卷", host.canonicalFile.toPath().startsWith(privateRoot))
+            assertEquals(guest, PhoneStorageAccess.guestPath(host))
+        }
+    }
+
     @Test fun grantedPhoneStorageCanBrowseAndOpenOnlyOurSyntheticDownloadFixture(): Unit = runBlocking {
         requireVerificationPackage()
         assumeTrue("所有文件访问AppOp仅适用于Android 11以上", Build.VERSION.SDK_INT >= 30)
@@ -86,7 +104,7 @@ class PhoneStorageAccessTest {
             assertEquals(listOf("sample.txt"), manager.list(relativeFolder).map { it.name })
             assertEquals(WorkspaceFileManager.FileKind.TEXT, manager.describe(relativeFile).kind)
             assertEquals(text, manager.readTextPage(relativeFile).text)
-            assertEquals(selected.absolutePath, manager.guestPath(relativeFile))
+            assertEquals("/phone/primary/${Environment.DIRECTORY_DOWNLOADS}/$name/sample.txt", manager.guestPath(relativeFile))
 
             val open = manager.prepareOpen(context, relativeFile)
             openedUri = open.data

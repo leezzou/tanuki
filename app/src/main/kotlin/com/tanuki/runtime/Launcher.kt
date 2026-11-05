@@ -151,7 +151,7 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             } finally { if(interrupted)Thread.currentThread().interrupt() }
         }
     }
-    fun start(root: File, args: List<String>, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null): Child {
+    fun start(root: File, args: List<String>, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false): Child {
         val lib = context.applicationInfo.nativeLibraryDir
         val node = nodeHome ?: if (File(paths.node, "bin/node").isFile || !File(root, "opt/node/bin/node").isFile) paths.node else File(root, "opt/node")
         val pnpm = if (paths.pnpm.exists() || !File(root, "opt/pnpm").exists()) paths.pnpm else File(root, "opt/pnpm")
@@ -171,7 +171,17 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             File(root, "opt/tanuki").mkdirs()
             listOf("-b", "${browserTools.absolutePath}:/opt/tanuki")
         } else emptyList()
-        val command = listOf("$lib/libsupervisor.so", "$lib/libproot.so", "--link2symlink", "-0", "-r", root.absolutePath) + browserBinding + listOf(
+        // 只为实际 DSH 暴露受控客户端；手机卷不直接挂入客体，写入由原生独立授权。
+        val phoneTools = com.tanuki.storage.PhoneFileIntegration.directory(paths)
+        val phoneBinding = if (phoneFiles && home == paths.home && dshHome == paths.dshData && workspace == paths.workspaces &&
+            phoneTools.isDirectory && !java.nio.file.Files.isSymbolicLink(phoneTools.toPath())) {
+            val mount = File(root, "opt/tanuki-phone").toPath()
+            check(!java.nio.file.Files.isSymbolicLink(mount)) { "手机文件工具入口被重定向，已停止启动" }
+            java.nio.file.Files.createDirectories(mount)
+            listOf("-b", "${phoneTools.absolutePath}:/opt/tanuki-phone")
+        } else emptyList()
+        val phoneEnvironment = if (phoneBinding.isEmpty()) emptyList() else listOf("TANUKI_PHONE_FILES=/opt/tanuki-phone")
+        val command = listOf("$lib/libsupervisor.so", "$lib/libproot.so", "--link2symlink", "-0", "-r", root.absolutePath) + browserBinding + phoneBinding + listOf(
             "-b", "/dev", "-b", "/proc", "-b", "/sys", "-b", "${paths.guestTmp.absolutePath}:/tmp",
             // link2symlink writes host-absolute targets; the same guest path must resolve to this store.
             "-b", "${paths.linkStore.absolutePath}:${paths.linkStore.absolutePath}",
@@ -182,7 +192,7 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             "HOME=/home/tanuki", "DSH_HOME=/dsh-data", "PATH=/opt/pnpm/${RuntimeManager.PNPM}/bin:/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TMPDIR=/tmp", "LANG=C.UTF-8", "TERM=xterm-256color", "DEBIAN_FRONTEND=noninteractive",
             "DPKG_DEB_THREADS_MAX=1", "XZ_DEFAULTS=-T1", "ZSTD_NBTHREADS=1", "UV_THREADPOOL_SIZE=4", "NODE_COMPILE_CACHE=/opt/node-cache",
-            "npm_config_fetch_timeout=60000", "npm_config_fetch_retries=2", "npm_config_fetch_retry_mintimeout=2000", "npm_config_fetch_retry_maxtimeout=10000") + args
+            "npm_config_fetch_timeout=60000", "npm_config_fetch_retries=2", "npm_config_fetch_retry_mintimeout=2000", "npm_config_fetch_retry_maxtimeout=10000") + phoneEnvironment + args
         val pb = ProcessBuilder(command).directory(paths.base)
         pb.environment().apply {
             clear(); put("PATH", "/system/bin"); put("PROOT_LOADER", "$lib/libproot-loader.so")
@@ -243,8 +253,8 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             CommandResult(code, out.await(), err.await()).also { log.append("exit=$code") }
         } finally { if (child.process.isAlive) child.stop() }
     }
-    suspend fun run(root: File, args: List<String>, timeoutMs: Long = 120000, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, onLine: (String) -> Unit = {}): CommandResult {
-        val child = start(root, args, home, dshHome, workspace, engineHome, nodeHome)
+    suspend fun run(root: File, args: List<String>, timeoutMs: Long = 120000, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false, onLine: (String) -> Unit = {}): CommandResult {
+        val child = start(root, args, home, dshHome, workspace, engineHome, nodeHome, phoneFiles)
         return try { withCommandDeadline(timeoutMs) { collect(child,onLine) } } finally { if (child.process.isAlive) child.stop() }
     }
 }
