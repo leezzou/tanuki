@@ -7,6 +7,7 @@ import android.graphics.Rect
 import android.os.SystemClock
 import android.view.ContextThemeWrapper
 import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -54,6 +55,8 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.tanuki.runtime.*
 import com.tanuki.storage.WorkspaceStorageState
 import com.tanuki.ui.GlassNavigationBar
+import com.tanuki.ui.BrowserControlButton
+import com.tanuki.ui.BrowserControlUiState
 import com.tanuki.ui.TanukiGlyph
 import com.tanuki.ui.TanukiIcon
 import com.tanuki.ui.TanukiTheme
@@ -315,6 +318,9 @@ class SetupPresentationTest {
         val fontScale = mutableStateOf(fontScale)
         val narrow = mutableStateOf(false)
         val radius = mutableStateOf(16.dp)
+        val centerAction = mutableStateOf(false)
+        val aiControlled = mutableStateOf(false)
+        val controlClicks = java.util.concurrent.atomic.AtomicInteger()
         val bounds = java.util.concurrent.atomic.AtomicReference<Rect>()
     }
 
@@ -354,6 +360,12 @@ class SetupPresentationTest {
                                             r.right.toInt() + origin[0], r.bottom.toInt() + origin[1]))
                                     },
                                 blurRadius = fixture.radius.value,
+                                centerAction = if (fixture.centerAction.value) ({
+                                    BrowserControlButton(BrowserControlUiState(fixture.aiControlled.value, true,
+                                        if (fixture.aiControlled.value) "AI控制" else "人工控制"), onToggle = {
+                                        fixture.controlClicks.incrementAndGet(); fixture.aiControlled.value = !fixture.aiControlled.value
+                                    })
+                                }) else null,
                             ) { index, tint -> TanukiIcon(glyphs[index], tint = tint) }
                         }
                     }
@@ -450,6 +462,98 @@ class SetupPresentationTest {
                 kotlin.math.abs(android.graphics.Color.blue(a) - android.graphics.Color.blue(b)) > 6) changed++
         }
         return changed
+    }
+
+    @Test(timeout = 120_000) fun browserControlWithoutGlassRejectsDragButAcceptsClick() {
+        val activity = launch(); cancelSourceTests()
+        val clicks = java.util.concurrent.atomic.AtomicInteger()
+        try {
+            instrumentation.runOnMainSync { activity.setContent {
+                TanukiTheme { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    BrowserControlButton(BrowserControlUiState(enabled = true), onToggle = { clicks.incrementAndGet() })
+                } }
+            } }
+            val bounds = Rect().also(find("浏览器控制")::getBoundsInScreen)
+            GlassTouch(bounds.exactCenterX(), bounds.exactCenterY()).use {
+                it.moveTo(bounds.exactCenterX() + bounds.width() * .35f); it.finish()
+            }
+            assertEquals("Dragging inside the button must not toggle control without a glass parent", 0, clicks.get())
+            GlassTouch(bounds.exactCenterX(), bounds.exactCenterY()).use { it.finish() }
+            assertEquals(1, clicks.get())
+        } finally { cleanup(activity) }
+    }
+
+    @Test(timeout = 120_000) fun glassCenterOnlyClicksAndDragsSnapPastTheAction() {
+        val activity = launch(); cancelSourceTests()
+        val fixture = GlassFixture().apply { centerAction.value = true }
+        var reference: Bitmap? = null; var settled: Bitmap? = null
+        try {
+            mountGlassNavigation(activity, fixture)
+            val control = Rect().also(find("浏览器控制")::getBoundsInScreen)
+            GlassTouch(control.exactCenterX(), control.exactCenterY()).use { it.finish() }
+            assertEquals(1, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
+            GlassTouch(control.exactCenterX(), control.exactCenterY()).use { it.finish(cancel = true) }
+            assertEquals(1, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
+            instrumentation.runOnMainSync { fixture.selected.value = 1 }; SystemClock.sleep(700)
+            reference = screenshot("glass-center-left-reference.png")
+            instrumentation.runOnMainSync { fixture.selected.value = 0 }; SystemClock.sleep(700)
+            GlassTouch(control.exactCenterX(), control.exactCenterY()).use { it.moveTo(glassTabBounds("浏览器").exactCenterX()); it.finish() }
+            assertEquals(1, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
+            GlassTouch(glassTabBounds("工作台").exactCenterX(), control.exactCenterY()).use {
+                it.moveTo(control.exactCenterX() - control.width() / 4f)
+                assertGlassSelection(fixture, 0, emptyList()); assertEquals(1, fixture.controlClicks.get())
+                it.finish()
+            }
+            assertGlassSelection(fixture, 1, listOf(1))
+            settled = screenshot("glass-center-left-snapped.png")
+            val bar = requireNotNull(fixture.bounds.get())
+            assertTrue("Lens must settle on DSH, not the center action", changedGlassPixels(reference!!, settled!!, bar) < bar.width() * bar.height() / 20)
+            GlassTouch(glassTabBounds("浏览器").exactCenterX(), control.exactCenterY()).use {
+                it.moveTo(control.exactCenterX() + control.width() / 4f); it.finish()
+            }
+            assertGlassSelection(fixture, 2, listOf(1, 2)); assertEquals(1, fixture.controlClicks.get())
+            GlassTouch(glassTabBounds("文件").exactCenterX(), control.exactCenterY()).use {
+                it.moveTo(control.exactCenterX() - control.width() / 4f); it.finish(cancel = true)
+            }
+            assertGlassSelection(fixture, 2, listOf(1, 2)); assertEquals(1, fixture.controlClicks.get())
+        } finally { reference?.recycle(); settled?.recycle(); cleanup(activity) }
+    }
+
+    @Test(timeout = 120_000) fun glassCenterSkipsRtlGapAtLargeFontsAndCancelsVerticalPress() {
+        val activity = launch(); cancelSourceTests()
+        val fixture = GlassFixture(backdrop = false, rtl = true, fontScale = 2f).apply {
+            centerAction.value = true; narrow.value = true
+        }
+        try {
+            mountGlassNavigation(activity, fixture); assertGlassLabelsVisible(fixture)
+            val control = Rect().also(find("浏览器控制")::getBoundsInScreen)
+            assertTrue(control.width() >= (48 * context.resources.displayMetrics.density).toInt())
+            assertFalse(find("浏览器控制").isSelected)
+            val down = SystemClock.uptimeMillis()
+            for ((action, dy) in listOf(MotionEvent.ACTION_DOWN to 0f, MotionEvent.ACTION_MOVE to control.height() * .35f, MotionEvent.ACTION_UP to control.height() * .35f)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, control.exactCenterX(), control.exactCenterY() + dy, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+                try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+                SystemClock.sleep(100)
+            }
+            assertEquals(0, fixture.controlClicks.get()); assertGlassSelection(fixture, 0, emptyList())
+            GlassTouch(glassTabBounds("工作台").exactCenterX(), control.exactCenterY()).use {
+                it.moveTo(control.exactCenterX() - control.width() / 4f); it.finish()
+            }
+            assertGlassSelection(fixture, 2, listOf(2))
+            GlassTouch(glassTabBounds("浏览器").exactCenterX(), control.exactCenterY()).use {
+                it.moveTo(control.exactCenterX() + control.width() / 4f); it.finish()
+            }
+            assertGlassSelection(fixture, 1, listOf(2, 1)); assertEquals(0, fixture.controlClicks.get())
+            screenshot("glass-center-rtl-font200.png")
+            repeat(6) {
+                if (!find("浏览器控制").isFocused) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_TAB); SystemClock.sleep(100) }
+            }
+            assertTrue(find("浏览器控制").isFocused)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER); SystemClock.sleep(200)
+            assertEquals(1, fixture.controlClicks.get())
+            assertTrue(find("浏览器控制").performAction(AccessibilityNodeInfo.ACTION_CLICK)); SystemClock.sleep(200)
+            assertEquals(2, fixture.controlClicks.get()); assertGlassSelection(fixture, 1, listOf(2, 1))
+        } finally { cleanup(activity) }
     }
 
     @Test(timeout = 120_000) fun glassNavigationBlursPixelsAndKeepsTabsClickable() {

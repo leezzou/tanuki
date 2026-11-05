@@ -2,13 +2,52 @@
 
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
 
+## 导航中央控制（2026-11-04，独立debug）
+
+- `feat/navigation-browser-control`基于修复分支4a7bc31，保留悬浮与全屏修复。主导航中央/侧栏中部人、机器人按钮统一操作权状态；普通状态条移除，登录保护、请求/下载、接管询问及独立小窗入口保留。
+- 新回归先复现：后台原生授权仍受可见性限制、工作区无中央控制入口。改为显式原生点击使用已有当前连接授权，不开放RPC授权、不改变普通页只读/私有页阻断。拖动采用真实DOWN区分中央起点，镜片吸附最近有效页签，不触发控制动作。
+- 审阅发现侧栏直接按钮缺少底栏父级的拖动取消保护；独立按钮真实MotionEvent先失败（应0次、实际1次）。将取消保护移到共用按钮后通过，未复制另一套侧栏逻辑。后续补按键测试曾缺KeyEvent导入，已补齐，不把编译失败计为通过。
+- 最终双debug/modern AndroidTest构建、**97 JVM无失败/跳过，modern lint0错误/71警告/1提示**。Tanuki_UI_API36/emulator-5554、ARM64/API36/WebView133，独立`com.tanuki.modern.uipolish.workspacecheck`：最终APK按下列方法去重，**25项通过**；包含像素定位/真实触摸、中央起拖/跨越/取消/左右吸附、RTL/320dp/200%字体、合成Tab/Enter与无障碍点击、四页实际授权切换、私有页禁用、文档/草稿保留及旧全屏/避让回归。
+- 最终APK先跑新增/强化5项通过；关联20项首跑19通过，旧独立控制器只读用例的首次截图缺少result。失败定位于截图读取而非授权断言；测试增加WebView可视帧同步及错误码断言，随后连续3次通过，产品APK字节未变。不以缺少result日志推断具体RPC错误码，重复次数不累计为新增用例。
+- 核对版本0.1.5/code7、包名、instrumentation target及与前一独立包相同开发签名后覆盖测试包，无清数据/正常安装覆盖。副本在`artifacts/builds/navigation-control`；本轮没有正式签名发布、提交或推送。真机/低API、完整宽屏Activity、真实账号/模型未验；独立按钮手势测试不冒充宽屏整页验收，API Key保存仍暂停。
+
+公开源码中的实际选择如下（前缀`com.tanuki.`），可用`adb -s <已确认的合成设备> shell am instrument -w -r -e class <类#方法> <实际test包>/androidx.test.runner.AndroidJUnitRunner`逐项执行。独立init与公开`workspace-verification.init.gradle`仅debug后缀不同；构建目标为`assembleModernDebug assembleCompatDebug assembleModernDebugAndroidTest testModernDebugUnitTest lintModernDebug`。
+
+```text
+SetupPresentationTest#browserControlWithoutGlassRejectsDragButAcceptsClick
+SetupPresentationTest#glassCenterOnlyClicksAndDragsSnapPastTheAction
+SetupPresentationTest#glassCenterSkipsRtlGapAtLargeFontsAndCancelsVerticalPress
+BrowserWorkspacePresentationTest#navigationControlTogglesFromEveryPageWithoutSwitchingOrReloading
+BrowserWorkspacePresentationTest#navigationControlCannotGrantOnPrivateLoginPage
+AgentBrowserControlTest#proactiveNativeGrantIsForKnownConnectionAndCannotBeInvokedByRpc
+AgentBrowserControlTest#visibilityAndTouchNeitherGrantNorRevokeExplicitPermission
+AgentBrowserControlTest#canonicalReadSurvivesHumanControlWhileMutationsStayDenied
+AgentBrowserControlTest#privateLoginIsHiddenFromReadAndControlEvenWhenGranted
+AgentBrowserControlTest#idleThirtySecondsReturnsTemporaryControlButNeverExplicitRevoke
+BrowserWorkspacePresentationTest#revokedAiKeepsDshBrowserEntryAndUserPageVisible
+BrowserWorkspacePresentationTest#defaultConnectionAndTouchTakeoverSurviveBackgroundAndRecreation
+BrowserWorkspacePresentationTest#compactChromeSharesTitleRowAndWebPixelsShowBehindNavigation
+BrowserWorkspacePresentationTest#optionalBottomAvoidanceKeepsFixedControlsClickableWithoutReload
+BrowserWorkspacePresentationTest#fullscreenRoundTripsRestoreChromePositionWithoutReload
+BrowserWorkspacePresentationTest#newBrowserPageDefaultsToWindowsAndFullscreenKeepsTheDocument
+FilesBrowserPresentationTest#canonicalGrantAndTabExitKeepControlUntilExplicitTakeback
+FilesBrowserPresentationTest#addressBarIsActuallyPaintedAndRealTouchCanNavigateBeforeAndAfterPageLoad
+FilesBrowserPresentationTest#browserAddressRemainsVisibleAndTouchableInDarkThemeAtTwoHundredPercent
+SetupPresentationTest#actualDshWebViewSurvivesFullscreenWithoutReload
+SetupPresentationTest#fixedBottomDshControlsAcceptRealTouchesWithoutChangingNavigation
+SetupPresentationTest#filesListExtendsBehindNavigationAndScrollsTailClearWithoutReloadingDsh
+SetupPresentationTest#glassNavigationDragPreviewsThenCommitsOnceAndCancels
+SetupPresentationTest#glassNavigationNullBackdropDragsInRtlAndKeepsLargeTabsClickable
+BrowserOverlayPresentationTest#fullDocumentAndAiZoomAreIndependentOfSmallWindow
+```
+
 ## 全屏往返与悬浮修复（2026-11-04，独立debug）
 
 - 悬浮修复cbe9e9c：浏览器默认恢复透显，可在通用设置主动开启/保存网页底部控件避让，DSH保护不变。此前双debug/AndroidTest、97 JVM、12项API36专项通过（97.5秒），lint0/71/1；避让项补网页可视帧同步另过，不重复计数。原生宿主不裁切实验仍无法透显，已撤回；不存在的图标编译错误改为复用已有图标。旧过程交接归档删除。
 - 新增全屏往返坐标回归先失败：地址/网页顶部由139/528变为267/656，重复128px状态栏占位。MainActivity在创建时统一edge-to-edge，DshWindowMode不再来回切换decorFits，占位只由Compose处理；不使用负padding、不重建WebView。
 - 旧systemBars断言在API36另有误判：初始和退出均为 `[status=true, navigation=true, caption=false, combined=false]`。手机没有窗口caption，不能要求组合systemBars全部可见；现明确要求状态/导航栏进入全屏都隐藏，退出恢复完整初始可见性。新坐标断言独立验证产品缺陷，没有用测试修改掩盖重复占位。
 - 本轮新跑双debug/AndroidTest、**97 JVM无失败/跳过，modern lint0错误/71警告/1提示**；Tanuki_UI_API36/emulator-5554、WebView133、独立uipolish.workspacecheck包：**13项UI专项全过137.4秒，2项ClipData/系统SAF上传全过8.3秒，共15个不同用例**。往返用例增加原生栏可见等待，避免通用查找器在过渡帧滚动网页，随后2项复跑通过，不累计。
-- 覆盖3次按钮/系统返回往返、地址/网页坐标及高度、状态栏/导航栏、同WebView/草稿/timeOrigin，DSH边界与退出绘制、空页、透明像素、可选避让、文件列表/玻璃、地址栏/暗色200%、后台重建、完整截图/AI缩放/小窗和上传。正常开发安装未覆盖；真机/低API与真实DSH任务未验，不将API36结果扩大为所有平台。当前交接见[全屏修复](handoffs/20261104-1911-fullscreen-insets.md)。
+- 覆盖3次按钮/系统返回往返、地址/网页坐标及高度、状态栏/导航栏、同WebView/草稿/timeOrigin，DSH边界与退出绘制、空页、透明像素、可选避让、文件列表/玻璃、地址栏/暗色200%、后台重建、完整截图/AI缩放/小窗和上传。正常开发安装未覆盖；真机/低API与真实DSH任务未验，不将API36结果扩大为所有平台。实现决策见[浏览器工作区](BROWSER-WORKSPACE.md)。
 
 ## v0.1.5/7 PR #3 release 验证（2026-11-04）
 

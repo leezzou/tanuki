@@ -73,10 +73,6 @@ internal class BrowserPermissionGate {
         if (closed || !visible || pending != client) return false
         generation++; granted = client; pending = null; return true
     }
-    @Synchronized fun grantFromNativeConfirmation(client: String): Boolean {
-        if (closed || !visible) return false
-        generation++; granted = client; pending = null; return true
-    }
     @Synchronized fun grantProcessConnection(client: String): Boolean {
         if (closed) return false
         generation++; granted = client; pending = null; return true
@@ -537,7 +533,8 @@ class AgentBrowserController(private val context: Context, val library: BrowserL
         granted(clientId)
     }
     fun grantConnection() {
-        uiThread(); if (rendererGone || !gate.grantFromNativeConfirmation(connection.clientId)) return
+        // 全局原生按钮可在其他页明确授权当前连接，不以网页可见性冒充用户许可。
+        uiThread(); if (rendererGone || !gate.grantProcessConnection(connection.clientId)) return
         library.setAiControlEnabled(true)
         granted(connection.clientId)
     }

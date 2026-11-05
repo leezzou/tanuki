@@ -22,7 +22,7 @@ internal data class BrowserMenuItem(val title: String, val icon: ImageVector, va
 /** Thumb-reachable, two-level actions. Preferences are not mixed into a long overflow menu. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun BrowserMenuSheet(tools: Boolean, loaded: Boolean, authorized: Boolean,
+internal fun BrowserMenuSheet(tools: Boolean, loaded: Boolean,
     onChoose: (String) -> Unit, onBack: () -> Unit, onDismiss: () -> Unit) {
     val entries = if (tools) listOf(
         BrowserMenuItem("页内查找", Icons.Default.Search, loaded),
@@ -56,10 +56,8 @@ internal fun BrowserMenuSheet(tools: Boolean, loaded: Boolean, authorized: Boole
             }
         }
         HorizontalDivider()
-        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (authorized) Icons.Default.SmartToy else Icons.Default.Person, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(if (authorized) "AI 可操作 · 点网页可收回" else "你在操作 · AI 已暂停", Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { onChoose("权限与后台") }) { Text("管理") }
+        TextButton(onClick = { onChoose("权限与后台") }, Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+            Text("管理操作权限与后台")
         }
     }
 }

@@ -118,7 +118,7 @@ data class TanukiUiCallbacks(
     val testNpmSources: (String) -> Unit = {},
     val cancelNpmSourceTests: () -> Unit = {},
     val openBrowser: () -> Unit = {},
-    val revokeBrowser: () -> Unit = {},
+    val toggleBrowserControl: () -> Unit = {},
     val openBrowserOverlay: (() -> Unit)? = null,
     val checkAppUpdates: () -> Unit = {},
     val downloadAppUpdate: () -> Unit = {},
@@ -138,15 +138,13 @@ internal enum class TanukiGlyph { Home, Terminal, Layers, Settings, Folder, File
 @Composable
 fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: WebView,
              filesPage: @Composable (Modifier, Dp) -> Unit = { _, _ -> },
-             agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> }, browserRequest: Boolean = false,
-             browserAuthorized: Boolean = false, browserOpenRequest: Int = 0, browserAvailable: Boolean = false) {
+             agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> },
+             browserOpenRequest: Int = 0, browserControl: BrowserControlUiState = BrowserControlUiState()) {
     var tab by rememberSaveable(key = "tanuki-navigation-5") { mutableIntStateOf(0) }
     val pageStates = rememberSaveableStateHolder()
     var fullscreen by rememberSaveable { mutableStateOf(false) }
     var browserFullscreen by rememberSaveable { mutableStateOf(false) }
     val activeFullscreen = (fullscreen && tab == 1) || (browserFullscreen && tab == 3)
-    // 用户查看浏览器不依赖 AI 授权；无可用浏览器时不显示无法打开的入口。
-    val showBrowserStatus = tab != 3 && (browserAuthorized || (browserAvailable && tab == 1))
     var floatingBrowser by rememberSaveable { mutableStateOf(false) }
     fun navigate(index: Int) {
         if (index == 3) { callbacks.openBrowser(); floatingBrowser = false }
@@ -188,6 +186,9 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Column(Modifier.padding(vertical = 12.dp)) {
                         destinations.forEachIndexed { index, destination ->
+                            if (index == 2) Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                BrowserControlButton(browserControl, callbacks.toggleBrowserControl)
+                            }
                             NavigationRailItem(selected = tab == index, onClick = { navigate(index) },
                                 icon = { TanukiIcon(destination.glyph, destination.title) }, label = { Text(destination.title) },
                                 colors = NavigationRailItemDefaults.colors(
@@ -209,29 +210,18 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         if (tab != 1 && tab != 3 && !activeFullscreen) TanukiHeader(tab, if (tab == 4) settingsSection ?: "设置" else TanukiDestination.entries[tab].title, callbacks,
                             s.service in setOf(ServiceState.STARTING, ServiceState.RUNNING),
                             settings = ::openSettings, back = ::settingsBack)
-                        if (browserRequest && tab != 3) Surface(
+                        if (browserControl.requestPending && tab != 3) Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         ) {
                             Row(Modifier.fillMaxWidth().then(if (tab == 1) Modifier.statusBarsPadding() else Modifier).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("网页操作待授权", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                                Text("浏览器有待处理请求", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                                 TextButton(onClick = { navigate(3) }) { Text("查看请求") }
-                            }
-                        }
-                        if (showBrowserStatus) Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Row(Modifier.fillMaxWidth().then(if (tab == 1 && !browserRequest) Modifier.statusBarsPadding() else Modifier).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (browserAuthorized) "AI 已获浏览器操作权 · 后台有效" else "AI 可查看 · 你在操作",
-                                    Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                                TextButton(onClick = { navigate(3) }) { Text("查看浏览器") }
-                                if (browserAuthorized) TextButton(onClick = callbacks.revokeBrowser) { Text("撤销 AI") }
                             }
                         }
                         OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
                             modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
-                                else if (tab == 3 || (tab == 1 && !browserRequest && !showBrowserStatus)) Modifier.statusBarsPadding() else Modifier)
+                                else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }
                 }, bottomBar = {
                     if (floatingNavigation) Column(
@@ -243,6 +233,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             onSelect = ::navigate,
                             backdrop = if (nativeGlass) navigationBackdrop else null,
                             translucentBackground = floatingNavigation && !nativeGlass,
+                            centerAction = { BrowserControlButton(browserControl, callbacks.toggleBrowserControl) },
                         ) { index, tint ->
                             TanukiIcon(destinations[index].glyph, destinations[index].title, tint = tint)
                         }

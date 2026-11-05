@@ -4,6 +4,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -51,6 +53,7 @@ internal fun GlassNavigationBar(
     modifier: Modifier = Modifier,
     blurRadius: Dp = 16.dp,
     translucentBackground: Boolean = false,
+    centerAction: (@Composable () -> Unit)? = null,
     icon: @Composable (Int, Color) -> Unit,
 ) {
     if (labels.isEmpty()) return
@@ -59,15 +62,18 @@ internal fun GlassNavigationBar(
     val direction = LocalLayoutDirection.current
     val density = LocalDensity.current
     val select by rememberUpdatedState(onSelect)
+    val hasCenterAction = centerAction != null
+    fun slotForIndex(index: Int) = if (hasCenterAction && index >= 2) index + 1 else index
     val sources = remember(labels.size) { List(labels.size) { MutableInteractionSource() } }
     val pressed = sources.map { it.collectIsPressedAsState().value }.getOrNull(selectedIndex) == true
     var dragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableFloatStateOf(0f) }
-    var lastSelected by remember { mutableIntStateOf(selectedIndex.coerceIn(labels.indices)) }
+    var snappingToSide by remember { mutableStateOf(false) }
+    var lastSelectedSlot by remember { mutableIntStateOf(slotForIndex(selectedIndex.coerceIn(labels.indices))) }
     val selected = selectedIndex in labels.indices
     val position by animateFloatAsState(
-        if (dragging) dragPosition else if (selected) selectedIndex.toFloat() else lastSelected.toFloat(),
-        if (dragging) snap() else spring(dampingRatio = 0.8f, stiffness = 480f),
+        if (dragging) dragPosition else if (selected) slotForIndex(selectedIndex).toFloat() else lastSelectedSlot.toFloat(),
+        if (dragging && !snappingToSide) snap() else spring(dampingRatio = 0.8f, stiffness = 480f),
         label = "液态导航位置",
     )
     val pressure by animateFloatAsState(
@@ -77,9 +83,9 @@ internal fun GlassNavigationBar(
     val visibility by animateFloatAsState(
         if (selected || dragging) 1f else 0f, label = "液态导航可见度",
     )
-    LaunchedEffect(selectedIndex, labels.size, direction) {
+    LaunchedEffect(selectedIndex, labels.size, direction, hasCenterAction) {
         dragging = false
-        if (selected) lastSelected = selectedIndex
+        if (selected) lastSelectedSlot = slotForIndex(selectedIndex)
     }
     val tabsBackdrop = rememberLayerBackdrop()
     // 网页靠原生叠放透显，不进入录制层；背板保留足够底色以保证明暗网页上的文字对比度。
@@ -88,32 +94,57 @@ internal fun GlassNavigationBar(
     val lensShape = RoundedCornerShape(50)
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val itemWidth = (maxWidth - 8.dp) / labels.size
+        val slotCount = labels.size + if (hasCenterAction) 1 else 0
+        val lastSlot = slotCount - 1
+        val itemWidth = (maxWidth - 8.dp) / slotCount
         val itemPixels = with(density) { itemWidth.toPx() }
         val edgePixels = with(density) { 4.dp.toPx() }
+        fun visualSlotAt(x: Float) = (x - edgePixels) / itemPixels - 0.5f
         fun positionAt(x: Float): Float {
-            val visual = (x - edgePixels) / itemPixels - 0.5f
-            return (if (direction == LayoutDirection.Rtl) labels.lastIndex - visual else visual)
-                .coerceIn(0f, labels.lastIndex.toFloat())
+            val position = (if (direction == LayoutDirection.Rtl) lastSlot - visualSlotAt(x) else visualSlotAt(x))
+                .coerceIn(0f, lastSlot.toFloat())
+            // 中央物理槽不属于页签；按其到两侧页签中心的距离吸附，RTL 在换算前保持视觉方向。
+            snappingToSide = hasCenterAction && position >= 1.5f && position < 2.5f
+            return if (snappingToSide) {
+                if (position < 2f) 1f else 3f
+            } else position
+        }
+        fun finishDrag() {
+            if (!dragging) return
+            val rounded = dragPosition.roundToInt().coerceIn(0, lastSlot)
+            val targetSlot = if (hasCenterAction && rounded == 2) if (dragPosition < 2f) 1 else 3 else rounded
+            val target = if (hasCenterAction && targetSlot >= 3) targetSlot - 1 else targetSlot
+            dragging = false
+            if (target != selectedIndex) select(target)
         }
         LaunchedEffect(itemPixels) { dragging = false }
-        val gesture = Modifier.pointerInput(labels.size, selectedIndex, direction, itemPixels) {
+        val gesture = Modifier.pointerInput(labels.size, selectedIndex, direction, itemPixels, hasCenterAction) {
             if (itemPixels <= 0f) return@pointerInput
-            detectHorizontalDragGestures(
-                onDragStart = { point -> dragPosition = positionAt(point.x); dragging = true },
-                onHorizontalDrag = { change, _ ->
-                    change.consume()
-                    if (dragging) dragPosition = positionAt(change.position.x)
-                },
-                onDragEnd = {
-                    if (dragging) {
-                        val target = dragPosition.roundToInt().coerceIn(labels.indices)
-                        dragging = false
-                        if (target != selectedIndex) select(target)
-                    }
-                },
-                onDragCancel = { dragging = false },
-            )
+            if (!hasCenterAction) {
+                detectHorizontalDragGestures(
+                    onDragStart = { point -> dragPosition = positionAt(point.x); dragging = true },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        if (dragging) dragPosition = positionAt(change.position.x)
+                    },
+                    onDragEnd = ::finishDrag,
+                    onDragCancel = { dragging = false },
+                )
+            } else {
+                detectDragGestures(
+                    orientationLock = Orientation.Horizontal,
+                    onDragStart = { down, _, _ ->
+                        // 必须用真实 DOWN 判定起点，过 slop 后才落入中央的手势仍属于导航拖动。
+                        dragging = visualSlotAt(down.position.x) !in 1.5f..<2.5f
+                        if (dragging) dragPosition = positionAt(down.position.x)
+                    },
+                    onDrag = { change, _ ->
+                        if (dragging) dragPosition = positionAt(change.position.x)
+                    },
+                    onDragEnd = { finishDrag() },
+                    onDragCancel = { dragging = false },
+                )
+            }
         }
         Box(gesture) {
             // 录制层仅含背板与真实标签，镜片在其同级绘制，避免递归捕获和重复无障碍节点。
@@ -138,6 +169,10 @@ internal fun GlassNavigationBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 labels.forEachIndexed { index, label ->
+                    if (hasCenterAction && index == 2) {
+                        // 只留等宽空列，实际按钮在录制层外绘制，避免被镜片采样后重复显示。
+                        Spacer(Modifier.weight(1f).fillMaxHeight())
+                    }
                     val focused by sources[index].collectIsFocusedAsState()
                     Column(
                         Modifier.weight(1f).fillMaxHeight().heightIn(min = 64.dp)
@@ -170,7 +205,7 @@ internal fun GlassNavigationBar(
                             highlight = { Highlight.Default.copy(width = 0.8.dp, alpha = 0.65f + pressure * 0.35f) },
                             shadow = { Shadow(radius = 6.dp, alpha = 0.65f) },
                             layerBlock = {
-                                translationX = (if (direction == LayoutDirection.Rtl) labels.lastIndex - position else position) * itemPixels
+                                translationX = (if (direction == LayoutDirection.Rtl) lastSlot - position else position) * itemPixels
                                 alpha = visibility
                                 scaleX = 1f + 0.055f * pressure
                                 scaleY = 1f + 0.08f * pressure
@@ -180,6 +215,13 @@ internal fun GlassNavigationBar(
                             },
                         ),
                 )
+            }
+            if (centerAction != null) {
+                Box(Modifier.matchParentSize().padding(4.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(itemWidth).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        centerAction()
+                    }
+                }
             }
         }
     }
