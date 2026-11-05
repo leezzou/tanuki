@@ -1,6 +1,189 @@
 # 测试现状
 
+**仓库规则变更处置：** 本轮直接push main被GitHub GH013拒绝，规则要求所有变更通过PR；没有绕过或改保护。改用 `release/0.1.6` 推送同一版本/QA/文档提交，再由用户创建并合入PR。PR5功能已由用户合并，不重复合功能。当前无可用已授权GitHub PR API/浏览器控制入口，提供比较链接供用户创建PR；不宣称PR已创建。发布分支推送成功后仍可按已测字节封装0.1.6；main须等用户合入发布PR。
+
 Tanuki验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release构建与证书、宿主与设备执行必须分别记录，源码中有测试不等于已运行。
+
+## 0.1.6 合并后发布候选验证（2026-11-05）
+
+- 用户自行合入PR #5后，主目录main快进到 `f1fb10296df72cda6fc728d218774ddad6dfcbd4`；其完整tree `74ba29a9c227913097a3af3a9efa718599687b31` 与已测head `862e510` 相同。本轮仅更新0.1.6/code8、应用下节已验证的外链QA宿主夹具并整理文档，没有新增产品逻辑或依赖。用户授权全部适用验证收尾后统一一次push，再封装同一已测APK；无需重建PR5功能分支。
+- 本轮新跑：modern release与配套release AndroidTest、compat debug编译、release JVM/lint单次Gradle **4分38秒、134任务成功**；**JVM97，0失败/错误/跳过；release lint0错误、71警告、1Hint**。宿主发布18项、交接工作流12项、公开边界19项均通过（分别1.236/11.894/3.046秒），共49个不同宿主用例。不得混算为设备测试。
+- 复用 `Pixel_7_API_34_arm64/emulator-5572`，ARM64/API34/WebView159，已确认专用合成数据且无node/proot/apt/dpkg/真实任务。核实app/test身份、target和证书后仅同包覆盖；不卸载、清数据、wipe或恢复快照。已安装及公开可发现清单最高code7，旧011/010无清单，结合既有实际code3/1与tag核查，选择递增code8。
+- 实际候选为 `com.tanuki.modern.workspacecheck`、**0.1.6/code8**、开发证书、**non-debuggable release**、ARM64、minSdk26/targetSdk34；**10,375,252字节**，SHA-256 **`802d1f49db4f56d2cc737cf95242fcd86ab6abebe7f0a5acf1a559d97147138e`**，证书SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。后续verified模式只封装这些字节，不因Git提交元数据重编另一份包。
+- release核心6项全部通过（124.278秒），选择与下节PR5 focused完全一致，含真实30秒临时交回、再等31秒显式撤销保持、普通当前页撤权可读、私有页阻断、4页中央控制、真实手势/取消及RTL200%。关联51项首轮 **49通过、2失败**：`SetupPresentationTest#filesListExtendsBehindNavigationAndScrollsTailClearWithoutReloadingDsh` 与 `#fixedBottomDshControlsAcceptRealTouchesWithoutChangingNavigation` 均为合成HTML marker载入超时；保持产品APK和测试源码/测试APK原样，仅选这两项独立复跑，**2项通过**（JUnit23.34秒，宿主24.313秒）。未找到可证明的产品或夹具根因，不能宣称修复了超时。首轮JUnit3266.997秒与宿主344.843秒存在时钟差异，仅作观察，不据此确定归因。按方法集合去重，**57个不同release设备用例最终通过，无跳过**，不是首组全部通过，也没有把旧debug通过冒充本次结果。
+- 关联51的完整选择为下节PR5 related43项，再加 `ApplicationUpdateNativeTest` 3项及 `ApkInstallAccessTest` 5项（如下）。旧code7先显式种入一个私有合成升级标记（1项通过、1.584秒），随后同证书覆盖code8；关联组以 `-e verifyUpgradeMarker true` 验证原标记仍在并清理，不能把单纯新包内写读当覆盖升级。实际系统安装器预读、URI授权/回收、两provider隔离、文件选择ClipData及系统SAF回传均通过；没有点击系统安装器最终确认来重装或卸载。
+- 同一release再以 **2400x1800/420dpi** 跑4页中央控制单项，14.673秒通过；两张实际截图尺寸均为2400x1800，真实宽屏侧栏布局。`finally`已核实还原 **1080x2400/420dpi**。此重复配置不增加57个不同方法计数。
+- APK独立核验通过：实际签名、版本/SDK/ABI、4个AArch64 ELF、更新与浏览器两个非导出FileProvider的不同组件/authority/路径及DEX继承；62份许可资产与源码逐字节一致，79依赖记录/78坐标、Kyant2 NOTICE与共享Apache内容齐全。固定APK公开扫描403成员、0发现。最终源码及实际index须在文档冻结后重新扫描、重打包并核外部散列。
+- 未验：MIUI和其他真机/低API、真实账号OAuth/模型/DSH任务、完整运行环境升级、长期复杂页压力及private/notice全状态矩阵。原始用户图标滞后未全面重现；旧RTL200%轻微折射现象不能称视觉无瑕。API Key保存继续用户暂停。compat仅编译，不称旧Android设备通过。
+
+本轮实际构建命令（同一目录串行，JDK17/SDK36）：
+
+```bash
+./gradlew -PtestBuildType=release -PdevelopmentReleaseSigning=true \
+  -PtanukiVersionName=0.1.6 -PtanukiVersionCode=8 \
+  -I scripts/workspace-verification.init.gradle \
+  :app:assembleModernRelease :app:assembleCompatDebug :app:assembleModernReleaseAndroidTest \
+  :app:testModernReleaseUnitTest :app:lintModernRelease
+python3 scripts/test-app-release.py
+python3 scripts/test-agent-workflow.py
+python3 scripts/test-publication.py
+adb -s emulator-5572 install -r <核对身份后的release APK>
+adb -s emulator-5572 install -r <配套release AndroidTest APK>
+adb -s emulator-5572 shell am instrument -w -r -e class <上述方法选择> \
+  -e verifyUpgradeMarker true \
+  com.tanuki.modern.workspacecheck.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+补充的8项完整类名前缀为 `com.tanuki.`：
+
+```text
+ApplicationUpdateNativeTest#androidArchiveAndInstalledSignerMatchActualPublishedFields
+ApplicationUpdateNativeTest#privateSyntheticFileSurvivesCoverInstall
+ApplicationUpdateNativeTest#androidCacheRootIsAcceptedButOwnUpdateLinkIsNotNeeded
+ApkInstallAccessTest#installerCanReadBeforeActivityStartsButMatchingUserAppCannot
+ApkInstallAccessTest#plainViewFlagAloneDoesNotGrantInstallerPreRead
+ApkInstallAccessTest#nextApkRevokesThePreviousFileAndExpiryRevokesTheCurrentFile
+ApkInstallAccessTest#foreignAndBrowserProviderUrisAreRejected
+ApkInstallAccessTest#actualInstallerReadsApkMetadataBeforeUserConfirmation
+```
+
+## PR #5 中央控制导航独立验证（2026-11-05，验证时尚未合并）
+
+- 用户本次明确要求测试PR5，上一轮“不动PR5”的范围限制由新请求解除；仍只测试并告知，**由用户合并，不提交/推送/发版**。固定[PR #5](https://github.com/leezzou/tanuki/pull/5) head `862e510c87e5334f58b96778a9d8483d5bd3fa7f`；merge-base最新main `8b5776adcd8a4043398ac9271e1b6ce384c7c31a`，ahead6/behind0。用户已squash合PR4为8b5776a，其完整tree与已测4a7bc31相同；独立detached工作树测试，主目录local main4509972及未提交文档保留，不整合产品。
+- PR改动：共享中央人/AI按钮，点击明确切换操作权；拖动不切权、镜片按住连续跟手，松手才跳过中央吸附，取消回原页；移除重复常态控制条，待处理/登录/临时接管提示、小窗本地入口保留。原生当前连接可跨页面显式授权，RPC仍不能授权；普通当前页无操作权可读、读取不切页、OAuth/private屏蔽保持。旧30秒已交回提示只在当前权限失效时清除，其他通知保留。
+- PR产品/测试原样构建 **5分9秒、125任务成功**，modern/compat debug及modern AndroidTest；**JVM97，0失败/错误/跳过；modern debug lint0错误/71警告/1Hint**。原生固定源码/补丁在测试树由构建脚本准备/编译，未改第三方源码来消除其警告。主构建/核心组/关联首跑均为原样产品和测试；随后仅修正旧外链测试宿主，产品未改，不混算作者API36结果、PR4的34项或旧0.1.5的57项。
+- 确认既有Pixel_7_API_34_arm64/emulator-5572、ARM64/API34/WebView159，无node/proot/apt/dpkg/仪器或真实任务；核app/test身份、target与开发证书后仅覆盖安装，不清数据/卸载/快照。候选 `com.tanuki.modern.workspacecheck`、0.1.5/code7、debuggable=true、min26/target34，**14,112,591字节**，SHA-256 `2e6bd70c773540bcb0081b663a280d78d647e0e47ce361846edaad4f56a132c9`，开发证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。这是测试debug包，不是新release。
+- 核心 **6项全部通过，132.802秒**：真实触摸点击与拖动、松手吸附/取消、RTL/200%、跨4页不切页不重载、真实30秒交回图标和31秒显式撤销不恢复、旧提示失效及其他提示保留、私有登录页禁用。关联43项首跑42通过/1失败365.577秒。唯一外链真实点击超时在同PR5原样单例再现27.225秒，已合PR4等价基线同点失败24.818秒；不是只凭旧记录排除回归。实拍/诊断显示裸WebView旧触点y=96.84位于系统栏top=136之内。仅给测试FrameLayout补systemBars insets、可见/焦点/首帧与正确真触摸，保留全部原跳转/隔离/epoch断言；测试包/lint重编57秒，认证整类2项通过23.082秒，产品APK SHA不变。修正后触点y=232.83位于安全区，DOM pointerdown/up/click均trusted，forwarded=1，后续5跳转及Cookie恢复/有界失败全部通过。按方法集合去重 **49个不同用例最终全部通过**，无跳过/host timeout/断线；原始失败不抹去。另同方法宽屏2400x1800/420复测通过15.847秒，截图确认为真实左侧栏，显示已finally还原1080x2400/420。
+- 13张合成图复核：正常布局8图、宽屏2图、全屏/恢复/键盘3图；人/机器人与中央镜片实际绘制，侧栏确实是>=840dp布局，IME/全屏隐藏主导航后退出恢复。RTL/320dp/200%选中DSH文字两侧有轻微窄竖折射重影，未见功能遮挡、无同配置基线对照，未定为新增回归，不宣称视觉完全无瑕。原图不公开。
+- QA修补保存在[外链测试夹具](../app/src/androidTest/kotlin/com/tanuki/WebAuthenticationTest.kt)，仅测试宿主，不修改产品来源/手势/隐私校验；验证当时只存在于独立测试树。用户已于12:04确认合并，main f1fb102完整tree与862e510相同；本轮已同步并将该夹具应用到主目录，后续0.1.6另跑release验证后一次push再封装。版本已确认，不再询问。
+- 静态未见权限边界阻塞；仍须以真实30+31秒的图标像素/语义/权限/提示回归判断本机表现，不将作者记录的原始图标滞后未复现自动称作全面修复。private前已有AI权的mask、notice在private/关闭/渲染失败分支、中央撤销后重建同链未独立新增用例，不能扩称全部状态矩阵已测。
+- 真机/低API/真实模型与DSH任务、长期复杂页面压力、完整运行环境升级未验，API Key保存继续暂停。
+
+实际命令（独立目录、JDK17/SDK36）：
+
+```bash
+./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle \
+  :app:assembleModernDebug :app:assembleCompatDebug :app:assembleModernDebugAndroidTest \
+  :app:testModernDebugUnitTest :app:lintModernDebug
+adb -s emulator-5572 install -r <身份核对后的app.apk>
+adb -s emulator-5572 install -r <配套AndroidTest.apk>
+adb -s emulator-5572 shell am instrument -w -r -e class <以下逗号分隔选择> \
+  com.tanuki.modern.workspacecheck.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+以下完整类名前缀为 `com.tanuki.`，整类覆盖与单方法选择均按实际运行去重计数：
+
+### focused（6项）
+
+```text
+SetupPresentationTest#browserControlWithoutGlassRejectsDragButAcceptsClick
+SetupPresentationTest#glassCenterOnlyClicksAndDragsSnapPastTheAction
+SetupPresentationTest#glassCenterSkipsRtlGapAtLargeFontsAndCancelsVerticalPress
+BrowserWorkspacePresentationTest#navigationControlTogglesFromEveryPageWithoutSwitchingOrReloading
+BrowserWorkspacePresentationTest#navigationControlTracksRealIdleReturnAndExplicitRevoke
+BrowserWorkspacePresentationTest#navigationControlCannotGrantOnPrivateLoginPage
+```
+
+### related（43项）
+
+```text
+AgentBrowserControlTest（整类14项）
+BrowserWorkspacePresentationTest#fullscreenRoundTripsRestoreChromePositionWithoutReload
+BrowserWorkspacePresentationTest#newBrowserPageDefaultsToWindowsAndFullscreenKeepsTheDocument
+BrowserWorkspacePresentationTest#emptyBrowserCanExitFullscreenWithoutFocusingAMissingAddressField
+BrowserWorkspacePresentationTest#optionalBottomAvoidanceKeepsFixedControlsClickableWithoutReload
+BrowserWorkspacePresentationTest#compactChromeSharesTitleRowAndWebPixelsShowBehindNavigation
+BrowserWorkspacePresentationTest#revokedAiKeepsDshBrowserEntryAndUserPageVisible
+BrowserWorkspacePresentationTest#defaultConnectionAndTouchTakeoverSurviveBackgroundAndRecreation
+SetupPresentationTest#actualDshWebViewSurvivesFullscreenWithoutReload
+SetupPresentationTest#fixedBottomDshControlsAcceptRealTouchesWithoutChangingNavigation
+SetupPresentationTest#filesListExtendsBehindNavigationAndScrollsTailClearWithoutReloadingDsh
+SetupPresentationTest#glassNavigationBlursPixelsAndKeepsTabsClickable
+SetupPresentationTest#glassNavigationDragPreviewsThenCommitsOnceAndCancels
+SetupPresentationTest#glassNavigationNullBackdropDragsInRtlAndKeepsLargeTabsClickable
+SetupPresentationTest#setupGuideFirstStepSourceVersionAndLocalThemeScreenshots
+FilesBrowserPresentationTest（整类5项）
+BrowserOverlayPresentationTest#fullDocumentAndAiZoomAreIndependentOfSmallWindow
+BrowserOverlayPresentationTest#revokedAiCanStillOpenAndViewBrowserOverlay
+BrowserOverlayPresentationTest#keyboardTouchTakeoverAndSystemRevocationRemainUsable
+BrowserOverlayPresentationTest#windowSurvivesHomeMovesAndResizesWithoutReloadAndReturnsToBrowser
+DshFileUploadTest#clipDataOnlyResultDeliversAllFilesThroughMainActivity
+DshFileUploadTest#systemDocumentPickerReturnsChosenBytesThroughMainActivity
+WebAuthenticationTest（整类2项）
+DshViewportTest#logicalWidthMakesTheWholeDshPageCompactWithoutReloadOrSystemChanges
+ApplicationUpdatePresentationTest#checkActionIsReachableAt320dpWithLargeFontsInBothThemes
+```
+
+## PR #4 fix 独立验证（2026-11-05，验证时尚未合并）
+
+- 用户只要求测fix PR，正常后由用户亲自合并，**不合并、不推送、不动PR #5、不发版**。固定[PR #4](https://github.com/leezzou/tanuki/pull/4) head `4a7bc3133f664272b16f66023a00f1dd126e8cf3`；merge-base为最新main `4509972ff34d1a2c2da9b0469dca8760c71c5233`，ahead2/behind0。列表页面缓存仍返回PR #3，独立PR页面与实时Git refs确认目标；仅fetch main/PR4，独立detached工作树测试，主目录产品代码不整合。
+- PR产品只改MainActivity、DshWindowMode、BrowserLibrary、AgentBrowserPage。主窗口统一edge-to-edge，Compose消费insets，全屏只切系统栏和刘海策略；浏览器默认恢复网页透显，用户可在「浏览器设置→通用→避让网页底部控件」开启安全视口，设置持久保存；DSH原有底部保护保持。默认透显不承诺网页fixed底栏可点击，不能把开启后的真实触摸结果用于宣称默认模式也避让。
+- 原样PR构建 **5分47秒成功（125任务）**：modern/compat debug、modern AndroidTest、**97 JVM（0失败/错误/跳过）**，modern debug lint **0错误/71警告/1Hint**。本轮未改产品/测试代码；作者API36/15项与旧0.1.5/57项均是历史，不能算本轮。
+- 实际检查app/test包名与instrumentation target、证书后，同包同证书覆盖专用 **Pixel_7_API_34_arm64 / emulator-5572**，API34/ARM64/WebView159；安装前无node/proot/apt/dpkg/仪器或真实任务，不清数据/卸载/恢复快照。候选 `com.tanuki.modern.workspacecheck`、0.1.5/code7、**debuggable=true**、min26/target34，**14,104,579字节**，SHA-256 `1fc1b905f18402b2a76b6a1e7dc4cc8734274fe6e3ff5913dfa5fa9731127171`；开发证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。这是验证debug包，不是新release，不覆盖历史发布附件。
+- 设备重点 **11项全部通过，126.301秒**：三次全屏往返（按钮/系统返回）后地址栏顶/网页顶/高度严格恢复，WebView/timeOrigin/草稿保持；旧全屏方法改为真实status/nav分别隐藏并完整恢复初始栏状态，本机通过，没有继续排除旧方法。caption/combined逻辑纠正与产品顶部留白修复是两个问题，未把修改断言冒充产品修复。默认透显实际像素、开关后底部真实点击/同文档、DSH全屏/底部控件、地址/暗色200%及整页尾部/AI缩放/小窗均通过。
+- 关联 **23项全部通过，175.755秒**，与重点组合计 **34个不同设备用例全部通过**；无失败/跳过/host timeout/ADB断线/仪器中断。包括上传5、AI只读/不切页/私有页3、接管/重建与撤权后可见2、原生glass3/文件尾部/工作台5、文件3、悬浮窗3、viewport1、更新页1。
+- 8张本轮合成截图独立视觉复核通过：默认网页透显、避让后底部控件完整露出、全屏满幅及退出无重复留白、DSH前后边界相同、键盘时导航收起且无残留空白、暗色200%控件可见；只支持本机这些帧，原图留忽略目录，不公开设备原始资料。
+- 环境准备首次误假设主目录有local.properties，复制中断，测试树缺当前STATE链接导致交接拒绝；日志目录也未建立，首次Gradle未启动。显式写测试树SDK配置、复制记录/STATE并刷新守卫后重启成功，不将该准备失败计产品失败/通过。
+- 未验：MIUI真机、低API/桌面caption/宽屏旋转、真实账号/模型/DSH任务键盘、长期后台/复杂页面压力与完整Ubuntu/Node/DSH跨APK升级。API Key保存继续暂停。偏好旧JSON缺字段与AI状态保持本轮静态核对，设备只测现有默认false/true重开及UI开关，不能扩称整个迁移矩阵通过。
+
+实际命令（设置JDK17/SDK36后）：
+
+```bash
+./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle \
+  :app:assembleModernDebug :app:assembleCompatDebug :app:assembleModernDebugAndroidTest \
+  :app:testModernDebugUnitTest :app:lintModernDebug
+adb -s emulator-5572 install -r <核对身份的app.apk>
+adb -s emulator-5572 install -r <配套AndroidTest.apk>
+adb -s emulator-5572 shell am instrument -w -r -e class <下列逗号分隔选择> \
+  com.tanuki.modern.workspacecheck.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+以下方法完整类名前缀为 `com.tanuki.`，分11与23两组，单一设备串行执行：
+
+### focused（11项）
+
+```text
+BrowserLibraryTest#nativeLibraryAndPagePreferencesPersistWithoutAnyPermission
+BrowserWorkspacePresentationTest#compactChromeSharesTitleRowAndWebPixelsShowBehindNavigation
+BrowserWorkspacePresentationTest#optionalBottomAvoidanceKeepsFixedControlsClickableWithoutReload
+BrowserWorkspacePresentationTest#fullscreenRoundTripsRestoreChromePositionWithoutReload
+BrowserWorkspacePresentationTest#newBrowserPageDefaultsToWindowsAndFullscreenKeepsTheDocument
+BrowserWorkspacePresentationTest#emptyBrowserCanExitFullscreenWithoutFocusingAMissingAddressField
+SetupPresentationTest#actualDshWebViewSurvivesFullscreenWithoutReload
+SetupPresentationTest#fixedBottomDshControlsAcceptRealTouchesWithoutChangingNavigation
+FilesBrowserPresentationTest#addressBarIsActuallyPaintedAndRealTouchCanNavigateBeforeAndAfterPageLoad
+FilesBrowserPresentationTest#browserAddressRemainsVisibleAndTouchableInDarkThemeAtTwoHundredPercent
+BrowserOverlayPresentationTest#fullDocumentAndAiZoomAreIndependentOfSmallWindow
+```
+
+### related（23项）
+
+```text
+AgentBrowserControlTest#canonicalReadSurvivesHumanControlWhileMutationsStayDenied
+AgentBrowserControlTest#readWithTabIdCannotSwitchTheUsersPage
+AgentBrowserControlTest#privateLoginIsHiddenFromReadAndControlEvenWhenGranted
+BrowserWorkspacePresentationTest#defaultConnectionAndTouchTakeoverSurviveBackgroundAndRecreation
+BrowserWorkspacePresentationTest#revokedAiKeepsDshBrowserEntryAndUserPageVisible
+SetupPresentationTest#glassNavigationBlursPixelsAndKeepsTabsClickable
+SetupPresentationTest#glassNavigationDragPreviewsThenCommitsOnceAndCancels
+SetupPresentationTest#glassNavigationNullBackdropDragsInRtlAndKeepsLargeTabsClickable
+SetupPresentationTest#filesListExtendsBehindNavigationAndScrollsTailClearWithoutReloadingDsh
+SetupPresentationTest#setupGuideFirstStepSourceVersionAndLocalThemeScreenshots
+FilesBrowserPresentationTest#fileControlsRemainReachableInDarkThemeAtTwoHundredPercent
+FilesBrowserPresentationTest#fileEditingCopyPickerAndSelectionWorkThroughActualActivity
+FilesBrowserPresentationTest#canonicalGrantAndTabExitKeepControlUntilExplicitTakeback
+BrowserOverlayPresentationTest#windowSurvivesHomeMovesAndResizesWithoutReloadAndReturnsToBrowser
+BrowserOverlayPresentationTest#revokedAiCanStillOpenAndViewBrowserOverlay
+BrowserOverlayPresentationTest#displayDensityKeepsCollapsedControlsReachableAndNotificationStopIsFinal
+DshViewportTest#logicalWidthMakesTheWholeDshPageCompactWithoutReloadOrSystemChanges
+DshFileUploadTest#selectedContentFilesReachDomAndWorkerUpload
+DshFileUploadTest#clipDataOnlyResultDeliversAllFilesThroughMainActivity
+DshFileUploadTest#systemDocumentPickerReturnsChosenBytesThroughMainActivity
+DshFileUploadTest#cancelledAndNavigatedRequestsCannotDeliverStaleFiles
+DshFileUploadTest#foreignPagesAndPrivateFileUrisAreRejected
+ApplicationUpdatePresentationTest#checkActionIsReachableAt320dpWithLargeFontsInBothThemes
+```
+
 
 ## 合入PR #4后的main（2026-11-05）
 
@@ -74,6 +257,8 @@ BrowserOverlayPresentationTest#fullDocumentAndAiZoomAreIndependentOfSmallWindow
 - 覆盖3次按钮/系统返回往返、地址/网页坐标及高度、状态栏/导航栏、同WebView/草稿/timeOrigin，DSH边界与退出绘制、空页、透明像素、可选避让、文件列表/玻璃、地址栏/暗色200%、后台重建、完整截图/AI缩放/小窗和上传。正常开发安装未覆盖；真机/低API与真实DSH任务未验，不将API36结果扩大为所有平台。实现决策见[浏览器工作区](BROWSER-WORKSPACE.md)。
 
 ## v0.1.5/7 PR #3 release 验证（2026-11-04）
+
+- 流程回顾：Agent当时误把push理解为直推main4509972，越过用户手动合并PR3步骤，已告知/致歉，没有擅自回退/强推。PR4/5随后均由用户自行合并；本轮0.1.6的同步/一次push是在用户确认合并后按新授权执行。015当时最终工作树/索引各400、源码402项公开检查0发现，SOURCE-SHA和旧014清单通过，push后verified封装六附件（原生19.6秒、源码0.6秒）；后续仅改流程文档/源码副本，不重编APK。
 
 - 用户明确测试正常后push并打包0.1.5。固定[PR #3](https://github.com/leezzou/tanuki/pull/3) head `c95fa9fcc80a78489a1bc2d7fc5710dfbe30857a`，merge-base为最新main `a2a591331100e94b8425d7b7c9d31019f459827c`，ahead6/behind0；远端Git引用复核一致。列表缓存曾返回旧PR #2，匿名API失败，改用独立PR页面与Git refs确认。保持0.1.4的上传/AI只读修复，默认版本改0.1.5/code7，高于公开清单与已安装最高6。
 - 新增真实触摸回归先复现 **浏览器与DSH底部按钮均被原生浮动导航拦截、误切页（2失败，23.891秒）**。修复仅给两个AndroidView预留bottomInset，含导航、间隙与系统区域；键盘/全屏/宽屏无浮动导航时为零。保留同一WebView，不改官方DSH、完整截图开关或权限；旧网页透显断言改为安全视口实际绘制，两项真实触摸断言保持。
