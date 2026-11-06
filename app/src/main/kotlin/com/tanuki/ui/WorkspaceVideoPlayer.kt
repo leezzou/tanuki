@@ -1,6 +1,8 @@
 package com.tanuki.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
@@ -134,6 +136,23 @@ internal fun WorkspaceVideoPlayer(uri: Uri, fullscreen: Boolean, onFullscreen: (
         if (ready) runCatching { view?.pause() }
         playing = false
     }
+    // 仅视频全屏临时允许随设备旋转（不强制横屏）；退出全屏、返回或播放器销毁时恢复进入前的方向。
+    // 找不到 Activity 时保持原行为，方向切换失败也不影响播放。
+    val hostActivity = remember(context) { context.findHostActivity() }
+    val orientation = remember(hostActivity) { VideoFullscreenPolicy.Session() }
+    DisposableEffect(fullscreen, hostActivity, orientation) {
+        if (fullscreen && hostActivity != null) {
+            val target = orientation.enter(hostActivity.requestedOrientation)
+            runCatching { hostActivity.requestedOrientation = target }
+            onDispose {
+                orientation.exit()?.let { previous ->
+                    runCatching { hostActivity.requestedOrientation = previous }
+                }
+            }
+        } else {
+            onDispose { }
+        }
+    }
     LaunchedEffect(uri, ready) {
         while (ready && !failed) {
             val current = view
@@ -246,3 +265,15 @@ internal fun WorkspaceVideoPlayer(uri: Uri, fullscreen: Boolean, onFullscreen: (
 
 private fun videoTime(milliseconds: Int): String = String.format(Locale.ROOT, "%d:%02d", milliseconds / 60000, milliseconds / 1000 % 60)
 private fun videoSpeed(speed: Float): String = String.format(Locale.ROOT, "%.2f", speed).trimEnd('0').trimEnd('.') + "×"
+
+/** 从 Compose 的包装 Context 安全上溯到 Activity；找不到时返回 null，调用方保持原播放行为。 */
+private fun Context.findHostActivity(): Activity? {
+    var current: Context = this
+    // 有限层数避免异常包装 Context 自引用导致无限循环。
+    repeat(16) {
+        if (current is Activity) return current
+        current = (current as? ContextWrapper)?.baseContext ?: return null
+    }
+    return null
+}
+
