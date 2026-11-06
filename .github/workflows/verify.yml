@@ -1,0 +1,110 @@
+name: verify
+
+# 推送与面向 main 的 PR 都执行同一套门禁；不跑设备、不使用 secrets、不发布。
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  host-scripts:
+    name: Host scripts and handoff checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test agent workflow
+        run: python3 scripts/test-agent-workflow.py
+      - name: Test app release
+        run: python3 scripts/test-app-release.py
+      - name: Test publication checks
+        run: python3 scripts/test-publication.py
+      - name: Check Browser and Phone RPC contract
+        run: python3 scripts/check-rpc-contract.py
+      - name: Test Browser client
+        run: node scripts/test-browser-client.mjs
+      - name: Test Phone client
+        run: node scripts/test-phone-client.mjs
+      # 交接门禁放在最后：W1 的恢复记录未合并前它必然失败，
+      # 但独立协议/客户端回归仍应完整执行并留下结果；该步骤不会被跳过。
+      - name: Check handoff consistency
+        run: python3 scripts/check-handoff.py
+
+  android-build:
+    name: Android build, JVM tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANDROID_SDK_ROOT: /home/runner/android-sdk
+      ANDROID_HOME: /home/runner/android-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/android-sdk
+          key: ${{ runner.os }}-android-sdk-36-bt35-v1
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-36-bt35-
+      - name: Install Android SDK platform 36 and build-tools 35
+        run: |
+          set -eu
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+            curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+            rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          fi
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null
+          "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install "platforms;android-36" "build-tools;35.0.0"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      - name: Report native runtime packaging
+        run: |
+          if [ -d app/src/main/jniLibs ]; then
+            echo "CI 不重建原生 .so，将打包检出中已有的 app/src/main/jniLibs"
+          else
+            echo "CI 不重建原生 .so；检出中没有 app/src/main/jniLibs，APK 不包含原生运行时"
+          fi
+      - name: Assemble, JVM test and lint Modern debug
+        # CI 不重建原生 .so：-x buildNativeRuntime 避免 NDK/macOS 依赖。
+        # 原生构建由 W2 的本地引导和人工验证覆盖；这里只验证 Kotlin/JVM/AndroidTest 编译与 lint。
+        run: |
+          ./gradlew --no-daemon --console=plain --stacktrace \
+            -PtestBuildType=debug \
+            -I scripts/workspace-verification.init.gradle \
+            -x buildNativeRuntime \
+            :app:assembleModernDebug \
+            :app:assembleModernDebugAndroidTest \
+            :app:testModernDebugUnitTest \
+            :app:lintModernDebug
