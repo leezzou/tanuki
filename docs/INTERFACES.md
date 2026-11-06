@@ -124,7 +124,7 @@ HTTP 200..399 或 401 → 存活
 - 请求体超过 65536 字节：客户端直接 `request_too_large`。
 - 响应累计超过 **3 MiB**：`response_too_large`。
 - 客户端超时 **12000 ms**：`browser_timeout`。
-- 非 JSON 或非法错误结构：`invalid_response`。
+- 响应体不是合法 JSON：客户端抛 `invalid_response`。客户端**不校验** `ok`、`result` 或 `error` 的类型/结构，合法 JSON 会原样返回；不要依赖客户端做错误结构校验。
 - 客户端不打印 token、连接文件路径或原始 HTTP 异常。
 
 ### 2.2 请求与响应信封
@@ -227,7 +227,7 @@ HTTP 200..399 或 401 → 存活
 | `page_unavailable` | 页面不可绘制或快照结果不可解析 |
 | `capture_failed` | PNG 编码失败 |
 
-客户端本地错误：`request_too_large`、`response_too_large`、`browser_timeout`、`invalid_response`。
+客户端本地错误：`request_too_large`、`response_too_large`、`browser_timeout`，以及响应体 JSON 解析失败时的 `invalid_response`。`invalid_response` 仅表示 JSON 解析失败，不代表客户端校验了 `ok`/`result`/`error` 结构。
 
 ## 3. 工具面：Phone RPC
 

@@ -26,7 +26,7 @@
 |---|---|
 | `docs/AGENT-STATE.md` | 恢复当前状态；记录 0.1.8 已发布、无设备测试报告、本轮 docs 验证与暂停项 |
 | `docs/TEST-REPORT.md` | 恢复测试现状；新增 0.1.8 只读复核与本轮门禁结果；旧测试逐节标注“历史”，不冒充 0.1.8 通过 |
-| `docs/INTERFACES.md` | 新增控制面、Browser/Phone RPC、错误码、进程/挂载与变更流程契约；复核后将 Phone 未知方法错误码精确为服务端 `invalid_method`（`PhoneFileAccess` 的 `unknown_method` 仅兜底） |
+| `docs/INTERFACES.md` | 新增控制面、Browser/Phone RPC、错误码、进程/挂载与变更流程契约；复核后将 Phone 未知方法错误码精确为服务端 `invalid_method`（`PhoneFileAccess` 的 `unknown_method` 仅兜底）；按 PR #10 评审收窄 Browser 客户端 `invalid_response` 为仅 JSON 解析失败，明确不校验 `ok`/`result`/`error` 结构 |
 | `docs/AGENT-QUICKSTART.md` | 更新当前分支/0.1.8 状态、历史测试措辞（54 项标为历史、未在本轮复跑）、接口契约入口、下一步与源码包路径 |
 | `docs/APP-UPDATES.md` | 更新已发布版本、0.1.8 清单/路径、验证范围与分支描述 |
 | `docs/ARTIFACTS.md` | 当前发布改为 0.1.8/code10；补目录、校验命令与源码快照路径；0.1.7 标为历史；统一“不回写已发布附件”的源码打包措辞 |
