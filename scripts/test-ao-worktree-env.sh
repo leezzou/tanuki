@@ -69,6 +69,16 @@ tanuki_env_copy_entry "$work/link-file" "$work/dst-link-file"
 [[ -f "$work/dst-link-file" && ! -L "$work/dst-link-file" ]] || fail "文件链接未实体化"
 cmp -s "$work/external-file.txt" "$work/dst-link-file" || fail "文件链接目标内容不完整"
 
+# 3b. 顶层链接指向含逃逸链接的目录：递归校验必须拒绝，不能实体化到 worktree。
+mkdir -p "$work/external-escape" "$work/outside-escape"
+printf 'secret2\n' > "$work/outside-escape/secret.txt"
+ln -s "$work/outside-escape/secret.txt" "$work/external-escape/escape"
+ln -s "$work/external-escape" "$work/link-escape-dir"
+if tanuki_env_copy_entry "$work/link-escape-dir" "$work/dst-link-escape" 2>/dev/null; then
+  fail "顶层链接目录内的逃逸链接应被拒绝"
+fi
+[[ ! -e "$work/dst-link-escape" ]] || fail "拒绝顶层链接目录后不应留下目标"
+
 # 4. 目录内的绝对/逃逸链接必须拒绝，且不留下目标。
 mkdir -p "$work/outside" "$work/src-escape-abs" "$work/src-escape-rel"
 printf 'secret\n' > "$work/outside/secret.txt"
