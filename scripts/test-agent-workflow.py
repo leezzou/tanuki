@@ -2,14 +2,18 @@
 """离线宿主回归：交接有效性与模拟验证保护，不调用真实ADB/Gradle。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = "com.tanuki.modern.workspacecheck"
@@ -22,7 +26,8 @@ class WorkflowTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "project with spaces"
         (self.root / "scripts").mkdir(parents=True)
-        self.env = {**os.environ, "TANUKI_DEVICE": "", "VERIFIER_EVENTS": str(self.root / "events.jsonl")}
+        self.env = {**os.environ, "TANUKI_DEVICE": "", "VERIFIER_EVENTS": str(self.root / "events.jsonl"),
+                    "TANUKI_DEVICE_LOCK_DIR": str(self.root / "device-locks")}
 
     def run_cmd(self, *args, **env):
         return subprocess.run(args, cwd=self.root, env={**self.env, **env}, capture_output=True, text=True)
@@ -133,8 +138,22 @@ if args[0] == 'sign':
         self.put("docs/AGENT-STATE.md", "[Latest](handoffs/link.md)\n")
         self.assertNotEqual(0, self.checker("--record", "docs/handoffs/link.md").returncode)
 
+    def apk_paths(self):
+        return (self.root / "app/build/outputs/apk/modern/debug/app-modern-debug.apk",
+                self.root / "app/build/outputs/apk/androidTest/modern/debug/app-modern-debug-androidTest.apk")
+
+    def make_apk(self, path, libs=True):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("AndroidManifest.xml", "synthetic")
+            if libs:
+                for name in ("libproot.so", "libproot-loader.so", "libsupervisor.so"):
+                    archive.writestr(f"lib/arm64-v8a/{name}", "synthetic")
+
     def runner_fixture(self):
         shutil.copy2(ROOT / "scripts/verify-workspace.sh", self.root / "scripts/verify-workspace.sh")
+        shutil.copy2(ROOT / "scripts/device-preflight.py", self.root / "scripts/device-preflight.py")
+        shutil.copy2(ROOT / "scripts/device-lock.py", self.root / "scripts/device-lock.py")
         self.put("scripts/check-handoff.py", "print('Synthetic handoff guard')\n")
         self.put("scripts/env.sh", '''set -euo pipefail
 TANUKI_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -142,40 +161,114 @@ TANUKI_SDK="$TANUKI_PROJECT/sdk"
 TANUKI_ADB="$TANUKI_SDK/platform-tools/adb"
 select_device() { "$TANUKI_ADB" -s "$TANUKI_DEVICE" get-state >/dev/null; }
 ''')
+        app_apk, test_apk = self.apk_paths()
+        self.make_apk(app_apk)
+        self.make_apk(test_apk)
         common = '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
 with open(os.environ['VERIFIER_EVENTS'], 'a') as f:
     f.write(json.dumps([pathlib.Path(sys.argv[0]).name, *args]) + '\\n')
 '''
-        self.put("gradlew", common + "raise SystemExit(int(os.environ.get('FAKE_BUILD_EXIT', '0')))\n", True)
+        self.put("gradlew", common + "import time; time.sleep(float(os.environ.get('FAKE_BUILD_SLEEP', '0')))\nraise SystemExit(int(os.environ.get('FAKE_BUILD_EXIT', '0')))\n", True)
         self.put("sdk/cmdline-tools/latest/bin/apkanalyzer", common + f'''
 app = {APP!r}
+apk = args[-1]
 if args[:2] == ['manifest', 'application-id']:
-    print(os.environ.get('FAKE_APP', app) if 'androidTest' not in args[-1] else app + '.test')
+    print(app + '.test' if 'androidTest' in apk else os.environ.get('FAKE_APP', app))
+elif args[:2] == ['manifest', 'version-name']:
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_VERSION_NAME'): print(os.environ['FAKE_TEST_VERSION_NAME'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_VERSION_NAME', '0.1.7'))
+elif args[:2] == ['manifest', 'version-code']:
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_VERSION_CODE'): print(os.environ['FAKE_TEST_VERSION_CODE'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_VERSION_CODE', '9'))
+elif args[:2] == ['manifest', 'min-sdk']:
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_MIN_SDK'): print(os.environ['FAKE_TEST_MIN_SDK'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_MIN_SDK', '26'))
 elif args[:2] == ['manifest', 'print']:
     target = os.environ.get('FAKE_TARGET', app)
     print('<manifest xmlns:android="http://schemas.android.com/apk/res/android"><instrumentation android:targetPackage="' + target + '"/></manifest>')
 else:
     raise SystemExit(2)
 ''', True)
+        self.put("sdk/build-tools/35.0.0/apksigner", common + '''
+if os.environ.get('FAKE_SIGN_BAD') == '1':
+    print('ERROR: synthetic bad signature')
+    raise SystemExit(1)
+apk = args[-1]
+cert = os.environ.get('FAKE_TEST_CERT' if 'androidTest' in apk else 'FAKE_CERT', '1' * 64)
+print('Verifies')
+print('Signer #1 certificate SHA-256 digest: ' + cert)
+''', True)
         self.put("sdk/platform-tools/adb", common + '''
-if args[-1] == 'get-state': print('device')
-elif 'getprop' in args: print(os.environ.get('FAKE_ABI', 'arm64-v8a'))
-elif 'install' in args: print('Success (mock only)')
-elif 'instrument' in args:
-    mode = os.environ.get('FAKE_RESULT', 'pass')
-    print('INSTRUMENTATION_STATUS_CODE: 1')
-    if mode == 'fail':
-        print('INSTRUMENTATION_STATUS_CODE: -2\\nFAILURES!!!')
-    elif mode == 'skip':
-        print('INSTRUMENTATION_STATUS_CODE: -3\\nOK (1 test)')
-    elif mode == 'incomplete':
-        print('INSTRUMENTATION_STATUS_CODE: 0')
+argv = args[2:] if len(args) >= 2 and args[0] == '-s' else args
+def out(text=''): print(text)
+if argv == ['get-state']:
+    out('device')
+elif argv and argv[0] == 'shell':
+    command = ' '.join(argv[1:])
+    if 'getprop' in command:
+        prop = command.split()[-1]
+        values = {'ro.product.cpu.abi': os.environ.get('FAKE_ABI', 'arm64-v8a'),
+                  'ro.build.version.sdk': os.environ.get('FAKE_API', '34'),
+                  'ro.build.version.release': os.environ.get('FAKE_RELEASE', '14')}
+        out(values.get(prop, ''))
+    elif 'ps -A -o NAME' in command:
+        out('NAME')
+        for name in os.environ.get('FAKE_PROCESSES', 'init,system_server').split(','):
+            if name.strip(): out(name.strip())
+    elif 'pm list staged-sessions' in command:
+        if os.environ.get('FAKE_STAGED_UNSUPPORTED') == '1': raise SystemExit(1)
+        if os.environ.get('FAKE_SESSIONS'): out(os.environ['FAKE_SESSIONS'])
+    elif 'dumpsys webviewupdate' in command:
+        out('  Current WebView package (name, version): (com.android.webview, ' + os.environ.get('FAKE_WEBVIEW', '159.0.8133.0') + ')')
+    elif command.startswith('dumpsys package'):
+        parts = command.split()
+        if len(parts) == 2:
+            out('Active install sessions:')
+            if os.environ.get('FAKE_ACTIVE_SESSIONS'):
+                prefix = '  Active Child Session 7:' if os.environ.get('FAKE_ACTIVE_CHILD') else '  Active Session 7:'
+                out(prefix)
+                out('    package=com.example')
+            out('Finalized install sessions:')
+        else:
+            package = parts[-1]
+            if os.environ.get('FAKE_NO_INSTALL') == '1':
+                out('Unable to find package: ' + package)
+            else:
+                post = (pathlib.Path.cwd() / 'install-done').exists()
+                code = os.environ.get('FAKE_POST_CODE') if post and os.environ.get('FAKE_POST_CODE') else os.environ.get('FAKE_INSTALLED_CODE', '9')
+                name = os.environ.get('FAKE_POST_NAME') if post and os.environ.get('FAKE_POST_NAME') else os.environ.get('FAKE_INSTALLED_NAME', '0.1.7')
+                out('    versionCode=' + code + ' minSdk=26 targetSdk=34')
+                out('    versionName=' + name)
+    elif 'am instrument' in command:
+        mode = os.environ.get('FAKE_RESULT', 'pass')
+        print('INSTRUMENTATION_STATUS_CODE: 1')
+        if mode == 'fail':
+            print('INSTRUMENTATION_STATUS_CODE: -2\\nFAILURES!!!')
+        elif mode == 'skip':
+            print('INSTRUMENTATION_STATUS_CODE: -3\\nOK (1 test)')
+        elif mode == 'incomplete':
+            print('INSTRUMENTATION_STATUS_CODE: 0')
+        else:
+            print('INSTRUMENTATION_STATUS_CODE: 0\\nOK (1 test)')
+        if mode == 'transport': raise SystemExit(7)
     else:
-        print('INSTRUMENTATION_STATUS_CODE: 0\\nOK (1 test)')
-    if mode == 'transport': raise SystemExit(7)
-else: raise SystemExit(2)
+        raise SystemExit(2)
+elif 'install' in argv:
+    (pathlib.Path.cwd() / 'install-done').write_text('1')
+    out('Success (mock only)')
+else:
+    raise SystemExit(2)
 ''', True)
 
     def runner(self, *args, **env):
@@ -191,7 +284,9 @@ else: raise SystemExit(2)
     def test_help_and_invalid_flags_touch_no_tools(self):
         self.runner_fixture()
         self.assertEqual(0, self.runner("--help").returncode)
-        for args in (("--unknown",), ("--device",), ("--run-device-tests",), ("--confirm-test-data",), ("--device", "synthetic-device")):
+        for args in (("--unknown",), ("--device",), ("--run-device-tests",), ("--confirm-test-data",),
+                     ("--device", "synthetic-device"), ("--expect-apk-sha256", "0" * 64),
+                     ("--min-webview-major", "120")):
             with self.subTest(args=args):
                 self.assertNotEqual(0, self.runner(*args).returncode)
         self.assertEqual([], self.events())
@@ -223,6 +318,138 @@ else: raise SystemExit(2)
         self.assertEqual(2, sum('install' in command for command in commands))
         self.assertFalse(any(item in {'uninstall', 'clear', 'force-stop'} for command in commands for item in command))
         self.assertIn('PASS: 1 Android tests', result.stdout)
+
+    def test_device_lock_rejects_same_serial_and_releases_after_exit(self):
+        self.runner_fixture()
+        env = {"TANUKI_DEVICE_LOCK_DIR": str(self.root / "device-locks")}
+        holder = subprocess.Popen(
+            [sys.executable, "scripts/device-lock.py", "--serial", "lock-a", "--",
+             sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: holder.poll() is None and holder.kill())
+        self.assertIn("DEVICE_LOCK_ACQUIRED", holder.stdout.readline())
+        second = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-a",
+                              "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(3, second.returncode, second.stderr)
+        self.assertIn("已被", second.stderr)
+        other = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-b",
+                             "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(0, other.returncode, other.stderr)
+        holder.terminate()
+        holder.wait(timeout=10)
+        released = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-a",
+                                "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(0, released.returncode, released.stderr)
+
+    def test_device_lock_survives_helper_death_until_child_exits(self):
+        self.runner_fixture()
+        lock_dir = self.root / "device-locks"
+        env = {"TANUKI_DEVICE_LOCK_DIR": str(lock_dir)}
+        holder = subprocess.Popen(
+            [sys.executable, "scripts/device-lock.py", "--serial", "lock-c", "--",
+             sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertIn("DEVICE_LOCK_ACQUIRED", holder.stdout.readline())
+        owner = json.loads((lock_dir / "tanuki-device-lock-c.lock").read_text())
+        child_pid = int(owner["childPid"])
+        holder.kill()
+        holder.wait(timeout=10)
+        still_held = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-c",
+                                  "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(3, still_held.returncode, still_held.stderr)
+        try:
+            os.kill(child_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        deadline = time.time() + 10
+        attempt = None
+        while time.time() < deadline:
+            attempt = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-c",
+                                   "--", sys.executable, "-c", "pass", **env)
+            if attempt.returncode == 0:
+                break
+            time.sleep(0.1)
+        self.assertEqual(0, attempt.returncode, attempt.stderr)
+
+    def test_verify_workspace_device_runs_are_serialized_per_serial(self):
+        self.runner_fixture()
+        env = {"FAKE_BUILD_SLEEP": "3"}
+        first = subprocess.Popen(
+            ["bash", "scripts/verify-workspace.sh", *self.device_args()],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: first.poll() is None and first.kill())
+        self.assertIn("DEVICE_LOCK_ACQUIRED", first.stdout.readline())
+        second = self.runner(*self.device_args(), **env)
+        self.assertEqual(3, second.returncode, second.stderr)
+        self.assertIn("设备任务被拒绝", second.stderr)
+        _, stderr = first.communicate(timeout=90)
+        self.assertEqual(0, first.returncode, stderr)
+        self.assertEqual(1, sum(event[0] == "gradlew" for event in self.events()))
+
+    def test_device_preflight_identity_and_busy_gates_block_installation(self):
+        self.runner_fixture()
+        cases = (
+            ({"FAKE_SIGN_BAD": "1"}, "bad archive signature"),
+            ({"FAKE_TEST_CERT": "2" * 64}, "app/test certificate mismatch"),
+            ({"FAKE_INSTALLED_CODE": "10"}, "installed versionCode is higher"),
+            ({"FAKE_WEBVIEW": "120.0.0.0"}, "WebView below minimum"),
+            ({"FAKE_PROCESSES": "init,node"}, "live Node process"),
+            ({"FAKE_SESSIONS": "Session 7: package=com.example"}, "active install session"),
+            ({"FAKE_STAGED_UNSUPPORTED": "1", "FAKE_ACTIVE_SESSIONS": "1"}, "dumpsys fallback active session"),
+            ({"FAKE_STAGED_UNSUPPORTED": "1", "FAKE_ACTIVE_SESSIONS": "1", "FAKE_ACTIVE_CHILD": "1"},
+             "dumpsys fallback active child session"),
+        )
+        for env, label in cases:
+            with self.subTest(label=label):
+                result = self.runner(*self.device_args(), **env)
+                self.assertNotEqual(0, result.returncode, result.stdout)
+                self.assertFalse(any("install" in event for event in self.events()))
+                (self.root / "events.jsonl").unlink()
+        app_apk, _ = self.apk_paths()
+        self.make_apk(app_apk, libs=False)
+        result = self.runner(*self.device_args())
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertFalse(any("install" in event for event in self.events()))
+
+    def test_device_preflight_accepts_independent_androidtest_version(self):
+        self.runner_fixture()
+        result = self.runner(*self.device_args(), FAKE_TEST_VERSION_NAME="1.0-test",
+                             FAKE_TEST_VERSION_CODE="1", FAKE_TEST_MIN_SDK="26")
+        self.assertEqual(0, result.returncode, result.stderr)
+        evidence = sorted((self.root / ".build/logs").glob("device-preflight-pre-*.json"))[-1]
+        payload = json.loads(evidence.read_text())
+        self.assertEqual(9, payload["app"]["versionCode"])
+        self.assertEqual(1, payload["test"]["versionCode"])
+
+    def test_device_preflight_pins_and_post_install_version(self):
+        self.runner_fixture()
+        app_apk, _ = self.apk_paths()
+        app_sha = hashlib.sha256(app_apk.read_bytes()).hexdigest()
+        result = self.runner(*self.device_args(), "--expect-apk-sha256", app_sha,
+                             "--expect-cert-sha256", "1" * 64)
+        self.assertEqual(0, result.returncode, result.stderr)
+        preflight = sorted((self.root / ".build/logs").glob("device-preflight-pre-*.json"))
+        self.assertEqual(1, len(preflight))
+        self.assertIn('"status": "pass"', preflight[0].read_text())
+        (self.root / "events.jsonl").unlink()
+        (self.root / "install-done").unlink(missing_ok=True)
+
+        for args, env in (
+            (("--expect-apk-sha256", "0" * 64), {}),
+            (("--expect-cert-sha256", "3" * 64), {}),
+        ):
+            with self.subTest(args=args):
+                result = self.runner(*self.device_args(), *args, **env)
+                self.assertNotEqual(0, result.returncode, result.stdout)
+                self.assertFalse(any("install" in event for event in self.events()))
+                (self.root / "events.jsonl").unlink()
+                (self.root / "install-done").unlink(missing_ok=True)
+
+        result = self.runner(*self.device_args(), FAKE_POST_CODE="10")
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        commands = self.events()
+        self.assertEqual(2, sum("install" in event for event in commands))
+        self.assertFalse(any("instrument" in event for event in commands))
 
     def test_failure_skip_incomplete_and_transport_are_not_passes(self):
         self.runner_fixture()
