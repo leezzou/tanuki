@@ -211,6 +211,19 @@ class DevelopmentGateTest(unittest.TestCase):
         self.set_files(["scripts/unclassified-tool.sh"])
         self.assert_rejected(self.run_gate(), "缺少独立 QA 证据")
 
+    def test_product_skill_markdown_requires_qa(self):
+        for path in ("app/src/main/assets/browser/SKILL.md",
+                     "app/src/main/assets/phone/SKILL.md"):
+            with self.subTest(path=path):
+                self.set_files([path])
+                self.assert_rejected(self.run_gate(), "缺少独立 QA 证据")
+
+    def test_root_markdown_remains_exempt(self):
+        self.set_files(["CHANGELOG.md"])
+        result = self.run_gate()
+        self.assert_passes(result)
+        self.assertIn("qa=not_required", result.stdout)
+
     def test_valid_qa_with_skips_is_not_all_green(self):
         self.set_files(["app/src/main/kotlin/com/tanuki/TanukiApp.kt"])
         evidence = self.evidence(steps=[

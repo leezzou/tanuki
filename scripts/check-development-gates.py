@@ -84,10 +84,12 @@ def classify_paths(paths: List[str]) -> Tuple[List[str], List[str]]:
     required: List[str] = []
     unknown: List[str] = []
     for path in paths:
-        if path in EXEMPT_FILES or path.startswith(EXEMPT_PREFIXES) or path.endswith(".md"):
-            continue
+        # 必需 QA 路径优先，避免 app/ 内随产品发布的 Markdown 被后缀豁免。
         if path in QA_REQUIRED_FILES or path.startswith(QA_REQUIRED_PREFIXES):
             required.append(path)
+        elif path in EXEMPT_FILES or path.startswith(EXEMPT_PREFIXES) or (
+                path.endswith(".md") and "/" not in path):
+            continue
         else:
             unknown.append(path)
     return required, unknown
