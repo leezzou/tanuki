@@ -14,112 +14,47 @@
 #   TANUKI_ANDROID_USER_HOME            覆盖默认的 worktree 内 ANDROID_USER_HOME
 #   TANUKI_SKIP_ANDROID_USER_HOME=1     不重定向 ANDROID_USER_HOME（assemble/lint 会因写 ~/.android 被沙箱拒绝）
 
-# 解析路径；优先 readlink -f，旧系统退回 realpath。
-tanuki_env_realpath() {
-  local path="$1"
-  if readlink -f "$path" >/dev/null 2>&1; then
-    readlink -f "$path"
-  elif command -v realpath >/dev/null 2>&1; then
-    realpath "$path"
-  else
-    return 1
-  fi
-}
-
-# 可写缓存/源码树拒绝绝对链接、逃出源树或先出根再返回的链接；内部安全链接在复制时 dereference。
-tanuki_env_validate_tree_links() {
-  local src="$1" src_real link raw resolved
-  local link_rel link_dir depth part
-  local -a parts
-  src_real=$(tanuki_env_realpath "$src") || return 1
-  src="$src_real"
+# 严格策略：复制可写缓存/源码树时不跟随、不保留任何符号链接。
+# 已存在的目标树也会清理链接；顶层链接源直接跳过，让 Gradle 重新下载或重新构建。
+tanuki_env_strip_links() {
+  local root="$1" link
   while IFS= read -r -d '' link; do
-    raw=$(readlink "$link") || return 1
-    if [[ "$raw" == /* ]]; then
-      printf '[ao-worktree-env] 错误: 源码树含绝对符号链接，拒绝复制: %s -> %s\n' "$link" "$raw" >&2
-      return 1
-    fi
-    # 仅检查源位置的 realpath 不够：链接文本会原样复制，必须保证搬迁后仍从副本根内解析。
-    # 从链接所在目录按词法累计深度，任何 .. 越过源根（即使随后返回）都会指向源目录或断链。
-    link_rel="${link#"$src_real"/}"
-    link_dir="${link_rel%/*}"
-    [[ "$link_dir" == "$link_rel" ]] && link_dir=""
-    depth=0
-    IFS='/' read -r -a parts <<< "$link_dir"
-    parts+=("")
-    for part in "${parts[@]}"; do
-      case "$part" in
-        ''|.) ;;
-        ..) depth=$((depth - 1)); (( depth >= 0 )) || { printf '[ao-worktree-env] 错误: 符号链接路径异常: %s\n' "$link" >&2; return 1; } ;;
-        *) depth=$((depth + 1)) ;;
-      esac
-    done
-    IFS='/' read -r -a parts <<< "$raw"
-    parts+=("")
-    for part in "${parts[@]}"; do
-      case "$part" in
-        ''|.) ;;
-        ..)
-          depth=$((depth - 1))
-          if (( depth < 0 )); then
-            printf '[ao-worktree-env] 错误: 符号链接先逃出源码根，搬迁后会指向源目录或断链: %s -> %s\n' "$link" "$raw" >&2
-            return 1
-          fi
-          ;;
-        *) depth=$((depth + 1)) ;;
-      esac
-    done
-    resolved=$(tanuki_env_realpath "$link") || {
-      printf '[ao-worktree-env] 错误: 无法解析符号链接: %s -> %s\n' "$link" "$raw" >&2
-      return 1
-    }
-    if [[ ! -e "$resolved" ]]; then
-      printf '[ao-worktree-env] 错误: 符号链接目标不存在: %s -> %s\n' "$link" "$raw" >&2
-      return 1
-    fi
-    case "$resolved" in
-      "$src_real"/*) ;;
-      *)
-        printf '[ao-worktree-env] 错误: 符号链接逃出源码树，拒绝复制: %s -> %s\n' "$link" "$raw" >&2
-        return 1
-        ;;
-    esac
-  done < <(find "$src" -type l -print0 2>/dev/null)
-  return 0
+    printf '[ao-worktree-env] 警告: 跳过符号链接（不复制/不跟随/不保留）: %s -> %s\n' "$link" "$(readlink "$link")" >&2
+    rm -f "$link"
+  done < <(find "$root" -type l -print0 2>/dev/null)
 }
 
-# 通用复制：目录/文件/符号链接；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
+# 通用复制：目录/文件；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
 # 独立定义，便于 scripts/test-ao-worktree-env.sh 在 TANUKI_ENV_LIB_ONLY=1 下做回归测试。
 tanuki_env_copy_entry() {
-  local src="$1" dst="$2" tmp target leftover
-  if [[ -e "$dst" || -L "$dst" ]]; then return 0; fi
+  local src="$1" dst="$2" tmp leftover
+  if [[ -L "$dst" ]]; then
+    printf '[ao-worktree-env] 警告: 移除已有符号链接目标: %s -> %s\n' "$dst" "$(readlink "$dst")" >&2
+    rm -f "$dst"
+  fi
+  if [[ -e "$dst" ]]; then
+    if [[ -d "$dst" ]]; then
+      tanuki_env_strip_links "$dst"
+    fi
+    return 0
+  fi
+  if [[ -L "$src" ]]; then
+    printf '[ao-worktree-env] 警告: 跳过符号链接源（不复制/不跟随/不保留）: %s -> %s\n' "$src" "$(readlink "$src")" >&2
+    return 0
+  fi
   mkdir -p "$(dirname "$dst")" || return 1
   tmp="${dst}.tmp.$$"
   rm -rf "$tmp"
-  if [[ -L "$src" ]]; then
-    # 顶层链接先解析，再把目标复制为独立实体；绝不把外部/相对链接原样带进 worktree。
-    target=$(tanuki_env_realpath "$src") || {
-      printf '[ao-worktree-env] 错误: 无法解析符号链接: %s\n' "$src" >&2
-      return 1
-    }
-    if [[ ! -e "$target" ]]; then
-      printf '[ao-worktree-env] 错误: 符号链接目标不存在: %s -> %s\n' "$src" "$(readlink "$src")" >&2
-      return 1
-    fi
-    tanuki_env_copy_entry "$target" "$dst" || return 1
-    return 0
-  fi
   if [[ -d "$src" ]]; then
-    tanuki_env_validate_tree_links "$src" || return 1
-    # -L 完全 dereference 链接，worktree 内不保留任何链接文本；循环链接由 cp 拒绝。
-    if ! cp -cRL "$src" "$tmp" 2>/dev/null; then
+    if ! cp -cR "$src" "$tmp" 2>/dev/null; then
       # clone 失败可能已创建部分 $tmp；不清理会让普通复制嵌套成 $tmp/<basename>。
       rm -rf "$tmp"
-      if ! cp -RL "$src" "$tmp"; then
+      if ! cp -R "$src" "$tmp"; then
         rm -rf "$tmp"
         return 1
       fi
     fi
+    tanuki_env_strip_links "$tmp"
     leftover=$(find "$tmp" -type l -print -quit 2>/dev/null)
     if [[ -n "$leftover" ]]; then
       printf '[ao-worktree-env] 错误: 复制后仍残留符号链接，拒绝使用: %s\n' "$leftover" >&2
@@ -259,7 +194,10 @@ tanuki_ao_worktree_env() {
     for entry in "$dist_source"/*/; do
       [[ -d "$entry" ]] || continue
       name=$(basename "$entry")
-      [[ -x "$dist_target/$name/gradle-${wrapper_version}/bin/gradle" ]] && continue
+      if [[ -x "$dist_target/$name/gradle-${wrapper_version}/bin/gradle" ]]; then
+        tanuki_env_strip_links "$dist_target/$name"
+        continue
+      fi
       tanuki_env_copy_entry "${entry%/}" "$dist_target/$name" || {
         tanuki_env_fail "复用 Gradle 发行版失败: ${entry%/}"
         return 1
@@ -278,7 +216,7 @@ tanuki_ao_worktree_env() {
   fi
 
   # 复用依赖缓存（modules-2/jars-9/generated-gradle-jars），避免重复下载；不复制锁与 journal。
-  local cache_reused=0 cache_skipped=0
+  local cache_reused=0 cache_skipped=0 cache_missing=0
   if [[ "${TANUKI_SKIP_GRADLE_CACHE_COPY:-0}" == "1" ]]; then
     cache_skipped=1
   else
@@ -291,28 +229,36 @@ tanuki_ao_worktree_env() {
       else
         name="$gradle_user_home/caches/$(basename "$entry")"
       fi
-      [[ -e "$name" ]] && continue
+      if [[ -e "$name" ]]; then
+        [[ -d "$name" ]] && tanuki_env_strip_links "$name"
+        continue
+      fi
       tanuki_env_copy_entry "$entry" "$name" || {
         tanuki_env_fail "复制 Gradle 缓存失败: $entry"
         return 1
       }
-      cache_reused=1
+      if [[ -e "$name" ]]; then cache_reused=1; else cache_missing=1; fi
     done
     if [[ "${TANUKI_COPY_GRADLE_VERSION_CACHE:-0}" == "1" && -d "$cache_source/$wrapper_version" ]]; then
       for entry in "$cache_source/$wrapper_version"/*; do
         [[ -e "$entry" ]] || continue
         name="$version_cache/$(basename "$entry")"
-        [[ -e "$name" ]] && continue
+        if [[ -e "$name" ]]; then
+          [[ -d "$name" ]] && tanuki_env_strip_links "$name"
+          continue
+        fi
         tanuki_env_copy_entry "$entry" "$name" || {
           tanuki_env_fail "复制 Gradle 版本缓存失败: $entry"
           return 1
         }
-        cache_reused=1
+        if [[ -e "$name" ]]; then cache_reused=1; else cache_missing=1; fi
       done
     fi
   fi
   if [[ "$cache_skipped" == "1" ]]; then
     tanuki_env_note "已按 TANUKI_SKIP_GRADLE_CACHE_COPY=1 跳过依赖缓存复制"
+  elif [[ "$cache_missing" == "1" ]]; then
+    tanuki_env_note "部分 Gradle 缓存含符号链接已跳过，Gradle 将重新下载/重建"
   elif [[ "$cache_reused" == "1" ]]; then
     tanuki_env_note "已复用 Gradle 依赖缓存（modules-2/jars-9，APFS 可用时为写时复制）"
   else
@@ -382,7 +328,7 @@ tanuki_ao_worktree_env() {
 }
 
 if tanuki_ao_worktree_env; then
-  unset -f tanuki_ao_worktree_env tanuki_env_note tanuki_env_fail tanuki_env_copy_entry tanuki_env_realpath tanuki_env_validate_tree_links
+  unset -f tanuki_ao_worktree_env tanuki_env_note tanuki_env_fail tanuki_env_copy_entry tanuki_env_strip_links
 else
   if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 1

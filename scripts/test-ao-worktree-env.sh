@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 回归测试：clonefile 失败留下部分临时目录时，普通复制回退不得嵌套或残留。
+# 回归测试：可写缓存/源码树复制严格跳过符号链接，且 clone 失败回退不嵌套。
 # 只加载脚本里的复制辅助函数，不执行环境准备，也不写 worktree 的 .build。
 set -euo pipefail
 
@@ -17,12 +17,12 @@ fail() {
   exit 1
 }
 
-# 模拟 macOS 的 cp：-cRL / -c 先创建部分目标再失败；plain_copy_fails=1 时 -RL 也失败。
+# 模拟 macOS 的 cp：-cR / -c 先创建部分目标再失败；plain_copy_fails=1 时 -R 也失败。
 real_cp=$(command -v cp)
 plain_copy_fails=0
 cp() {
   case "$1" in
-    -cRL)
+    -cR)
       mkdir -p "$3/partial-clone"
       printf 'partial\n' > "$3/partial-clone/junk"
       return 1
@@ -31,7 +31,7 @@ cp() {
       printf 'partial\n' > "$3"
       return 1
       ;;
-    -RL)
+    -R)
       if [[ "$plain_copy_fails" == "1" ]]; then
         mkdir -p "$3/partial-plain"
         printf 'partial\n' > "$3/partial-plain/junk"
@@ -55,87 +55,69 @@ printf 'whole-file\n' > "$work/source.txt"
 tanuki_env_copy_entry "$work/source.txt" "$work/dst-file.txt"
 cmp -s "$work/source.txt" "$work/dst-file.txt" || fail "文件复制内容不完整"
 
-# 3. 顶层符号链接：解析后复制为独立实体，不能把外部链接带进 worktree。
+# 3. 顶层符号链接：一律跳过，不复制、不跟随、不产生目标。
 mkdir -p "$work/external-dir"
 printf 'external-dir\n' > "$work/external-dir/file.txt"
 ln -s "$work/external-dir" "$work/link-dir"
 tanuki_env_copy_entry "$work/link-dir" "$work/dst-link-dir"
-[[ -d "$work/dst-link-dir" && ! -L "$work/dst-link-dir" ]] || fail "目录链接未实体化"
-[[ -f "$work/dst-link-dir/file.txt" ]] || fail "目录链接目标缺少文件"
+[[ ! -e "$work/dst-link-dir" ]] || fail "顶层目录链接不应产生目标"
 
 printf 'external-file\n' > "$work/external-file.txt"
 ln -s external-file.txt "$work/link-file"
 tanuki_env_copy_entry "$work/link-file" "$work/dst-link-file"
-[[ -f "$work/dst-link-file" && ! -L "$work/dst-link-file" ]] || fail "文件链接未实体化"
-cmp -s "$work/external-file.txt" "$work/dst-link-file" || fail "文件链接目标内容不完整"
+[[ ! -e "$work/dst-link-file" ]] || fail "顶层文件链接不应产生目标"
 
-# 3b. 顶层链接指向含逃逸链接的目录：递归校验必须拒绝，不能实体化到 worktree。
+# 3b. 顶层链接指向含逃逸链接的目录：也直接跳过，不递归。
 mkdir -p "$work/external-escape" "$work/outside-escape"
 printf 'secret2\n' > "$work/outside-escape/secret.txt"
 ln -s "$work/outside-escape/secret.txt" "$work/external-escape/escape"
 ln -s "$work/external-escape" "$work/link-escape-dir"
-if tanuki_env_copy_entry "$work/link-escape-dir" "$work/dst-link-escape" 2>/dev/null; then
-  fail "顶层链接目录内的逃逸链接应被拒绝"
-fi
-[[ ! -e "$work/dst-link-escape" ]] || fail "拒绝顶层链接目录后不应留下目标"
+tanuki_env_copy_entry "$work/link-escape-dir" "$work/dst-link-escape"
+[[ ! -e "$work/dst-link-escape" ]] || fail "顶层链接目录不应产生目标"
 
-# 4. 目录内的绝对/逃逸链接必须拒绝，且不留下目标。
-mkdir -p "$work/outside" "$work/src-escape-abs" "$work/src-escape-rel"
+# 4. 目录内的链接全部跳过，其他文件正常复制，目标树不得有任何符号链接。
+mkdir -p "$work/outside" "$work/src-links/data" "$work/src-links/deep" "$work/src-links/cycle"
 printf 'secret\n' > "$work/outside/secret.txt"
-ln -s "$work/outside/secret.txt" "$work/src-escape-abs/absolute-link"
-if tanuki_env_copy_entry "$work/src-escape-abs" "$work/dst-escape-abs" 2>/dev/null; then
-  fail "绝对符号链接应被拒绝"
-fi
-[[ ! -e "$work/dst-escape-abs" ]] || fail "拒绝绝对链接后不应留下目标"
+printf 'source\n' > "$work/src-links/data/file.txt"
+ln -s data/file.txt "$work/src-links/safe-link"
+ln -s "$work/outside/secret.txt" "$work/src-links/absolute-link"
+ln -s ../outside/secret.txt "$work/src-links/relative-link"
+ln -s ../d "$work/src-links/deep/to-d"
+ln -s to-d/../../src-links/data/file.txt "$work/src-links/deep/chain-link"
+ln -s .. "$work/src-links/cycle/loop"
+tanuki_env_copy_entry "$work/src-links" "$work/dst-links"
+[[ -f "$work/dst-links/data/file.txt" ]] || fail "目录复制缺少普通文件"
+[[ -z "$(find "$work/dst-links" -type l -print -quit)" ]] || fail "目标树不应保留符号链接"
+for skipped in safe-link absolute-link relative-link deep/to-d deep/chain-link cycle/loop; do
+  [[ ! -e "$work/dst-links/$skipped" && ! -L "$work/dst-links/$skipped" ]] || fail "链接未被跳过: $skipped"
+done
+printf 'changed\n' > "$work/dst-links/data/file.txt"
+[[ "$(cat "$work/src-links/data/file.txt")" == "source" ]] || fail "写目标文件修改了源"
+[[ "$(cat "$work/dst-links/data/file.txt")" == "changed" ]] || fail "写目标文件未生效"
 
-ln -s ../outside/secret.txt "$work/src-escape-rel/relative-link"
-if tanuki_env_copy_entry "$work/src-escape-rel" "$work/dst-escape-rel" 2>/dev/null; then
-  fail "逃出源码树的相对符号链接应被拒绝"
-fi
-[[ ! -e "$work/dst-escape-rel" ]] || fail "拒绝逃逸链接后不应留下目标"
-
-# 4b. 先逃出源根再返回的链接：复制后仍会指向源目录，必须拒绝。
-mkdir -p "$work/src-escape-round/data"
-printf 'round\n' > "$work/src-escape-round/data/file.txt"
-ln -s ../src-escape-round/data/file.txt "$work/src-escape-round/link.txt"
-if tanuki_env_copy_entry "$work/src-escape-round" "$work/dst-escape-round" 2>/dev/null; then
-  fail "先逃出源根再返回的链接应被拒绝"
-fi
-[[ ! -e "$work/dst-escape-round" ]] || fail "拒绝绕回链接后不应留下目标"
-
-# 4c. 循环链接必须拒绝，且不留下目标。
-mkdir -p "$work/src-cycle/sub"
-ln -s .. "$work/src-cycle/sub/loop"
-if tanuki_env_copy_entry "$work/src-cycle" "$work/dst-cycle" 2>/dev/null; then
-  fail "循环符号链接应被拒绝"
-fi
-[[ ! -e "$work/dst-cycle" ]] || fail "拒绝循环链接后不应留下目标"
-
-# 5. 源/目标目录名不同：内部安全链接被 dereference，写副本不能修改源。
-mkdir -p "$work/src-original/data" "$work/src-original/sub"
-printf 'source\n' > "$work/src-original/data/file.txt"
-ln -s ../data/file.txt "$work/src-original/sub/link.txt"
-tanuki_env_copy_entry "$work/src-original" "$work/dst-renamed"
-[[ -f "$work/dst-renamed/sub/link.txt" && ! -L "$work/dst-renamed/sub/link.txt" ]] || fail "内部链接应 dereference 为普通文件"
-[[ "$(cat "$work/dst-renamed/sub/link.txt")" == "source" ]] || fail "dereference 后内容不完整"
-printf 'changed\n' > "$work/dst-renamed/sub/link.txt"
-[[ "$(cat "$work/src-original/data/file.txt")" == "source" ]] || fail "写副本文件修改了源"
-[[ "$(cat "$work/dst-renamed/sub/link.txt")" == "changed" ]] || fail "写副本文件未生效"
-
-# 5b. 中间目录链接 + 链式 .. 绕回：dereference 后写副本不得修改源。
+# 5. 源/目标目录名不同 + 中间目录链接 + 链式 .. 绕回：链接跳过，写目标不影响源。
 mkdir -p "$work/src-chain/d" "$work/src-chain/data" "$work/src-chain/deep"
 printf 'chain\n' > "$work/src-chain/data/file.txt"
 ln -s ../d "$work/src-chain/deep/to-d"
 ln -s to-d/../../src-chain/data/file.txt "$work/src-chain/deep/link.txt"
 tanuki_env_copy_entry "$work/src-chain" "$work/dst-chain"
-[[ -f "$work/dst-chain/deep/link.txt" && ! -L "$work/dst-chain/deep/link.txt" ]] || fail "链式链接应 dereference 为普通文件"
-[[ "$(cat "$work/dst-chain/deep/link.txt")" == "chain" ]] || fail "链式链接 dereference 内容不完整"
-[[ -z "$(find "$work/dst-chain" -type l -print -quit)" ]] || fail "副本不应保留任何符号链接"
-printf 'chain-changed\n' > "$work/dst-chain/deep/link.txt"
-[[ "$(cat "$work/src-chain/data/file.txt")" == "chain" ]] || fail "写链式副本修改了源"
-[[ "$(cat "$work/dst-chain/deep/link.txt")" == "chain-changed" ]] || fail "写链式副本未生效"
+[[ -f "$work/dst-chain/data/file.txt" ]] || fail "链式源缺少普通文件"
+[[ ! -e "$work/dst-chain/deep/to-d" && ! -L "$work/dst-chain/deep/to-d" ]] || fail "目录链接未被跳过"
+[[ ! -e "$work/dst-chain/deep/link.txt" && ! -L "$work/dst-chain/deep/link.txt" ]] || fail "链式链接未被跳过"
+[[ -z "$(find "$work/dst-chain" -type l -print -quit)" ]] || fail "链式目标不应保留符号链接"
+printf 'chain-changed\n' > "$work/dst-chain/data/file.txt"
+[[ "$(cat "$work/src-chain/data/file.txt")" == "chain" ]] || fail "写链式目标修改了源"
+[[ "$(cat "$work/dst-chain/data/file.txt")" == "chain-changed" ]] || fail "写链式目标未生效"
 
-# 6. 回退也失败时必须返回非 0，且清理目标与临时目录。
+# 6. 已存在的目标树也要清理链接，保证重复 source 后仍无符号链接。
+mkdir -p "$work/existing-target"
+printf 'old\n' > "$work/existing-target/old.txt"
+ln -s "$work/outside/secret.txt" "$work/existing-target/old-link"
+tanuki_env_copy_entry "$work/src" "$work/existing-target"
+[[ -f "$work/existing-target/old.txt" ]] || fail "已有目标文件被误删"
+[[ -z "$(find "$work/existing-target" -type l -print -quit)" ]] || fail "已有目标树仍有符号链接"
+
+# 7. 回退也失败时必须返回非 0，且清理目标与临时目录。
 plain_copy_fails=1
 if tanuki_env_copy_entry "$work/src" "$work/dst-failed"; then
   fail "普通复制失败时应返回非 0"
@@ -146,7 +128,7 @@ if compgen -G "$work/dst-failed.tmp.*" >/dev/null; then
 fi
 plain_copy_fails=0
 
-# 7. 正常路径（真实 cp）仍工作。
+# 8. 正常路径（真实 cp）仍工作。
 unset -f cp
 tanuki_env_copy_entry "$work/src" "$work/dst-ok"
 [[ -f "$work/dst-ok/sub/file.txt" ]] || fail "正常复制缺少文件"
