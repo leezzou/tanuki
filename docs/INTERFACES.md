@@ -154,7 +154,7 @@ HTTP 200..399 或 401 → 存活
 - 合法连接默认可以查看普通页面；操作权由原生票据约束，**RPC 不能自行授权**。
 - `status` 只读认证元数据。
 - `tabs`、`snapshot`、`screenshot` 是查看方法；当前连接可直接查看普通页面，不需要操作票据。
-- `request_control` 向用户请求当前连接的操作权；用户未授权前，操作方法返回 `permission_required`。
+- `request_control` 向用户请求当前连接的操作权。已授权时返回 `{pending:false, authorized:true}`；未授权时**立即**返回 `{pending:true}`，不阻塞等待用户。调用方应通过 `status` 的 `authorized`/`pending` 观察结果；120 秒只是待处理请求的有效期，到期仍未处理会撤销该请求。用户未授权前，操作方法返回 `permission_required`。
 - 操作方法在执行前取得票据；用户收回、临时接管到期、页面重建或连接关闭都会使旧票据失效，后续返回 `permission_revoked`。
 - 触碰网页会先暂停 AI 操作并使旧票据失效；临时接管连续 30 秒无交互后只恢复同一当前连接的票据。
 - 登录保护页：`tabs` 仍可用，但活动标签 ID 返回空；其他方法返回 `private_page`。
@@ -165,7 +165,7 @@ HTTP 200..399 或 401 → 存活
 | # | 方法 | 参数与限制 | 行为 / 结果 |
 |---|---|---|---|
 | 1 | `status` | 无 | 返回 `visible`、`closed`、`authorized`、`pending`、`background`；不含文档数据 |
-| 2 | `request_control` | 无 | 请求当前连接操作权；已授权返回 `authorized=true`；等待用户最多 120 秒 |
+| 2 | `request_control` | 无 | 已授权返回 `{pending:false, authorized:true}`；未授权立即返回 `{pending:true}` 并由原生询问用户；120 秒为待处理请求有效期，不是 RPC 等待时间；结果通过 `status` 观察 |
 | 3 | `tabs` | 可选 `tabId` 必须等于当前选中标签 | 返回普通标签 `id/url/title` 与 `activeTab`；敏感登录页 `activeTab=""` 且不列出该标签 |
 | 4 | `snapshot` | `offset` 0..1000000（默认 0）、`elementOffset` 0..50000（默认 0）、可选 `tabId` | 读取整篇主文档；每页最多 20000 字符、100 个控件；扫描上限 50000 节点；序列化结果上限 160000 字符 |
 | 5 | `screenshot` | 可选 `tabId` | 完整文档 PNG；最大边 2048 px；Base64 后超过 2 MiB 返回 `screenshot_too_large` |
