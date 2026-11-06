@@ -47,15 +47,31 @@ class DocxTextExtractorTest {
     @Test fun extractsParagraphsEmptyParagraphsBreaksTabsAndEntities() {
         val file = docx(
             "word/document.xml" to xml(
-                "<w:p><w:r><w:t>第一段 &amp; 文本</w:t></w:r></w:p>" +
+                "<w:p><w:r><w:t>第一段 &amp; 文本<![CDATA[ & CDATA]]></w:t></w:r></w:p>" +
                     "<w:p/>" +
                     "<w:p><w:r><w:t>第二</w:t><w:br/><w:t>段</w:t><w:tab/><w:t>尾</w:t></w:r></w:p>",
             ),
         )
         try {
             val result = extract(file)
-            assertEquals("第一段 & 文本\n\n第二\n段\t尾", result.text)
+            assertEquals("第一段 & 文本 & CDATA\n\n第二\n段\t尾", result.text)
             assertFalse(result.truncated)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test fun rejectsDoctypeDeclarationBeforeRootElement() {
+        val doctype = """<?xml version="1.0" encoding="UTF-8"?>""" +
+            """<!DOCTYPE w:document>""" +
+            """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">""" +
+            """<w:body><w:p><w:r><w:t>不应被提取</w:t></w:r></w:p></w:body></w:document>"""
+        val file = docx("word/document.xml" to doctype.toByteArray())
+        try {
+            extract(file)
+            fail("包含 DOCTYPE 的正文应被拒绝")
+        } catch (failure: IOException) {
+            assertTrue(failure.message.orEmpty().contains("文档类型声明"))
         } finally {
             file.delete()
         }

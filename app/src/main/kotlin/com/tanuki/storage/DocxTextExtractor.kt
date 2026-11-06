@@ -91,10 +91,12 @@ object DocxTextExtractor {
                     "tab" -> append("\t")
                 }
                 XmlPullParser.END_TAG -> if (localName(parser) == "t") inText = false
-                XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF -> if (inText) append(parser.text.orEmpty())
+                XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF,
+                XmlPullParser.IGNORABLE_WHITESPACE -> if (inText) append(parser.text.orEmpty())
             }
             if (truncated) break
-            event = parser.next()
+            // next() 会跳过 DOCDECL；nextToken() 才能观察到并拒绝 DTD。
+            event = parser.nextToken()
         }
         return truncated
     }
