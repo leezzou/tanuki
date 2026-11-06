@@ -1,6 +1,6 @@
 # 应用内更新
 
-当前视频/手机文件独立写授权已完成debug目标验证；用户追加授权推送新分支 `fix/video-phone-file-permissions`，由用户自行合并。未要求新版本，下述0.1.7/code9为上一轮已完成交付，不覆盖其发布目录；当前状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考，不覆盖其发布目录。当前文档门禁任务分支为 `chore/phase2-docs-contracts`，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -32,21 +32,23 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。本次用户确认 `v0.1.7`，候选对应 `versionName=0.1.7` / `versionCode=9`；封装前须核对公开、已安装及归档上限，确保code9严格递增。沿用原workspacecheck开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（`versionName=0.1.7` / `versionCode=9`）；当前已发布 `v0.1.8`（`versionName=0.1.8` / `versionCode=10`）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
-本次文件管理增强及手机共享存储权限见[项目存储说明](WORKSPACE-STORAGE.md)。候选release须独立完成适用测试；debug或0.1.6历史结果不能替代。本次完成全部验证、文档与交接、过期记录清理及公开/实际index检查后，统一一次commit/push新分支 `feature/live-file-manager-017`，再按已测SHA封装最终附件。由用户自行合并PR并在网页发布Release，Agent不创建tag或上传Release。
+0.1.8 沿用文件管理、手机共享存储权限与浏览器输入线程修复，行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)。候选 release 须独立完成适用测试；debug 或 0.1.7 历史结果不能替代。完成全部验证、文档与交接、过期记录清理及公开/实际 index 检查后，统一一次 commit/push；由用户自行合并 PR 并在网页发布 Release，Agent 不创建 tag 或上传 Release。
+
+下面命令以当前已发布 0.1.8 为例；未来发版替换为用户确认的版本和递增 code：
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.7 --version-code 9 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.8 --version-code 10 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
-脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.7/`：
+脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.8/`：
 
-- `Tanuki-0.1.7-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
-- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.7` 的同一个 Release，不能只上传 APK。
-- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.7-source.zip`、原生对应源码与校验文件。
+- `Tanuki-0.1.8-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
+- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.8` 的同一个 Release，不能只上传 APK。
+- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.8-source.zip`、原生对应源码与校验文件。
 
 清单结构为 `schemaVersion:1` / `packages` 数组，每个包包含 `packageName`、`versionName`、整数 `versionCode/minSdk/bytes`、`assetName`、`sha256`、`certificateSha256`。不要把文档示例或其他包/版本的元数据当成实际附件。更换/重打 APK 后必须重跑生成和外部散列检查。
 
@@ -54,8 +56,8 @@ python3 scripts/prepare-app-release.py --version 0.1.7 --version-code 9 --channe
 
 ## 验证范围
 
-既有回归覆盖公开Feed、清单、来源/大小/哈希、APK身份、缓存文件与签名边界；早期ARM64 API34模拟器曾实际进入更新页并点击检查，得到「暂无可用于应用内更新的Release」，而非API限流。这是历史结果，不代表当前公开Release状态或0.1.7已通过验证；本轮候选的实际命令和结果以[测试现状](TEST-REPORT.md)为准。网络始终不可达时仍会失败，不承诺GitHub全球可用。
+既有回归覆盖公开Feed、清单、来源/大小/哈希、APK身份、缓存文件与签名边界；早期ARM64 API34模拟器曾实际进入更新页并点击检查，得到「暂无可用于应用内更新的Release」，而非API限流。这是历史结果，不代表当前公开Release状态或0.1.8已通过验证；0.1.8 没有随版本记录设备测试。后续候选的实际命令和结果以[测试现状](TEST-REPORT.md)为准。网络始终不可达时仍会失败，不承诺GitHub全球可用。
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-本次工作分支为 `feature/live-file-manager-017`。完成适用release测试、文档与交接、过期记录清理、公开源码候选及实际index检查后，统一一次commit/push该新分支；推送成功后按verified模式封装同一已测APK。main通过PR合入，由用户自行创建并合并PR、创建tag及发布Pre-release；Agent不直推main或修改保护规则。0.1.6及更早已交付附件保持原样。
+本轮工作分支为 `chore/phase2-docs-contracts`，只改 docs 并创建 PR；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。

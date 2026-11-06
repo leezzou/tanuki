@@ -1,6 +1,6 @@
 # 浏览器工作区
 
-Tanuki 使用独立 Android WebView profile，不与管理页共享 Cookie/站点存储；不是 Via 内核或 Windows 内核。实现入口为 `AgentBrowserController`、`AgentBrowserPage`、`BrowserService` 和 `BrowserOverlayWindow`；本轮与历史验证边界统一见 [TEST-REPORT](TEST-REPORT.md)。
+Tanuki 使用独立 Android WebView profile，不与管理页共享 Cookie/站点存储；不是 Via 内核或 Windows 内核。实现入口为 `AgentBrowserController`、`AgentBrowserPage`、`BrowserService` 和 `BrowserOverlayWindow`；0.1.8/code10 已包含输入线程修复，**0.1.8 没有随版本记录设备测试**，本轮与历史验证边界统一见 [TEST-REPORT](TEST-REPORT.md)。RPC 方法、错误码与传输限制见 [接口契约](INTERFACES.md)。
 
 ## 授权
 
@@ -16,7 +16,7 @@ Tanuki 使用独立 Android WebView profile，不与管理页共享 Cookie/站�
 
 ## 输入线程
 
-WebView 的 InputConnection 可在输入法后台线程回调；六种被拦截的输入操作先在主线程完成授权判断与交互计时，再在原调用线程交给 WebView。主线程直接调用不排队，后台最多等待500ms；超时或中断拒绝本次输入并取消尚未执行的判断，避免迟到接管。控制器、计时与页面状态继续只在主线程访问，不因修复输入闪退而放宽授权。主线程长时间繁忙时当次输入可能需要重试；其他输入法/机型仍需验证。
+WebView 的 InputConnection 可在输入法后台线程回调；六种被拦截的输入操作先在主线程完成授权判断与交互计时，再在原调用线程交给 WebView。主线程直接调用不排队，后台最多等待500ms；超时或中断拒绝本次输入并取消尚未执行的判断，避免迟到接管。控制器、计时与页面状态继续只在主线程访问，不因修复输入闪退而放宽授权。主线程长时间繁忙时当次输入可能需要重试；其他输入法/机型仍需验证。0.1.8 合并了该修复；此前 22 项设备验证是历史记录，未在本轮复跑。
 
 ## 使用入口
 
@@ -54,4 +54,4 @@ Windows PC是UA/宽视口设置，不能保证所有站点桌面布局。页面�
 
 资源回调不能证明覆盖每一跳重定向，不宣传完整网络/SSRF沙箱。真实模型、真实账号登录、HyperOS长期后台和其他系统版本仍待验收，详见 [安全](SECURITY.md) 与 [测试](TEST-REPORT.md)。
 
-本轮AOSP键盘合成截图中，导航显示在键盘上方，地址输入与前往按钮仍可达；证据不支持“所有键盘状态下导航必定收起”。未在真实DSH模型任务中验收键盘行为。
+历史 AOSP 键盘合成截图中，导航显示在键盘上方，地址输入与前往按钮仍可达；证据不支持“所有键盘状态下导航必定收起”。该结果未在真实 DSH 模型任务中验收，也不是 0.1.8 的设备测试报告。
