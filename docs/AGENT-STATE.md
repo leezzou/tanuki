@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，执行会话 android_agent-16；实现与 JVM 验证完成，PR 待创建）。上一记录 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md) 保留（PR #14 已合并为 `cff09a3`）。W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留；其设备验收门禁实现已随 PR #13 合并。本轮由 android_agent-16 在独立 clone 中实现文件查看器 PDF/DOCX/缩放增强，不改视频播放、协议、AO 配置或 0.1.8 附件。
+当前交接：[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，执行会话 android_agent-16；实现与 JVM 验证完成，PR #16 待独立 Review）。上一记录 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md) 保留（PR #14 已合并为 `cff09a3`）。W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留；其设备验收门禁实现已随 PR #13 合并。本轮由 android_agent-16 在独立 clone 中实现文件查看器 PDF/DOCX/缩放增强，不改视频播放、协议、AO 配置或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
@@ -41,9 +41,9 @@
 - 角色：Orchestrator、Worker、Android QA、规范维护由 DSH/DeepSeek V4.1 Flash 承担；Reviewer 为 Codex/GPT High，只做独立 Review。当前 `ao project get android_agent` 的 orchestrator/worker 均为 `deepseek-harness`，模型 `opencode-go/deepseek-v4.1-flash`，与本轮实际运行一致。
 - PR #14 已由 android_agent-13 rebase 到 `origin/main=14d2884` 后重新运行交接/门禁/公开检查/源码包；android_agent-14 先修复 `test-agent-workflow.py` 中锁标记首行假设（循环等待至多 30 秒，未出现仍失败），再按 review 修正 QA 门禁：必需 QA 路径优先于 Markdown 豁免且后缀豁免仅限根目录，`app/src/main/assets/{browser,phone}/SKILL.md` 补拒绝回归；并在 AO 查询与 QA 校验后、输出 PASS 前再次核对 `state,isDraft,headRefOid`。目标用例 10/10、完整 19 项与门禁 28 项通过。独立 Review、合并和发布未授权/未完成。最终 head 的 Host/Android CI 以 PR 页面为准。
 
-### F1 文件查看器内置预览（PR 待创建）
+### F1 文件查看器内置预览（PR #16，待独立 Review）
 
-- 分支 `ao/tanuki-android-dsh/workspace-file-preview`，基线 `cff09a3`；只交付可审查候选，未合并、未触发 AO Review、未发布。
+- 分支 `ao/tanuki-android-dsh/workspace-file-preview`，基线 `cff09a3`，PR [#16](https://github.com/leezzou/tanuki/pull/16)；只交付可审查候选，未合并、未触发 AO Review、未发布。初始代码提交 `dd3807b`，回填文档后的 head 以 PR 页面为准。
 - `WorkspaceFileManager.FileKind` 增加 `PDF`/`DOCX`/`DOC`；`.pdf`、`.docx`、`.doc` 由纯分类函数映射，`.doc` 在界面明确提示“暂不支持内置预览，可用其他应用打开”，不冒充 DOCX。
 - PDF：`ParcelFileDescriptor` + `PdfRenderer` 逐页渲染，上一页/下一页、页码、共享缩放平移；加密/损坏/无页中文提示；渲染在 IO 线程，Bitmap 及时回收，长边 ≤2048、总像素 ≤4,000,000。
 - DOCX：`ZipFile` + `XmlPullParser` 只读 `word/document.xml`，处理 `w:p/w:t/w:br/w:cr/w:tab`；限制归档、条目数、总解压、正文和文本长度；界面提示复杂排版/页眉页脚/图片不会显示。
@@ -62,13 +62,13 @@
 
 ## 环境与阻塞
 
-- 当前（F1）在独立 `/tmp` clone 分支 `ao/tanuki-android-dsh/workspace-file-preview` 提交，基线 `origin/main=cff09a3`；共享 worktree 不执行 `.git` 写操作。
+- 当前（F1）已在独立 `/tmp` clone 分支 `ao/tanuki-android-dsh/workspace-file-preview` 提交并开 PR #16，基线 `origin/main=cff09a3`；共享 worktree 不执行 `.git` 写操作。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
 - 无当前产品修复阻塞；F1 的独立 Review、CI、合并与发布由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. 推送 F1 分支并开 PR；由 Orchestrator 触发当前 head 的独立 Codex High Review 与适用 CI，本会话不自行触发、不自评。
+1. PR #16 已创建；由 Orchestrator 触发当前 head 的独立 Codex High Review 与适用 CI，本会话不自行触发、不自评。
 2. F1 设备 QA 覆盖图片双指/双击/平移边界、PDF 翻页/缩放/加密/损坏/无页、DOCX 多段/超限/复杂格式提示与深色主题；设备须无真实任务并记录 AVD/serial。
 3. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
 4. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。

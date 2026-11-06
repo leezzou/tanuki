@@ -16,7 +16,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
-- 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`。
+- 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
 - 实际执行：`source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，123 tests、0 failures、0 errors、0 skipped。新增 `WorkspaceFileKindTest` 2 项、`ZoomPolicyTest` 6 项、`DocxTextExtractorTest` 7 项、`PdfRenderPolicyTest` 4 项；DOCX 测试用合成 zip 覆盖多段/空段/换行/制表/实体、文本截断、单条目与总解压超限、缺正文、损坏 zip 和坏 XML。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实加密或损坏 PDF、真实复杂 DOCX、深色主题与手势实机验证。编译通过和 JVM 策略测试不能替代设备验收。
 

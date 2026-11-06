@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-16（DSH Worker）
 - 时间：2026-11-06 16:47 CST
-- 状态：进行中（实现与 JVM 验证通过；等待独立 clone 提交、推送和 PR）
+- 状态：进行中（实现与 JVM 验证通过；PR #16 已创建，等待独立 Review 与设备 QA）
 - 前一记录：[研发治理与合并前门禁](20261106-1415-governance-gates.md)
 
 ## 用户目标与范围
@@ -16,7 +16,7 @@
 - 已实现：上述功能全部落到源码；PDF/DOCX 在查看器内打开，不再落入 `OTHER`；`.doc` 仍走外部打开并显示明确提示。
 - 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；123 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 18 项）。
 - 待验证：真实设备上的手势、翻页、加密/损坏 PDF、真实复杂 DOCX 与深色主题；未运行 lint/assemble/仪器测试。
-- 当前基线：`main=cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 合并提交）；会话分支 `ao/tanuki-android-dsh/root`，本轮改动尚未提交。
+- 当前基线：`main=cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 合并提交）；分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。初始代码提交 `dd3807bb5529c18c0e320ebdbc5de818b0f2788c`；回填文档后的最终 head 以 PR 页面为准。
 - 关键源码：[`WorkspaceFileManager.kt`](../../app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt)、[`DocxTextExtractor.kt`](../../app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt)、[`WorkspaceFileViewer.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt)、[`WorkspacePdfPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)、[`ZoomableContent.kt`](../../app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt)。
 
 ## 本次改动
@@ -57,7 +57,7 @@
 
 ## 下一步
 
-1. 在 `/tmp` 独立 clone 中从 `origin/main=cff09a3` 建分支 `ao/tanuki-android-dsh/workspace-file-preview`，复制本轮改动，复核 `check-handoff.py --record`、`check-handoff.py`、`check-publication.py --git`、`package-source.py` 后提交推送并开 PR（不合并、不触发 AO Review、不发布）。
+1. PR #16 已从独立 `/tmp` clone 创建，目标 `main`、未合并、未触发 AO Review、未发布；等待当前 head 的独立 Codex High Review、CI 与设备 QA。
 2. 由 Orchestrator 安排当前 head 的独立 Codex High Review 与适用设备 QA；设备验证至少覆盖图片双指/双击/边界、PDF 翻页/缩放/加密与损坏样本、DOCX 多段/超限/复杂格式提示，真机与低 API 另行确认。
 
 ## 约束与风险
@@ -69,6 +69,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP：本轮不生成 APK、不发布；源码 ZIP 仅在提交前按 `scripts/package-source.py` 刷新并核对 `artifacts/SOURCE-SHA256SUMS`，属于工作材料。
-- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布；PR 创建后只交付可审查候选。
+- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布；PR [#16](https://github.com/leezzou/tanuki/pull/16) 只交付可审查候选。
 - 提交/推送前清理的过期记录：未删除历史交接；W5 治理记录仍与当前 `AGENT-STATE` 和 PR #14 相关，保留。结论已迁入 `AGENT-STATE`/`TEST-REPORT`，无因本任务过期而必须删除的记录。
 - 仍需保留的验证/未完成记录：本记录与 `docs/handoffs/CURRENT.json` 印章；设备验证缺口待独立 QA。
