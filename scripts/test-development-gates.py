@@ -23,10 +23,15 @@ case "$1 $2" in
   "repo view")
     cat "$FIX/repo.json" ;;
   "pr view")
-    if [ -f "$FIX/view-count" ]; then
-      if [ -f "$FIX/pr2.json" ]; then cat "$FIX/pr2.json"; else cat "$FIX/pr.json"; fi
+    count=0
+    if [ -f "$FIX/view-count" ]; then count=$(cat "$FIX/view-count"); fi
+    count=$((count + 1))
+    printf '%s' "$count" > "$FIX/view-count"
+    if [ -f "$FIX/pr3.json" ] && [ "$count" -ge 3 ]; then
+      cat "$FIX/pr3.json"
+    elif [ -f "$FIX/pr2.json" ] && [ "$count" -ge 2 ]; then
+      cat "$FIX/pr2.json"
     else
-      : > "$FIX/view-count"
       cat "$FIX/pr.json"
     fi ;;
   "pr diff")
@@ -275,6 +280,21 @@ class DevelopmentGateTest(unittest.TestCase):
         self.set_json("pr2.json", {"url": PR, "number": 13, "state": "OPEN", "isDraft": False,
                                    "baseRefName": "main", "headRefOid": OTHER_SHA})
         self.assert_rejected(self.run_gate(), "head 发生变化")
+
+    def test_head_change_during_ao_queries_is_rejected(self):
+        self.set_json("pr3.json", {"url": PR, "number": 13, "state": "OPEN", "isDraft": False,
+                                   "baseRefName": "main", "headRefOid": OTHER_SHA})
+        self.assert_rejected(self.run_gate(), "head 或状态发生变化")
+
+    def test_non_candidate_state_during_ao_queries_is_rejected(self):
+        for label, changes in (("draft", {"isDraft": True}), ("closed", {"state": "CLOSED"})):
+            with self.subTest(label=label):
+                (self.fixtures / "view-count").unlink(missing_ok=True)
+                payload = {"url": PR, "number": 13, "state": "OPEN", "isDraft": False,
+                           "baseRefName": "main", "headRefOid": HEAD}
+                payload.update(changes)
+                self.set_json("pr3.json", payload)
+                self.assert_rejected(self.run_gate(), "head 或状态发生变化")
 
 
 if __name__ == "__main__":

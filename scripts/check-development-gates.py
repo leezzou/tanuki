@@ -341,6 +341,14 @@ def main() -> int:
         else:
             qa_status = "not_required"
 
+        # AO 查询与 QA 校验期间 PR 仍可能变化；输出 PASS 前做最后一次只读核对。
+        final = command_json(["gh", "pr", "view", args.pr, "--json", "state,isDraft,headRefOid"])
+        if (not isinstance(final, dict)
+                or final.get("headRefOid") != head
+                or final.get("state") != "OPEN"
+                or final.get("isDraft") is not False):
+            raise GateError("门禁执行期间 PR head 或状态发生变化，必须重新运行")
+
         print("GATE RESULT: PASS")
         print("pr=%s head=%s base=%s checks=%d" % (pr_url, head, default_branch, len(checks)))
         print("review=%s approved target=%s" % (harness, latest.get("targetSha")))

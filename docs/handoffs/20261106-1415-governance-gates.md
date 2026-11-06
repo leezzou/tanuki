@@ -8,7 +8,7 @@
 ## 用户目标与范围
 
 - 用户本次实际要求：落实长期研发治理，不对产品功能开发；对齐现有规范，最小修改 AGENTS，新增缺失的 `ORCHESTRATOR-RULES`、`QA-GATES`、`LESSONS`、`code-standards`；实现只读 `scripts/check-development-gates.py` 与离线回归并接入 Host CI；更新当前状态与交接；一个治理 PR，独立 Review 后才合并。
-- 本次包含：`AGENTS.md` 入口/角色/合并授权/两轮根因规则；四个专题文档；合并前门禁脚本与其 26 项离线回归；Host CI 步骤；`AGENT-STATE`、`AGENT-QUICKSTART`、`CI`、`PUBLICATION`、`ARTIFACTS`、`RELEASE`、`APP-UPDATES`、`TEST-REPORT`、`AO-WORKTREE-BUILD` 的过期 main/分支表述；W8 只读 QA 报告保留；过期 handoff 清理与印章刷新；PR #14 rebase 到 `origin/main=14d2884` 并复跑交接/门禁/公开检查/源码包。
+- 本次包含：`AGENTS.md` 入口/角色/合并授权/两轮根因规则；四个专题文档；合并前门禁脚本与其 28 项离线回归；Host CI 步骤；`AGENT-STATE`、`AGENT-QUICKSTART`、`CI`、`PUBLICATION`、`ARTIFACTS`、`RELEASE`、`APP-UPDATES`、`TEST-REPORT`、`AO-WORKTREE-BUILD` 的过期 main/分支表述；W8 只读 QA 报告保留；过期 handoff 清理与印章刷新；PR #14 rebase 到 `origin/main=14d2884` 并复跑交接/门禁/公开检查/源码包。
 - 本次不包含：产品 Kotlin/原生代码、协议方法集、`INTERFACES` 契约；AO 配置；0.1.8 附件、版本号、tag/Release；设备执行；合并或发布。PR #15 的设备门禁测试补充不在本 PR。
 - 用户暂停/保留：API Key 保存；真实模型/账号验收；真机验收；未获合并/发布授权不得自行合并、直推 main 或发版。
 
@@ -32,7 +32,7 @@
 | `AGENTS.md`、`docs/ORCHESTRATOR-RULES.md`、`docs/LESSONS.md`（复验修正） | 按 `ao project get` 实测配置删除“保存的 `orchestrator.agent=codex`”过期断言，改为 `deepseek-harness`/DeepSeek V4.1 Flash；Reviewer 仍为 Codex/GPT High |
 | `docs/code-standards.md` | 新增 Kotlin/Android、Python 3.9、Shell、文档、提交/PR 和审查清单规范 |
 | `scripts/check-development-gates.py` | 新增只读合并前门禁：PR 身份/最新 head/全部 check/独立 review/QA 适用与证据结构；失败、空 checks、旧 SHA、自评、未知范围均拒绝 |
-| `scripts/test-development-gates.py` | 新增 26 项离线回归，用假 `gh`/`ao` 覆盖旧 SHA、缺 review/CI、QA 漏项、失败/跳过、身份不符、豁免和有效 QA；补 app 内 `SKILL.md` 必须 QA、根目录 Markdown 豁免 |
+| `scripts/test-development-gates.py` | 新增 28 项离线回归，用假 `gh`/`ao` 覆盖旧 SHA、缺 review/CI、QA 漏项、失败/跳过、身份不符、豁免和有效 QA；补 app 内 `SKILL.md` 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝 |
 | `.github/workflows/verify.yml` | 在既有 Host job 增加 `test-development-gates.py`；Android job 和 CI 边界不变 |
 | `docs/CI.md` | 记录新回归、合并前门禁、独立 review 与 provider 审批边界 |
 | `docs/AGENT-STATE.md` | 以 PR #13 合并后的状态为基础，更新 main/CI/Wave0/W4/W5/0.1.8 冒烟边界；删除过期“待复审/未合并”描述 |
@@ -49,11 +49,12 @@
 - 改动：仅该用例改为循环读取 stdout，最多等待 30 秒直到出现锁标记；未出现仍断言失败。保留第二任务退出码 3 与“设备任务被拒绝”断言，不放宽设备门禁，不改产品、协议、`device-preflight.py`/`device-lock.py` 逻辑或 0.1.8 附件。
 - 验证：目标用例连续 10 次通过；完整 `test-agent-workflow.py` 19 项通过，见“验证记录”。本修复不启动设备、不跑 Gradle/Android 构建。
 
-## Review 修复：app 内 Markdown 不得豁免 QA（android_agent-14）
+## Review 修复：Markdown QA 与 PASS 前复核（android_agent-14）
 
 - Review 意见（P2）：`classify_paths` 在所有路径判断前用 `path.endswith(".md")` 直接豁免，导致 `app/src/main/assets/browser/SKILL.md`、`app/src/main/assets/phone/SKILL.md` 这类随 App 发布到 Android 内 DSH 的产品资源只改 Markdown 时得到 `qa=not_required`，绕过 `app/**` 必须独立 QA 的规则。
 - 修复：必需 QA 路径（`QA_REQUIRED_FILES`/`QA_REQUIRED_PREFIXES`）优先判断；Markdown 后缀豁免仅限根目录（路径不含 `/`），与 [QA-GATES](../QA-GATES.md) 的 `docs/**`、根目录 `*.md` 表述一致。`app/**/*.md` 现进入 QA 必需范围。
-- 回归：新增 `test_product_skill_markdown_requires_qa`（两个真实资源路径均拒绝）与 `test_root_markdown_remains_exempt`；门禁套件 26 项通过。未改 QA 证据结构、CI 配置或产品代码。
+- 第二处 P2：最后一次 provider head 查询发生在 AO session/project/review 查询与 QA 校验之前，窗口内 A→B 仍可能输出 PASS。现于 `qa_status` 分支后、`print("GATE RESULT: PASS")` 前再查询 `state,isDraft,headRefOid`；head 不等于被校验 SHA、非 `OPEN` 或 `isDraft` 非 `False` 时拒绝。
+- 回归：新增 `test_product_skill_markdown_requires_qa`、`test_root_markdown_remains_exempt`、`test_head_change_during_ao_queries_is_rejected`（第三次查询才把 A 改成 B）与 `test_non_candidate_state_during_ao_queries_is_rejected`（draft/closed）；门禁套件 28 项通过。未改 QA 证据结构、CI 配置或产品代码。
 
 ## 验证记录
 
@@ -74,14 +75,14 @@
 | `git push --force-with-lease origin HEAD:chore/autonomous-development-governance`；`gh pr view 14` | PR #14 head 更新，触发 Host/Android CI | 仅更新 PR 分支，不合并、不触发 Review/发布 |
 | `python3 scripts/test-agent-workflow.py WorkflowTests.test_verify_workspace_device_runs_are_serialized_per_serial` ×10（android_agent-14） | 连续 10/10 通过，单次 6.512–11.453s，均为 `OK` | 宿主 mock；不启动设备/Gradle |
 | `python3 scripts/test-agent-workflow.py`（android_agent-14） | `Ran 19 tests in 74.688s`，`OK`，exit 0 | 宿主 mock；设备/Android 未执行 |
-| `python3 scripts/test-development-gates.py`（android_agent-14 review 修复） | `Ran 26 tests in 16.588s`，`OK`；新增 app 内两个 `SKILL.md` 拒绝与根目录 Markdown 豁免回归 | 宿主 Python 3.9；离线假 CLI，无网络/设备 |
+| `python3 scripts/test-development-gates.py`（android_agent-14 review 修复） | `Ran 28 tests in 15.297s`，`OK`；新增 app 内两个 `SKILL.md` 拒绝、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝 | 宿主 Python 3.9；离线假 CLI，无网络/设备 |
 
 - 哪些是前一轮结果：Wave0 的 24 项门禁回归、W2 构建、W3 CI/契约测试、0.1.7/0.1.8 历史设备数字均为前轮记录；本表区分 W7 原轮次、PR #14 rebase 后复验与 android_agent-14 的仅测试修复。W8 的 AVD/ADB 核查发生在 W8/#13/#15 分支，本 PR 未重跑；`test-agent-workflow.py` 19 项已由 android_agent-14 在本 PR 重跑（74.688s）。
 - 未测试、失败和暂未复现：未运行 Gradle/Android 构建、lint、设备/仪器；无真实 open PR 的完整门禁通过样例；W8 的 `device-preflight.py` 未在真实设备执行；0.1.8 的 Ubuntu/Node/DSH 安装与真实模型未验证。
 
 ## 未完成与暂停项
 
-- 未完成：本 PR 的独立 Codex High Review（P2 的 app 内 Markdown 豁免已修复，待复验）；推送后当前 head 的 Host/Android CI 确认；合并与发布未授权。
+- 未完成：本 PR 的独立 Codex High Review（两处 P2 已修复：app 内 Markdown 必须 QA、PASS 前复核 head/状态；待复验）；推送后当前 head 的 Host/Android CI 确认；合并与发布未授权。
 - 未完成（其他会话）：PR #15 补充的设备门禁测试已随 `14d2884` 合并；W8 的设备门禁虽随 PR #13 合并，但尚未在真实设备执行。
 - 设备边界：0.1.8 只有 android_agent-10 的安装/冷启动/基础 UI/WebView 冒烟；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
