@@ -3,7 +3,7 @@
 - Agent/会话标识：browser-input-thread
 - 时间：2026-11-05 CST
 - 状态：修复、构建与设备验证完成；准备推送贡献分支
-- 前一记录：[v0.1.5交付依据](20261104-1632-pr-release-015.md)
+- 前一记录：已清理；必要结论见 [TEST-REPORT 历史记录](../TEST-REPORT.md) 与 [AGENT-STATE](../AGENT-STATE.md)
 
 ## 用户目标与范围
 

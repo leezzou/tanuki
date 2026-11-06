@@ -89,9 +89,9 @@ bash scripts/verify-workspace.sh \
 
 脚本先检查交接、构建、用SDK `apkanalyzer`核验app/test包名和instrumentation target，再 `install -r` 两个APK并执行固定14类回归。不卸载、不 `pm clear`、不重置系统、不自动切换DSH权限。设备参数和确认缺一就拒绝；只传设备而未开启设备测试也会拒绝。
 
-当前14类回归上次为54项（具体条目随开发可变化），约5分钟，调用工具建议预留至少900秒，环境首次补包还需网络时间。脚本不会给测试强加短超时。ADB返回0不代表JUnit成功，脚本检查最终OK、逐项完成以及失败/跳过/中断；本地完整日志在 `.build/logs/workspace-regression-*.txt`，不直接公开。
+历史记录：14 类回归上次为 54 项（具体条目随开发可变化），约 5 分钟，调用工具建议预留至少 900 秒，环境首次补包还需网络时间；该数字未在本轮复跑。脚本不会给测试强加短超时。ADB返回0不代表JUnit成功，脚本检查最终OK、逐项完成以及失败/跳过/中断；本地完整日志在 `.build/logs/workspace-regression-*.txt`，不直接公开。
 
-手机文件客户端宿主回归单独运行 `node scripts/test-phone-client.mjs`；本次视频/手机文件目标设备集合见 [TEST-REPORT](TEST-REPORT.md)。`PhoneFileGuestClientTest` 只允许已有Ubuntu/Node且无真实任务的测试安装，不自动下载环境；本机环境缺失时明确记未运行。
+手机文件客户端宿主回归单独运行 `node scripts/test-phone-client.mjs`；0.1.7 视频/手机文件的历史目标设备集合见 [TEST-REPORT](TEST-REPORT.md)，0.1.8 没有随版本记录设备测试。`PhoneFileGuestClientTest` 只允许已有Ubuntu/Node且无真实任务的测试安装，不自动下载环境；本机环境缺失时明确记未运行。
 
 它不是所有Android测试类的自动全选器：组件替换、冷安装、真实guest工具、更新矩阵、真机和模型等测试另有前置条件。执行前读对应测试与 [TEST-REPORT](TEST-REPORT.md)，不能把本脚本通过等同于全部功能验收。
 
@@ -114,7 +114,7 @@ bash scripts/verify-workspace.sh \
 | 快照/安全解包/DSH 更新 | `app/src/main/kotlin/com/tanuki/storage/DataSnapshots.kt`、`SafeTar.kt`、`update/UpdateManager.kt` |
 | Tanuki APK 更新/版本打包 | `app/src/main/kotlin/com/tanuki/update/ApplicationUpdateManager.kt`、`AppReleaseManifest.kt`、`AppUpdatePolicy.kt`、`scripts/prepare-app-release.py`；见 [应用内更新](APP-UPDATES.md) / [发布](RELEASE.md) |
 | Android原生启动链 | `app/src/main/cpp/supervisor.c`、`runtime/build-native-runtime.sh`、`runtime/patches/proot-exitkill.patch` |
-| AI浏览器客户端/Skill | `app/src/main/assets/browser/tanuki-browser.mjs`、`app/src/main/assets/browser/SKILL.md` |
+| AI浏览器客户端/Skill | `app/src/main/assets/browser/tanuki-browser.mjs`、`app/src/main/assets/browser/SKILL.md`；RPC/控制面契约见 [接口契约](INTERFACES.md) |
 | 测试 | `app/src/test/kotlin/com/tanuki/`、`app/src/androidTest/kotlin/com/tanuki/` |
 
 表中同一单元内省略目录的文件均与该单元第一个文件同目录。改动前核对实际定义，尤其不要误找不存在的 `runtime/EventLog.kt` 或把管理WebView与独立浏览器混为一谈。
@@ -131,13 +131,13 @@ bash scripts/verify-workspace.sh \
 
 ## 7. 完成与交付
 
-当前任务是视频控制与DSH默认只读手机文件通道，用户在测完后授权推送新分支 `fix/video-phone-file-permissions`，未要求新版本；0.1.7/code9已交付的release六附件保持。文件工具逻辑路径、独立本次写许可及视频能力见[项目存储说明](WORKSPACE-STORAGE.md)。本轮debug和既有release验证分别见[测试现状](TEST-REPORT.md)，不能混算。
+当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。本轮是文档门禁任务，分支 `chore/phase2-docs-contracts`：恢复 `AGENT-STATE`/`TEST-REPORT`/`CURRENT`，修复公开断链并新增 [接口契约](INTERFACES.md)，不改产品代码。0.1.7 视频/手机文件 debug 与 release 验证见 [测试现状](TEST-REPORT.md)，只能作为历史记录，不能混算成 0.1.8 已通过。
 
 1. 完成本次交接记录并更新 `AGENT-STATE.md`，诚实写明实际验证及未测范围。每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、删除已过期交接并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
 2. `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md`，再不带参数检查。
-3. `python3 scripts/check-publication.py --git` 检查实际Git候选；`python3 scripts/package-source.py` 生成 `artifacts/sources/Tanuki-0.1.7-source.zip`，再检查ZIP内容、嵌套附件与 `artifacts/SOURCE-SHA256SUMS`。
+3. `python3 scripts/check-publication.py --git` 检查实际Git候选；`python3 scripts/package-source.py` 生成 `artifacts/sources/` 下的源码包，再检查ZIP内容、嵌套附件与 `artifacts/SOURCE-SHA256SUMS`。
 4. APK有变化才更新其交付副本/校验并核对包名、签名和安装目标。仅文档/宿主脚本变化，不声称业务APK已重编译或设备测试全套重跑。
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。
 6. 最终答复给清楚的产物路径、完成项、暂停/阻塞项和下一步，不留下只存在聊天里的必要信息。
 
-本轮分支为 `fix/video-phone-file-permissions`，基于已合入PR #7的最新origin/main/ab0d762，其完整树等于已测起点782ad0d。用户要求测完推送新分支并自行合并；不直推main、不创建Release或重打既有0.1.7。未来发版仍须确认新版本和递增code。
+本轮分支为 `chore/phase2-docs-contracts`，基线为已发布 `origin/main/c196bbf`；只改 docs 并创建 PR，不直推 main、不创建 tag/Release、不重打 0.1.8 附件。未来发版仍须确认新版本和递增 code。
