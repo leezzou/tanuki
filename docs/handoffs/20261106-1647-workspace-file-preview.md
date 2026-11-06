@@ -13,8 +13,8 @@
 
 ## 当前状态
 
-- 已实现：上述功能全部落到源码；PDF/DOCX 在查看器内打开，不再落入 `OTHER`；`.doc` 仍走外部打开并显示明确提示。已按 PR #16 review 把 DOCX 读取改为 `nextToken()`，使 `DOCDECL` 可被观察并拒绝，保留实体/CDATA 文本，并补 DOCTYPE 回归。
-- 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；124 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 20 项）。
+- 已实现：上述功能全部落到源码；PDF/DOCX 在查看器内打开，不再落入 `OTHER`；`.doc` 仍走外部打开并显示明确提示。已按 PR #16 两轮 P2 review 把 DOCX 读取改为 `nextToken()`，拒绝 `DOCDECL`，未定义实体不再静默丢成空串而是返回中文格式错误，保留标准实体/数字字符引用/CDATA；并补 DOCTYPE 与未定义实体回归。
+- 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；126 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 22 项）。
 - 待验证：真实设备上的手势、翻页、加密/损坏 PDF、真实复杂 DOCX 与深色主题；未运行 lint/assemble/仪器测试。
 - 当前基线：`main=cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 合并提交）；分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。初始代码提交 `dd3807bb5529c18c0e320ebdbc5de818b0f2788c`；review 修复后的最终 head 以 PR 页面为准。
 - 关键源码：[`WorkspaceFileManager.kt`](../../app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt)、[`DocxTextExtractor.kt`](../../app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt)、[`WorkspaceFileViewer.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt)、[`WorkspacePdfPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)、[`ZoomableContent.kt`](../../app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt)。
@@ -24,7 +24,7 @@
 | 文件 | 改动与目的 |
 |---|---|
 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt` | `FileKind` 增加 PDF/DOCX/DOC；抽 `classifyFileKind` 纯映射；`describe`/`fileMime` 映射 pdf/docx/doc；新增 `openPreviewDescriptor`（只读 ParcelFileDescriptor）和 `extractDocxText`（IO 锁内有界解压）。 |
-| `app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt` | 新增：只读 `word/document.xml`，处理 `w:p/w:t/w:br/w:cr/w:tab`；限制归档大小、条目数、总解压大小、正文大小与文本长度；用 `nextToken()` 观察并拒绝 `DOCDECL`（`next()` 会跳过）；中文错误。 |
+| `app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt` | 新增：只读 `word/document.xml`，处理 `w:p/w:t/w:br/w:cr/w:tab`；限制归档大小、条目数、总解压大小、正文大小与文本长度；用 `nextToken()` 观察并拒绝 `DOCDECL`（`next()` 会跳过），`ENTITY_REF` 无 replacement text 时返回中文格式错误而不是静默丢弃；中文错误。 |
 | `app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt` | 新增：`ZoomPolicy` 纯策略（1.0–5.0x、双击 1x/2.5x、围绕手指缩放、平移边界）与共享 `Zoomable` 手势组件，切换文件/页面或视口变化时重置。 |
 | `app/src/main/kotlin/com/tanuki/ui/PdfRenderPolicy.kt` | 新增：PDF 位图长边 ≤2048、总像素 ≤4,000,000、小页最多 2x 放大，避免 OOM。 |
 | `app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt` | 新增：PFD + `PdfRenderer` 打开/逐页渲染/关闭；上一页/下一页/页码/缩放；加密、损坏、无页中文提示；IO 渲染与 Bitmap 及时回收。 |
@@ -41,13 +41,14 @@
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；124 tests / 0 failures / 0 errors / 0 skipped | review 修复后本轮新跑；测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`，不提交。 |
-| 测试类 `WorkspaceFileKindTest`、`ZoomPolicyTest`、`DocxTextExtractorTest`、`PdfRenderPolicyTest` | 2 + 6 + 8 + 4 = 20 项全部通过 | 其中 20 项为本次新增；DOCX 测试使用 kxml2 作为 JVM 侧 XmlPullParser 实现，产品代码不依赖该库。 |
-| PR #16 review P2 修复（`DocxTextExtractor.kt:97`） | 改为 `nextToken()` 并补 `rejectsDoctypeDeclarationBeforeRootElement`；DOCTYPE 返回中文“文档类型声明”错误，实体与 CDATA 断言同时通过 | 针对合成 XML/zip，未用真实 Word 生成样本；`nextToken()` 对标准实体的解析由现有 `&amp;` 断言覆盖。 |
+| `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；126 tests / 0 failures / 0 errors / 0 skipped | 两轮 review 修复后本轮新跑；测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`，不提交。 |
+| 测试类 `WorkspaceFileKindTest`、`ZoomPolicyTest`、`DocxTextExtractorTest`、`PdfRenderPolicyTest` | 2 + 6 + 10 + 4 = 22 项全部通过 | 其中 22 项为本次新增；DOCX 测试使用 kxml2 作为 JVM 侧 XmlPullParser 实现，产品代码不依赖该库。 |
+| PR #16 review P2 修复 1（`DocxTextExtractor.kt:97`） | 改为 `nextToken()` 并补 `rejectsDoctypeDeclarationBeforeRootElement`；DOCTYPE 返回中文“文档类型声明”错误，实体与 CDATA 断言同时通过 | 针对合成 XML/zip，未用真实 Word 生成样本。 |
+| PR #16 review P2 修复 2（`DocxTextExtractor.kt:95`） | `ENTITY_REF` 单独处理：replacement text 为 null 时抛中文格式错误；新增未定义实体拒绝与标准/数字字符引用正常提取回归 | 合成 XML/zip；KXml 对未定义实体返回 null、对 `&amp;`/`&#65;`/`&#x42;` 返回可解析文本，均已断言。 |
 | 首次测试运行 | 1 项失败：新增缩放测试断言写反（期望 -maxX 却传入正向平移） | 仅测试代码错误；修正断言后复跑通过，不涉及产品行为。 |
 | 静态边界检查 | `.doc` 不进入 DOCX 分支；`WorkspaceVideoPlayer.kt` 未修改；产品依赖未新增 | 编译覆盖 UI 接线；未做设备手势/真实文件验证。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：124 项 JVM 与编译结果均为 review 修复后新跑；历史 104 JVM、设备测试和 0.1.8 冒烟不混入本轮。
+- 哪些是前一轮结果，哪些是本次新验证：126 项 JVM 与编译结果均为两轮 review 修复后新跑；历史 104 JVM、设备测试和 0.1.8 冒烟不混入本轮。
 - 未测试、超时、失败和暂未复现的情况：未跑 lint、assemble、Android 仪器、真实设备；未用真实加密 PDF/损坏 PDF/复杂 DOCX 验证错误文案与渲染效果；手势在 Compose 中的双击/双指共存仅编译通过，未设备实测。
 
 ## 未完成与暂停项

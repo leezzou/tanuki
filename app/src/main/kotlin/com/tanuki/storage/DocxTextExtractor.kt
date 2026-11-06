@@ -91,7 +91,13 @@ object DocxTextExtractor {
                     "tab" -> append("\t")
                 }
                 XmlPullParser.END_TAG -> if (localName(parser) == "t") inText = false
-                XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF,
+                XmlPullParser.ENTITY_REF -> if (inText) {
+                    // nextToken() 对未定义实体返回 null 文本；不能静默当作空串丢掉内容。
+                    val replacement = parser.text
+                        ?: throw IOException("此 DOCX 正文包含无法解析的实体引用，格式不正确")
+                    append(replacement)
+                }
+                XmlPullParser.TEXT, XmlPullParser.CDSECT,
                 XmlPullParser.IGNORABLE_WHITESPACE -> if (inText) append(parser.text.orEmpty())
             }
             if (truncated) break

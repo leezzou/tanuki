@@ -88,6 +88,29 @@ class DocxTextExtractorTest {
         }
     }
 
+    @Test fun extractsStandardAndNumericCharacterReferences() {
+        val file = docx("word/document.xml" to xml("<w:p><w:r><w:t>&amp;&lt;&#65;&#x42;</w:t></w:r></w:p>"))
+        try {
+            val result = extract(file)
+            assertEquals("&<AB", result.text)
+            assertFalse(result.truncated)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test fun rejectsUndefinedEntityInsteadOfSilentlyDroppingIt() {
+        val file = docx("word/document.xml" to xml("<w:p><w:r><w:t>A&missing;B</w:t></w:r></w:p>"))
+        try {
+            extract(file)
+            fail("未定义实体应被拒绝，不能静默显示为 AB")
+        } catch (failure: IOException) {
+            assertTrue(failure.message.orEmpty().contains("实体"))
+        } finally {
+            file.delete()
+        }
+    }
+
     @Test fun truncatesAtTextLimitInsteadOfUnboundedMemory() {
         val file = docx("word/document.xml" to xml("<w:p><w:r><w:t>${"字".repeat(100)}</w:t></w:r></w:p>"))
         try {
