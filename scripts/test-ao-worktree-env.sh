@@ -55,7 +55,44 @@ printf 'whole-file\n' > "$work/source.txt"
 tanuki_env_copy_entry "$work/source.txt" "$work/dst-file.txt"
 cmp -s "$work/source.txt" "$work/dst-file.txt" || fail "文件复制内容不完整"
 
-# 3. 回退也失败时必须返回非 0，且清理目标与临时目录。
+# 3. 顶层符号链接：解析后复制为独立实体，不能把外部链接带进 worktree。
+mkdir -p "$work/external-dir"
+printf 'external-dir\n' > "$work/external-dir/file.txt"
+ln -s "$work/external-dir" "$work/link-dir"
+tanuki_env_copy_entry "$work/link-dir" "$work/dst-link-dir"
+[[ -d "$work/dst-link-dir" && ! -L "$work/dst-link-dir" ]] || fail "目录链接未实体化"
+[[ -f "$work/dst-link-dir/file.txt" ]] || fail "目录链接目标缺少文件"
+
+printf 'external-file\n' > "$work/external-file.txt"
+ln -s external-file.txt "$work/link-file"
+tanuki_env_copy_entry "$work/link-file" "$work/dst-link-file"
+[[ -f "$work/dst-link-file" && ! -L "$work/dst-link-file" ]] || fail "文件链接未实体化"
+cmp -s "$work/external-file.txt" "$work/dst-link-file" || fail "文件链接目标内容不完整"
+
+# 4. 目录内的绝对/逃逸链接必须拒绝，且不留下目标。
+mkdir -p "$work/outside" "$work/src-escape-abs" "$work/src-escape-rel"
+printf 'secret\n' > "$work/outside/secret.txt"
+ln -s "$work/outside/secret.txt" "$work/src-escape-abs/absolute-link"
+if tanuki_env_copy_entry "$work/src-escape-abs" "$work/dst-escape-abs" 2>/dev/null; then
+  fail "绝对符号链接应被拒绝"
+fi
+[[ ! -e "$work/dst-escape-abs" ]] || fail "拒绝绝对链接后不应留下目标"
+
+ln -s ../outside/secret.txt "$work/src-escape-rel/relative-link"
+if tanuki_env_copy_entry "$work/src-escape-rel" "$work/dst-escape-rel" 2>/dev/null; then
+  fail "逃出源码树的相对符号链接应被拒绝"
+fi
+[[ ! -e "$work/dst-escape-rel" ]] || fail "拒绝逃逸链接后不应留下目标"
+
+# 5. 源码树内部的相对链接保留，且复制后仍可读。
+mkdir -p "$work/src-safe/data"
+printf 'safe\n' > "$work/src-safe/data/file.txt"
+ln -s data/file.txt "$work/src-safe/link.txt"
+tanuki_env_copy_entry "$work/src-safe" "$work/dst-safe"
+[[ -L "$work/dst-safe/link.txt" ]] || fail "内部相对链接应保留"
+[[ "$(cat "$work/dst-safe/link.txt")" == "safe" ]] || fail "内部相对链接复制后不可读"
+
+# 6. 回退也失败时必须返回非 0，且清理目标与临时目录。
 plain_copy_fails=1
 if tanuki_env_copy_entry "$work/src" "$work/dst-failed"; then
   fail "普通复制失败时应返回非 0"
@@ -66,7 +103,7 @@ if compgen -G "$work/dst-failed.tmp.*" >/dev/null; then
 fi
 plain_copy_fails=0
 
-# 4. 正常路径（真实 cp）仍工作。
+# 7. 正常路径（真实 cp）仍工作。
 unset -f cp
 tanuki_env_copy_entry "$work/src" "$work/dst-ok"
 [[ -f "$work/dst-ok/sub/file.txt" ]] || fail "正常复制缺少文件"

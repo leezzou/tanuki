@@ -53,7 +53,7 @@ source scripts/ao-worktree-env.sh
 | `local.properties` | 缺失时写入 `sdk.dir=<SDK>`；确认被 `.gitignore` 忽略 | worktree 根目录（不提交） |
 | `ANDROID_USER_HOME` | `<worktree>/.build/android-user-home`（debug keystore、指标） | worktree `.build` |
 
-复制优先使用 macOS APFS 的 `cp -c`（写时复制），失败时退回普通 `cp -R`；回退前会清理 clone 失败留下的部分临时目录，避免把源目录嵌套复制进缓存布局。脚本只读取主仓库与 `~/.gradle`，不会修改它们。
+复制优先使用 macOS APFS 的 `cp -c`（写时复制），失败时退回普通 `cp -R`；回退前会清理 clone 失败留下的部分临时目录，避免把源目录嵌套复制进缓存布局。符号链接策略：顶层链接先解析目标，再把目标复制为 worktree 内的独立实体；目录内只保留指向源码树内部的相对链接，绝对链接或逃出源码树的链接直接拒绝，避免 Gradle 锁与元数据写回共享缓存。脚本只读取主仓库与 `~/.gradle`，不会修改它们。
 
 `ANDROID_USER_HOME` 只影响 AGP 的 keystore/指标目录；`~/.android` 的 analytics 告警仍可能出现（见 §7），但不影响构建结果。
 
@@ -135,7 +135,7 @@ Handoff check failed: No handoff stamp: write a record/state, then use --record 
 bash scripts/test-ao-worktree-env.sh
 ```
 
-只加载复制辅助函数，不执行环境准备。覆盖：clonefile 失败留下部分临时目录后回退普通复制不嵌套、文件复制内容完整、回退也失败时清理目标与临时目录、正常复制路径。测试在临时目录中运行并自动清理。
+只加载复制辅助函数，不执行环境准备。覆盖：clonefile 失败留下部分临时目录后回退普通复制不嵌套、文件复制内容完整、顶层外部链接实体化、目录内绝对/逃逸链接拒绝、内部相对链接保留、回退也失败时清理目标与临时目录、正常复制路径。测试在临时目录中运行并自动清理。
 
 ## 7. 失败排查
 

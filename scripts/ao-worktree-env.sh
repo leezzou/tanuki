@@ -14,19 +14,70 @@
 #   TANUKI_ANDROID_USER_HOME            覆盖默认的 worktree 内 ANDROID_USER_HOME
 #   TANUKI_SKIP_ANDROID_USER_HOME=1     不重定向 ANDROID_USER_HOME（assemble/lint 会因写 ~/.android 被沙箱拒绝）
 
+# 解析路径；优先 readlink -f，旧系统退回 realpath。
+tanuki_env_realpath() {
+  local path="$1"
+  if readlink -f "$path" >/dev/null 2>&1; then
+    readlink -f "$path"
+  elif command -v realpath >/dev/null 2>&1; then
+    realpath "$path"
+  else
+    return 1
+  fi
+}
+
+# 可写缓存/源码树只允许内部相对链接；绝对链接或逃出源树的链接会把共享目录带进 worktree。
+tanuki_env_validate_tree_links() {
+  local src="$1" src_real link raw resolved
+  src_real=$(tanuki_env_realpath "$src") || return 1
+  while IFS= read -r -d '' link; do
+    raw=$(readlink "$link") || return 1
+    if [[ "$raw" == /* ]]; then
+      printf '[ao-worktree-env] 错误: 源码树含绝对符号链接，拒绝复制: %s -> %s\n' "$link" "$raw" >&2
+      return 1
+    fi
+    resolved=$(tanuki_env_realpath "$link") || {
+      printf '[ao-worktree-env] 错误: 无法解析符号链接: %s -> %s\n' "$link" "$raw" >&2
+      return 1
+    }
+    if [[ ! -e "$resolved" ]]; then
+      printf '[ao-worktree-env] 错误: 符号链接目标不存在: %s -> %s\n' "$link" "$raw" >&2
+      return 1
+    fi
+    case "$resolved" in
+      "$src_real"/*) ;;
+      *)
+        printf '[ao-worktree-env] 错误: 符号链接逃出源码树，拒绝复制: %s -> %s\n' "$link" "$raw" >&2
+        return 1
+        ;;
+    esac
+  done < <(find "$src" -type l -print0 2>/dev/null)
+  return 0
+}
+
 # 通用复制：目录/文件/符号链接；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
 # 独立定义，便于 scripts/test-ao-worktree-env.sh 在 TANUKI_ENV_LIB_ONLY=1 下做回归测试。
 tanuki_env_copy_entry() {
-  local src="$1" dst="$2" tmp
+  local src="$1" dst="$2" tmp target
   if [[ -e "$dst" || -L "$dst" ]]; then return 0; fi
   mkdir -p "$(dirname "$dst")" || return 1
   tmp="${dst}.tmp.$$"
   rm -rf "$tmp"
   if [[ -L "$src" ]]; then
-    if ln -s "$(readlink "$src")" "$tmp" && mv "$tmp" "$dst"; then return 0; fi
-    rm -rf "$tmp"; return 1
+    # 顶层链接先解析，再把目标复制为独立实体；绝不把外部/相对链接原样带进 worktree。
+    target=$(tanuki_env_realpath "$src") || {
+      printf '[ao-worktree-env] 错误: 无法解析符号链接: %s\n' "$src" >&2
+      return 1
+    }
+    if [[ ! -e "$target" ]]; then
+      printf '[ao-worktree-env] 错误: 符号链接目标不存在: %s -> %s\n' "$src" "$(readlink "$src")" >&2
+      return 1
+    fi
+    tanuki_env_copy_entry "$target" "$dst" || return 1
+    return 0
   fi
   if [[ -d "$src" ]]; then
+    tanuki_env_validate_tree_links "$src" || return 1
     if ! cp -cR "$src" "$tmp" 2>/dev/null; then
       # clone 失败可能已创建部分 $tmp；不清理会让普通复制嵌套成 $tmp/<basename>。
       rm -rf "$tmp"
@@ -291,7 +342,7 @@ tanuki_ao_worktree_env() {
 }
 
 if tanuki_ao_worktree_env; then
-  unset -f tanuki_ao_worktree_env tanuki_env_note tanuki_env_fail tanuki_env_copy_entry
+  unset -f tanuki_ao_worktree_env tanuki_env_note tanuki_env_fail tanuki_env_copy_entry tanuki_env_realpath tanuki_env_validate_tree_links
 else
   if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 1
