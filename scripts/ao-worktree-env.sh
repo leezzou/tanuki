@@ -29,13 +29,46 @@ tanuki_env_realpath() {
 # 可写缓存/源码树只允许内部相对链接；绝对链接或逃出源树的链接会把共享目录带进 worktree。
 tanuki_env_validate_tree_links() {
   local src="$1" src_real link raw resolved
+  local link_rel link_dir depth part
+  local -a parts
   src_real=$(tanuki_env_realpath "$src") || return 1
+  src="$src_real"
   while IFS= read -r -d '' link; do
     raw=$(readlink "$link") || return 1
     if [[ "$raw" == /* ]]; then
       printf '[ao-worktree-env] 错误: 源码树含绝对符号链接，拒绝复制: %s -> %s\n' "$link" "$raw" >&2
       return 1
     fi
+    # 仅检查源位置的 realpath 不够：链接文本会原样复制，必须保证搬迁后仍从副本根内解析。
+    # 从链接所在目录按词法累计深度，任何 .. 越过源根（即使随后返回）都会指向源目录或断链。
+    link_rel="${link#"$src_real"/}"
+    link_dir="${link_rel%/*}"
+    [[ "$link_dir" == "$link_rel" ]] && link_dir=""
+    depth=0
+    IFS='/' read -r -a parts <<< "$link_dir"
+    parts+=("")
+    for part in "${parts[@]}"; do
+      case "$part" in
+        ''|.) ;;
+        ..) depth=$((depth - 1)); (( depth >= 0 )) || { printf '[ao-worktree-env] 错误: 符号链接路径异常: %s\n' "$link" >&2; return 1; } ;;
+        *) depth=$((depth + 1)) ;;
+      esac
+    done
+    IFS='/' read -r -a parts <<< "$raw"
+    parts+=("")
+    for part in "${parts[@]}"; do
+      case "$part" in
+        ''|.) ;;
+        ..)
+          depth=$((depth - 1))
+          if (( depth < 0 )); then
+            printf '[ao-worktree-env] 错误: 符号链接先逃出源码根，搬迁后会指向源目录或断链: %s -> %s\n' "$link" "$raw" >&2
+            return 1
+          fi
+          ;;
+        *) depth=$((depth + 1)) ;;
+      esac
+    done
     resolved=$(tanuki_env_realpath "$link") || {
       printf '[ao-worktree-env] 错误: 无法解析符号链接: %s -> %s\n' "$link" "$raw" >&2
       return 1

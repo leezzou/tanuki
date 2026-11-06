@@ -84,13 +84,30 @@ if tanuki_env_copy_entry "$work/src-escape-rel" "$work/dst-escape-rel" 2>/dev/nu
 fi
 [[ ! -e "$work/dst-escape-rel" ]] || fail "拒绝逃逸链接后不应留下目标"
 
-# 5. 源码树内部的相对链接保留，且复制后仍可读。
-mkdir -p "$work/src-safe/data"
-printf 'safe\n' > "$work/src-safe/data/file.txt"
-ln -s data/file.txt "$work/src-safe/link.txt"
-tanuki_env_copy_entry "$work/src-safe" "$work/dst-safe"
-[[ -L "$work/dst-safe/link.txt" ]] || fail "内部相对链接应保留"
-[[ "$(cat "$work/dst-safe/link.txt")" == "safe" ]] || fail "内部相对链接复制后不可读"
+# 4b. 先逃出源根再返回的链接：复制后仍会指向源目录，必须拒绝。
+mkdir -p "$work/src-escape-round/data"
+printf 'round\n' > "$work/src-escape-round/data/file.txt"
+ln -s ../src-escape-round/data/file.txt "$work/src-escape-round/link.txt"
+if tanuki_env_copy_entry "$work/src-escape-round" "$work/dst-escape-round" 2>/dev/null; then
+  fail "先逃出源根再返回的链接应被拒绝"
+fi
+[[ ! -e "$work/dst-escape-round" ]] || fail "拒绝绕回链接后不应留下目标"
+
+# 5. 源/目标目录名不同：内部相对链接必须指向副本，写副本不能修改源。
+mkdir -p "$work/src-original/data" "$work/src-original/sub"
+printf 'source\n' > "$work/src-original/data/file.txt"
+ln -s ../data/file.txt "$work/src-original/sub/link.txt"
+tanuki_env_copy_entry "$work/src-original" "$work/dst-renamed"
+[[ -L "$work/dst-renamed/sub/link.txt" ]] || fail "内部相对链接应保留"
+dst_real=$(tanuki_env_realpath "$work/dst-renamed")
+resolved=$(tanuki_env_realpath "$work/dst-renamed/sub/link.txt")
+case "$resolved" in
+  "$dst_real"/*) ;;
+  *) fail "复制后的链接未指向副本: $resolved" ;;
+esac
+printf 'changed\n' > "$work/dst-renamed/sub/link.txt"
+[[ "$(cat "$work/src-original/data/file.txt")" == "source" ]] || fail "写副本链接修改了源"
+[[ "$(cat "$work/dst-renamed/data/file.txt")" == "changed" ]] || fail "写副本链接未写入副本"
 
 # 6. 回退也失败时必须返回非 0，且清理目标与临时目录。
 plain_copy_fails=1
