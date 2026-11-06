@@ -112,6 +112,19 @@ printf 'changed\n' > "$work/dst-renamed/sub/link.txt"
 [[ "$(cat "$work/src-original/data/file.txt")" == "source" ]] || fail "写副本文件修改了源"
 [[ "$(cat "$work/dst-renamed/sub/link.txt")" == "changed" ]] || fail "写副本文件未生效"
 
+# 5b. 中间目录链接 + 链式 .. 绕回：dereference 后写副本不得修改源。
+mkdir -p "$work/src-chain/d" "$work/src-chain/data" "$work/src-chain/deep"
+printf 'chain\n' > "$work/src-chain/data/file.txt"
+ln -s ../d "$work/src-chain/deep/to-d"
+ln -s to-d/../../src-chain/data/file.txt "$work/src-chain/deep/link.txt"
+tanuki_env_copy_entry "$work/src-chain" "$work/dst-chain"
+[[ -f "$work/dst-chain/deep/link.txt" && ! -L "$work/dst-chain/deep/link.txt" ]] || fail "链式链接应 dereference 为普通文件"
+[[ "$(cat "$work/dst-chain/deep/link.txt")" == "chain" ]] || fail "链式链接 dereference 内容不完整"
+[[ -z "$(find "$work/dst-chain" -type l -print -quit)" ]] || fail "副本不应保留任何符号链接"
+printf 'chain-changed\n' > "$work/dst-chain/deep/link.txt"
+[[ "$(cat "$work/src-chain/data/file.txt")" == "chain" ]] || fail "写链式副本修改了源"
+[[ "$(cat "$work/dst-chain/deep/link.txt")" == "chain-changed" ]] || fail "写链式副本未生效"
+
 # 6. 回退也失败时必须返回非 0，且清理目标与临时目录。
 plain_copy_fails=1
 if tanuki_env_copy_entry "$work/src" "$work/dst-failed"; then
