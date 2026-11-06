@@ -18,7 +18,7 @@ FILES = (
 # 原生对应源码附件不作为 Git 检出或可迁移源码指纹的前置条件；
 # 两个附件都已生成时才一并打包，以满足二进制分发的许可要求。
 EXTRAS = ("artifacts/sources/native/Tanuki-native-corresponding-sources.tar.gz", "artifacts/sources/native/native-source-SHA256SUMS")
-TREES = ("app/src", "gradle", "runtime", "scripts", "docs", "licenses")
+TREES = ("app/src", "gradle", "runtime", "scripts", ".github", "docs", "licenses")
 OMIT_PARTS = {"__pycache__", ".DS_Store", ".git", ".gradle", ".build", "build", "private", ".private",
               ".idea", ".vscode", ".ssh", ".aws", ".kotlin", ".cxx", ".externalNativeBuild", ".cache",
               "node_modules", ".npm", ".pnpm-store", ".venv", "venv", ".pytest_cache", ".mypy_cache",

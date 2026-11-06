@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261106-1211-phase2-worktree-build.md",
-  "recordSha256": "bc3a5f85aa29890142dc6b06ac9af636bd7fcb6e25e0b7ebec4d05b6e8cca586",
-  "sourceFingerprint": "44d8f533c3fec5b2b0f8df6288c948707adcf8035b9d0180dcbc7d2fdfdc36be",
-  "fileCount": 433
+  "record": "docs/handoffs/20261106-1207-ci-rpc-contract-tests.md",
+  "recordSha256": "7cda67a0891e01ee1d1841d9064be7cb277a2f8c990bb5ef8b782c88db83215b",
+  "sourceFingerprint": "4b8736991129b5e71b93ec488b829b3ff8412b4cb4371bb4d62df4f060fa3e53",
+  "fileCount": 438
 }

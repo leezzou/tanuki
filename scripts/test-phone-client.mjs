@@ -13,6 +13,8 @@ import { promisify } from 'node:util';
 import { callPhone, readToFile, writeFromFile } from '../app/src/main/assets/phone/tanuki-phone.mjs';
 
 const execute = promisify(execFile);
+const phoneMethods = ['status', 'stat', 'list', 'read', 'write_begin', 'write_chunk', 'write_commit',
+  'write_cancel', 'mkdir', 'rename', 'delete'];
 async function fixture(handler, block) {
   const directory = await mkdtemp(join(tmpdir(), 'tanuki-phone-client-'));
   const token = randomBytes(32).toString('base64url');
@@ -26,8 +28,13 @@ async function fixture(handler, block) {
       const value = JSON.parse(Buffer.concat(chunks));
       requests.push(value);
       const result = await handler(value, { directory, token, requests });
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify(result));
+      if (result && result.__raw !== undefined) {
+        response.writeHead(result.status ?? 200, { 'Content-Type': result.contentType ?? 'application/json' });
+        response.end(result.__raw);
+      } else {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(result));
+      }
     } catch {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ ok: false, error: 'fixture_failed' }));
@@ -209,5 +216,58 @@ test('分页期间配置改变不会静默切换到另一能力连接', async ()
     await readToFile('/phone/primary/a.bin', destination, { connectionFile });
     assert.deepEqual(await readFile(destination), bytes);
     assert.equal(requests.length, 2);
+  });
+});
+
+test('非200、无效JSON与缺失ok字段统一为invalid_response', async () => {
+  await fixture(({ method }) => {
+    if (method === 'status') return { __raw: 'not-json' };
+    if (method === 'list') return { __raw: JSON.stringify({ ok: true, result: {} }), status: 500 };
+    return { __raw: JSON.stringify({ result: {} }) };
+  }, async ({ connectionFile }) => {
+    await assert.rejects(callPhone('status', {}, connectionFile), { code: 'invalid_response' });
+    await assert.rejects(callPhone('list', {}, connectionFile), { code: 'invalid_response' });
+    await assert.rejects(callPhone('stat', {}, connectionFile), { code: 'invalid_response' });
+  });
+});
+
+test('超过1MiB的响应以response_too_large拒绝', async () => {
+  await fixture(() => ({ __raw: Buffer.alloc(1048576 + 1, 0x61) }), async ({ connectionFile }) => {
+    await assert.rejects(callPhone('status', {}, connectionFile), { code: 'response_too_large' });
+  });
+});
+
+test('长IO超时以phone_timeout拒绝且不等待完整120秒', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  await fixture(async () => {
+    await new Promise(resolve => realSetTimeout(resolve, 150));
+    return ok({});
+  }, async ({ connectionFile }) => {
+    globalThis.setTimeout = (callback, delay, ...args) => realSetTimeout(callback,
+      delay === 20000 || delay === 120000 ? 20 : delay, ...args);
+    try {
+      await assert.rejects(callPhone('stat', {}, connectionFile), { code: 'phone_timeout' });
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  });
+});
+
+test('方法集与请求大小限制在本地拒绝，未知方法不发出请求', async () => {
+  await fixture(() => ok({}), async ({ connectionFile, requests }) => {
+    for (const method of phoneMethods) await callPhone(method, {}, connectionFile);
+    assert.deepEqual(requests.map(value => value.method), phoneMethods);
+    const sent = requests.length;
+
+    await assert.rejects(callPhone('eval', {}, connectionFile), { code: 'invalid_request' });
+    await assert.rejects(callPhone('status', [], connectionFile), { code: 'invalid_request' });
+    await assert.rejects(callPhone('read', { data: 'x'.repeat(300000) }, connectionFile), { code: 'request_too_large' });
+    assert.equal(requests.length, sent);
+  });
+});
+
+test('原生错误码不符合短码格式时拒绝为invalid_response', async () => {
+  await fixture(() => ({ ok: false, error: 'Bad Code' }), async ({ connectionFile }) => {
+    await assert.rejects(callPhone('status', {}, connectionFile), { code: 'invalid_response' });
   });
 });
