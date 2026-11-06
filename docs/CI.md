@@ -20,7 +20,7 @@ python3 scripts/check-handoff.py
 
 Host job 使用 Python 3.12 与 Node 22。`check-handoff.py` 放在最后：W1 的交接恢复记录尚未合并时它会失败，但前面的独立协议与客户端回归仍会完整执行；该步骤不会被跳过或标记为 `continue-on-error`。
 
-其中 `check-rpc-contract.py` 同时比对 Browser/Phone 的客户端与原生方法集、`/rpc`、Bearer、token 正则、请求/响应大小上限和错误码格式；任何一侧单独扩展协议都会失败。`test-browser-client.mjs` 与 `test-phone-client.mjs` 使用本机回环 mock server，不依赖真实浏览器、设备或用户能力配置。
+其中 `check-rpc-contract.py` 同时比对 Browser/Phone 的客户端与原生方法集、`/rpc`、Bearer、token 正则、请求/响应大小上限和错误码格式；任何一侧单独扩展协议都会失败。`test-browser-client.mjs` 与 `test-phone-client.mjs` 使用本机回环 mock server，不依赖真实浏览器、设备或用户能力配置。`test-agent-workflow.py` 还会用 mock ADB/apkanalyzer/apksigner 覆盖设备验收门禁：APK 哈希/签名/版本/ABI/原生库、WebView 最低版本、忙碌进程与活动安装会话，以及 install 后版本确认；CI 不连接任何设备。
 
 ### Android build, JVM tests and lint
 

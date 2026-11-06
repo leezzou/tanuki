@@ -9,6 +9,14 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - **0.1.8 没有对应的设备测试报告。** 未发现 0.1.8 的 JVM、lint 或设备仪器测试记录；不能把 0.1.7 或更早的数字写成 0.1.8 已通过。
 - 当前模拟器 `emulator-5572`：API34/ARM64、WebView `159.0.8133.0`，已安装 0.1.7/code9；任务基线记录 `files/runtime` 与 `files/engines` 为空，本轮未提权读取 release 私有目录。本轮只读查看 serial/API/ABI/WebView/已安装版本，未安装、未清数据、未运行仪器。
 
+## 设备验收门禁（2026-11-06，host-only，非产品测试）
+
+- 新增 `scripts/device-preflight.py`，并在 `scripts/verify-workspace.sh` 的设备路径 install 前（pre）与 install 后（post）调用。门禁只读核验：APK SHA-256、包名、versionCode/versionName、应用与测试签名一致、arm64-v8a、`libproot.so`/`libproot-loader.so`/`libsupervisor.so` 是否随包、设备 API/ABI、当前 WebView 主版本，以及 apt/dpkg/Node/PRoot/supervisor 进程和活动安装会话；失败不安装，证据写私有 `.build/logs/device-preflight-*.json`。
+- 本轮实际执行（宿主 mock，无设备、无构建、无安装）：
+  - `python3 scripts/test-agent-workflow.py` → **14 tests OK（54.390s）**；新增身份/签名/版本降级/WebView/忙碌进程/安装会话/证据 pin/post 版本场景。
+  - `bash -n scripts/verify-workspace.sh`、`python3 scripts/device-preflight.py --help` → 语法/入口通过。
+- 未测试：未对真实 APK/设备执行 pre/post 门禁，未构建、未安装、未跑仪器。main CI run `42163963031` 双绿，但 CI 使用 `-x buildNativeRuntime` 且不携带原生 `.so`，不能替代本门禁或设备验收；0.1.8 仍没有设备测试报告。
+
 ## 本轮文档门禁验证（2026-11-06，非产品测试）
 
 - 用户要求恢复 `docs/AGENT-STATE.md`、`docs/TEST-REPORT.md`、`docs/handoffs/CURRENT.json`，修复 `check-publication.py --git` 的 20 个断链，并新增 `docs/INTERFACES.md`；只改 docs，不改产品代码。
