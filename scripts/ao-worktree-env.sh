@@ -26,7 +26,7 @@ tanuki_env_realpath() {
   fi
 }
 
-# 可写缓存/源码树只允许内部相对链接；绝对链接或逃出源树的链接会把共享目录带进 worktree。
+# 可写缓存/源码树拒绝绝对链接、逃出源树或先出根再返回的链接；内部安全链接在复制时 dereference。
 tanuki_env_validate_tree_links() {
   local src="$1" src_real link raw resolved
   local link_rel link_dir depth part
@@ -91,7 +91,7 @@ tanuki_env_validate_tree_links() {
 # 通用复制：目录/文件/符号链接；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
 # 独立定义，便于 scripts/test-ao-worktree-env.sh 在 TANUKI_ENV_LIB_ONLY=1 下做回归测试。
 tanuki_env_copy_entry() {
-  local src="$1" dst="$2" tmp target
+  local src="$1" dst="$2" tmp target leftover
   if [[ -e "$dst" || -L "$dst" ]]; then return 0; fi
   mkdir -p "$(dirname "$dst")" || return 1
   tmp="${dst}.tmp.$$"
@@ -111,13 +111,20 @@ tanuki_env_copy_entry() {
   fi
   if [[ -d "$src" ]]; then
     tanuki_env_validate_tree_links "$src" || return 1
-    if ! cp -cR "$src" "$tmp" 2>/dev/null; then
+    # -L 完全 dereference 链接，worktree 内不保留任何链接文本；循环链接由 cp 拒绝。
+    if ! cp -cRL "$src" "$tmp" 2>/dev/null; then
       # clone 失败可能已创建部分 $tmp；不清理会让普通复制嵌套成 $tmp/<basename>。
       rm -rf "$tmp"
-      if ! cp -R "$src" "$tmp"; then
+      if ! cp -RL "$src" "$tmp"; then
         rm -rf "$tmp"
         return 1
       fi
+    fi
+    leftover=$(find "$tmp" -type l -print -quit 2>/dev/null)
+    if [[ -n "$leftover" ]]; then
+      printf '[ao-worktree-env] 错误: 复制后仍残留符号链接，拒绝使用: %s\n' "$leftover" >&2
+      rm -rf "$tmp"
+      return 1
     fi
     if mv "$tmp" "$dst"; then return 0; fi
     rm -rf "$tmp"; return 1

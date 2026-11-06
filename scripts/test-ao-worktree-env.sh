@@ -17,12 +17,12 @@ fail() {
   exit 1
 }
 
-# 模拟 macOS 的 cp：-cR / -c 先创建部分目标再失败；plain_copy_fails=1 时 -R 也失败。
+# 模拟 macOS 的 cp：-cRL / -c 先创建部分目标再失败；plain_copy_fails=1 时 -RL 也失败。
 real_cp=$(command -v cp)
 plain_copy_fails=0
 cp() {
   case "$1" in
-    -cR)
+    -cRL)
       mkdir -p "$3/partial-clone"
       printf 'partial\n' > "$3/partial-clone/junk"
       return 1
@@ -31,7 +31,7 @@ cp() {
       printf 'partial\n' > "$3"
       return 1
       ;;
-    -R)
+    -RL)
       if [[ "$plain_copy_fails" == "1" ]]; then
         mkdir -p "$3/partial-plain"
         printf 'partial\n' > "$3/partial-plain/junk"
@@ -93,21 +93,24 @@ if tanuki_env_copy_entry "$work/src-escape-round" "$work/dst-escape-round" 2>/de
 fi
 [[ ! -e "$work/dst-escape-round" ]] || fail "拒绝绕回链接后不应留下目标"
 
-# 5. 源/目标目录名不同：内部相对链接必须指向副本，写副本不能修改源。
+# 4c. 循环链接必须拒绝，且不留下目标。
+mkdir -p "$work/src-cycle/sub"
+ln -s .. "$work/src-cycle/sub/loop"
+if tanuki_env_copy_entry "$work/src-cycle" "$work/dst-cycle" 2>/dev/null; then
+  fail "循环符号链接应被拒绝"
+fi
+[[ ! -e "$work/dst-cycle" ]] || fail "拒绝循环链接后不应留下目标"
+
+# 5. 源/目标目录名不同：内部安全链接被 dereference，写副本不能修改源。
 mkdir -p "$work/src-original/data" "$work/src-original/sub"
 printf 'source\n' > "$work/src-original/data/file.txt"
 ln -s ../data/file.txt "$work/src-original/sub/link.txt"
 tanuki_env_copy_entry "$work/src-original" "$work/dst-renamed"
-[[ -L "$work/dst-renamed/sub/link.txt" ]] || fail "内部相对链接应保留"
-dst_real=$(tanuki_env_realpath "$work/dst-renamed")
-resolved=$(tanuki_env_realpath "$work/dst-renamed/sub/link.txt")
-case "$resolved" in
-  "$dst_real"/*) ;;
-  *) fail "复制后的链接未指向副本: $resolved" ;;
-esac
+[[ -f "$work/dst-renamed/sub/link.txt" && ! -L "$work/dst-renamed/sub/link.txt" ]] || fail "内部链接应 dereference 为普通文件"
+[[ "$(cat "$work/dst-renamed/sub/link.txt")" == "source" ]] || fail "dereference 后内容不完整"
 printf 'changed\n' > "$work/dst-renamed/sub/link.txt"
-[[ "$(cat "$work/src-original/data/file.txt")" == "source" ]] || fail "写副本链接修改了源"
-[[ "$(cat "$work/dst-renamed/data/file.txt")" == "changed" ]] || fail "写副本链接未写入副本"
+[[ "$(cat "$work/src-original/data/file.txt")" == "source" ]] || fail "写副本文件修改了源"
+[[ "$(cat "$work/dst-renamed/sub/link.txt")" == "changed" ]] || fail "写副本文件未生效"
 
 # 6. 回退也失败时必须返回非 0，且清理目标与临时目录。
 plain_copy_fails=1
