@@ -411,6 +411,16 @@ else:
         self.assertNotEqual(0, result.returncode, result.stdout)
         self.assertFalse(any("install" in event for event in self.events()))
 
+    def test_device_preflight_accepts_missing_test_version_and_empty_sessions(self):
+        self.runner_fixture()
+        result = self.runner(*self.device_args())
+        self.assertEqual(0, result.returncode, result.stderr)
+        evidence = sorted((self.root / ".build/logs").glob("device-preflight-pre-*.json"))[-1]
+        payload = json.loads(evidence.read_text())
+        self.assertIsNone(payload["test"]["versionName"])
+        self.assertIsNone(payload["test"]["versionCode"])
+        self.assertEqual(0, payload["activeInstallSessions"])
+
     def test_device_preflight_accepts_independent_androidtest_version(self):
         self.runner_fixture()
         result = self.runner(*self.device_args(), FAKE_TEST_VERSION_NAME="1.0-test",
