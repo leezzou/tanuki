@@ -54,14 +54,31 @@ def digest(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def apkanalyzer(sdk: Path, apk: Path, field: str) -> str:
+def apkanalyzer_tool(sdk: Path) -> Path:
     tool = sdk / "cmdline-tools/latest/bin/apkanalyzer"
     if not tool.is_file():
         fail(f"缺少 apkanalyzer: {tool}")
-    result = run([str(tool), "manifest", field, str(apk)])
+    return tool
+
+
+def apkanalyzer(sdk: Path, apk: Path, field: str) -> str:
+    result = run([str(apkanalyzer_tool(sdk)), "manifest", field, str(apk)])
     if result.returncode != 0:
         fail(f"apkanalyzer {field} 失败: {result.stderr.strip()[:300]}")
-    return result.stdout.strip()
+    value = result.stdout.strip()
+    if not value:
+        fail(f"apkanalyzer {field} 未返回值")
+    return value
+
+
+def apkanalyzer_optional(sdk: Path, apk: Path, field: str) -> str | None:
+    # androidTest manifest 通常不继承应用的 versionCode/versionName；
+    # 缺失是合法状态，不能因此阻断设备验收。
+    result = run([str(apkanalyzer_tool(sdk)), "manifest", field, str(apk)])
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
 
 
 def instrumentation_target(sdk: Path, apk: Path) -> str:
@@ -159,7 +176,9 @@ def active_install_sessions(adb_path: Path, serial: str) -> list[str]:
     if staged.returncode == 0:
         text = staged.stdout.strip()
         if text and not text.lower().startswith("error"):
-            return [line.strip() for line in text.splitlines() if line.strip()]
+            entries = [line.strip() for line in text.splitlines() if re.search(r"Session \d+", line)]
+            if entries:
+                return entries
     # fallback：部分镜像的 pm 子命令不可用，改读 dumpsys 的 Active install sessions 段。
     dump = adb(adb_path, serial, "shell", "dumpsys package")
     if dump.returncode != 0:
@@ -173,7 +192,9 @@ def active_install_sessions(adb_path: Path, serial: str) -> list[str]:
     for line in lines[start + 1:]:
         if line and not line.startswith((" ", "\t")):
             break
-        if re.match(r"^\s+Session \d+:", line):
+        # Android 14 输出 "Active Session 7:" / "Active Child Session 7:"；
+        # 旧格式可能是 "Session 7:"，两者都只在 Active 段内计数。
+        if re.match(r"^\s+(?:Active\s+(?:Child\s+)?Session|Session)\s+\d+:", line):
             sessions.append(line.strip())
     return sessions
 
@@ -192,20 +213,35 @@ def installed(adb_path: Path, serial: str, package: str) -> dict[str, object] | 
     return {"versionCode": int(code.group(1)), "versionName": name.group(1)}
 
 
-def apk_fields(sdk: Path, apk: Path) -> dict[str, object]:
-    version_name = apkanalyzer(sdk, apk, "version-name")
+def optional_int(value: str | None, label: str) -> int | None:
+    if value is None:
+        return None
     try:
-        version_code = int(apkanalyzer(sdk, apk, "version-code"))
-        min_sdk = int(apkanalyzer(sdk, apk, "min-sdk"))
+        return int(value)
     except ValueError:
-        fail(f"无法解析 {apk.name} 的 versionCode/minSdk")
+        fail(f"{label} 格式异常: {value}")
+
+
+def app_fields(sdk: Path, apk: Path) -> dict[str, object]:
+    version_name = apkanalyzer(sdk, apk, "version-name")
     return {
         "path": str(apk),
         "sha256": digest(apk),
         "packageName": apkanalyzer(sdk, apk, "application-id"),
         "versionName": version_name,
-        "versionCode": version_code,
-        "minSdk": min_sdk,
+        "versionCode": optional_int(apkanalyzer(sdk, apk, "version-code"), "应用 versionCode"),
+        "minSdk": optional_int(apkanalyzer(sdk, apk, "min-sdk"), "应用 minSdk"),
+    }
+
+
+def test_fields(sdk: Path, apk: Path) -> dict[str, object]:
+    return {
+        "path": str(apk),
+        "sha256": digest(apk),
+        "packageName": apkanalyzer(sdk, apk, "application-id"),
+        "versionName": apkanalyzer_optional(sdk, apk, "version-name"),
+        "versionCode": optional_int(apkanalyzer_optional(sdk, apk, "version-code"), "测试 APK versionCode"),
+        "minSdk": optional_int(apkanalyzer_optional(sdk, apk, "min-sdk"), "测试 APK minSdk"),
     }
 
 
@@ -214,15 +250,15 @@ def check_identity(sdk: Path, app_apk: Path, test_apk: Path, package: str,
     for apk in (app_apk, test_apk):
         if not apk.is_file():
             fail(f"APK 不存在: {apk}")
-    app = apk_fields(sdk, app_apk)
-    test = apk_fields(sdk, test_apk)
+    app = app_fields(sdk, app_apk)
+    test = test_fields(sdk, test_apk)
     if app["packageName"] != package:
         fail(f"应用 APK 包名不符: 期望 {package}，实际 {app['packageName']}")
     if test["packageName"] != package + ".test":
         fail(f"测试 APK 包名不符: 期望 {package}.test，实际 {test['packageName']}")
-    if test["versionCode"] != app["versionCode"] or test["versionName"] != app["versionName"]:
-        fail("应用/测试 APK 版本不一致")
-    if int(app["minSdk"]) < 26:
+    # AGP 的 androidTest manifest 不继承应用 versionCode/versionName；
+    # 测试 APK 允许缺失或独立版本，分别记录，不做相等要求。
+    if app["minSdk"] is None or int(app["minSdk"]) < 26:
         fail(f"APK minSdk={app['minSdk']} 低于项目要求 26")
     if instrumentation_target(sdk, test_apk) != package:
         fail("instrumentation target 与应用包名不一致")

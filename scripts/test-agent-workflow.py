@@ -177,11 +177,23 @@ apk = args[-1]
 if args[:2] == ['manifest', 'application-id']:
     print(app + '.test' if 'androidTest' in apk else os.environ.get('FAKE_APP', app))
 elif args[:2] == ['manifest', 'version-name']:
-    print(os.environ.get('FAKE_VERSION_NAME', '0.1.7'))
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_VERSION_NAME'): print(os.environ['FAKE_TEST_VERSION_NAME'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_VERSION_NAME', '0.1.7'))
 elif args[:2] == ['manifest', 'version-code']:
-    print(os.environ.get('FAKE_VERSION_CODE', '9'))
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_VERSION_CODE'): print(os.environ['FAKE_TEST_VERSION_CODE'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_VERSION_CODE', '9'))
 elif args[:2] == ['manifest', 'min-sdk']:
-    print(os.environ.get('FAKE_MIN_SDK', '26'))
+    if 'androidTest' in apk:
+        if os.environ.get('FAKE_TEST_MIN_SDK'): print(os.environ['FAKE_TEST_MIN_SDK'])
+        else: raise SystemExit(2)
+    else:
+        print(os.environ.get('FAKE_MIN_SDK', '26'))
 elif args[:2] == ['manifest', 'print']:
     target = os.environ.get('FAKE_TARGET', app)
     print('<manifest xmlns:android="http://schemas.android.com/apk/res/android"><instrumentation android:targetPackage="' + target + '"/></manifest>')
@@ -224,7 +236,8 @@ elif argv and argv[0] == 'shell':
         if len(parts) == 2:
             out('Active install sessions:')
             if os.environ.get('FAKE_ACTIVE_SESSIONS'):
-                out('  Session 7:')
+                prefix = '  Active Child Session 7:' if os.environ.get('FAKE_ACTIVE_CHILD') else '  Active Session 7:'
+                out(prefix)
                 out('    package=com.example')
             out('Finalized install sessions:')
         else:
@@ -383,6 +396,8 @@ else:
             ({"FAKE_PROCESSES": "init,node"}, "live Node process"),
             ({"FAKE_SESSIONS": "Session 7: package=com.example"}, "active install session"),
             ({"FAKE_STAGED_UNSUPPORTED": "1", "FAKE_ACTIVE_SESSIONS": "1"}, "dumpsys fallback active session"),
+            ({"FAKE_STAGED_UNSUPPORTED": "1", "FAKE_ACTIVE_SESSIONS": "1", "FAKE_ACTIVE_CHILD": "1"},
+             "dumpsys fallback active child session"),
         )
         for env, label in cases:
             with self.subTest(label=label):
@@ -395,6 +410,16 @@ else:
         result = self.runner(*self.device_args())
         self.assertNotEqual(0, result.returncode, result.stdout)
         self.assertFalse(any("install" in event for event in self.events()))
+
+    def test_device_preflight_accepts_independent_androidtest_version(self):
+        self.runner_fixture()
+        result = self.runner(*self.device_args(), FAKE_TEST_VERSION_NAME="1.0-test",
+                             FAKE_TEST_VERSION_CODE="1", FAKE_TEST_MIN_SDK="26")
+        self.assertEqual(0, result.returncode, result.stderr)
+        evidence = sorted((self.root / ".build/logs").glob("device-preflight-pre-*.json"))[-1]
+        payload = json.loads(evidence.read_text())
+        self.assertEqual(9, payload["app"]["versionCode"])
+        self.assertEqual(1, payload["test"]["versionCode"])
 
     def test_device_preflight_pins_and_post_install_version(self):
         self.runner_fixture()

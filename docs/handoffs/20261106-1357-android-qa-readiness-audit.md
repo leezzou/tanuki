@@ -19,8 +19,9 @@
   - `scripts/verify-workspace.sh`：设备路径在 install 前执行 pre 门禁、install 后执行 post 版本确认；新增 `--expect-apk-sha256`、`--expect-cert-sha256`、`--min-webview-major`；失败即中止，不安装。
   - `scripts/device-lock.py`：按 serial 的 `flock` 进程锁，覆盖构建→预检→install→instrument 全程；同 serial 第二任务退出 3 并报告持有者，不同 serial 独立；锁 fd 传给子任务，父进程意外退出时仍由存活子任务持有。
   - `scripts/test-agent-workflow.py`：mock ADB/apkanalyzer/apksigner 覆盖新门禁与失败场景；新增同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、`verify-workspace.sh` 串行化回归。
+  - 复审修复（P1）：androidTest manifest 不继承应用 versionCode/versionName，测试 APK 改为允许缺失/独立版本并分别记录；API34 活动安装段兼容 `Active Session`/`Active Child Session` 前缀，mock 使用真实样例。
 - 已验证（本轮实际执行）：
-  - `python3 scripts/test-agent-workflow.py` → **17 tests OK（67.181s）**。
+  - `python3 scripts/test-agent-workflow.py` → **18 tests OK（75.194s）**。
   - `bash -n scripts/verify-workspace.sh`、`python3 scripts/device-preflight.py --help`、`python3 scripts/device-lock.py --help` → 通过。
 - 未验证：真实 APK/设备上的锁、pre/post 门禁、构建、安装、仪器、0.1.8 设备证据。
 - 当前目标包名/分支：`com.tanuki.modern.workspacecheck`；分支 `audit/android-qa-readiness`，基线 `main=a9aa507c06883c62048a89924384ef0a10e01470`；无运行中构建/测试任务。
@@ -92,7 +93,7 @@
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `python3 scripts/test-agent-workflow.py` | **17 tests OK（67.181s）** | 宿主 mock；覆盖门禁成功/失败/证据，以及同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、verify 串行化 |
+| `python3 scripts/test-agent-workflow.py` | **18 tests OK（75.194s）** | 宿主 mock；覆盖门禁成功/失败/证据、测试 APK 独立/缺失版本、API34 Active/Child Session、同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、verify 串行化 |
 | `bash -n scripts/verify-workspace.sh` | 通过 | 语法检查 |
 | `python3 scripts/device-preflight.py --help` | 通过 | 模块可导入/入口正常 |
 | `git rev-parse HEAD`、`gh api …/commits/a9aa507…`、`gh api …/git/ref/heads/main` | 均 `a9aa507c…` | 本地/远端一致 |

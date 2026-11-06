@@ -35,7 +35,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮）：宿主 mock/并发回归 17 tests OK（67.181s）；`bash -n verify-workspace.sh`、`device-preflight.py --help`、`device-lock.py --help` 通过；同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、verify 串行化均有离线回归；main/CI/设备 metadata 只读核对；交接门禁刷新。
+- 已验证（本轮）：宿主 mock/并发回归 18 tests OK（75.194s，含复审 P1 修复：测试 APK 独立/缺失版本、API34 Active/Child Session）；`bash -n verify-workspace.sh`、`device-preflight.py --help`、`device-lock.py --help` 通过；同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、verify 串行化均有离线回归；main/CI/设备 metadata 只读核对；交接门禁刷新。
 - 已验证（W3 本轮，历史）：CI/协议测试实现、Host 门禁、RPC 方法集/常量一致性。
 - 已验证（W2/W1 前轮，历史）：worktree 构建引导、链接跳过策略、文档/门禁恢复、接口契约。
 - 待验证：真实 APK/AVD 上的锁、pre/post 门禁与 14 类回归；`install-and-launch.sh`/`test-runtime.sh` 等历史入口未接入锁；PR 复审与合并；0.1.8 构建/设备/JVM/lint 证据；真实模型/账号、真机/MIUI、低 API、长期后台。
