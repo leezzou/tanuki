@@ -35,6 +35,8 @@ jobs:
         run: python3 scripts/test-app-release.py
       - name: Test publication checks
         run: python3 scripts/test-publication.py
+      - name: Test development gates
+        run: python3 scripts/test-development-gates.py
       - name: Check Browser and Phone RPC contract
         run: python3 scripts/check-rpc-contract.py
       - name: Test Browser client

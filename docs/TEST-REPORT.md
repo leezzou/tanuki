@@ -4,20 +4,35 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
-- `main` 与 `v0.1.8` tag 均指向 `c196bbf4d211604bc2076de450a8ed2d52ddde99`。`artifacts/releases/0.1.8/` 六附件齐全：APK、`app-update.json`、完整源码 ZIP、原生对应源码 TAR、`RELEASE-SHA256SUMS`、`native-source-SHA256SUMS`。
+- `v0.1.8` tag 指向 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（0.1.8 发布点）；远端 `main` 已前进到 `a9aa507c06883c62048a89924384ef0a10e01470`（Wave0 PR #10/#11/#12 合并）。`artifacts/releases/0.1.8/` 六附件齐全：APK、`app-update.json`、完整源码 ZIP、原生对应源码 TAR、`RELEASE-SHA256SUMS`、`native-source-SHA256SUMS`。
 - 本轮只读复核 APK：包名 `com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - **0.1.8 没有对应的设备测试报告。** 未发现 0.1.8 的 JVM、lint 或设备仪器测试记录；不能把 0.1.7 或更早的数字写成 0.1.8 已通过。
 - 当前模拟器 `emulator-5572`：API34/ARM64、WebView `159.0.8133.0`，已安装 0.1.7/code9；任务基线记录 `files/runtime` 与 `files/engines` 为空，本轮未提权读取 release 私有目录。本轮只读查看 serial/API/ABI/WebView/已安装版本，未安装、未清数据、未运行仪器。
 
-## 本轮文档门禁验证（2026-11-06，非产品测试）
+### 0.1.8 首轮设备冒烟（2026-11-06，android_agent-10，非完整验收）
+
+- 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
+- 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
+
+## 本轮研发治理验证（2026-11-06，W7，非产品测试）
+
+- 用户要求治理研发规范与合并前门禁，不开发产品功能：最小修改 `AGENTS.md`，新增编排/QA/经验/代码规范文档和只读 `check-development-gates.py`，接入 Host CI，并更新状态/交接。
+- 实际执行与结果：
+  - `python3 scripts/test-development-gates.py` → 24 tests OK；覆盖旧 SHA、缺 review、空/排队/失败/跳过 checks、QA 漏项/错 SHA/同 session/未知 session/失败步骤/无 Android 步骤、跨仓库 PR、head 变化、纯文档豁免和有效 QA 证据。
+  - `python3 scripts/check-development-gates.py --pr 12 --session android_agent-6` → exit 1（`PR 不是打开状态`）；用真实 `gh`/`ao` 只读 CLI 验证已合并 PR 被保守拒绝。
+  - `python3 scripts/check-handoff.py --record …`、`python3 scripts/check-handoff.py`、`python3 scripts/check-publication.py --git` → 见 W7 交接/PR 的最终输出。
+- 本轮没有构建 APK、没有运行 Gradle/JVM/lint/Android 仪器或设备测试；没有真实 open PR 的完整门禁通过样例。历史数字只作范围参考。
+- W8 的只读核查与 host mock 结果记录在 [W8 报告](handoffs/20261106-1357-android-qa-readiness-audit.md)；其 `device-preflight.py` 已随 PR #13 合并为 `b2a018d`，但未在真实设备执行，不能算 Android 验收。
+
+## W1 文档门禁验证（2026-11-06，历史记录，未在本轮复跑）
 
 - 用户要求恢复 `docs/AGENT-STATE.md`、`docs/TEST-REPORT.md`、`docs/handoffs/CURRENT.json`，修复 `check-publication.py --git` 的 20 个断链，并新增 `docs/INTERFACES.md`；只改 docs，不改产品代码。
 - 实际执行与结果：
-  - `python3 scripts/check-handoff.py --record docs/handoffs/20261106-1059-phase2-docs-contracts.md` → 通过，刷新 `CURRENT.json`。
+  - `python3 scripts/check-handoff.py --record <W1记录>` → 通过，刷新 `CURRENT.json`。
   - `python3 scripts/check-handoff.py` → 退出 0（`Handoff current`）。
   - `python3 scripts/check-publication.py --git` → 0 findings；证据：修复前 20 findings，修复后 0。
   - `git diff --stat` → 只包含 `docs/` 文件。
-- 本轮没有构建 APK、没有运行 JVM/设备/lint，也没有复跑下列任何历史测试；历史数字只作范围参考。
+- W1 当时没有构建 APK、没有运行 JVM/设备/lint，也没有复跑下列任何历史测试；历史数字只作范围参考。
 
 ## PR #8 浏览器输入线程修复（2026-11-05，历史记录，未在本轮复跑）
 

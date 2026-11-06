@@ -1,6 +1,6 @@
 # 签名、打包与 GitHub Release
 
-当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` tag 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 只作历史参考。当前文档门禁任务分支为 `chore/phase2-docs-contracts`，只改 docs；状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 只作历史参考。当前研发治理分支为 `chore/autonomous-development-governance`，只改治理文档/门禁脚本/CI Host 步骤；状态以[交接](AGENT-STATE.md)为准。
 
 **用户说要发布时，先询问版本号；已经明确的版本不重复问。** 历史记录：用户确认过 **v0.1.7**（`versionName=0.1.7`、`versionCode=9`）；当前已发布 **v0.1.8**（`versionName=0.1.8`、`versionCode=10`），沿用原有workspacecheck开发证书。后续封装前须重新核对公开、已安装及归档版本上限，确保 code 严格递增；不能只依据本地默认值判断。
 
@@ -88,9 +88,9 @@ PRoot/talloc 等采用 GPL/LGPL，APK 发布必须同时提供精确对应源码
 
 版本说明应列明应用版本/ARM64/SDK、开发或正式签名、证书公开指纹、APK SHA-256；Ubuntu/Node/npm/pnpm/DSH/PRoot 实际版本与来源许可；空间与首次下载、模型 API 数据边界；模拟器/真机/合成登录/真实模型的分别验证范围；WebView123+与 Android Linux 沙箱/后台限制；完整源码和构建方式。不要把局部测试等同正式产品验收。
 
-本轮工作分支为 `chore/phase2-docs-contracts`，只改 docs 并创建 PR；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
+本轮工作分支为 `chore/autonomous-development-governance`，只改治理文档、门禁脚本/回归和 CI Host 步骤，经 PR 交付；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
 
 
 ## 审批规则历史与用户合并
 
-2026-11-05 13:23的历史公开查证：[main ruleset 26522583](https://github.com/leezzou/tanuki/rules/26522583)要求1人批准，开启dismiss_stale_reviews_on_push；Code Owners、最新推送审批和review_thread条件未开启，required_reviewers为空。作者不能批准自己的PR；此前答疑建议用户将Required approvals调为0，保留Require a pull request before merging后保存。Agent没有修改保护或代合PR，不把历史参数当当前值。依据见[GitHub审批说明](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)与[规则编辑说明](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository)。历史记录：用户已合入0.1.6的PR #6至main/1024eeb，并已合并0.1.7、发布0.1.8；当前0.1.8位于`c196bbf`。后续分支仍由用户自行创建并合并PR、发布Pre-release。
+2026-11-05 13:23的历史公开查证：[main ruleset 26522583](https://github.com/leezzou/tanuki/rules/26522583)要求1人批准，开启dismiss_stale_reviews_on_push；Code Owners、最新推送审批和review_thread条件未开启，required_reviewers为空。作者不能批准自己的PR；此前答疑建议用户将Required approvals调为0，保留Require a pull request before merging后保存。Agent没有修改保护或代合PR，不把历史参数当当前值。依据见[GitHub审批说明](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)与[规则编辑说明](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository)。历史记录：用户已合入0.1.6的PR #6至main/1024eeb，并已合并0.1.7、发布0.1.8；0.1.8发布点为`c196bbf`，远端main已前进到`a9aa507`。后续分支仍由用户自行创建并合并PR、发布Pre-release。

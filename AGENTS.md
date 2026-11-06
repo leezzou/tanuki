@@ -8,6 +8,8 @@
 2. 当前状态指向的 `docs/handoffs/` 交接记录。
 3. [上手指南](docs/AGENT-QUICKSTART.md)：环境、构建、验证、模块地图。
 4. [README](README.md) 和任务相关文档。安全/运行改动先读 [SECURITY](docs/SECURITY.md)；测试结论对照 [TEST-REPORT](docs/TEST-REPORT.md)。
+5. 按角色读专题规则：[编排规则](docs/ORCHESTRATOR-RULES.md)、[QA 门禁](docs/QA-GATES.md)、[经验规则](docs/LESSONS.md)、[代码规范](docs/code-standards.md)；接口以 [INTERFACES](docs/INTERFACES.md) 为准。
+6. 当前 baseline 以远端实际 SHA 和 provider 状态为准，不把本地 `main`、旧交接或 PR 描述当最新；开始任务时记录实际 SHA。
 
 历史报告、截图和旧交接已按用户上传前精简要求清理，必要实现决策归入专题文档，验证摘要保留于 `docs/TEST-REPORT.md`。历史测试数字/包名不能覆盖当前状态。源码是实现事实，验证记录是“已测”依据；冲突必须查证，不凭旧摘要改代码。
 
@@ -27,7 +29,7 @@
   ```
 - 交付源码前再运行 `python3 scripts/package-source.py`，核对 `artifacts/SOURCE-SHA256SUMS`。修改文档也会改变源码包，不能继续发旧 ZIP。
 
-只读权限的 Agent 不得违反权限去写文件：输出同模板的完整交接文本，明确“未落盘”，交由主 Agent 保存。并发子 Agent 返回结论和证据，由主 Agent 汇总；不要多人同时覆盖当前状态或印章。下一任 Agent 建立新记录，工作过程中保留旧记录，不无理由改写历史。
+只读权限的 Agent 不得违反权限去写文件：输出同模板的完整交接文本，明确“未落盘”，交由主 Agent 保存。并发子 Agent 返回结论和证据，由主 Agent 汇总；不要多人同时覆盖当前状态或印章。每轮只指定一名 `AGENT-STATE.md` / `CURRENT.json` 维护方，其他并发 Worker 只回报告；状态、印章和交接必须串行汇总。下一任 Agent 建立新记录，工作过程中保留旧记录，不无理由改写历史。
 
 **每次 Git 提交或推送前，必须先清理已过期的交接文档**，不能只新增记录而持续堆积：
 
@@ -62,6 +64,10 @@
 - 本轮未修改产品代码时，如实说明只做了文档/脚本验证，保留前一轮产品测试范围，不冒充重跑全套。
 - README 保持简短产品介绍与必要入口；实现、验证和发布细节放专题文档，不把初版首页重新扩成维护报告。
 - 新增根目录交付文件时检查 `scripts/package-source.py` 的明确清单；`.build`、本机配置、密钥不得变成必要交接依赖。
+- 长期分工：编排/规划/管理、实现、测试、独立 Android QA 和复盘由 DSH 承担；Codex/GPT High 只做独立 Review，不参与开发或编排。按任务独立性并发 1 至 3 个 Worker（默认最多 3 个），同一核心文件或共享接口避免并发写。合并/配置决策前先用 `ao session get` 与 `ao project get` 核对实际值，不自行改 AO 配置。
+- 跨端协议、RPC 方法集和共享接口先定契约再实现；依赖其他分支或外部交付时，先集成到最新基线再刷新验证，不把集成前结果当集成后结论。
+- 同一问题连续两轮无实质进展时停止盲试，先分析根因、缩小复现范围或更换方案；仍无进展则报告阻塞并请用户决策。
+- 独立审查绑定 PR 当前完整 SHA；推送新提交后旧批准不沿用。Worker 自评、Host 结果和模型自述不能替代独立审查或设备 QA。
 
 ## 5. 发布约定
 
@@ -70,6 +76,7 @@
 - 确认包名/签名渠道与递增 `versionCode`（必须高于该包已安装/已发布的所有版本），再使用 `scripts/prepare-app-release.py --version <确认版本> --version-code <递增代码> --channel <workspacecheck|production>`。工作区验证包与正式包不能互相覆盖。
 - 打包必须核对 APK 实际包名、版本、Android 要求、证书、大小/SHA-256，输出 `app-update.json`、对应源码与校验清单；保留安装环境，不卸载或清数据。正式密钥须在仓库外，通过环境传递密码，不读取/输出密钥或密码。
 - 产物按 [取包说明](docs/ARTIFACTS.md) 分类：完整发布在 `artifacts/releases/<版本>/`，源码在 `sources/`，签名中间包在 `builds/`，旧包在 `archive/`。不在根目录散放 APK/ZIP；发版时同步取包说明与生成的 `artifacts/README.md`，不能按最大版本号选择已撤回候选包。
+- 合并、发布、创建 tag/Release 和修改保护策略/权限都需要用户明确授权；没有授权时只交付可合并候选，不代合、不直推默认分支。合并前按 [编排规则](docs/ORCHESTRATOR-RULES.md) 完成当前 SHA 的独立审查、适用 CI 和 QA；AO approved 不等于 GitHub required approval。
 - 打包不等于创建 tag、上传 GitHub Release 或自动推送；按用户当前授权分别执行。开发签名包标 Pre-release。完整流程见 [发布说明](docs/RELEASE.md) 与 [应用内更新](docs/APP-UPDATES.md)。
 
 ## 6. 推荐入口
@@ -81,6 +88,10 @@ bash scripts/verify-workspace.sh
 
 # 仅确认无真实数据、已装运行环境、无安装任务的 ARM64 测试设备：
 bash scripts/verify-workspace.sh --run-device-tests --confirm-test-data --device <SERIAL>
+
+# 合并前只读门禁（需要当前 PR、独立 review 与适用 QA；不改任何文件）：
+python3 scripts/check-development-gates.py --pr <PR> --session <AO worker id> [--qa-evidence <json>]
+python3 scripts/test-development-gates.py
 ```
 
 对外报告始终区分开发 debug 包与正式签名、模拟器与真机、合成登录与真实微信登录、无模型诊断与实际模型任务。完成局部工作不能等同于整个产品已正式验收。

@@ -109,7 +109,7 @@ APFS 克隆时这些文件与源缓存共享数据块，实际新增磁盘通常
 
 ## 6. 实测记录（2026-11-06）
 
-环境：macOS 27.0.1 arm64；Temurin JDK 17.0.21+9；Gradle 8.13；AGP 8.13.2；Kotlin 2.3.10；SDK platform 36、build-tools 35.0.0、NDK 27.2.12479018；基线 `origin/main` = `c196bbf4d211604bc2076de450a8ed2d52ddde99`（分支 `chore/phase2-worktree-build`）。
+环境：macOS 27.0.1 arm64；Temurin JDK 17.0.21+9；Gradle 8.13；AGP 8.13.2；Kotlin 2.3.10；SDK platform 36、build-tools 35.0.0、NDK 27.2.12479018；W2 当时基线 `origin/main` = `c196bbf4d211604bc2076de450a8ed2d52ddde99`（分支 `chore/phase2-worktree-build`）。
 
 | 命令 | 结果 | 备注 |
 | --- | --- | --- |
@@ -120,7 +120,7 @@ APFS 克隆时这些文件与源缓存共享数据块，实际新增磁盘通常
 | `./gradlew ... :app:assembleModernDebug` | **BUILD SUCCESSFUL**，15 s | 清空 `.build/android-user-home` 后重新生成 `debug.keystore`，APK 14,293,015 字节 |
 | `python3 scripts/check-handoff.py` | 通过 | 补齐本轮交接并刷新印章后，无参数检查退出 0 |
 
-本轮已补齐独立交接并刷新印章：`python3 scripts/check-handoff.py` 现在通过（`Handoff current: docs/handoffs/20261106-1211-phase2-worktree-build.md`）。因此 `verify-workspace.sh` 不会再因交接印章在启动 Gradle 前退出；但本 worktree 没有完整执行它的 assemble/androidTest/lint 全流程，不能宣称 `verify-workspace.sh` 整体通过。本 worktree 只新增脚本、回归测试、文档与交接记录，未改产品源码。
+W2 当时已补齐独立交接并刷新印章，`python3 scripts/check-handoff.py` 通过。因此 `verify-workspace.sh` 不会再因交接印章在启动 Gradle 前退出；但该 worktree 没有完整执行它的 assemble/androidTest/lint 全流程，不能宣称 `verify-workspace.sh` 整体通过。W2 只新增脚本、回归测试、文档与交接记录，未改产品源码。W2 记录已在本轮治理中清理，结论保留于 [AGENT-STATE](AGENT-STATE.md) 与 [PR #11](https://github.com/leezzou/tanuki/pull/11)。
 
 构建产物（`app/build/`、`.build/`、`app/src/main/jniLibs/*.so`、`local.properties`）均在 `.gitignore` 覆盖范围内，不提交。
 

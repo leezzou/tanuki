@@ -40,7 +40,7 @@ printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
 
 ## 3. 第一次构建（不操作设备）
 
-无需JDK/SDK的宿主流程自测：`python3 scripts/test-agent-workflow.py`、发布清单/版本回归 `python3 scripts/test-app-release.py`；上传过滤/脱敏回归为 `python3 scripts/test-publication.py`，发布前按 [上传检查](PUBLICATION.md) 检查候选文件。它只在临时目录使用模拟ADB/Gradle，验证交接过期检测、默认不操作设备、包名/target保护和失败/跳过/中断判定，不代表Android产品测试。
+无需JDK/SDK的宿主流程自测：`python3 scripts/test-agent-workflow.py`、发布清单/版本回归 `python3 scripts/test-app-release.py`；上传过滤/脱敏回归为 `python3 scripts/test-publication.py`，合并前门禁离线回归为 `python3 scripts/test-development-gates.py`，发布前按 [上传检查](PUBLICATION.md) 检查候选文件。它只在临时目录使用模拟ADB/Gradle/gh/ao，验证交接过期检测、默认不操作设备、包名/target保护、失败/跳过/中断判定和门禁拒绝边界，不代表Android产品测试。
 
 ```bash
 python3 scripts/check-handoff.py
@@ -131,7 +131,7 @@ bash scripts/verify-workspace.sh \
 
 ## 7. 完成与交付
 
-当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。本轮是文档门禁任务，分支 `chore/phase2-docs-contracts`：恢复 `AGENT-STATE`/`TEST-REPORT`/`CURRENT`，修复公开断链并新增 [接口契约](INTERFACES.md)，不改产品代码。0.1.7 视频/手机文件 debug 与 release 验证见 [测试现状](TEST-REPORT.md)，只能作为历史记录，不能混算成 0.1.8 已通过。
+当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并；main CI 以 Actions 为准）。release 六附件保持原样；0.1.8 没有随版本记录设备测试。本轮是研发治理任务，分支 `chore/autonomous-development-governance`：新增编排/QA/经验/代码规范与合并前只读门禁，修正过期 main/分支表述，不改产品代码。0.1.7 视频/手机文件 debug 与 release 验证见 [测试现状](TEST-REPORT.md)，只能作为历史记录，不能混算成 0.1.8 已通过。
 
 1. 完成本次交接记录并更新 `AGENT-STATE.md`，诚实写明实际验证及未测范围。每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、删除已过期交接并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
 2. `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md`，再不带参数检查。
@@ -140,4 +140,4 @@ bash scripts/verify-workspace.sh \
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。
 6. 最终答复给清楚的产物路径、完成项、暂停/阻塞项和下一步，不留下只存在聊天里的必要信息。
 
-本轮分支为 `chore/phase2-docs-contracts`，基线为已发布 `origin/main/c196bbf`；只改 docs 并创建 PR，不直推 main、不创建 tag/Release、不重打 0.1.8 附件。未来发版仍须确认新版本和递增 code。
+当前治理分支为 `chore/autonomous-development-governance`，基线为远端 `origin/main/14d2884`；只改治理文档、门禁脚本、回归和 CI Host 步骤，不改产品代码/协议，不直推 main、不创建 tag/Release、不重打 0.1.8 附件。合并前按 [编排规则](ORCHESTRATOR-RULES.md) 与 [QA 门禁](QA-GATES.md) 完成独立 Review/适用验证；未来发版仍须确认新版本和递增 code。
