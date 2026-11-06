@@ -1,0 +1,34 @@
+package com.tanuki.ui
+
+import kotlin.math.floor
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * PDF 页面位图尺寸策略：长边与总像素都有上限，避免高 DPI 文档或异常页面在渲染时 OOM。
+ * 小页面最多放大两倍以适配屏幕，大页面按比例缩小。
+ */
+internal object PdfRenderPolicy {
+    const val MAX_DIMENSION = 2048
+    const val MAX_PIXELS = 4_000_000
+    const val MAX_UPSCALE = 2.0
+
+    data class Size(val width: Int, val height: Int)
+
+    fun targetSize(
+        pageWidth: Int,
+        pageHeight: Int,
+        maxDimension: Int = MAX_DIMENSION,
+        maxPixels: Int = MAX_PIXELS,
+    ): Size {
+        require(pageWidth > 0 && pageHeight > 0) { "PDF 页面尺寸无效" }
+        require(maxDimension > 0 && maxPixels > 0) { "PDF 渲染上限无效" }
+        val byDimension = min(maxDimension.toDouble() / pageWidth, maxDimension.toDouble() / pageHeight)
+        val byPixels = sqrt(maxPixels.toDouble() / (pageWidth.toDouble() * pageHeight))
+        val scale = min(min(byDimension, byPixels), MAX_UPSCALE)
+        return Size(
+            floor(pageWidth * scale).toInt().coerceAtLeast(1),
+            floor(pageHeight * scale).toInt().coerceAtLeast(1),
+        )
+    }
+}
