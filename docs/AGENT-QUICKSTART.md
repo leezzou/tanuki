@@ -87,9 +87,9 @@ bash scripts/verify-workspace.sh \
   --run-device-tests --confirm-test-data --device <明确选定的 ARM64 序列号>
 ```
 
-脚本先检查交接、构建，再由 `scripts/device-preflight.py` 核验 APK SHA-256、包名、versionCode/versionName、应用与测试签名是否一致、arm64-v8a 及 `libproot.so`/`libproot-loader.so`/`libsupervisor.so` 是否随包，设备 API/ABI、当前 WebView 主版本（默认 ≥123），并拒绝存在 apt/dpkg/Node/PRoot/supervisor 进程或活动安装会话的设备；随后 `install -r` 两个APK，install 后再次确认实际生效版本，再执行固定14类回归。不卸载、不 `pm clear`、不重置系统、不自动切换DSH权限。设备参数和确认缺一就拒绝；只传设备而未开启设备测试也会拒绝。可用 `--expect-apk-sha256`、`--expect-cert-sha256`、`--min-webview-major` 固定本次验收对象；门禁证据只写私有 `.build/logs/device-preflight-*.json`，不进入公开源码包。
+脚本先检查交接、构建、用SDK `apkanalyzer`核验app/test包名和instrumentation target，再 `install -r` 两个APK并执行固定14类回归。不卸载、不 `pm clear`、不重置系统、不自动切换DSH权限。设备参数和确认缺一就拒绝；只传设备而未开启设备测试也会拒绝。
 
-历史记录：14 类回归上次为 54 项（具体条目随开发可变化），约 5 分钟，调用工具建议预留至少 900 秒，环境首次补包还需网络时间；该数字未在本轮复跑。脚本不会给测试强加短超时。ADB返回0不代表JUnit成功，脚本检查最终OK、逐项完成以及失败/跳过/中断；本地完整日志在 `.build/logs/workspace-regression-*.txt`，不直接公开。注意默认14类包含 `RuntimeFoundationToolsTest`，它会真实安装/校验工具并执行 venv，属于会改变测试环境且需要网络的用例；不得与其他安装、apt/dpkg 或真实任务并行。
+历史记录：14 类回归上次为 54 项（具体条目随开发可变化），约 5 分钟，调用工具建议预留至少 900 秒，环境首次补包还需网络时间；该数字未在本轮复跑。脚本不会给测试强加短超时。ADB返回0不代表JUnit成功，脚本检查最终OK、逐项完成以及失败/跳过/中断；本地完整日志在 `.build/logs/workspace-regression-*.txt`，不直接公开。
 
 手机文件客户端宿主回归单独运行 `node scripts/test-phone-client.mjs`；0.1.7 视频/手机文件的历史目标设备集合见 [TEST-REPORT](TEST-REPORT.md)，0.1.8 没有随版本记录设备测试。`PhoneFileGuestClientTest` 只允许已有Ubuntu/Node且无真实任务的测试安装，不自动下载环境；本机环境缺失时明确记未运行。
 

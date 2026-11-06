@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[Android QA 验收能力核查与门禁](handoffs/20261106-1357-android-qa-readiness-audit.md)。本轮先只读核查 AVD/设备、脚本与仪器测试入口、模拟器独占和公开 CI，再按用户批准保存记录并新增设备验收门禁：`scripts/device-preflight.py` 在 install 前后核验 APK 哈希/包名/版本/签名/ABI/原生库、设备 API/ABI/WebView 与忙碌状态；`scripts/verify-workspace.sh` 已接入并支持 pin 参数。宿主 mock 回归 14 项通过；未构建、未安装、未跑仪器。
+当前交接：[Android QA 验收能力核查与门禁](handoffs/20261106-1357-android-qa-readiness-audit.md)。本轮先只读核查 AVD/设备、脚本与仪器测试入口、模拟器独占和公开 CI，再按用户批准保存记录并新增设备验收门禁：`scripts/device-preflight.py` 在 install 前后核验 APK 哈希/包名/版本/签名/ABI/原生库、设备 API/ABI/WebView 与忙碌状态；`scripts/device-lock.py` 提供 per-serial 进程锁，覆盖构建→预检→install→仪器全程；`scripts/verify-workspace.sh` 已接入并支持 pin 参数。宿主 mock/并发回归 17 项通过；未构建、未安装、未跑仪器。
 
 ## 0.1.8 交付与仓库基线
 
@@ -29,15 +29,16 @@
 ### W4 设备验收门禁（本轮，待复审）
 
 - 新增 `scripts/device-preflight.py`：APK SHA-256/包名/versionCode/versionName、应用与测试签名一致、arm64-v8a、`libproot.so`/`libproot-loader.so`/`libsupervisor.so`、设备 API/ABI、WebView ≥123（可配）、apt/dpkg/Node/PRoot/supervisor 进程、活动安装会话；`--phase post` 校验 install 后版本；证据写私有 `.build/logs/device-preflight-*.json`。
+- `scripts/device-lock.py`：基于 `flock` 的 per-serial 进程锁；`verify-workspace.sh` 设备入口经锁重新执行自身，覆盖构建→pre/post 门禁→`install -r`→仪器全程；同 serial 第二任务退出 3，不同 serial 独立；锁 fd 传给子任务，父进程 SIGKILL 后仍由存活子任务持有。
 - `scripts/verify-workspace.sh` 设备路径已接入 pre/post 门禁，并新增 `--expect-apk-sha256`、`--expect-cert-sha256`、`--min-webview-major` 参数；失败不安装。
-- `scripts/test-agent-workflow.py` 增加 mock 回归；`docs/AGENT-QUICKSTART.md`、`docs/CI.md`、`docs/TEST-REPORT.md` 已同步。
+- `scripts/test-agent-workflow.py` 增加门禁与锁的 mock/并发回归；不改 W7 负责的 AGENTS、ORCHESTRATOR-RULES/QA-GATES/LESSONS/code-standards、治理检查脚本或 Host CI。
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮）：宿主 mock 回归 14 tests OK（54.390s）；`bash -n verify-workspace.sh` 与 `device-preflight.py --help` 通过；main/CI/设备 metadata 只读核对；交接门禁刷新。
+- 已验证（本轮）：宿主 mock/并发回归 17 tests OK（67.181s）；`bash -n verify-workspace.sh`、`device-preflight.py --help`、`device-lock.py --help` 通过；同 serial 拒绝、不同 serial 独立、失败/父进程死亡释放、verify 串行化均有离线回归；main/CI/设备 metadata 只读核对；交接门禁刷新。
 - 已验证（W3 本轮，历史）：CI/协议测试实现、Host 门禁、RPC 方法集/常量一致性。
 - 已验证（W2/W1 前轮，历史）：worktree 构建引导、链接跳过策略、文档/门禁恢复、接口契约。
-- 待验证：真实 APK/AVD 上的 pre/post 门禁与 14 类回归；PR 复审与合并；0.1.8 构建/设备/JVM/lint 证据；真实模型/账号、真机/MIUI、低 API、长期后台。
+- 待验证：真实 APK/AVD 上的锁、pre/post 门禁与 14 类回归；`install-and-launch.sh`/`test-runtime.sh` 等历史入口未接入锁；PR 复审与合并；0.1.8 构建/设备/JVM/lint 证据；真实模型/账号、真机/MIUI、低 API、长期后台。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 ## 环境与阻塞
@@ -48,7 +49,7 @@
 
 ## 下一步
 
-1. 在已确认无真实数据的专用 AVD 上实跑一次 `verify-workspace.sh --run-device-tests --confirm-test-data --device emulator-5572`，记录 pre/post 证据与 14 类结果；先确认无 apt/dpkg/安装/真实任务。
-2. 视需要补机器级设备租约（serial + flock + `AO_SESSION_ID`），避免 QA/实现并发。
+1. 等独立 QA 完成当前 0.1.8 设备冒烟后，在已确认无真实数据的专用 AVD 上实跑一次 `verify-workspace.sh --run-device-tests --confirm-test-data --device <serial>`，记录锁、pre/post 证据与 14 类结果；先确认无 apt/dpkg/安装/真实任务。
+2. 如需覆盖历史入口，把 `device-lock.py` 接入 `test-runtime.sh`/`install-and-launch.sh`；人工直接 adb 始终绕过，不得宣称完全独占。
 3. 为 WebSocket、Phone Guest、进程死亡/后台重启补 opt-in 用例；skip 记为未运行，不能计通过。
 4. 0.1.8 设备证据另开验收任务；真实模型/账号仍等待用户恢复。

@@ -7,8 +7,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 import zipfile
@@ -24,7 +26,8 @@ class WorkflowTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "project with spaces"
         (self.root / "scripts").mkdir(parents=True)
-        self.env = {**os.environ, "TANUKI_DEVICE": "", "VERIFIER_EVENTS": str(self.root / "events.jsonl")}
+        self.env = {**os.environ, "TANUKI_DEVICE": "", "VERIFIER_EVENTS": str(self.root / "events.jsonl"),
+                    "TANUKI_DEVICE_LOCK_DIR": str(self.root / "device-locks")}
 
     def run_cmd(self, *args, **env):
         return subprocess.run(args, cwd=self.root, env={**self.env, **env}, capture_output=True, text=True)
@@ -150,6 +153,7 @@ if args[0] == 'sign':
     def runner_fixture(self):
         shutil.copy2(ROOT / "scripts/verify-workspace.sh", self.root / "scripts/verify-workspace.sh")
         shutil.copy2(ROOT / "scripts/device-preflight.py", self.root / "scripts/device-preflight.py")
+        shutil.copy2(ROOT / "scripts/device-lock.py", self.root / "scripts/device-lock.py")
         self.put("scripts/check-handoff.py", "print('Synthetic handoff guard')\n")
         self.put("scripts/env.sh", '''set -euo pipefail
 TANUKI_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -166,7 +170,7 @@ args = sys.argv[1:]
 with open(os.environ['VERIFIER_EVENTS'], 'a') as f:
     f.write(json.dumps([pathlib.Path(sys.argv[0]).name, *args]) + '\\n')
 '''
-        self.put("gradlew", common + "raise SystemExit(int(os.environ.get('FAKE_BUILD_EXIT', '0')))\n", True)
+        self.put("gradlew", common + "import time; time.sleep(float(os.environ.get('FAKE_BUILD_SLEEP', '0')))\nraise SystemExit(int(os.environ.get('FAKE_BUILD_EXIT', '0')))\n", True)
         self.put("sdk/cmdline-tools/latest/bin/apkanalyzer", common + f'''
 app = {APP!r}
 apk = args[-1]
@@ -301,6 +305,73 @@ else:
         self.assertEqual(2, sum('install' in command for command in commands))
         self.assertFalse(any(item in {'uninstall', 'clear', 'force-stop'} for command in commands for item in command))
         self.assertIn('PASS: 1 Android tests', result.stdout)
+
+    def test_device_lock_rejects_same_serial_and_releases_after_exit(self):
+        self.runner_fixture()
+        env = {"TANUKI_DEVICE_LOCK_DIR": str(self.root / "device-locks")}
+        holder = subprocess.Popen(
+            [sys.executable, "scripts/device-lock.py", "--serial", "lock-a", "--",
+             sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: holder.poll() is None and holder.kill())
+        self.assertIn("DEVICE_LOCK_ACQUIRED", holder.stdout.readline())
+        second = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-a",
+                              "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(3, second.returncode, second.stderr)
+        self.assertIn("已被", second.stderr)
+        other = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-b",
+                             "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(0, other.returncode, other.stderr)
+        holder.terminate()
+        holder.wait(timeout=10)
+        released = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-a",
+                                "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(0, released.returncode, released.stderr)
+
+    def test_device_lock_survives_helper_death_until_child_exits(self):
+        self.runner_fixture()
+        lock_dir = self.root / "device-locks"
+        env = {"TANUKI_DEVICE_LOCK_DIR": str(lock_dir)}
+        holder = subprocess.Popen(
+            [sys.executable, "scripts/device-lock.py", "--serial", "lock-c", "--",
+             sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertIn("DEVICE_LOCK_ACQUIRED", holder.stdout.readline())
+        owner = json.loads((lock_dir / "tanuki-device-lock-c.lock").read_text())
+        child_pid = int(owner["childPid"])
+        holder.kill()
+        holder.wait(timeout=10)
+        still_held = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-c",
+                                  "--", sys.executable, "-c", "pass", **env)
+        self.assertEqual(3, still_held.returncode, still_held.stderr)
+        try:
+            os.kill(child_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        deadline = time.time() + 10
+        attempt = None
+        while time.time() < deadline:
+            attempt = self.run_cmd(sys.executable, "scripts/device-lock.py", "--serial", "lock-c",
+                                   "--", sys.executable, "-c", "pass", **env)
+            if attempt.returncode == 0:
+                break
+            time.sleep(0.1)
+        self.assertEqual(0, attempt.returncode, attempt.stderr)
+
+    def test_verify_workspace_device_runs_are_serialized_per_serial(self):
+        self.runner_fixture()
+        env = {"FAKE_BUILD_SLEEP": "3"}
+        first = subprocess.Popen(
+            ["bash", "scripts/verify-workspace.sh", *self.device_args()],
+            cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: first.poll() is None and first.kill())
+        self.assertIn("DEVICE_LOCK_ACQUIRED", first.stdout.readline())
+        second = self.runner(*self.device_args(), **env)
+        self.assertEqual(3, second.returncode, second.stderr)
+        self.assertIn("设备任务被拒绝", second.stderr)
+        _, stderr = first.communicate(timeout=90)
+        self.assertEqual(0, first.returncode, stderr)
+        self.assertEqual(1, sum(event[0] == "gradlew" for event in self.events()))
 
     def test_device_preflight_identity_and_busy_gates_block_installation(self):
         self.runner_fixture()

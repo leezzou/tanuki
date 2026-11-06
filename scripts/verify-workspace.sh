@@ -9,7 +9,8 @@ usage() {
     'Device tests install in place and may change the test environment/settings. Use ONLY test data.' \
     'Prepare Ubuntu -> Node -> tools -> DSH first; stop DSH/installers before device tests.' \
     'Device runs verify APK hash/package/version/signature/ABI/native libs and WebView, and refuse' \
-    'when apt/dpkg/Node/PRoot/supervisor or an active install session is present.'
+    'when apt/dpkg/Node/PRoot/supervisor or an active install session is present. Device runs are' \
+    'serialized by a per-serial process lock; direct adb or TANUKI_DEVICE_LOCK_HELD=1 bypasses it.'
 }
 run_device=false
 confirmed=false
@@ -18,6 +19,7 @@ device="${TANUKI_DEVICE:-}"
 expect_apk_sha256=""
 expect_cert_sha256=""
 min_webview_major=123
+original_args=("$@")
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
@@ -55,6 +57,12 @@ elif [ "$confirmed" = true ] || [ "$explicit_device" = true ] || [ -n "$expect_a
     || [ -n "$expect_cert_sha256" ] || [ "$min_webview_major" != 123 ]; then
   printf '%s\n' 'Device options require --run-device-tests; omit them for a build-only run.' >&2
   exit 2
+fi
+# 设备任务从构建前就持有 per-serial 进程锁；锁 fd 传给子任务，父进程退出也不提前释放。
+if [ "$run_device" = true ] && [ "${TANUKI_DEVICE_LOCK_HELD:-}" != "1" ]; then
+  export TANUKI_DEVICE_LOCK_HELD=1
+  script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  exec python3 "$(dirname "$0")/device-lock.py" --serial "$device" -- bash "$script" "${original_args[@]}"
 fi
 source "$(dirname "$0")/env.sh"
 cd "$TANUKI_PROJECT"
