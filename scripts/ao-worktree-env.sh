@@ -14,6 +14,50 @@
 #   TANUKI_ANDROID_USER_HOME            覆盖默认的 worktree 内 ANDROID_USER_HOME
 #   TANUKI_SKIP_ANDROID_USER_HOME=1     不重定向 ANDROID_USER_HOME（assemble/lint 会因写 ~/.android 被沙箱拒绝）
 
+# 通用复制：目录/文件/符号链接；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
+# 独立定义，便于 scripts/test-ao-worktree-env.sh 在 TANUKI_ENV_LIB_ONLY=1 下做回归测试。
+tanuki_env_copy_entry() {
+  local src="$1" dst="$2" tmp
+  if [[ -e "$dst" || -L "$dst" ]]; then return 0; fi
+  mkdir -p "$(dirname "$dst")" || return 1
+  tmp="${dst}.tmp.$$"
+  rm -rf "$tmp"
+  if [[ -L "$src" ]]; then
+    if ln -s "$(readlink "$src")" "$tmp" && mv "$tmp" "$dst"; then return 0; fi
+    rm -rf "$tmp"; return 1
+  fi
+  if [[ -d "$src" ]]; then
+    if ! cp -cR "$src" "$tmp" 2>/dev/null; then
+      # clone 失败可能已创建部分 $tmp；不清理会让普通复制嵌套成 $tmp/<basename>。
+      rm -rf "$tmp"
+      if ! cp -R "$src" "$tmp"; then
+        rm -rf "$tmp"
+        return 1
+      fi
+    fi
+    if mv "$tmp" "$dst"; then return 0; fi
+    rm -rf "$tmp"; return 1
+  fi
+  if ! cp -c "$src" "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    if ! cp -p "$src" "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+  if mv "$tmp" "$dst"; then return 0; fi
+  rm -f "$tmp"; return 1
+}
+
+# 只加载辅助函数（回归测试用）；正常 source 继续执行环境准备。
+if [[ "${TANUKI_ENV_LIB_ONLY:-0}" == "1" ]]; then
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    printf '[ao-worktree-env] 错误: TANUKI_ENV_LIB_ONLY=1 只能 source 使用\n' >&2
+    exit 2
+  fi
+  return 0
+fi
+
 tanuki_ao_worktree_env() {
   local project_root main_repo build_dir gradle_user_home android_user_home jdk sdk
   local wrapper_version dist_source dist_target entry name
@@ -28,29 +72,6 @@ tanuki_ao_worktree_env() {
 
   tanuki_env_note() { printf '[ao-worktree-env] %s\n' "$*"; }
   tanuki_env_fail() { printf '[ao-worktree-env] 错误: %s\n' "$*" >&2; return 1; }
-
-  # 通用复制：目录/文件/符号链接；优先 APFS clonefile（写时复制，快且省盘），失败退回普通复制。
-  tanuki_env_copy_entry() {
-    local src="$1" dst="$2" tmp
-    if [[ -e "$dst" || -L "$dst" ]]; then return 0; fi
-    mkdir -p "$(dirname "$dst")" || return 1
-    tmp="${dst}.tmp.$$"
-    rm -rf "$tmp"
-    if [[ -L "$src" ]]; then
-      if ln -s "$(readlink "$src")" "$tmp" && mv "$tmp" "$dst"; then return 0; fi
-      rm -rf "$tmp"; return 1
-    fi
-    if [[ -d "$src" ]]; then
-      if cp -cR "$src" "$tmp" 2>/dev/null || cp -R "$src" "$tmp"; then
-        if mv "$tmp" "$dst"; then return 0; fi
-      fi
-      rm -rf "$tmp"; return 1
-    fi
-    if cp -c "$src" "$tmp" 2>/dev/null || cp -p "$src" "$tmp"; then
-      if mv "$tmp" "$dst"; then return 0; fi
-    fi
-    rm -rf "$tmp"; return 1
-  }
 
   # 解析主仓库：linked worktree 的 --git-common-dir 指向主仓库 .git。
   main_repo="${TANUKI_MAIN_REPO:-}"
