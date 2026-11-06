@@ -3,7 +3,7 @@
 - Agent/会话标识：android_agent-8（DSH QA 能力核查 Worker，DeepSeek V4.1 Flash）
 - 时间：2026-11-06 13:57 CST（UTC 05:57）；实施与验证完成于同日
 - 状态：已完成（只读核查 + 设备验收门禁实现；未做 Android 设备验收）
-- 前一记录：[20261106-1207-ci-rpc-contract-tests.md](20261106-1207-ci-rpc-contract-tests.md)
+- 前一记录：无（原 W3 记录已清理，结论见 [AGENT-STATE](../AGENT-STATE.md) 与 [PR #12](https://github.com/leezzou/tanuki/pull/12)）
 
 ## 用户目标与范围
 

@@ -1,6 +1,6 @@
 # 应用内更新
 
-当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考，不覆盖其发布目录。当前文档门禁任务分支为 `chore/phase2-docs-contracts`，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考，不覆盖其发布目录。当前研发治理分支为 `chore/autonomous-development-governance`，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -60,4 +60,4 @@ python3 scripts/prepare-app-release.py --version 0.1.8 --version-code 10 --chann
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-本轮工作分支为 `chore/phase2-docs-contracts`，只改 docs 并创建 PR；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
+本轮工作分支为 `chore/autonomous-development-governance`，只改治理文档、门禁脚本/回归和 CI Host 步骤，经 PR 交付；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。

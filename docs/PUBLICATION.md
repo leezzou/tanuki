@@ -1,6 +1,6 @@
 # Git 上传与脱敏
 
-当前已发布 **0.1.8/code10**（`main` 与 `v0.1.8` 均为 `c196bbf`），release 六附件保持原样；0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考。当前文档门禁任务分支为 `chore/phase2-docs-contracts`，只改 docs，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并；main CI 以 Actions 为准）；release 六附件保持原样，0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考。当前研发治理分支为 `chore/autonomous-development-governance`，只改治理文档/门禁脚本/CI Host 步骤，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
 
 ## 只上传源码
 
@@ -66,4 +66,4 @@ Git检出不依赖本机构建附件。源码ZIP按明确目录清单生成；�
 
 固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。0.1.8 已按该顺序交付到 `artifacts/releases/0.1.8/`，0.1.7及更早历史附件保持原样；后续发版仍由用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
 
-本轮工作分支为 `chore/phase2-docs-contracts`，只改 docs 并创建 PR；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
+本轮工作分支为 `chore/autonomous-development-governance`，只改治理文档、门禁脚本/回归和 CI Host 步骤，经 PR 交付；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则，合并前按 [编排规则](ORCHESTRATOR-RULES.md) 完成当前 SHA 的独立审查与适用验证。

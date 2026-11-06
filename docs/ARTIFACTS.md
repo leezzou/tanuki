@@ -1,6 +1,6 @@
 # Tanuki 构建产物：从哪里取包
 
-**已交付发布包为 v0.1.8/code10。** `main` 与 `v0.1.8` tag 均为 `c196bbf`，release 六附件保持原样；0.1.8 没有随版本记录设备测试。本轮为文档门禁任务，分支 `chore/phase2-docs-contracts`，不发布新版本。
+**已交付发布包为 v0.1.8/code10。** `v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并）；release 六附件保持原样，0.1.8 没有随版本记录设备测试。本轮为研发治理任务，分支 `chore/autonomous-development-governance`，不发布新版本。
 
 - 安装 APK：`artifacts/releases/0.1.8/Tanuki-0.1.8-workspacecheck-arm64-release.apk`
 - GitHub 发布：由用户在网页创建 `v0.1.8` 的 **Pre-release**，只上传 `artifacts/releases/0.1.8/` 内全部 **6 个附件**，包含 `app-update.json`、完整源码、原生对应源码及散列。
@@ -61,4 +61,4 @@ artifacts/
 - 只改文档/脚本时不重编 APK；下一次交付前重打源码并刷新散列，已发布的 0.1.8 及更早附件不回写。
 - `artifacts/` 全部是被Git忽略的生成产物；本说明的源码为 `docs/ARTIFACTS.md`。既有历史包和校验保持原样，不因本次版本入口更新而删除或改写。
 
-本轮工作分支为 `chore/phase2-docs-contracts`，只改 docs 并创建 PR；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
+本轮工作分支为 `chore/autonomous-development-governance`，只改治理文档、门禁脚本/回归和 CI Host 步骤，经 PR 交付；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则。
