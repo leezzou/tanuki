@@ -14,6 +14,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## F1 文件查看器内置预览验证（2026-11-06，非设备）
+
+- 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
+- 实际执行：`source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，126 tests、0 failures、0 errors、0 skipped。新增 `WorkspaceFileKindTest` 2 项、`ZoomPolicyTest` 6 项、`DocxTextExtractorTest` 10 项、`PdfRenderPolicyTest` 4 项；DOCX 测试用合成 zip 覆盖多段/空段/换行/制表/标准实体/数字字符引用/CDATA、DOCTYPE 拒绝、未定义实体拒绝、文本截断、单条目与总解压超限、缺正文、损坏 zip 和坏 XML。PR #16 两轮 P2 将读取改为 `nextToken()`，使 `DOCDECL` 可被观察并拒绝，并让 replacement text 为 null 的 `ENTITY_REF` 返回中文格式错误；两项回归均通过。
+- 未执行：lint、assemble、Android 仪器/真实设备、真实加密或损坏 PDF、真实复杂 DOCX、深色主题与手势实机验证。编译通过和 JVM 策略测试不能替代设备验收。
+
 ## 本轮研发治理验证（2026-11-06，W7，非产品测试）
 
 - 用户要求治理研发规范与合并前门禁，不开发产品功能：最小修改 `AGENTS.md`，新增编排/QA/经验/代码规范文档和只读 `check-development-gates.py`，接入 Host CI，并更新状态/交接。

@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.ParcelFileDescriptor
+import android.util.Xml
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import com.tanuki.runtime.Paths
@@ -43,7 +45,7 @@ class WorkspaceFileManager(
 ) {
     data class Entry(val path: String, val name: String, val directory: Boolean, val bytes: Long, val linked: Boolean, val modified: Long = 0)
     data class Preview(val text: String? = null, val image: Bitmap? = null, val revision: String? = null)
-    enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, OTHER }
+    enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, PDF, DOCX, DOC, OTHER }
     data class FileInfo(val name: String, val mimeType: String, val bytes: Long, val kind: FileKind)
     data class TextPage(val text: String, val offset: Long, val nextOffset: Long, val totalBytes: Long,
                         val encoding: String, val hasMore: Boolean, val revision: String? = null)
@@ -56,7 +58,29 @@ class WorkspaceFileManager(
         }
         return (location.guestPath.trimEnd('/') + if (relative.isEmpty()) "" else "/$relative").ifEmpty { "/" }
     }
-    companion object { const val TEXT_LIMIT = 256 * 1024 }
+    companion object {
+        const val TEXT_LIMIT = 256 * 1024
+        private val textExtensions = setOf("txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "jsonl", "xml", "yaml", "yml",
+            "toml", "ini", "cfg", "conf", "properties", "kt", "kts", "java", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx",
+            "html", "htm", "css", "scss", "less", "sh", "bash", "zsh", "c", "h", "cpp", "hpp", "rs", "go", "swift", "sql", "srt", "vtt", "env")
+        private val textNames = setOf("Dockerfile", "Makefile", "LICENSE", "README", ".gitignore", ".gitattributes", ".editorconfig")
+
+        /** 纯扩展名/MIME 分类；.doc 明确保留为旧二进制格式，不能当作 DOCX 或文本。 */
+        internal fun classifyFileKind(name: String, mime: String?): FileKind {
+            val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+            val type = mime?.lowercase(Locale.ROOT)
+            return when {
+                extension == "pdf" -> FileKind.PDF
+                extension == "docx" -> FileKind.DOCX
+                extension == "doc" -> FileKind.DOC
+                type?.startsWith("image/") == true -> FileKind.IMAGE
+                type?.startsWith("audio/") == true -> FileKind.AUDIO
+                type?.startsWith("video/") == true -> FileKind.VIDEO
+                extension in textExtensions || name in textNames || type?.startsWith("text/") == true -> FileKind.TEXT
+                else -> FileKind.OTHER
+            }
+        }
+    }
     private val lock = Mutex()
     private val noFollow = LinkOption.NOFOLLOW_LINKS
     private val internalName = Regex("^\\.(?:proot\\.)?l2s\\..*")
@@ -246,26 +270,39 @@ class WorkspaceFileManager(
         val file = payload(resolve(relative, true))
         val name = relative.substringAfterLast('/')
         val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-        val knownText = extension in setOf("txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "jsonl", "xml", "yaml", "yml",
-            "toml", "ini", "cfg", "conf", "properties", "kt", "kts", "java", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx",
-            "html", "htm", "css", "scss", "less", "sh", "bash", "zsh", "c", "h", "cpp", "hpp", "rs", "go", "swift", "sql", "srt", "vtt", "env") ||
-            name in setOf("Dockerfile", "Makefile", "LICENSE", "README", ".gitignore", ".gitattributes", ".editorconfig")
         val explicitMime = when (extension) {
             "mkv" -> "video/x-matroska"; "mov" -> "video/quicktime"; "webm" -> "video/webm"
             "mp4", "m4v" -> "video/mp4"; "avi" -> "video/x-msvideo"; "m4a" -> "audio/mp4"
             "mp3" -> "audio/mpeg"; "flac" -> "audio/flac"; "wav" -> "audio/wav"; "ogg", "opus" -> "audio/ogg"
             "pdf" -> "application/pdf"; "md", "markdown" -> "text/markdown"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "doc" -> "application/msword"
             else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
         }
-        val kind = when {
-            explicitMime?.startsWith("image/") == true -> FileKind.IMAGE
-            explicitMime?.startsWith("audio/") == true -> FileKind.AUDIO
-            explicitMime?.startsWith("video/") == true -> FileKind.VIDEO
-            knownText || explicitMime?.startsWith("text/") == true -> FileKind.TEXT
-            explicitMime == null && runCatching { TextFileReader.read(file); true }.getOrDefault(false) -> FileKind.TEXT
-            else -> FileKind.OTHER
+        var kind = classifyFileKind(name, explicitMime)
+        // 无已知扩展名时保留原有内容探测：可解码为文本的文件按文本预览。
+        if (kind == FileKind.OTHER && explicitMime == null && runCatching { TextFileReader.read(file); true }.getOrDefault(false)) {
+            kind = FileKind.TEXT
         }
         FileInfo(name, explicitMime ?: if (kind == FileKind.TEXT) "text/plain" else "application/octet-stream", Files.size(file), kind)
+    }
+
+    /** 为 PDF 等需要可随机读取的内置预览提供只读描述符；调用方负责关闭。 */
+    suspend fun openPreviewDescriptor(relative: String): ParcelFileDescriptor = io(writing = false) {
+        val file = payload(resolve(relative, true))
+        check(Files.isRegularFile(file, noFollow)) { "此条目不是普通文件，无法预览" }
+        ParcelFileDescriptor.open(file.toFile(), ParcelFileDescriptor.MODE_READ_ONLY)
+    }
+
+    /** DOCX 文本预览在 IO 锁内完成有界解压，不向界面暴露文件路径。 */
+    suspend fun extractDocxText(relative: String): DocxTextExtractor.Result = io(writing = false) {
+        val file = payload(resolve(relative, true))
+        DocxTextExtractor.extract(file.toFile()) { input ->
+            Xml.newPullParser().apply {
+                setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                setInput(input, null)
+            }
+        }
     }
 
     suspend fun readTextPage(relative: String, offset: Long = 0, encoding: String = "自动"): TextPage = io(writing = false) {
@@ -362,6 +399,9 @@ class WorkspaceFileManager(
         return when (extension) {
             "mkv" -> "video/x-matroska"; "mov" -> "video/quicktime"; "webm" -> "video/webm"
             "m4a" -> "audio/mp4"; "flac" -> "audio/flac"; "opus" -> "audio/ogg"
+            "pdf" -> "application/pdf"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "doc" -> "application/msword"
             else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
         }
     }

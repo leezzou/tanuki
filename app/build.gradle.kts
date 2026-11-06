@@ -75,6 +75,8 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // 仅 JVM 测试使用真实 XmlPullParser 实现；产品运行时依赖 Android 内置实现，不新增运行时库。
+    testImplementation("net.sf.kxml:kxml2:2.3.0")
     androidTestImplementation("androidx.test:runner:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

@@ -145,20 +145,43 @@ internal fun WorkspaceFileViewer(
             (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
             if (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT) {
                 TextFileReader(files, entry.path, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
-            } else Box(Modifier.weight(1f).fillMaxWidth().padding(if (fullscreen) 0.dp else 16.dp), contentAlignment = Alignment.Center) {
-                when (info?.kind) {
-                    WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let {
-                        Image(it.asImageBitmap(), entry.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            } else {
+                val kind = info?.kind
+                val contentModifier = Modifier.weight(1f).fillMaxWidth()
+                    .padding(if (fullscreen || kind == WorkspaceFileManager.FileKind.PDF || kind == WorkspaceFileManager.FileKind.DOCX) 0.dp else 16.dp)
+                Box(contentModifier, contentAlignment = Alignment.Center) {
+                    when (kind) {
+                        WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let { bitmap ->
+                            Zoomable(
+                                contentWidth = bitmap.width,
+                                contentHeight = bitmap.height,
+                                resetKey = entry.path,
+                                modifier = Modifier.fillMaxSize(),
+                            ) { content ->
+                                Image(bitmap.asImageBitmap(), entry.name, content, contentScale = ContentScale.Fit)
+                            }
+                        }
+                        WorkspaceFileManager.FileKind.PDF -> PdfPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.DOCX -> DocxTextPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.DOC -> Column(
+                            Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text("旧版 Word 文档（.doc）", style = MaterialTheme.typography.titleMedium)
+                            Text("暂不支持内置预览，可用其他应用打开。", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
+                        WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
+                        WorkspaceFileManager.FileKind.OTHER -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text(info?.mimeType.orEmpty(), style = MaterialTheme.typography.titleMedium)
+                            Text("使用设备上的应用打开此文件。原文件不会被修改。", style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = { forceText = true }) { Text("按文本查看") }
+                        }
+                        else -> Unit
                     }
-                    WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
-                    WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
-                    WorkspaceFileManager.FileKind.OTHER -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text(info?.mimeType.orEmpty(), style = MaterialTheme.typography.titleMedium)
-                        Text("使用设备上的应用打开此文件。原文件不会被修改。", style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(onClick = { forceText = true }) { Text("按文本查看") }
-                    }
-                    else -> Unit
                 }
             }
             if (!fullscreen) HorizontalDivider()

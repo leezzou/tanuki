@@ -1,10 +1,10 @@
 # Tanuki 当前状态
 
-当前交接：[研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（W5 治理，执行会话 android_agent-7，记录内标识 W7；PR #14 待独立 Review）。W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留；其设备验收门禁实现已随 PR #13 合并。本轮由 android_agent-13 在独立 clone 中把 PR #14 rebase 到最新 main 并复验；android_agent-14 随后补仅测试确定性修复，并按 review 修正门禁（Markdown 豁免、PASS 前 head 复核），不改产品代码、协议、AO 配置或 0.1.8 附件。
+当前交接：[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，执行会话 android_agent-16；PR #16 的两轮 P2 review 已修复并推送，待重审）。上一记录 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md) 保留（PR #14 已合并为 `cff09a3`）。W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留；其设备验收门禁实现已随 PR #13 合并。本轮由 android_agent-16 在独立 clone 中实现文件查看器 PDF/DOCX/缩放增强，不改视频播放、协议、AO 配置或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
-- `main` 为 `14d2884d690f0264b14c5ada8391ad14f42f12f2`（PR #15 设备门禁测试补充合并提交）；`v0.1.8` tag 仍为 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（PR #8 浏览器输入线程修复合并提交）。用户已发布 0.1.8；Agent 不代合 main、不创建 tag/Release。
+- `main` 已前进到 `cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 治理门禁合并提交）。`v0.1.8` tag 仍为 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（PR #8 浏览器输入线程修复合并提交）。用户已发布 0.1.8；Agent 不代合 main、不创建 tag/Release。
 - `artifacts/releases/0.1.8/` 六附件齐全。W1 只读复核 APK：`com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
@@ -41,25 +41,35 @@
 - 角色：Orchestrator、Worker、Android QA、规范维护由 DSH/DeepSeek V4.1 Flash 承担；Reviewer 为 Codex/GPT High，只做独立 Review。当前 `ao project get android_agent` 的 orchestrator/worker 均为 `deepseek-harness`，模型 `opencode-go/deepseek-v4.1-flash`，与本轮实际运行一致。
 - PR #14 已由 android_agent-13 rebase 到 `origin/main=14d2884` 后重新运行交接/门禁/公开检查/源码包；android_agent-14 先修复 `test-agent-workflow.py` 中锁标记首行假设（循环等待至多 30 秒，未出现仍失败），再按 review 修正 QA 门禁：必需 QA 路径优先于 Markdown 豁免且后缀豁免仅限根目录，`app/src/main/assets/{browser,phone}/SKILL.md` 补拒绝回归；并在 AO 查询与 QA 校验后、输出 PASS 前再次核对 `state,isDraft,headRefOid`。目标用例 10/10、完整 19 项与门禁 28 项通过。独立 Review、合并和发布未授权/未完成。最终 head 的 Host/Android CI 以 PR 页面为准。
 
+### F1 文件查看器内置预览（PR #16，review 修复待重审）
+
+- 分支 `ao/tanuki-android-dsh/workspace-file-preview`，基线 `cff09a3`，PR [#16](https://github.com/leezzou/tanuki/pull/16)；只交付可审查候选，未合并、未触发 AO Review、未发布。初始代码提交 `dd3807b`，回填文档后的 head 以 PR 页面为准。
+- `WorkspaceFileManager.FileKind` 增加 `PDF`/`DOCX`/`DOC`；`.pdf`、`.docx`、`.doc` 由纯分类函数映射，`.doc` 在界面明确提示“暂不支持内置预览，可用其他应用打开”，不冒充 DOCX。
+- PDF：`ParcelFileDescriptor` + `PdfRenderer` 逐页渲染，上一页/下一页、页码、共享缩放平移；加密/损坏/无页中文提示；渲染在 IO 线程，Bitmap 及时回收，长边 ≤2048、总像素 ≤4,000,000。
+- DOCX：`ZipFile` + `XmlPullParser` 只读 `word/document.xml`，用 `nextToken()` 处理 `w:p/w:t/w:br/w:cr/w:tab`，拒绝 `DOCDECL`，未定义实体返回中文错误，保留标准实体/数字字符引用/CDATA；限制归档、条目数、总解压、正文和文本长度；界面提示复杂排版/页眉页脚/图片不会显示。
+- 图片与 PDF 共用 `Zoomable`/`ZoomPolicy`：1.0–5.0x、围绕手指缩放、平移边界、双击 1x/2.5x、切换文件/页面重置；`WorkspaceVideoPlayer.kt` 未改。
+- 验证：`compileModernDebugKotlin` 与 `testModernDebugUnitTest` BUILD SUCCESSFUL；126 JVM，0 失败/错误/跳过（本轮新增分类、DOCX、缩放、渲染上限回归）。未跑 lint/assemble/仪器/真机。
+
 ## 已实现、已验证与待验证
 
-- 已验证（PR #14 rebase 后本轮复跑）：`check-handoff.py --record ...` 刷新印章；`check-handoff.py` 当前；`test-development-gates.py` 28 项离线通过（含 app 内 SKILL.md 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝）；`test-agent-workflow.py` 19 项与目标 device-lock 用例 10/10 通过；`check-publication.py --git` 0 findings；`package-source.py` 生成源码包与校验清单（工作材料，不提交）。真实输出见 1415 交接记录。
+- 已验证（F1 本轮）：`compileModernDebugKotlin` 与 `testModernDebugUnitTest` BUILD SUCCESSFUL；126 JVM，0 失败/错误/跳过；新增分类、DOCX 合成 zip（多段/空段/DOCTYPE/未定义实体/数字引用/CDATA/超限/损坏）、缩放 clamp/边界/重置、PDF 渲染上限回归。真实命令与限制见 1647 交接。
+- 已验证（W5 轮，历史）：`check-handoff.py --record ...` 刷新印章；`check-handoff.py` 当前；`test-development-gates.py` 28 项离线通过（含 app 内 SKILL.md 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝）；`test-agent-workflow.py` 19 项与目标 device-lock 用例 10/10 通过；`check-publication.py --git` 0 findings；`package-source.py` 生成源码包与校验清单（工作材料，不提交）。真实输出见 1415 交接记录。
 - 已验证（#13/#15、W8 当时，历史）：宿主 mock/并发回归 19 tests OK（76.760s）；设备门禁脚本 `--help` 与 `bash -n` 通过；main/CI/设备 metadata 只读核对。
 - 已验证（W5 前轮，历史）：24 项门禁离线回归；真实 `gh`/`ao` 只读 CLI 格式核对。
 - 已验证（W2/W3/W1 前轮，历史）：worktree 构建引导、CI/RPC 契约、文档门禁恢复。
-- 待验证：PR #14 独立 Codex High Review 与最终 head CI；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
+- 待验证：F1 的独立 Codex High Review、当前 head CI 与真实设备手势/PDF/DOCX 验收；PR #14 已合并（`cff09a3`），其 review/CI 不再作为待办；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 ## 环境与阻塞
 
-- 当前分支 `chore/autonomous-development-governance`，基线 `origin/main=14d2884`；本轮在独立 `/tmp` clone 完成 rebase/验证，未使用共享 worktree 的 `.git` 写操作。
+- 当前（F1）已在独立 `/tmp` clone 分支 `ao/tanuki-android-dsh/workspace-file-preview` 提交并开 PR #16，基线 `origin/main=cff09a3`；共享 worktree 不执行 `.git` 写操作。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
-- 无当前产品修复阻塞；PR #14 的独立 Review、最终 CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
+- 无当前产品修复阻塞；F1 的独立 Review、CI、合并与发布由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. 等 PR #14 当前 head 的 Host/Android CI；由 Orchestrator 触发独立 Codex High Review，本会话不自行触发、不自评。
-2. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-3. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
-4. PR #15（设备门禁测试补充）已合并；真实设备执行前确认无真实数据、无 apt/dpkg/安装/真实任务，不把 host mock 当设备验收。
+1. PR #16 已创建；由 Orchestrator 触发当前 head 的独立 Codex High Review 与适用 CI，本会话不自行触发、不自评。
+2. F1 设备 QA 覆盖图片双指/双击/平移边界、PDF 翻页/缩放/加密/损坏/无页、DOCX 多段/超限/复杂格式提示与深色主题；设备须无真实任务并记录 AVD/serial。
+3. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
+4. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
 5. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
