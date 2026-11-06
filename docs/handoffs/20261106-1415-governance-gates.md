@@ -1,6 +1,6 @@
 # 交接：20261106-1415-governance-gates
 
-- Agent/会话标识：android_agent-7（DSH 规范维护 Worker，DeepSeek V4.1 Flash）；PR #14 rebase 与复验：android_agent-13
+- Agent/会话标识：android_agent-7（DSH 规范维护 Worker，DeepSeek V4.1 Flash）；PR #14 rebase 与复验：android_agent-13；仅测试确定性修复：android_agent-14
 - 时间：2026-11-06 14:15 CST；rebase 复验于 2026-11-06 完成（最终 head 以 [PR #14](https://github.com/leezzou/tanuki/pull/14) 为准）
 - 状态：实现、离线验证、文档同步与交接清理完成；PR #14 已 rebase 到最新 main，待独立 Codex High Review 与合并授权
 - 前一记录：[20261106-1357-android-qa-readiness-audit.md](20261106-1357-android-qa-readiness-audit.md)（W8，随 PR #13 合并）
@@ -43,6 +43,12 @@
 | `docs/handoffs/20261106-1059-phase2-docs-contracts.md`、`20261106-1207-ci-rpc-contract-tests.md`、`20261106-1211-phase2-worktree-build.md` | 迁移必要事实后删除（见“产物与校验”） |
 | `docs/handoffs/CURRENT.json` | 由 `check-handoff.py --record` 生成，不手写 |
 
+## 仅测试确定性修复（android_agent-14）
+
+- 原因：`scripts/test-agent-workflow.py` 的 `test_verify_workspace_device_runs_are_serialized_per_serial` 直接断言 `first.stdout.readline()` 首行包含 `DEVICE_LOCK_ACQUIRED`；`device-lock.py` 先启动子进程再 flush 锁行，子进程输出（fixture 的 `Synthetic handoff guard`）可能先进入同一管道，导致偶发失败。
+- 改动：仅该用例改为循环读取 stdout，最多等待 30 秒直到出现锁标记；未出现仍断言失败。保留第二任务退出码 3 与“设备任务被拒绝”断言，不放宽设备门禁，不改产品、协议、`device-preflight.py`/`device-lock.py` 逻辑或 0.1.8 附件。
+- 验证：目标用例连续 10 次通过；完整 `test-agent-workflow.py` 19 项通过，见“验证记录”。本修复不启动设备、不跑 Gradle/Android 构建。
+
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
@@ -60,8 +66,10 @@
 | `python3 scripts/check-publication.py --git` | `446 public files, 446 index entries, 0 findings`，exit 0 | 文档链接/公开边界检查，不是产品测试 |
 | `python3 scripts/package-source.py` | `source_files=446`、`native_sources=absent`；生成 `artifacts/sources/Tanuki-0.1.7-source.zip` 与 `artifacts/SOURCE-SHA256SUMS` | 工作材料，不提交/不发布；外部 SHA 只在本轮报告给出 |
 | `git push --force-with-lease origin HEAD:chore/autonomous-development-governance`；`gh pr view 14` | PR #14 head 更新，触发 Host/Android CI | 仅更新 PR 分支，不合并、不触发 Review/发布 |
+| `python3 scripts/test-agent-workflow.py WorkflowTests.test_verify_workspace_device_runs_are_serialized_per_serial` ×10（android_agent-14） | 连续 10/10 通过，单次 6.512–11.453s，均为 `OK` | 宿主 mock；不启动设备/Gradle |
+| `python3 scripts/test-agent-workflow.py`（android_agent-14） | `Ran 19 tests in 74.688s`，`OK`，exit 0 | 宿主 mock；设备/Android 未执行 |
 
-- 哪些是前一轮结果：Wave0 的 24 项门禁回归、W2 构建、W3 CI/契约测试、0.1.7/0.1.8 历史设备数字均为前轮记录；本表区分 W7 原轮次与 PR #14 rebase 后复验。W8 的 `test-agent-workflow.py` 19 项（76.760s）和 AVD/ADB 核查发生在 W8/#13/#15 分支，本 PR 未重跑。
+- 哪些是前一轮结果：Wave0 的 24 项门禁回归、W2 构建、W3 CI/契约测试、0.1.7/0.1.8 历史设备数字均为前轮记录；本表区分 W7 原轮次、PR #14 rebase 后复验与 android_agent-14 的仅测试修复。W8 的 AVD/ADB 核查发生在 W8/#13/#15 分支，本 PR 未重跑；`test-agent-workflow.py` 19 项已由 android_agent-14 在本 PR 重跑（74.688s）。
 - 未测试、失败和暂未复现：未运行 Gradle/Android 构建、lint、设备/仪器；无真实 open PR 的完整门禁通过样例；W8 的 `device-preflight.py` 未在真实设备执行；0.1.8 的 Ubuntu/Node/DSH 安装与真实模型未验证。
 
 ## 未完成与暂停项

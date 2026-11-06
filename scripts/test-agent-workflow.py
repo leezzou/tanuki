@@ -378,7 +378,17 @@ else:
             ["bash", "scripts/verify-workspace.sh", *self.device_args()],
             cwd=self.root, env={**self.env, **env}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: first.poll() is None and first.kill())
-        self.assertIn("DEVICE_LOCK_ACQUIRED", first.stdout.readline())
+        # 锁行与子进程输出共用 stdout，子进程可能先于锁行被读取；循环等待锁标记出现。
+        deadline = time.time() + 30
+        lock_line = ""
+        while time.time() < deadline and "DEVICE_LOCK_ACQUIRED" not in lock_line:
+            line = first.stdout.readline()
+            if not line:
+                break
+            lock_line = line
+            if "DEVICE_LOCK_ACQUIRED" not in lock_line:
+                time.sleep(0.1)
+        self.assertIn("DEVICE_LOCK_ACQUIRED", lock_line, "设备锁未在 30 秒内获取")
         second = self.runner(*self.device_args(), **env)
         self.assertEqual(3, second.returncode, second.stderr)
         self.assertIn("设备任务被拒绝", second.stderr)
