@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 已实现：上述功能全部落到源码；PDF/DOCX 在查看器内打开，不再落入 `OTHER`；`.doc` 仍走外部打开并显示明确提示。
-- 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；123 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 18 项）。
+- 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；123 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 19 项）。
 - 待验证：真实设备上的手势、翻页、加密/损坏 PDF、真实复杂 DOCX 与深色主题；未运行 lint/assemble/仪器测试。
 - 当前基线：`main=cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 合并提交）；分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。初始代码提交 `dd3807bb5529c18c0e320ebdbc5de818b0f2788c`；回填文档后的最终 head 以 PR 页面为准。
 - 关键源码：[`WorkspaceFileManager.kt`](../../app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt)、[`DocxTextExtractor.kt`](../../app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt)、[`WorkspaceFileViewer.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt)、[`WorkspacePdfPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)、[`ZoomableContent.kt`](../../app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt)。
@@ -42,7 +42,7 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL（43s，28 tasks）；123 tests / 0 failures / 0 errors / 0 skipped | 工作材料日志在私有 `/tmp`，测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`；未提交。 |
-| 测试类 `WorkspaceFileKindTest`、`ZoomPolicyTest`、`DocxTextExtractorTest`、`PdfRenderPolicyTest` | 2 + 6 + 7 + 4 = 19 项全部通过 | 其中 18 项为本次新增；DOCX 测试使用 kxml2 作为 JVM 侧 XmlPullParser 实现，产品代码不依赖该库。 |
+| 测试类 `WorkspaceFileKindTest`、`ZoomPolicyTest`、`DocxTextExtractorTest`、`PdfRenderPolicyTest` | 2 + 6 + 7 + 4 = 19 项全部通过 | 其中 19 项为本次新增；DOCX 测试使用 kxml2 作为 JVM 侧 XmlPullParser 实现，产品代码不依赖该库。 |
 | 首次测试运行 | 1 项失败：新增缩放测试断言写反（期望 -maxX 却传入正向平移） | 仅测试代码错误；修正断言后复跑通过，不涉及产品行为。 |
 | 静态边界检查 | `.doc` 不进入 DOCX 分支；`WorkspaceVideoPlayer.kt` 未修改；产品依赖未新增 | 编译覆盖 UI 接线；未做设备手势/真实文件验证。 |
 
