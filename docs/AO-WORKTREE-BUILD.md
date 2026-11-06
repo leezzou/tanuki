@@ -120,7 +120,7 @@ APFS 克隆时这些文件与源缓存共享数据块，实际新增磁盘通常
 | `./gradlew ... :app:assembleModernDebug` | **BUILD SUCCESSFUL**，15 s | 清空 `.build/android-user-home` 后重新生成 `debug.keystore`，APK 14,293,015 字节 |
 | `python3 scripts/check-handoff.py` | 通过 | 补齐本轮交接并刷新印章后，无参数检查退出 0 |
 
-本轮已补齐独立交接并刷新印章：`python3 scripts/check-handoff.py` 现在通过（`Handoff current: docs/handoffs/20261106-1211-ao-worktree-build.md`）。因此 `verify-workspace.sh` 不会再因交接印章在启动 Gradle 前退出；但本 worktree 没有完整执行它的 assemble/androidTest/lint 全流程，不能宣称 `verify-workspace.sh` 整体通过。本 worktree 只新增脚本、回归测试、文档与交接记录，未改产品源码。
+本轮已补齐独立交接并刷新印章：`python3 scripts/check-handoff.py` 现在通过（`Handoff current: docs/handoffs/20261106-1211-phase2-worktree-build.md`）。因此 `verify-workspace.sh` 不会再因交接印章在启动 Gradle 前退出；但本 worktree 没有完整执行它的 assemble/androidTest/lint 全流程，不能宣称 `verify-workspace.sh` 整体通过。本 worktree 只新增脚本、回归测试、文档与交接记录，未改产品源码。
 
 构建产物（`app/build/`、`.build/`、`app/src/main/jniLibs/*.so`、`local.properties`）均在 `.gitignore` 覆盖范围内，不提交。
 

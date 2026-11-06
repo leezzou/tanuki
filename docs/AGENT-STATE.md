@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[AO Worktree 构建环境](handoffs/20261106-1211-ao-worktree-build.md)。当前 PR #11（`chore/phase2-worktree-build`）在 main `5b01ddf` 之上新增 AO worktree 构建脚本、回归测试与本专题文档，并补齐本文件与交接印章；不改产品代码、不重打 APK。0.1.8/code10 已由用户发布，六附件保持原样。
+当前交接：[AO Worktree 构建环境](handoffs/20261106-1211-phase2-worktree-build.md)。当前 PR #11（`chore/phase2-worktree-build`）在 main `5b01ddf` 之上新增 AO worktree 构建脚本、回归测试与本专题文档，并补齐本文件与交接印章；不改产品代码、不重打 APK。0.1.8/code10 已由用户发布，六附件保持原样。
 
 ## 0.1.8 交付与仓库基线
 

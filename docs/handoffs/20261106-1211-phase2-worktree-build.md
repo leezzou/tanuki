@@ -1,4 +1,4 @@
-# 交接：20261106-1211-ao-worktree-build
+# 交接：20261106-1211-phase2-worktree-build
 
 - Agent/会话标识：android_agent-5（DSH Worker 2，AO Worktree 构建环境）
 - 时间：2026-11-06 12:11 CST
@@ -28,7 +28,7 @@
 | `scripts/test-ao-worktree-env.sh` | 新增回归：clone 失败回退不嵌套、顶层/目录内/链式/循环链接全部跳过、目标树无链接、写目标不改源、已有目标清理 |
 | `docs/AO-WORKTREE-BUILD.md` | 新增专题文档：用法、成本、隔离原因、排查、W3 CI 建议；更新交接门禁状态为真实结果 |
 | `docs/AGENT-STATE.md` | 更新当前交接、main 基线、W2 状态与下一步；保留 W1/0.1.8 历史事实 |
-| `docs/handoffs/20261106-1211-ao-worktree-build.md` | 本记录 |
+| `docs/handoffs/20261106-1211-phase2-worktree-build.md` | 本记录 |
 | `docs/handoffs/CURRENT.json` | 由 `check-handoff.py --record` 生成，不手写 |
 
 ## 验证记录
@@ -41,8 +41,8 @@
 | `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL，11 s（28 个任务 up-to-date） | 同上；未重新执行测试；本分支较早完整执行过 21 套件/104 测试/0 失败 |
 | `bash scripts/test-ao-worktree-env.sh` | PASS | 覆盖复制失败回退、链接跳过、目标无链接、写目标不改源 |
 | GitHub API tree 对比 | 本地 433 个 blob 与 `290cb01` tree 全部一致 | 通过 main tarball 同步 docs；本地 Git 元数据仍受沙箱限制 |
-| `python3 scripts/check-handoff.py --record docs/handoffs/20261106-1211-ao-worktree-build.md` | 通过：`Handoff refreshed`，433 个公开文件 | 已刷新 `CURRENT.json` |
-| `python3 scripts/check-handoff.py` | 通过：`Handoff current: docs/handoffs/20261106-1211-ao-worktree-build.md (433 public files)` | 不再出现 `No handoff stamp` |
+| `python3 scripts/check-handoff.py --record docs/handoffs/20261106-1211-phase2-worktree-build.md` | 通过：`Handoff refreshed`，433 个公开文件 | 已刷新 `CURRENT.json` |
+| `python3 scripts/check-handoff.py` | 通过：`Handoff current: docs/handoffs/20261106-1211-phase2-worktree-build.md (433 public files)` | 不再出现 `No handoff stamp` |
 
 - 前一轮 W1 的 `check-handoff.py`/`check-publication.py` 结果不在本轮重复声称；0.1.8 的历史测试未在本轮复跑。
 - 未测试：完整 `verify-workspace.sh`、lint、设备/仪器、发布签名、真实模型/账号。
