@@ -161,7 +161,7 @@ private fun DeviceConditionBanner(state: DeviceConditionState) {
         Text("设备状态 · ${state.condition.label}", style = MaterialTheme.typography.titleMedium)
         SetupCaption(state.reasonText())
         SetupCaption("${state.statusText()} · 下载并发 ${state.workerCap} 路 · 日志 ${state.logLineLimit} 行 · 预览上限 ${state.previewMaxDimension} 像素")
-        if (state.deferredWork.isNotEmpty()) {
+        if (state.deferredChecks.isNotEmpty()) {
             SetupCaption("后台更新检查已延后，状态恢复后自动补跑；正在运行的 DSH 任务和用户下载不会被暂停或取消。")
         } else {
             SetupCaption("DSH 任务和前台操作不受影响；可在“设置 · 运行与后台”中调整开关与低电阈值。")

@@ -39,8 +39,8 @@ class DeviceConditionPolicyTest {
         assertEquals(2048, result.state.previewMaxDimension)
         assertEquals(4_000_000, result.state.previewMaxPixels)
         assertTrue(result.state.backgroundChecksAllowed)
-        assertTrue(result.state.deferredWork.isEmpty())
-        assertTrue(result.resumed.isEmpty())
+        assertTrue(result.state.deferredChecks.isEmpty())
+        assertTrue(result.resumedChecks.isEmpty())
         assertEquals(10_000L, result.state.sinceMillis)
     }
 
@@ -55,7 +55,8 @@ class DeviceConditionPolicyTest {
         assertEquals(DeviceCondition.HOT, state.condition)
         assertEquals(4, state.workerCap)
         assertFalse(state.backgroundChecksAllowed)
-        assertTrue(state.deferredWork.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        // 状态本身不登记待办；只有被跳过的具体 Worker 才会登记。
+        assertTrue(state.deferredChecks.isEmpty())
 
         state = evaluate(state, signals(thermal = ThermalLevel.SEVERE, now = 3_000L)).state
         assertEquals(DeviceCondition.CRITICAL, state.condition)
@@ -164,8 +165,7 @@ class DeviceConditionPolicyTest {
         assertEquals(1280, state.previewMaxDimension)
         assertEquals(1_600_000, state.previewMaxPixels)
         assertFalse(state.backgroundChecksAllowed)
-        assertTrue(state.deferredWork.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
-        assertTrue(result.newlyDeferred.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        assertTrue(state.deferredChecks.isEmpty())
     }
 
     /**
@@ -175,23 +175,76 @@ class DeviceConditionPolicyTest {
     fun deferredBackgroundCheckResumesAfterRecovery() {
         var state = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
         assertFalse(state.backgroundChecksAllowed)
-        assertTrue(state.deferredWork.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        assertTrue(state.deferredChecks.isEmpty())
+
+        // 只有 APK Worker 实际被跳过时才登记 APK 待办，不会捎带 DSH。
+        state = DeviceConditionPolicy.markCheckSkipped(state, DeviceWork.APK_UPDATE_CHECK)
+        assertTrue(state.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
 
         // 降到 LIGHT，但 HOT -> WARM 仍需迟滞。
         var result = evaluate(state, signals(thermal = ThermalLevel.LIGHT, now = 2_000L))
         assertEquals(DeviceCondition.HOT, result.state.condition)
-        assertTrue(result.resumed.isEmpty())
+        assertTrue(result.resumedChecks.isEmpty())
 
         result = evaluate(result.state, signals(thermal = ThermalLevel.LIGHT, now = 32_000L))
         assertEquals(DeviceCondition.WARM, result.state.condition)
         assertTrue(result.state.backgroundChecksAllowed)
-        assertTrue(result.resumed.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
-        assertTrue(result.state.deferredWork.isEmpty())
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
+        assertTrue(result.state.deferredChecks.isEmpty())
 
         assertEquals(
             WorkDisposition.RUN,
-            DeviceConditionPolicy.decide(result.state, DeviceWork.BACKGROUND_UPDATE_CHECK).disposition,
+            DeviceConditionPolicy.decide(result.state, DeviceWork.APK_UPDATE_CHECK).disposition,
         )
+    }
+
+    /** 只进入受限状态、没有 Worker 被跳过时，恢复不得补跑任何检查。 */
+    @Test
+    fun conditionWithoutSkippedWorkerDoesNotResumeAnyCheck() {
+        var state = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
+        assertTrue(state.deferredChecks.isEmpty())
+
+        // HOT -> NORMAL 需要 30 秒迟滞；期间也没有 Worker 登记待办。
+        var result = evaluate(state, signals(thermal = ThermalLevel.NONE, now = 2_000L))
+        assertEquals(DeviceCondition.HOT, result.state.condition)
+        assertTrue(result.resumedChecks.isEmpty())
+
+        result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
+        assertEquals(DeviceCondition.NORMAL, result.state.condition)
+        assertTrue(result.resumedChecks.isEmpty())
+        assertTrue(result.state.deferredChecks.isEmpty())
+    }
+
+    /** 只恢复实际被跳过的检查，不能因为共享状态把另一条检查也排入补跑。 */
+    @Test
+    fun onlyActuallySkippedCheckIsResumed() {
+        var state = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
+        state = DeviceConditionPolicy.markCheckSkipped(state, DeviceWork.DSH_UPDATE_CHECK)
+
+        var result = evaluate(state, signals(thermal = ThermalLevel.NONE, now = 2_000L))
+        assertTrue(result.resumedChecks.isEmpty())
+
+        result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
+        assertEquals(setOf(DeviceWork.DSH_UPDATE_CHECK), result.resumedChecks)
+        assertFalse(result.resumedChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+    }
+
+    @Test
+    fun skippedCheckRegistrationIsIdempotentAndLimitedToUpdates() {
+        val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
+
+        val once = DeviceConditionPolicy.markCheckSkipped(hot, DeviceWork.APK_UPDATE_CHECK)
+        val twice = DeviceConditionPolicy.markCheckSkipped(once, DeviceWork.APK_UPDATE_CHECK)
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), twice.deferredChecks)
+
+        val both = DeviceConditionPolicy.markCheckSkipped(twice, DeviceWork.DSH_UPDATE_CHECK)
+        assertEquals(
+            setOf(DeviceWork.APK_UPDATE_CHECK, DeviceWork.DSH_UPDATE_CHECK),
+            both.deferredChecks,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            DeviceConditionPolicy.markCheckSkipped(hot, DeviceWork.NPM_DEPENDENCY_DOWNLOAD)
+        }
     }
 
     @Test
@@ -225,29 +278,32 @@ class DeviceConditionPolicyTest {
         assertEquals(WorkDisposition.THROTTLE, DeviceConditionPolicy.decide(state, DeviceWork.NPM_DEPENDENCY_DOWNLOAD).disposition)
         assertEquals(WorkDisposition.THROTTLE, DeviceConditionPolicy.decide(state, DeviceWork.LOG_RENDER).disposition)
         assertEquals(WorkDisposition.THROTTLE, DeviceConditionPolicy.decide(state, DeviceWork.PREVIEW_RENDER).disposition)
-        assertEquals(WorkDisposition.DEFER, DeviceConditionPolicy.decide(state, DeviceWork.BACKGROUND_UPDATE_CHECK).disposition)
-        assertTrue(DeviceConditionPolicy.mayPauseOrCancel(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        assertEquals(WorkDisposition.DEFER, DeviceConditionPolicy.decide(state, DeviceWork.APK_UPDATE_CHECK).disposition)
+        assertEquals(WorkDisposition.DEFER, DeviceConditionPolicy.decide(state, DeviceWork.DSH_UPDATE_CHECK).disposition)
+        assertTrue(DeviceConditionPolicy.mayPauseOrCancel(DeviceWork.APK_UPDATE_CHECK))
+        assertTrue(DeviceConditionPolicy.mayPauseOrCancel(DeviceWork.DSH_UPDATE_CHECK))
     }
 
     @Test
     fun disablingPolicyRestoresNormalBudgetAndResumesDeferredWork() {
         val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
-        assertTrue(hot.deferredWork.isNotEmpty())
+        assertTrue(hot.deferredChecks.isEmpty())
+        val skipped = DeviceConditionPolicy.markCheckSkipped(hot, DeviceWork.APK_UPDATE_CHECK)
 
         val result = DeviceConditionPolicy.evaluate(
-            hot,
+            skipped,
             signals(thermal = ThermalLevel.MODERATE, now = 2_000L),
             config.copy(enabled = false),
         )
         assertEquals(DeviceCondition.NORMAL, result.state.condition)
         assertFalse(result.state.enabled)
-        assertTrue(result.state.deferredWork.isEmpty())
-        assertTrue(result.resumed.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        assertTrue(result.state.deferredChecks.isEmpty())
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
         assertEquals(16, result.state.workerCap)
         assertTrue(result.state.backgroundChecksAllowed)
         assertEquals(
             WorkDisposition.RUN,
-            DeviceConditionPolicy.decide(result.state, DeviceWork.BACKGROUND_UPDATE_CHECK).disposition,
+            DeviceConditionPolicy.decide(result.state, DeviceWork.APK_UPDATE_CHECK).disposition,
         )
     }
 
@@ -256,18 +312,21 @@ class DeviceConditionPolicyTest {
      */
     @Test
     fun restoredHotStateKeepsDeferralUntilDwellElapses() {
-        val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
-        assertTrue(hot.deferredWork.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
+        val hot = DeviceConditionPolicy.markCheckSkipped(
+            evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state,
+            DeviceWork.APK_UPDATE_CHECK,
+        )
+        assertTrue(hot.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
 
         var result = evaluate(hot, signals(thermal = ThermalLevel.NONE, now = 2_000L))
         assertEquals(DeviceCondition.HOT, result.state.condition)
-        assertTrue(result.state.deferredWork.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
-        assertTrue(result.resumed.isEmpty())
+        assertTrue(result.state.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+        assertTrue(result.resumedChecks.isEmpty())
 
         result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
         assertEquals(DeviceCondition.NORMAL, result.state.condition)
-        assertTrue(result.resumed.contains(DeviceWork.BACKGROUND_UPDATE_CHECK))
-        assertTrue(result.state.deferredWork.isEmpty())
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
+        assertTrue(result.state.deferredChecks.isEmpty())
     }
 
     @Test

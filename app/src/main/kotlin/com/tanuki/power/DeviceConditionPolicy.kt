@@ -35,7 +35,21 @@ enum class DeviceConditionReason { THERMAL, LOW_BATTERY, LOW_MEMORY }
  * FOREGROUND_TASK 与 DSH_TASK 是受保护类别：任何状态下都只允许继续运行，
  * 不得暂停、取消或缩短已领取的任务；其余类别才允许降并发或延后。
  */
-enum class DeviceWork { FOREGROUND_TASK, DSH_TASK, USER_DOWNLOAD, NPM_DEPENDENCY_DOWNLOAD, BACKGROUND_UPDATE_CHECK, LOG_RENDER, PREVIEW_RENDER }
+enum class DeviceWork {
+    FOREGROUND_TASK,
+    DSH_TASK,
+    USER_DOWNLOAD,
+    NPM_DEPENDENCY_DOWNLOAD,
+    APK_UPDATE_CHECK,
+    DSH_UPDATE_CHECK,
+    LOG_RENDER,
+    PREVIEW_RENDER;
+
+    companion object {
+        /** 只有这两个具体检查会登记“实际被跳过、待恢复补跑”。 */
+        val UPDATE_CHECKS: Set<DeviceWork> = setOf(APK_UPDATE_CHECK, DSH_UPDATE_CHECK)
+    }
+}
 
 enum class WorkDisposition { RUN, THROTTLE, DEFER }
 
@@ -133,7 +147,8 @@ data class DeviceConditionState(
     val previewMaxDimension: Int = 2048,
     val previewMaxPixels: Int = 4_000_000,
     val backgroundChecksAllowed: Boolean = true,
-    val deferredWork: Set<DeviceWork> = emptySet(),
+    /** 已实际被跳过的具体后台检查；仅由 Worker 在确认无法运行时登记。 */
+    val deferredChecks: Set<DeviceWork> = emptySet(),
     val lowBatteryEnterPercent: Int = 20,
     val sinceMillis: Long = 0L,
     val updatedAtMillis: Long = 0L,
@@ -167,8 +182,8 @@ data class DeviceConditionState(
 
 data class DeviceEvaluation(
     val state: DeviceConditionState,
-    val newlyDeferred: Set<DeviceWork> = emptySet(),
-    val resumed: Set<DeviceWork> = emptySet(),
+    /** 本次因状态恢复而需要补跑的具体检查；空集合表示没有实际待办。 */
+    val resumedChecks: Set<DeviceWork> = emptySet(),
 )
 
 /**
@@ -181,8 +196,17 @@ object DeviceConditionPolicy {
     /** 任何状态下都不允许被暂停或取消的工作。 */
     val PROTECTED_WORK: Set<DeviceWork> = setOf(DeviceWork.FOREGROUND_TASK, DeviceWork.DSH_TASK)
 
-    /** 目前参与“延后并在恢复后重跑”的类别；下载只降并发，不丢弃已领取的归档。 */
-    val DEFERRABLE_WORK: Set<DeviceWork> = setOf(DeviceWork.BACKGROUND_UPDATE_CHECK)
+    /** 只有具体后台检查会登记“实际被跳过、待恢复补跑”；下载只降并发，不丢弃已领取的归档。 */
+    val UPDATE_CHECK_WORK: Set<DeviceWork> = DeviceWork.UPDATE_CHECKS
+
+    /**
+     * 由确认被状态阻塞的 Worker 调用，登记自己这一项待办。
+     * 状态进入 HOT/低电本身不会登记任何检查，避免没有到期任务时恢复仍发起网络请求。
+     */
+    fun markCheckSkipped(state: DeviceConditionState, work: DeviceWork): DeviceConditionState {
+        require(work in UPDATE_CHECK_WORK) { "只有后台更新检查可以登记延后" }
+        return state.copy(deferredChecks = state.deferredChecks + work)
+    }
 
     fun evaluate(
         previous: DeviceConditionState?,
@@ -197,7 +221,7 @@ object DeviceConditionPolicy {
         )
 
         if (!config.enabled) {
-            val resumed = prev.deferredWork
+            val resumed = prev.deferredChecks
             val normal = DeviceConditionState(
                 condition = DeviceCondition.NORMAL,
                 reasons = emptySet(),
@@ -211,12 +235,12 @@ object DeviceConditionPolicy {
                 previewMaxDimension = config.normalPreviewDimension,
                 previewMaxPixels = config.normalPreviewPixels,
                 backgroundChecksAllowed = true,
-                deferredWork = emptySet(),
+                deferredChecks = emptySet(),
                 lowBatteryEnterPercent = config.lowBatteryEnterPercent,
                 sinceMillis = if (prev.condition == DeviceCondition.NORMAL) prev.sinceMillis else signals.nowMillis,
                 updatedAtMillis = signals.nowMillis,
             )
-            return DeviceEvaluation(normal, resumed = resumed)
+            return DeviceEvaluation(normal, resumedChecks = resumed)
         }
 
         val thermal = thermalTarget(prev, signals, config)
@@ -242,13 +266,9 @@ object DeviceConditionPolicy {
         val previewPixels = previewPixels(thermalCondition, lowBattery, config)
         val backgroundAllowed = thermalCondition != DeviceCondition.HOT &&
             thermalCondition != DeviceCondition.CRITICAL && !lowBattery
-        val deferred = if (backgroundAllowed) {
-            prev.deferredWork - DeviceWork.BACKGROUND_UPDATE_CHECK
-        } else {
-            prev.deferredWork + DeviceWork.BACKGROUND_UPDATE_CHECK
-        }
-        val resumed = prev.deferredWork - deferred
-        val newlyDeferred = deferred - prev.deferredWork
+        // 恢复时只清理并报告“确实被跳过的具体检查”；状态本身不凭空制造待办。
+        val resumed = if (backgroundAllowed) prev.deferredChecks else emptySet()
+        val deferred = prev.deferredChecks - resumed
 
         val state = DeviceConditionState(
             condition = condition,
@@ -269,12 +289,12 @@ object DeviceConditionPolicy {
             previewMaxDimension = previewDimension,
             previewMaxPixels = previewPixels,
             backgroundChecksAllowed = backgroundAllowed,
-            deferredWork = deferred,
+            deferredChecks = deferred,
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = if (prev.condition == condition) prev.sinceMillis else signals.nowMillis,
             updatedAtMillis = signals.nowMillis,
         )
-        return DeviceEvaluation(state, newlyDeferred, resumed)
+        return DeviceEvaluation(state, resumedChecks = resumed)
     }
 
     /**
@@ -286,13 +306,13 @@ object DeviceConditionPolicy {
             return WorkDecision(WorkDisposition.RUN, "前台任务与 DSH 任务不暂停、不取消")
         }
         if (!state.enabled) return WorkDecision(WorkDisposition.RUN, "温控与省电策略已关闭")
-        if (work in state.deferredWork) {
-            return WorkDecision(WorkDisposition.DEFER, "${state.reasonText()}，${workLabel(work)}已延后，恢复后自动重跑")
+        if (work in state.deferredChecks) {
+            return WorkDecision(WorkDisposition.DEFER, "${state.reasonText()}，${workLabel(work)}已跳过一次，恢复后补跑")
         }
         return when (work) {
-            DeviceWork.BACKGROUND_UPDATE_CHECK ->
+            DeviceWork.APK_UPDATE_CHECK, DeviceWork.DSH_UPDATE_CHECK ->
                 if (state.backgroundChecksAllowed) WorkDecision(WorkDisposition.RUN, "当前状态允许后台更新检查")
-                else WorkDecision(WorkDisposition.DEFER, "${state.reasonText()}，后台更新检查已延后，恢复后自动重跑")
+                else WorkDecision(WorkDisposition.DEFER, "${state.reasonText()}，${workLabel(work)}延后到状态恢复")
             DeviceWork.NPM_DEPENDENCY_DOWNLOAD ->
                 if (state.condition == DeviceCondition.NORMAL) WorkDecision(WorkDisposition.RUN, "依赖下载按正常额度运行")
                 else WorkDecision(WorkDisposition.THROTTLE, "${state.reasonText()}，依赖下载并发降至 ${state.workerCap}")
@@ -410,7 +430,8 @@ object DeviceConditionPolicy {
     }
 
     private fun workLabel(work: DeviceWork): String = when (work) {
-        DeviceWork.BACKGROUND_UPDATE_CHECK -> "后台更新检查"
+        DeviceWork.APK_UPDATE_CHECK -> "APK 更新检查"
+        DeviceWork.DSH_UPDATE_CHECK -> "DSH 更新检查"
         DeviceWork.NPM_DEPENDENCY_DOWNLOAD -> "依赖下载"
         DeviceWork.USER_DOWNLOAD -> "用户下载"
         DeviceWork.LOG_RENDER -> "日志展示"

@@ -65,8 +65,8 @@ class TanukiApp : Application() {
         cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("tanuki-blob-") }?.forEach { it.delete() }
         runtime = RuntimeManager(this)
         // 先绑定恢复回调再开始采样：进程重启后若设备已恢复，会立即补跑被延后的后台检查。
-        deviceConditions.onBackgroundWorkResumed = {
-            com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this)
+        deviceConditions.onBackgroundWorkResumed = { checks ->
+            com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this, checks)
         }
         deviceConditions.start()
         // 安装、切换或恢复 DSH 后只重算本地快照，不联网，也不覆盖已知远端 latest。

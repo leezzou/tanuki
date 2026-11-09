@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * 热状态来自 PowerManager（API 29+ 的 thermal status 监听），电量与充电来自电池广播，
  * 低内存来自 ActivityManager 的系统内存压力。采样结果交给纯策略 [DeviceConditionPolicy]；
- * 状态、延后工作与阈值写入应用私有 state 目录，进程重启后先恢复再按新信号校正。
+ * 状态、实际被跳过的后台检查与阈值写入应用私有 state 目录，进程重启后先恢复再按新信号校正。
  */
 class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     private val appContext = context.applicationContext
@@ -84,10 +84,26 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         scope.cancel()
     }
 
-    /** 供 Worker 在开始非关键后台工作前调用：先采样，再返回当前是否允许。 */
-    fun beginBackgroundWork(): Boolean {
-        refresh()
-        return state.value.backgroundChecksAllowed
+    /**
+     * 供具体后台检查的 Worker 在开始前调用。
+     *
+     * 允许时返回 true；不允许时只登记当前 Worker 这一项待办，不会代替其他检查登记。
+     * 当前 Worker 马上会执行的检查不会再次排入补跑队列，避免同一周期重复请求。
+     */
+    fun beginBackgroundWork(check: DeviceWork): Boolean {
+        require(check in DeviceConditionPolicy.UPDATE_CHECK_WORK) { "只有后台更新检查可以使用此入口" }
+        val snapshot: DeviceConditionState
+        val resumed: Set<DeviceWork>
+        val sequence: Long
+        synchronized(lock) {
+            val evaluation = evaluateLocked(check)
+            snapshot = evaluation.first
+            resumed = evaluation.second
+            sequence = refreshSequence.incrementAndGet()
+        }
+        persistState(snapshot, sequence)
+        if (resumed.isNotEmpty()) onBackgroundWorkResumed?.invoke(resumed)
+        return snapshot.backgroundChecksAllowed
     }
 
     fun setEnabled(enabled: Boolean) {
@@ -114,14 +130,30 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         val resumed: Set<DeviceWork>
         val sequence: Long
         synchronized(lock) {
-            val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
-            snapshot = evaluation.state
-            resumed = evaluation.resumed
-            mutable.value = snapshot
+            val evaluation = evaluateLocked()
+            snapshot = evaluation.first
+            resumed = evaluation.second
             sequence = refreshSequence.incrementAndGet()
         }
         persistState(snapshot, sequence)
         if (resumed.isNotEmpty()) onBackgroundWorkResumed?.invoke(resumed)
+    }
+
+    /** 在持有 [lock] 时采样、评估并写入当前状态；可选地由当前 Worker 登记或消费自己的检查。 */
+    private fun evaluateLocked(workerCheck: DeviceWork? = null): Pair<DeviceConditionState, Set<DeviceWork>> {
+        val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
+        var snapshot = evaluation.state
+        var resumed = evaluation.resumedChecks
+        if (workerCheck != null) {
+            if (snapshot.backgroundChecksAllowed) {
+                // 当前 Worker 会立刻执行这一项，不需要再为它排一次补跑。
+                resumed = resumed - workerCheck
+            } else {
+                snapshot = DeviceConditionPolicy.markCheckSkipped(snapshot, workerCheck)
+            }
+        }
+        mutable.value = snapshot
+        return snapshot to resumed
     }
 
     private fun readSignals(): DeviceSignals {
@@ -230,7 +262,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             .put("previewMaxDimension", snapshot.previewMaxDimension)
             .put("previewMaxPixels", snapshot.previewMaxPixels)
             .put("backgroundChecksAllowed", snapshot.backgroundChecksAllowed)
-            .put("deferredWork", JSONArray(snapshot.deferredWork.map { it.name }))
+            .put("deferredChecks", JSONArray(snapshot.deferredChecks.map { it.name }))
             .put("lowBatteryEnterPercent", snapshot.lowBatteryEnterPercent)
             .put("sinceMillis", snapshot.sinceMillis)
             .put("updatedAtMillis", snapshot.updatedAtMillis)
@@ -279,7 +311,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             previewMaxDimension = saved.optInt("previewMaxDimension", config.normalPreviewDimension),
             previewMaxPixels = saved.optInt("previewMaxPixels", config.normalPreviewPixels),
             backgroundChecksAllowed = saved.optBoolean("backgroundChecksAllowed", true),
-            deferredWork = workOr(saved.optJSONArray("deferredWork")),
+            deferredChecks = workOr(saved.optJSONArray("deferredChecks")),
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = saved.optLong("sinceMillis", 0L),
             updatedAtMillis = saved.optLong("updatedAtMillis", 0L),

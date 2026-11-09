@@ -1011,7 +1011,7 @@ private fun DeviceConditionSettings(state: DeviceConditionState, c: TanukiUiCall
         Caption("低于阈值且未充电时暂停后台更新检查并把下载并发降到 4 路；退出阈值比进入阈值高 5 个百分点。")
         Text("当前状态：${state.condition.label} · ${state.reasonText()}", style = MaterialTheme.typography.bodyMedium)
         Caption("下载并发 ${state.workerCap} 路 · 日志 ${state.logLineLimit} 行 · PDF 预览上限 ${state.previewMaxDimension} 像素")
-        if (state.deferredWork.isNotEmpty()) {
+        if (state.deferredChecks.isNotEmpty()) {
             Caption("后台更新检查已延后；状态恢复后由 WorkManager 自动补跑。")
         }
     }

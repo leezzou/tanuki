@@ -11,6 +11,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.tanuki.TanukiApp
+import com.tanuki.power.DeviceWork
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
@@ -24,7 +25,7 @@ class ApkUpdateCheckWorker(context: Context, params: WorkerParameters) : Corouti
     override suspend fun doWork(): Result {
         val app = applicationContext as? TanukiApp ?: return Result.success()
         // 热/低电/内存紧张时只登记延后，不启动网络检查；恢复后由调度器补跑一次性任务。
-        if (!app.deviceConditions.beginBackgroundWork()) return Result.success()
+        if (!app.deviceConditions.beginBackgroundWork(DeviceWork.APK_UPDATE_CHECK)) return Result.success()
         return try {
             val state = app.apkUpdateChecks.checkNow(force = false)
             if (state.available && state.latestVersion.isNotBlank() && UpdateNotifier.canNotify(app) &&
@@ -50,7 +51,7 @@ class DshUpdateCheckWorker(context: Context, params: WorkerParameters) : Corouti
     override suspend fun doWork(): Result {
         val app = applicationContext as? TanukiApp ?: return Result.success()
         // 与 APK 检查共用同一份设备状态，但各自保留独立的快照与通知去重。
-        if (!app.deviceConditions.beginBackgroundWork()) return Result.success()
+        if (!app.deviceConditions.beginBackgroundWork(DeviceWork.DSH_UPDATE_CHECK)) return Result.success()
         return try {
             val state = app.dshUpdateChecks.checkNow(force = false)
             if (state.available && state.latestVersion.isNotBlank() && UpdateNotifier.canNotify(app) &&
@@ -102,12 +103,15 @@ object UpdateCheckScheduler {
     }
 
     /**
-     * 设备恢复后补跑被延后的检查。
+     * 设备恢复后只补跑确实被跳过的检查。
      *
-     * 使用唯一的 OneTimeWorkRequest 和 REPLACE，避免多次状态抖动堆积任务；
-     * 网络仍由约束控制，仓库的最小查询间隔也会阻止紧邻的重复请求。
+     * [checks] 来自 Worker 自己的登记；空集合不会发起任何网络任务。使用唯一的
+     * OneTimeWorkRequest 和 REPLACE，避免多次状态抖动堆积任务；网络仍由约束控制。
      */
-    fun resumeDeferred(context: Context) {
+    fun resumeDeferred(context: Context, checks: Set<DeviceWork>) {
+        val apk = DeviceWork.APK_UPDATE_CHECK in checks
+        val dsh = DeviceWork.DSH_UPDATE_CHECK in checks
+        if (!apk && !dsh) return
         val app = context.applicationContext
         val spec = BackgroundUpdateChecks.schedule
         runCatching {
@@ -117,7 +121,7 @@ object UpdateCheckScheduler {
                     if (spec.requiresNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED
                 )
                 .build()
-            manager.enqueueUniqueWork(
+            if (apk) manager.enqueueUniqueWork(
                 APK_RESUME_WORK_NAME,
                 ExistingWorkPolicy.REPLACE,
                 OneTimeWorkRequestBuilder<ApkUpdateCheckWorker>()
@@ -125,7 +129,7 @@ object UpdateCheckScheduler {
                     .addTag(spec.apkUniqueName)
                     .build()
             )
-            manager.enqueueUniqueWork(
+            if (dsh) manager.enqueueUniqueWork(
                 DSH_RESUME_WORK_NAME,
                 ExistingWorkPolicy.REPLACE,
                 OneTimeWorkRequestBuilder<DshUpdateCheckWorker>()

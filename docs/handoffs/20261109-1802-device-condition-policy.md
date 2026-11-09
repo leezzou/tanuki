@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：上述策略与接入点；中文注释；开关/阈值；状态持久化。
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 16 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 222 tests / 0 failures / 0 errors / 0 skipped。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 19 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 225 tests / 0 failures / 0 errors / 0 skipped。
 - 待验证：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、设置页 UI、PDF 降级实际像素、独立 Review。
 - 当前分支：`ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，未合并、未触发 Review。
 - 没有运行中的设备安装或真实 DSH 任务；本轮未启动/停止模拟器，未安装 APK。
@@ -26,10 +26,10 @@
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/power/DeviceConditionPolicy.kt` | 新增纯策略：状态枚举、热/电/内存信号、迟滞、工作矩阵、延后/恢复结果；不依赖 Android |
+| `app/src/main/kotlin/com/tanuki/power/DeviceConditionPolicy.kt` | 新增纯策略：状态枚举、热/电/内存信号、迟滞、工作矩阵、具体检查登记/恢复结果；不依赖 Android |
 | `app/src/main/kotlin/com/tanuki/power/DeviceConditionMonitor.kt` | 新增 Android 采样：PowerManager thermal status、电池/充电广播、ActivityManager 低内存；持久化状态/设置；进程重启恢复 |
 | `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 创建并启动监控；绑定恢复回调到 WorkManager 补跑 |
-| `app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt` | 周期 Worker 在热/低电时延后并成功返回；恢复后唯一一次性补跑 |
+| `app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt` | 周期 Worker 在热/低电时只登记自己并成功返回；恢复时只按实际登记项补跑 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmDownloadPolicy.kt` | `NpmConcurrencyPolicy` 增加外部 `capProvider`，`current()` 取自适应目标与设备额度较小值 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt` | 注入当前设备 `workerCap`；降档由现有池子自然退休多余 worker |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 模型加入设备状态与两个回调；日志展示行数按策略裁剪；设置页新增开关/阈值/当前额度 |
@@ -38,10 +38,16 @@
 | `app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt` | 渲染入口接受长边/像素上限；默认行为不变 |
 | `app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt`、`WorkspaceFilesPage.kt` | 透传预览上限 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 订阅设备状态，接入模型/设置回调/PDF 上限 |
-| `app/src/test/kotlin/com/tanuki/DeviceConditionPolicyTest.kt` | 新增 16 项纯策略回归 |
+| `app/src/test/kotlin/com/tanuki/DeviceConditionPolicyTest.kt` | 新增 19 项纯策略回归 |
 | `app/src/test/kotlin/com/tanuki/NpmDownloadPolicyTest.kt` | 新增外部并发上限与恢复回归 |
 | `docs/DEVICE-CONDITION-POLICY.md` | 新增状态表、工作矩阵、接入点、恢复和未验证边界 |
 | `docs/AGENT-STATE.md`、`docs/TEST-REPORT.md`、本记录 | 记录本轮状态和证据 |
+
+## Review 修复（P2）
+
+- 评论：`DeviceConditionPolicy.kt` 每次进入 HOT/CRITICAL/低电就登记后台检查，恢复时无条件补跑 APK/DSH，可能打破 30 分钟/24 小时周期。
+- 修复：策略不再自动登记；`DeviceWork` 拆为 `APK_UPDATE_CHECK`/`DSH_UPDATE_CHECK`，被阻塞的 Worker 调用 `beginBackgroundWork(check)` 只登记自己；`UpdateCheckScheduler.resumeDeferred(checks)` 只入队实际登记项，空集合直接返回。
+- 新增回归：无 Worker 跳过时恢复不补跑；只恢复实际跳过的一项；登记幂等且只允许后台检查；当前 Worker 允许时不会为自己重复排队。
 
 ## 验证记录
 
@@ -49,15 +55,15 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` | JDK17/SDK36，`/tmp/tanuki-thermal-30`，BUILD SUCCESSFUL（5m29s，19 tasks） | 编译通过；只有既有弃用警告 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | BUILD SUCCESSFUL；16/7/2 tests，0 failures/errors/skipped | 目标回归通过；不是完整套件 |
-| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | BUILD SUCCESSFUL；222 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不代表设备测试 |
-| `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL（3m35s，29 tasks）；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
+| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | BUILD SUCCESSFUL；225 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不代表设备测试 |
+| `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL（4m12s，29 tasks）；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本记录中的编译与目标回归均为本轮在 `/tmp` clone 新跑；前轮 205 tests 等历史数字未复用。
 - 未测试、超时、失败和暂未复现的情况：真实温控/电池/低内存、WorkManager 调度/重启恢复、通知、设置页交互、PDF 降级像素、assemble/仪器、独立 Review 均未执行；lint 已在本轮通过。
 
 ### 最终结果
 
-- 完整 JVM：`./gradlew :app:testModernDebugUnitTest --rerun-tasks` → BUILD SUCCESSFUL（3m13s，28 tasks executed）；37 个结果文件，222 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 JVM：`./gradlew :app:testModernDebugUnitTest --rerun-tasks` → BUILD SUCCESSFUL（2m40s，28 tasks executed）；37 个结果文件，225 tests / 0 failures / 0 errors / 0 skipped。
 
 ## 未完成与暂停项
 
@@ -74,8 +80,8 @@
 ## 约束与风险
 
 - 数据/设备/权限边界：未读取真实 Key、Cookie、token 或会话；未安装/启动设备；未修改既有安全/暂停项。
-- 关键决策：策略只降并发/延后，不取消；前台与 DSH 任务列为受保护类别；后台更新检查用 WorkManager 一次性补跑；低电退出阈值固定比进入阈值高 5 个百分点；低内存只参与组合状态，不写入热状态字段。
-- 风险：`PowerManager` thermal status 仅 API 29+；低内存使用系统 `MemoryInfo.lowMemory`，可能与单应用内存压力不完全一致；补跑同时入队 APK/DSH 两个检查，仓库最小查询间隔会阻止紧邻重复请求；PDF 降级只覆盖内置 PDF，图片/DOCX 未接入。
+- 关键决策：策略只降并发/延后，不取消；前台与 DSH 任务列为受保护类别；后台更新检查由被阻塞的具体 Worker 登记，恢复时只补跑实际待办；低电退出阈值固定比进入阈值高 5 个百分点；低内存只参与组合状态，不写入热状态字段。
+- 风险：`PowerManager` thermal status 仅 API 29+；低内存使用系统 `MemoryInfo.lowMemory`，可能与单应用内存压力不完全一致；只有实际被跳过的 APK/DSH 检查才会补跑，无 Worker 跳过时不发请求；PDF 降级只覆盖内置 PDF，图片/DOCX 未接入。
 - 失败尝试与避免重复踩坑：没有把内存降级写入 `thermalCondition`（否则内存解除后还会被热迟滞多拖 30 秒）；并发测试需累计 32 次成功才能到 16 路。
 
 ## 产物与校验
