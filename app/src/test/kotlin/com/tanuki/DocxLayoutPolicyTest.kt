@@ -6,7 +6,9 @@ import com.tanuki.ui.DocxImageSize
 import com.tanuki.ui.DocxBitmapLifetime
 import com.tanuki.ui.DocxPageGeometryPolicy
 import com.tanuki.ui.DocxRenderBudget
+import com.tanuki.ui.DocxCellPlanner
 import com.tanuki.ui.DocxTableWidths
+import com.tanuki.ui.DocxTableRowPolicy
 import com.tanuki.ui.DocxTextChunking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -139,6 +141,38 @@ class DocxLayoutPolicyTest {
             assertFalse(last.isHighSurrogate())
             assertFalse(first.isLowSurrogate())
         }
+    }
+
+    @Test
+    fun cellPlanUsesSameGlobalBudgetForManyParagraphs() {
+        val plan = DocxCellPlanner.plan(List(40_000) { 1 })
+        assertTrue(plan.truncated)
+        assertEquals(DocxCellPlanner.MAX_CHUNKS, plan.chunks.values.sumOf { it.size })
+        assertTrue(plan.chunks.values.flatten().all { it.first == 0 && it.last == 0 })
+    }
+
+    @Test
+    fun cellPlanChunksLongParagraphAndPreservesBounds() {
+        val plan = DocxCellPlanner.plan(listOf(20_000))
+        assertFalse(plan.truncated)
+        val ranges = plan.chunks.getValue(0)
+        assertEquals(0, ranges.first().first)
+        assertEquals(19_999, ranges.last().last)
+        ranges.zipWithNext().forEach { (left, right) -> assertEquals(left.last + 1, right.first) }
+        assertTrue(ranges.all { it.last - it.first + 1 <= DocxCellPlanner.MAX_CHUNK_CHARS })
+    }
+
+    @Test
+    fun tableRowHeightIsClampedToContentHeight() {
+        val normal = DocxTableRowPolicy.limit(200f, 500f)
+        assertEquals(200f, normal.heightDp, 0.01f)
+        assertFalse(normal.truncated)
+        val huge = DocxTableRowPolicy.limit(400_000f, 500f)
+        assertEquals(500f, huge.heightDp, 0.01f)
+        assertTrue(huge.truncated)
+        assertTrue(DocxTableRowPolicy.limit(Float.NaN, 500f).truncated)
+        assertTrue(DocxTableRowPolicy.limit(Float.POSITIVE_INFINITY, 500f).truncated)
+        assertTrue(DocxTableRowPolicy.limit(-1f, 500f).truncated)
     }
 
     @Test

@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-31（DSH Worker）
 - 时间：2026-11-09 18:36 CST
-- 状态：进行中（实现、rebase、5 条 Review 修复与 JVM/lint 验证完成；PR [#28](https://github.com/leezzou/tanuki/pull/28) 等待复审与设备 QA）
+- 状态：进行中（实现、rebase、两轮 Review（6 条）修复与 JVM/lint 验证完成；PR [#28](https://github.com/leezzou/tanuki/pull/28) 等待复审与设备 QA）
 - 前一记录：[DSH 安装提速与国内镜像](20261109-1539-dsh-install-resilience.md)
 
 ## 用户目标与范围
@@ -15,7 +15,7 @@
 
 - 已实现：`.docx` 打开后进入原生分页预览；支持常用字符/段落/标题/列表/表格/图片/页面设置；连续滚动、1–4 倍按钮/双指/双击缩放；复制纯文本；支持范围对话框如实列出不支持项。
 - 已实现安全边界：归档/条目/总解压/单条目/正文/辅助 XML/图片大小与数量、XML 元素与深度、文字量、块数/单元格数上限；拒绝路径穿越、重复条目、DOCTYPE、未定义实体与不安全关系目标；外部关系不联网；图片解码采样与总像素预算；损坏/加密/超限返回中文错误。
-- 已验证：rebase 到 `main=c2f1b44` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，346 tests / 0 failures / 0 errors / 0 skipped（main 283 - 被替换的 DOCX 纯文本测试 10 + 新增 73），其中新增 DOCX 回归 73 项。
+- 已验证：rebase 到 `main=c2f1b44` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，349 tests / 0 failures / 0 errors / 0 skipped（main 283 - 被替换的 DOCX 纯文本测试 10 + 新增 76），其中新增 DOCX 回归 76 项。
 - 待验证：真实设备上的双指缩放/横向滚动/深色主题/超大文档性能、真实 Word 复杂样本、低 API/真机；assemble、Android 仪器未跑，lint 本轮通过。
 - 当前基线：`main=c2f1b44`（已包含 XLSX 预览 PR #23、DSH 安全模式 PR #25 与聊天通知 PR #22）；分支 `ao/docx-preview/root` 已 rebase 到该基线（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；rebase 后功能提交 `c16e906`（Review 修复 `cf32aa8`）；PR 后续仅有交接/状态回填提交，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
 - 关键源码：[`DocxDocumentReader.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxDocumentReader.kt)、[`DocxModel.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxModel.kt)、[`DocxStyles.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxStyles.kt)、[`DocxNumbering.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxNumbering.kt)、[`DocxXml.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxXml.kt)、[`DocxLayout.kt`](../../app/src/main/kotlin/com/tanuki/ui/DocxLayout.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)。
@@ -48,15 +48,16 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` | BUILD SUCCESSFUL（JDK17、SDK36、共享 worktree 缓存） | 编译覆盖新增存储层与 Compose 接线；不代表设备渲染正确。 |
-| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` | BUILD SUCCESSFUL；73 tests / 0 failures / 0 errors / 0 skipped（Reader 25、Security 22、Paginator 8、LayoutPolicy 18） | 合成 ZIP/XML；kxml2 仅测试实现。 |
+| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` | BUILD SUCCESSFUL；76 tests / 0 failures / 0 errors / 0 skipped（Reader 25、Security 22、Paginator 8、LayoutPolicy 21） | 合成 ZIP/XML；kxml2 仅测试实现。 |
 | `./gradlew :app:testModernDebugUnitTest`（rebase 前） | BUILD SUCCESSFUL；260 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`，不提交。 |
-| `git rebase origin/main`（`c2f1b44`）后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` | BUILD SUCCESSFUL；346 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 解决 `WorkspaceFileViewer` 冲突（保留 DOCX + XLSX 分支）并合并 runtime 安全模式与聊天通知后的 `AGENT-STATE`/印章；rebase 后重新运行。 |
-| 独立 `/tmp` clone（rebase 后 `main=c2f1b44`）`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；346 tests / 0 failures / 0 errors / 0 skipped | 干净 clone 复跑并解决冲突，不使用共享 worktree 的 `.git` 写操作；构建缓存来自项目既有环境。 |
-| Review P1/P2 修复回归 | Bitmap 释放改为捕获 effect 快照并新增 `DocxBitmapLifetime` 测试；文本切片复用已测量布局（`drawText`）并按页合并、长段落 8,000 字有界分段、行循环内执行预算；列宽用 Long 归一化并限制到正文宽度；页首 gap 清零；测量结果携带截断状态并在界面提示。 | 5 条 inline thread 均有对应代码/测试；真实设备手势与大文档性能仍未验证。 |
+| `git rebase origin/main`（`c2f1b44`）后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` | BUILD SUCCESSFUL；349 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 解决 `WorkspaceFileViewer` 冲突（保留 DOCX + XLSX 分支）并合并 runtime 安全模式与聊天通知后的 `AGENT-STATE`/印章；rebase 后重新运行。 |
+| 独立 `/tmp` clone（rebase 后 `main=c2f1b44`）`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；349 tests / 0 failures / 0 errors / 0 skipped | 干净 clone 复跑并解决冲突，不使用共享 worktree 的 `.git` 写操作；构建缓存来自项目既有环境。 |
+| 第二轮 Review P1 修复 | 单元格段落纳入同一原子预算并按 8,000 字分段；单元格内容累计高度限制在页面内容高度内，表格行高在传给 `Modifier.height` 前 clamp；新增 `DocxCellPlanner`/`DocxTableRowPolicy` 回归（40,000 段单元格、Long/Infinity/NaN 行高）。 | 单元格路径与行高限制均有 JVM 回归；真实超大表格滚动仍未验证。 |
+| 首轮 Review P1/P2 修复回归 | Bitmap 释放改为捕获 effect 快照并新增 `DocxBitmapLifetime` 测试；文本切片复用已测量布局（`drawText`）并按页合并、长段落 8,000 字有界分段、行循环内执行预算；列宽用 Long 归一化并限制到正文宽度；页首 gap 清零；测量结果携带截断状态并在界面提示。 | 5 条 inline thread 均有对应代码/测试；真实设备手势与大文档性能仍未验证。 |
 | 关键失败与修复 | 1）XML 本地名被整体小写，导致 `pPr/sectPr/gridCol` 等全部失配，样式/表格/页面/图片测试失败；改为保留 OOXML 大小写后 73 项全过。2）分页 gap 测试期望错误；修正为分页起点丢弃 gap。3）`DocxParagraph`/`DocxTable` 误当顶层类型；实际是 `DocxBlock` 嵌套类型，已修正。 | 均为本轮新跑记录，不掩盖失败。 |
 | 未执行 | assemble、Android 仪器、真实设备、真实 Word 样本、大文档性能 | lint 与 JVM 已跑；不能写成设备验收或完整 Word 兼容。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：rebase 后的 346 JVM、compile、lint 与独立 `/tmp` clone 复跑均为本轮新跑；rebase 前 260 JVM 保留为历史步骤；XLSX 233 项、runtime 安全模式 32 项与聊天通知 18 项属 main 既有记录，不混入 DOCX 新增 73 项。
+- 哪些是前一轮结果，哪些是本次新验证：rebase 后的 349 JVM、compile、lint 与独立 `/tmp` clone 复跑均为本轮新跑；rebase 前 260 JVM 保留为历史步骤；XLSX 233 项、runtime 安全模式 32 项与聊天通知 18 项属 main 既有记录，不混入 DOCX 新增 76 项。
 - 未测试、超时、失败和暂未复现的情况：真实 Word 复杂排版、双指与横向滚动交互、深色主题、图片解码 OOM 边界、超大表格/文档滚动性能未验证；assemble/仪器/真机未跑，lint 本轮通过。
 
 ## 未完成与暂停项

@@ -488,6 +488,7 @@ private data class DocxCellRender(
     val colSpan: Int,
     val shade: Int?,
     val blocks: List<DocxCellBlock>,
+    val heightDp: Float,
 )
 
 private sealed interface DocxCellBlock {
@@ -519,6 +520,7 @@ private class DocxMeasurer(
     private val output = mutableListOf<DocxRenderAtom>()
     private var nextKey = 0
     private val budget = DocxRenderBudget()
+    private var contentTruncated = false
 
     fun measure(): DocxMeasureResult {
         var pending = 0f
@@ -539,7 +541,7 @@ private class DocxMeasurer(
             }
             if (budget.exceeded) break
         }
-        return DocxMeasureResult(output, budget.exceeded)
+        return DocxMeasureResult(output, budget.exceeded || contentTruncated)
     }
 
     private fun measureParagraph(paragraph: DocxBlock.Paragraph, pendingGap: Float): Float {
@@ -610,51 +612,108 @@ private class DocxMeasurer(
         val widths = DocxTableWidths.normalize(table.columnWidthsTwips, columnCount, geometry.contentWidthDp)
         var pending = pendingGap
         table.rows.forEach { row ->
-            if (!budget.takeAtom()) return 0f
+            if (!budget.takeAtom()) {
+                contentTruncated = true
+                return 0f
+            }
             var columnStart = 0
             val cells = mutableListOf<DocxCellRender>()
             for (cell in row.cells) {
                 val span = cell.colSpan.coerceIn(1, (columnCount - columnStart).coerceAtLeast(1))
                 val cellWidth = widths.drop(columnStart).take(span).sum().coerceAtLeast(24f) - CELL_HORIZONTAL_PADDING * 2f
                 val measured = measureCell(cell, cellWidth.coerceAtLeast(16f))
-                cells += DocxCellRender(columnStart, span, cell.shadeArgb, measured)
+                cells += DocxCellRender(columnStart, span, cell.shadeArgb, measured.blocks, measured.heightDp)
+                if (measured.truncated) contentTruncated = true
                 columnStart += span
                 if (columnStart >= columnCount) break
             }
-            val contentHeight = cells.maxOfOrNull { cell ->
-                cell.blocks.fold(0f) { total, block ->
-                    total + when (block) {
-                        is DocxCellBlock.Text -> block.heightDp + block.gapBefore
-                        is DocxCellBlock.Image -> block.heightDp + block.gapBefore
-                        is DocxCellBlock.Placeholder -> 16f + block.gapBefore
-                    }
-                }
-            } ?: 20f
-            val rowHeight = (contentHeight + CELL_HORIZONTAL_PADDING * 2f).coerceAtLeast(20f)
+            val contentHeight = cells.maxOfOrNull { it.heightDp } ?: 20f
+            // 行高必须先限制在页面可绘制范围内，不能把数十万 dp 传给 Modifier.height。
+            val limited = DocxTableRowPolicy.limit(
+                (contentHeight + CELL_HORIZONTAL_PADDING * 2f).coerceAtLeast(20f),
+                geometry.contentHeightDp,
+            )
+            if (limited.truncated) contentTruncated = true
             output += DocxRenderAtom.TableRow(
-                atom = DocxPageAtom(nextKey++, rowHeight, pending),
+                atom = DocxPageAtom(nextKey++, limited.heightDp, pending),
                 header = row.header,
                 cells = cells,
                 columnWidths = widths,
-                heightDp = rowHeight,
+                heightDp = limited.heightDp,
             )
             pending = 0f
+            if (budget.exceeded || contentTruncated) return 0f
         }
         return 0f
     }
 
-    private fun measureCell(cell: DocxTableCell, widthDp: Float): List<DocxCellBlock> {
+    private fun measureCell(cell: DocxTableCell, widthDp: Float): DocxCellResult {
         val output = mutableListOf<DocxCellBlock>()
+        val paragraphs = cell.blocks.filterIsInstance<DocxBlock.Paragraph>()
+        val texts = paragraphs.map { paragraphText(it) }
+        // 单元格段落与正文共用原子预算，并按 8,000 字分段，避免单行大单元格在 UI 线程全量排版。
+        val plan = DocxCellPlanner.plan(texts.map { it.length }, budget.maxAtoms)
+        var paragraphOrdinal = 0
         var first = true
+        var truncated = plan.truncated
+        var budgetStopped = false
+        val cellCap = (geometry.contentHeightDp - CELL_HORIZONTAL_PADDING * 2f).coerceAtLeast(20f)
+        var usedHeight = 0f
+        fun addBlock(block: DocxCellBlock, height: Float): Boolean {
+            if (!height.isFinite() || usedHeight + height > cellCap) {
+                truncated = true
+                return false
+            }
+            output += block
+            usedHeight += height
+            return true
+        }
         for (block in cell.blocks) {
+            if (budgetStopped) break
             when (block) {
                 is DocxBlock.Paragraph -> {
+                    val full = texts.getOrNull(paragraphOrdinal)
+                    val chunks = plan.chunks[paragraphOrdinal].orEmpty()
                     val spaceBefore = if (first) 0f else geometry.textLengthDp(block.style.spaceBeforeTwips).coerceIn(0f, 12f)
-                    val metrics = paragraphMetrics(block, widthDp)
-                    if (metrics.layout.lineCount > 0) {
-                        output += DocxCellBlock.Text(metrics.annotated, metrics.style, spaceBefore, metrics.layout.size.height / density)
+                    if (full != null) {
+                        chunks.forEachIndexed { chunkIndex, range ->
+                            if (budgetStopped) return@forEachIndexed
+                            if (!budget.takeAtom()) {
+                                truncated = true
+                                budgetStopped = true
+                                return@forEachIndexed
+                            }
+                            if (range.first >= full.length) return@forEachIndexed
+                            val end = (range.last + 1).coerceAtMost(full.length)
+                            if (end <= range.first) return@forEachIndexed
+                            val chunk = full.subSequence(range.first, end)
+                            val metrics = paragraphMetrics(block, widthDp, chunk)
+                            if (metrics.layout.lineCount > 0) {
+                                val height = metrics.layout.size.height / density
+                                if (!addBlock(
+                                        DocxCellBlock.Text(
+                                            metrics.annotated,
+                                            metrics.style,
+                                            if (chunkIndex == 0) spaceBefore else 0f,
+                                            height,
+                                        ),
+                                        height + if (chunkIndex == 0) spaceBefore else 0f,
+                                    )
+                                ) {
+                                    budgetStopped = true
+                                    return@forEachIndexed
+                                }
+                            }
+                            first = false
+                        }
                     }
+                    paragraphOrdinal++
                     for (image in block.inlines.filterIsInstance<DocxInline.Image>()) {
+                        if (!budget.takeAtom()) {
+                            truncated = true
+                            budgetStopped = true
+                            break
+                        }
                         val bitmap = image.image.entryName?.let { bitmaps[it] }
                         val imageSize = if (bitmap != null) {
                             DocxImagePolicy.displaySize(
@@ -664,22 +723,37 @@ private class DocxMeasurer(
                         } else {
                             DocxImageSize(widthDp.coerceAtMost(120f), 40f)
                         }
-                        output += DocxCellBlock.Image(
-                            bitmap, image.image.altText, imageSize.widthDp, imageSize.heightDp,
-                            if (first) 0f else 2f,
-                        )
+                        val gap = if (first) 0f else 2f
+                        if (!addBlock(
+                                DocxCellBlock.Image(
+                                    bitmap, image.image.altText, imageSize.widthDp, imageSize.heightDp, gap,
+                                ),
+                                imageSize.heightDp + gap,
+                            )
+                        ) {
+                            budgetStopped = true
+                            break
+                        }
                         first = false
                     }
-                    first = false
                 }
                 is DocxBlock.Table -> {
-                    output += DocxCellBlock.Placeholder("嵌套表格未内置显示", if (first) 0f else 2f)
+                    if (!budget.takeAtom()) {
+                        truncated = true
+                        budgetStopped = true
+                        break
+                    }
+                    val gap = if (first) 0f else 2f
+                    if (!addBlock(DocxCellBlock.Placeholder("嵌套表格未内置显示", gap), 16f + gap)) {
+                        budgetStopped = true
+                        break
+                    }
                     first = false
                 }
                 DocxBlock.PageBreak -> Unit
             }
         }
-        return output
+        return DocxCellResult(output, usedHeight, truncated)
     }
 
     private fun paragraphMetrics(
@@ -775,6 +849,12 @@ private class DocxMeasurer(
 }
 
 private data class DocxMeasureResult(val atoms: List<DocxRenderAtom>, val truncated: Boolean)
+
+private data class DocxCellResult(
+    val blocks: List<DocxCellBlock>,
+    val heightDp: Float,
+    val truncated: Boolean,
+)
 
 private data class ParagraphMetrics(
     val annotated: AnnotatedString,

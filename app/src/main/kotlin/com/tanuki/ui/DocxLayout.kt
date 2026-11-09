@@ -280,3 +280,49 @@ object DocxTextChunking {
         return output
     }
 }
+
+
+/** 单元格文本分段计划：每个段落按 8,000 字切分，并为每个分段消耗一个渲染原子预算。 */
+data class DocxCellPlan(
+    val chunks: Map<Int, List<IntRange>>,
+    val truncated: Boolean,
+)
+
+object DocxCellPlanner {
+    const val MAX_CHUNK_CHARS = DocxTextChunking.MAX_CHARS
+    const val MAX_CHUNKS = 12_000
+
+    fun plan(paragraphLengths: List<Int>, maxChunks: Int = MAX_CHUNKS): DocxCellPlan {
+        val chunks = linkedMapOf<Int, List<IntRange>>()
+        var count = 0
+        for ((index, length) in paragraphLengths.withIndex()) {
+            val size = length.coerceAtLeast(1)
+            var start = 0
+            val ranges = mutableListOf<IntRange>()
+            while (start < size) {
+                if (count >= maxChunks) return DocxCellPlan(chunks, true)
+                val end = (start + MAX_CHUNK_CHARS - 1).coerceAtMost(size - 1)
+                ranges += start..end
+                start = end + 1
+                count++
+            }
+            chunks[index] = ranges
+        }
+        return DocxCellPlan(chunks, false)
+    }
+}
+
+data class DocxRowHeight(val heightDp: Float, val truncated: Boolean)
+
+/**
+ * 表格行高必须落在可绘制的页面高度内；Compose 的 Constraints 不能表示数十万 dp 的行高，
+ * 超限时截断并交由上层提示，而不是把原始行高传给 Modifier.height。
+ */
+object DocxTableRowPolicy {
+    fun limit(rawHeightDp: Float, contentHeightDp: Float): DocxRowHeight {
+        val cap = contentHeightDp.coerceAtLeast(1f)
+        val safe = if (!rawHeightDp.isFinite() || rawHeightDp <= 0f) cap else rawHeightDp
+        val limited = safe.coerceAtMost(cap)
+        return DocxRowHeight(limited, limited < rawHeightDp || !rawHeightDp.isFinite() || rawHeightDp <= 0f)
+    }
+}
