@@ -20,11 +20,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（3m36s，19 tasks）。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.BackgroundUpdateChecksTest'` → BUILD SUCCESSFUL，21 tests / 0 failures。
-  - `./gradlew :app:testModernDebugUnitTest --stacktrace` → BUILD SUCCESSFUL，153 tests / 0 failures / 0 errors / 0 skipped（27 个结果文件）。
+  - `./gradlew :app:testModernDebugUnitTest --stacktrace` → BUILD SUCCESSFUL，172 tests / 0 failures / 0 errors / 0 skipped（27 个结果文件）。
 - 新增回归：`BackgroundUpdateChecksTest` 21 项，覆盖 30 分钟/24 小时间隔与唯一任务名、12 秒超时范围、APK 版本选择与同/低版本不误报、APK/DSH 状态不可串读、镜像成功不访问官方、镜像损坏/网络失败回退、双源失败保留最近结果并记录错误、成功清除错误、SemVer 预发布比较、同版本只通知一次、最小查询间隔、CHECKING 不持久化、损坏状态回退、手动旧结果不覆盖较新后台快照（APK/DSH 两条链路）。
 - P2 复审修复 1：手动检查同步从 Activity `LaunchedEffect` 移到检查完成事件（`ApplicationUpdateManager`/`UpdateManager` 回调），并携带检查开始时间；`applyManualApk`/`applyManualDsh` 拒绝早于后台 `lastCheckedAt` 的旧结果。新增“手动旧结果 → 后台新结果 → Activity 重建”APK/DSH 两条链路回归。
 - P2 复审修复 2：APK 的 `evaluateApk`、`decodeApk`、`apkFailure` 全部只按 `versionCode` 判定，允许同 `versionName`、更高 code 的覆盖更新；新增成功 round-trip 与失败保留回归。
 - P2 复审修复 3：`ApkUpdateCheckRepository` 初始化时用当前 `BuildConfig.VERSION_NAME/VERSION_CODE` 重算 `available`，保留远端 latest 与 `notifiedVersion`；新增“旧快照 → 同包覆盖升级 → 离线启动不误报”回归。
+- Rebase：2026-11-09 rebase 到 `origin/main=9b32051`（PR #18 DSH 已安装版本管理），解决 `AGENT-STATE`/`CURRENT.json` 冲突；rebase 后 `compileModernDebugKotlin` 与完整 JVM 复跑通过，172 tests / 0 failures（既有 151 + 新增 21）。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实 GitHub/npmmirror/npm 请求、WorkManager 实际触发/重启恢复、Android 13 通知权限与展示、深色/大字体 UI。编译与 JVM 不能替代设备与真实网络验收。
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
