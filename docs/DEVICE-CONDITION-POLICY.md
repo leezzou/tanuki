@@ -70,7 +70,7 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 - 总开关关闭后立即回到 `NORMAL` 额度，并补跑实际登记过的后台检查；不会触发任何 DSH 任务取消。
 - 低电阈值提供 10%/15%/20%/25%/30% 五档，默认 20%；退出阈值固定为进入阈值 +5，减少阈值附近抖动。
 - 代码级阈值集中在 `DeviceConditionConfig`：热等级、低电进入/退出、热/内存迟滞时间、下载并发、日志行数、预览尺寸/像素。构造时会校验单调性和取值范围。
-- 设置持久化文件：`files/state/device-condition-settings.json`；运行状态：`files/state/device-condition.json`。设置修改也通过后台协程写入。
+- 设置持久化文件：`files/state/device-condition-settings.json`；运行状态：`files/state/device-condition.json`。设置修改通过单一后台写入器串行处理：写锁内读取最新 `config` 后原子写入，避免连续选择阈值时旧快照后写覆盖；主线程不等待磁盘。
 
 ## 6. 进程重启恢复
 
@@ -90,6 +90,6 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 
 ## 8. 验证与未验证
 
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 24 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 335 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 24 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 336 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
 - 未验证：真机/模拟器真实温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 预览降级实际像素、assemble/仪器测试。
 - 真机温控需要独立 QA 会话在无真实任务的设备上加热/充电/低电注入后验证；本轮 JVM 结果不能替代设备验收。

@@ -64,6 +64,12 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     /** restore/config 完成前，Worker 与设置入口都必须等待同一屏障。 */
     private val initialization = DeviceConditionInitialization { initializeState() }
 
+    /** 设置保存串行化：锁内读取最新 config，再原子写入，避免旧值后写覆盖。 */
+    private val configWriter = DeviceConditionConfigWriter(
+        readLatest = { synchronized(lock) { config } },
+        write = ::writeConfigSnapshot,
+    )
+
     private var started = false
     private var receiver: BroadcastReceiver? = null
     private var thermalListener: Any? = null
@@ -125,7 +131,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         startIfNeeded()
         scope.launch {
             initialization.awaitReady()
-            persistConfigNow()
+            configWriter.save()
             refreshNow(null)
         }
     }
@@ -143,7 +149,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         startIfNeeded()
         scope.launch {
             initialization.awaitReady()
-            persistConfigNow()
+            configWriter.save()
             refreshNow(null)
         }
     }
@@ -303,8 +309,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         )
     }
 
-    private fun persistConfigNow() {
-        val snapshot = synchronized(lock) { config }
+    private fun writeConfigSnapshot(snapshot: DeviceConditionConfig) {
         val json = JSONObject()
             .put("schema", SCHEMA)
             .put("enabled", snapshot.enabled)
