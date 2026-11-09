@@ -14,6 +14,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
+
+- 范围：新增 `XlsxWorkbookParser` 只读 OOXML 解析（workbook/rels/sharedStrings/styles/sheet）、`XlsxValueFormatter` 显示格式、Compose 原生表格 `XlsxTablePreview`、`FileKind.XLSX` 分类/入口与 `WorkspaceFileViewer` 接线。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/xlsx-preview/xlsx-native-preview`，未引入第三方 XLSX 库，不依赖 LibreOffice/外部 App。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Xlsx*' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL，30 tests / 0 failures。
+  - `./gradlew :app:testModernDebugUnitTest --console=plain` → BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped。
+  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL。
+- 新增回归（28 项）：`XlsxWorkbookParserTest` 18 项（多 sheet 顺序；共享/内联/布尔/错误/数字/公式缓存值；字体/填充/边框/对齐；列宽/行高/合并/冻结；行列与单元格预算截断；非 zip、缺 workbook、坏 XML 中文错误；条目数/总解压/单条目上限；谎报解压大小的 zip bomb 实际读取上限；共享字符串数量与总文本预算；路径穿越与外部链接拒绝；包内绝对路径；DOCTYPE/深层 XML/未定义实体；1904 日期与默认样式索引；空表；多表合并区域共享单元格预算；共享/内联/公式缓存字符串中的标准实体与数字引用）；`XlsxValueFormatterTest` 4 项（通用数字、千分位/小数/百分比、1900 闰年与 1904 日期时间、布尔）；`XlsxPreviewPolicyTest` 5 项（列字母、缩放 clamp/步进、列宽行高边界、按视口/缩放收缩冻结区、单元格字号换算）；`WorkspaceFileKindTest` 增补 `.xlsx` 与 `.xls`/`.xlsm` 边界。
+- 保真边界：支持多工作表、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、水平/垂直对齐、数字/百分比/日期/时间/布尔/错误值与公式缓存值、1904 日期系统。明确不支持图表、宏、透视表、外部链接、图片、复杂条件格式、隐藏行列、主题色、富文本多字体和公式重算；长文本单行省略；跨冻结列的合并按边界裁剪，跨行边框为近似。不宣称完整 Excel 兼容。
+- 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB（并按实际解压字节复核）、sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096，合并生成的起点/covered 占位也计入单表/全簿单元格预算；标准实体/数字引用保留；冻结区按实际视口与缩放收缩，无法容纳的冻结行列回到滚动体；单元格字号按样式磅值与缩放显示；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接。
+- 未执行：lint、assemble、Android 仪器/真实设备、真实 Excel/WPS 文件、真机大表滚动/冻结/缩放与深色主题、性能与内存实测。编译与 JVM 不能替代设备验收。
+
 ## 后台更新检查验证（2026-11-09，android_agent-24，非设备）
 
 - 范围：Tanuki APK 每 30 分钟检查 GitHub `app-update.json`；DSH 每 24 小时检查 npmmirror（失败回退官方 npm）；两份状态独立持久化；同版本通知去重；前台徽标与手动检查保留。未改 DSH 下载/安装逻辑。
