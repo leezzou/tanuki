@@ -94,7 +94,8 @@ data class TanukiUiModel(
     val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
     val chatNotifications: com.tanuki.notify.ChatNotificationStatus = com.tanuki.notify.ChatNotificationStatus(),
     val fileFullscreen: Boolean = false,
-    val deviceCondition: DeviceConditionState = DeviceConditionState()
+    val deviceCondition: DeviceConditionState = DeviceConditionState(),
+    val earlyStart: Boolean = true
 )
 
 data class TanukiUiCallbacks(
@@ -106,6 +107,7 @@ data class TanukiUiCallbacks(
     val measureStorage: () -> Unit,
     val toggleLegacy: (Boolean) -> Unit,
     val toggleBlob: (Boolean) -> Unit,
+    val toggleEarlyStart: (Boolean) -> Unit = {},
     val showNotices: () -> Unit,
     val updateWebView: () -> Unit,
     val webViewSettings: () -> Unit,
@@ -647,11 +649,14 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("更新通知权限", "后台发现新版本时提示；手动检查时申请", onClick = c.notifications)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ToggleRow("启动应用时自动运行 DSH", model.earlyStart, c.toggleEarlyStart)
+        Caption("只自动运行上次正常停止的实例；启动中、运行中、安装中或上次任务中断时不会自动启动，仍可手动运行。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         DeviceConditionSettings(model.deviceCondition, c)
         TanukiDetails("后台运行说明") {
-            Caption("服务由你主动启动；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
+            Caption("关闭自动运行后，服务只在你主动点击“启动 DSH”时运行；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
             Caption("部分厂商系统还需要在系统的通知、电池或自启动设置中允许 Tanuki，否则后台提醒可能被延迟或拦截。")
         }
     }

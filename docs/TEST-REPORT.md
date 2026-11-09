@@ -5,12 +5,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
 - 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
-- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=5fd1ab4` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=b9eeb75` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（5m29s，19 tasks）。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 23 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
 - 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查按具体 Worker 登记与恢复、无 Worker 跳过时恢复不发请求、只恢复实际跳过的一项、登记幂等、待办确认入队后才清除、入队失败保留重试、部分确认只清除已确认项、主线程刷新不内联写盘、突发刷新合并、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
-- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（2m43s，35 tasks executed）；46 个结果文件，311 tests / 0 failures / 0 errors / 0 skipped（合并 main 的聊天通知/XLSX/安全模式回归后 + 新增 23 策略 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（2m42s，35 tasks executed）；48 个结果文件，334 tests / 0 failures / 0 errors / 0 skipped（合并 main 的冷启动/聊天通知/XLSX/安全模式回归后 + 新增 23 策略 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
 - 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、assemble/仪器测试。编译、JVM 与 lint 不能替代设备验收。
 
 ## 0.1.8 发布状态（2026-11-06，只读复核）
@@ -25,6 +25,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## DSH 冷启动优化验证（2026-11-09，android_agent-27，非设备）
+
+- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
+- 实际执行：
+  - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
+  - 合并 `origin/main=c2f1b44` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
+  - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
+  - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+- 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
+- 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
 ## DSH 运行失败分类与安全模式验证（2026-11-09，android_agent-28，非设备）
 
 - 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`（rebase 后 `dc0494b`）；范围：新增纯 Kotlin `RuntimeFailurePolicy`，覆盖 `LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类、连续两次 startup/early 进入安全模式、安全模式 rescue 启动参数、probation 2 分钟窗口、自动重启上限/退避、noSpace/killed 不自动重启，以及 `state/failure-state.json` 跨进程恢复。RuntimeManager/RuntimeService 接入安全模式与前端入口。

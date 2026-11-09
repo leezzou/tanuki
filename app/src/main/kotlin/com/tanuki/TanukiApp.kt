@@ -73,6 +73,8 @@ class TanukiApp : Application() {
             com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this, checks)
         }
         deviceConditions.start()
+        // 独立更新/恢复任务有自己的 job 与状态；提前启动必须把它们计入忙碌判定。
+        runtime.registerBusySignal { updates.hasActiveOperation || appUpdates.hasActiveOperation }
         // 先在系统设置中建立渠道，用户才能在权限/渠道被关闭时找到入口。
         chatNotifications.ensureChannel()
         // 安装、切换或恢复 DSH 后只重算本地快照，不联网，也不覆盖已知远端 latest。
