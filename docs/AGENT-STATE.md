@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[PDF 原生阅读体验打磨](handoffs/20261109-1819-pdf-native-reading.md)（android_agent-35，独立 worktree，基线 `2f3fac9`，PR #24 待 Review）。并行记录：[远程主机直连 SSH 切片](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34，基线 `2f3fac9`，PR [#29](https://github.com/leezzou/tanuki/pull/29) 待审）、[原生界面与官方 DSH 界面切换](handoffs/20261109-1829-native-ui-switch.md)（PR #26）、[DSH 聊天通知](handoffs/20261109-1742-dsh-chat-notifications.md)（PR #22）、[DSH 冷启动优化](handoffs/20261109-1700-dsh-cold-start.md)（PR #27 已合并 `b9eeb75`）、[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（PR #25 已合并 `5fd1ab4`）、[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（PR #23 已合并 `f5debf5`）。保留记录：DSH 已安装版本管理、后台更新检查、DSH 安装提速（PR #20 已合并 `2f3fac9`）、视频全屏、F1 文件预览、研发治理门禁与 Android QA 核查。本轮 android_agent-35 完成 PDF 原生连续阅读；android_agent-34 仅将远程主机作为并行记录；均不改 AO 配置、既有安全/暂停项或 0.1.8 附件。
+当前交接：[设备温控与省电策略](handoffs/20261109-1802-device-condition-policy.md)（android_agent-30，独立 `/tmp` clone，PR [#21](https://github.com/leezzou/tanuki/pull/21) 待独立 Review）。并行记录：[远程主机直连 SSH 切片](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34，基线 `2f3fac9`，PR [#29](https://github.com/leezzou/tanuki/pull/29) 待审）、[PDF 原生阅读](handoffs/20261109-1819-pdf-native-reading.md)（PR #24 已合并 `0ba11da`）、[原生界面切换](handoffs/20261109-1829-native-ui-switch.md)（PR #26 已合并 `d9b4aa2`）、[DSH 聊天通知](handoffs/20261109-1742-dsh-chat-notifications.md)（PR #22）、[DSH 冷启动优化](handoffs/20261109-1700-dsh-cold-start.md)（PR #27 已合并 `b9eeb75`）、[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（PR #25 已合并 `5fd1ab4`）、[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（PR #23 已合并 `f5debf5`）。保留记录：DSH 已安装版本管理、后台更新检查、DSH 安装提速、视频全屏、F1 文件预览、研发治理门禁与 Android QA 核查。本轮 android_agent-30 实现设备温控/省电策略；android_agent-34 仅将远程主机作为并行记录；均不改 AO 配置、既有安全/暂停项或 0.1.8 附件。
 - `artifacts/releases/0.1.8/` 六附件齐全。W1 只读复核 APK：`com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
@@ -14,7 +14,7 @@
 - 安全：密码/私钥/口令/token 只经 AndroidKeyStore AES-256-GCM 加密后写入应用私有 SharedPreferences；Keystore 失败不降级明文；`toString()`/错误信息不含凭据；远程 token 只拼到 loopback 启动 URL 经隧道发送，不写日志、不导出。
 - UI：设置 → 远程主机支持测试连接、保存并连接、断开/清除、首次指纹确认；测试连接的确认对话框显示实际 SHA256 指纹；DSH 页显示远程主机/隧道/指纹，失败显示中文错误并回退。远程连接期间本地运行时保持原状；中继/WebRTC、远程 DSH 启停、多主机、自动重连未实现并标注后续。
 - Review 修复：Keystore 加密由 provider 生成 IV；管理页 Cookie 按逻辑主机隔离（本地/各远程分别保存，切换前清空并恢复，失败时页面置 RENDER_ERROR）；认证校验与 token 重试只绑定活动端点；设备测试夹具移除 origin/authenticatedUrl 反射。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`assembleModernDebug -x buildNativeRuntime` BUILD SUCCESSFUL（D8 正常打包 JSch）；远程分支完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped（新增 `RemoteHostTest` 24 项）；合入 `main=5fd1ab4`（含安全模式与 XLSX）后完整 JVM 289/0/0/0；合入冷启动/PDF/原生界面后完整 JVM 424/0/0/0；`lintModernDebug` 0 errors / 95 warnings / 1 hint；依赖清单 91 构件并刷新 JSch 许可。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`assembleModernDebug -x buildNativeRuntime` BUILD SUCCESSFUL（D8 正常打包 JSch）；远程分支完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped（新增 `RemoteHostTest` 24 项）；合入 `main=5fd1ab4`（含安全模式与 XLSX）后完整 JVM 289/0/0/0；合入冷启动/PDF/原生界面/温控后完整 JVM 455/0/0/0；`lintModernDebug` 0 errors / 95 warnings / 1 hint；依赖清单 91 构件并刷新 JSch 许可。
 - 待验证：真实 Android 设备到真实 sshd、真实 Keystore/远程 DSH token、弱网/断线、设备 UI、Ed25519、Android 仪器/真机；未安装设备、未更新 0.1.8 附件。
 
 ### 后台更新检查（android_agent-24，PR #19 待审）
@@ -25,7 +25,7 @@
 - 状态分离：`apk-update-check.json` 与 `dsh-update-check.json` 各自保存 `lastCheckedAt/latest/available/lastError/notifiedVersion`；不复用 `AppUpdateState` 或 `RuntimeManager` 的 `UpdateState`。
 - 前台：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动检查保留，仅在检查完成事件同步独立后台快照（不重复联网），开始时间早于后台结果的旧结果不覆盖较新快照；APK 判定与恢复统一按 `versionCode`；DSH 快照在仓库恢复及实际安装版本变化时只按当前安装身份重算 `installedVersion/available`，保留远端 latest 与通知去重。后台：`updates` 通知渠道按版本去重；Android 13+ 检查 `POST_NOTIFICATIONS`，手动检查入口顺带申请；失败静默记录。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped；新增 `BackgroundUpdateChecksTest` 23 项。
-- 待验证：PDF 原生阅读 PR #24 的独立 Review、真机大/加密/损坏 PDF 与手势/内存/视口裁剪验收；真实 WorkManager 调度/重启恢复、通知权限与展示、真实 GitHub/npmmirror/npm 请求、设备 UI；lint/assemble/仪器未跑。独立 Codex High Review、合并与发布未授权/未完成。
+- 待验证：设备温控/省电策略的真机温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素；PDF 原生阅读 PR #24 的独立 Review、真机大/加密/损坏 PDF 与手势/内存/视口裁剪验收；真实 WorkManager 调度/重启恢复、通知权限与展示、真实 GitHub/npmmirror/npm 请求、设备 UI；lint/assemble/仪器未跑。独立 Codex High Review、合并与发布未授权/未完成。
 ### DSH 安装提速与国内镜像（android_agent-23，PR #20 待审）
 
 - 分支 `ao/dsh-install-2/install-resilience`，已 rebase 到 `origin/main=6136451`（含 #19 更新检查）；保留 #20 的下载/镜像/并发改动与 #19 的更新检查接线，未重做 P1。
@@ -55,6 +55,16 @@
 - 验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`（223 tests / 0 failures / 0 errors / 0 skipped）与 `lintModernDebug` BUILD SUCCESSFUL；新增 `ChatNotificationPolicyTest` 10 项、`ChatNotificationRoutingTest` 4 项、`DshChatProtocolTest` 4 项；`node scripts/test-chat-session-open.mjs`（收起侧栏 + 非空搜索 + 其他会话）与注入脚本 5 类合成帧模拟通过。
 - 已验证：PR #22 的 Host checks 与 Android build+JVM+lint 均 pass；Review 修复提交 `21cc811` 与搜索过滤修复提交 `462d266` 再次全绿（首轮既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败，重跑通过，未改该测试），全部 Review thread 已 resolve。
 - 待验证：真实设备/模拟器的 Android 13 权限弹窗、通知展示/group/summary、点击切会话、后台/息屏送达、ROM 通知/电池/自启动限制、真实 DSH 页面事件；独立 Review、合并与发布未授权/未完成。
+
+### 设备温控与省电策略（android_agent-30，PR #21 待审）
+
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp` 独立 clone 验证/提交；未使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，head 以 PR 页面为准；未合并、未触发 Review。
+- 新增纯策略 `DeviceConditionPolicy` 与 Android 采样/持久化 `DeviceConditionMonitor`：状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`，来源为 `PowerManager` thermal status、电池电量/充电和系统低内存；热状态按进入阈值升级、按更低退出边界并持续 30 秒降级，低电用进入/退出阈值（默认 20%/25%）迟滞，低内存有 60 秒解除迟滞。
+- 降级：后台更新检查在 HOT/CRITICAL/LOW_BATTERY 由被阻塞的具体 Worker 登记 APK/DSH 待办，恢复后只补跑实际登记过的检查，WorkManager 确认入队且待办代次未变化后才清除（无 Worker 跳过时不发请求，失败保留重试，确认期间重新登记的新待办不被误删，代次计数确认后仍单调递增不复用）；DSH 依赖下载并发按 16/8/4/2/4 降档，自适应池只让多出的 worker 在完成当前归档后退休；日志展示 80/60/40/20/40 行；PDF 预览长边 2048/1600/1280/1024/1280、像素 4M/2.5M/1.6M/1M/1.6M。DSH 任务和前台交互始终 `RUN`，策略不调用取消。
+- 兼容：保留原两个唯一周期任务、联网约束、前台服务与唤醒锁；设置入口 `设置 · 运行与后台` 提供总开关与 10/15/20/25/30% 低电阈值；主线程/电池/热回调只向后台合并队列投递刷新请求，采样与写盘在后台串行完成，设置通过单一后台写入器串行保存；冷启动 Worker/设置通过一次性屏障等待 restore 完成，避免默认状态覆盖磁盘待办；状态与实际被跳过的检查写 `files/state/device-condition.json`，设置写 `device-condition-settings.json`，进程重启先恢复再校正。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项全过；完整 JVM 结果见 [测试报告](TEST-REPORT.md)。
+- 待验证：真机/模拟器温控回调、电池广播、低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级实际像素、assemble/仪器；独立 Review、合并与发布未授权/未完成。
+- 状态表、工作矩阵与接入细节见 [设备温控与省电策略](DEVICE-CONDITION-POLICY.md)。
 
 ## Phase 2 交付状态
 
@@ -147,7 +157,8 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面后完整 JVM 424/0/0/0（57 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
+- 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控后完整 JVM 455/0/0/0（61 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
+- 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-33 新跑，rebase 到 `0ba11da`）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；393 tests / 0 failures / 0 errors / 0 skipped；新增 `DshUiSwitchTest` 10 项、`DshNativeApiTest` 12 项、`DshNativeControllerTest` 6 项。
 - 已验证（本轮 android_agent-35 新跑）：rebase 到 `origin/main=b9eeb75` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 365 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 通过（新增 59 项 PDF 缓存/预加载/内存上限/跳页/视口/缩放可达性/预算联合/驻留预留策略测试）。
 - 已验证（合并后本轮新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；306 tests / 0 failures / 0 errors / 0 skipped（含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项，以及 main 的安全模式/聊天通知/XLSX 回归）；`node scripts/test-dsh-path-cache.mjs` 10/10 场景 PASS。未跑 assemble/设备/真实 PRoot DSH 启动。
@@ -168,20 +179,22 @@
 - 待验证：远程主机 PR #29 的真实 sshd/Keystore/token、Cookie 两主机隔离设备路径与 UI；DSH 聊天通知的 Android 13 权限/渠道/group/summary、点击切会话、后台/息屏与 MIUI/其他 ROM、真实 DSH WebSocket 事件；XLSX 真机大表/手势/深色；安全模式真机 rescue/崩溃/低内存/磁盘满；DSH 安装 PR #20、后台更新、视频全屏、F1、设备门禁、0.1.8 与真机/MIUI 仍按原记录待验证。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
+
 ## 环境与阻塞
 
+- 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：远程主机 `ao/remote-host/remote-ssh`（基线 `2f3fac9`，独立 `/tmp` clone 提交/推送，PR #29）；DSH 聊天通知 `ao/dsh-chat-notify/root`（PR #22）；冷启动 `ao/cold-start/root` 已合并 `b9eeb75`；安全模式/XLSX 已合入 main；DSH 安装 PR #20 已合并；视频/F1 已合并。以上均在独立 `/tmp` clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
-- 无当前产品修复阻塞；PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
+- 无当前产品修复阻塞；PR #21、PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
-2. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26)：rebase 到 `0ba11da` 后等待最终 CI 与独立 Pi Review；真机/PRoot DSH 验收另行授权。
-3. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
-4. 聊天通知设备 QA：Android 13 权限/渠道/group/summary、点击切会话、后台/息屏、MIUI/其他 ROM 与真实 DSH 事件。
-5. 安全模式 `5fd1ab4`、XLSX `f5debf5` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放 QA 另行授权。
+1. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
+2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
+3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
+4. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
+5. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
 6. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
 7. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
 8. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。

@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
     private val appUpdates get() = (application as TanukiApp).appUpdates
     private val apkUpdateChecks get() = (application as TanukiApp).apkUpdateChecks
     private val dshUpdateChecks get() = (application as TanukiApp).dshUpdateChecks
+    private val deviceConditions get() = (application as TanukiApp).deviceConditions
     private lateinit var browser: DshWebView
     private val dshWindowMode by lazy { com.tanuki.ui.DshWindowMode(window) }
     private var agentBrowser: AgentBrowserController? = null
@@ -290,6 +291,7 @@ class MainActivity : ComponentActivity() {
                 val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
                 val dshUpdateCheck by dshUpdateChecks.state.collectAsState()
                 val remoteHost by manager.remoteHost.ui.collectAsState()
+                val deviceCondition by deviceConditions.state.collectAsState()
                 val chatStatus by (application as TanukiApp).chatNotifications.status.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
                 val ubuntuSources=remember(components.selectedUbuntuVersion) { manager.components.sources(RuntimeComponent.UBUNTU) }
@@ -396,7 +398,8 @@ class MainActivity : ComponentActivity() {
                         remotePendingHost=remoteHost.pendingHost,
                         cookieReady=manager.cookieReady(),
                         chatNotifications=chatStatus,
-                        nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback),
+                        nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,
+                        deviceCondition=deviceCondition),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -487,6 +490,8 @@ class MainActivity : ComponentActivity() {
                         cancelRemoteHostKey = manager.remoteHost::cancelHostKey,
                         disconnectRemoteHost = manager.remoteHost::disconnect,
                         forgetRemoteHost = manager.remoteHost::forget,
+                        setDeviceConditionEnabled = deviceConditions::setEnabled,
+                        setLowBatteryThreshold = deviceConditions::setLowBatteryThreshold,
                         dshVisible = ::setDshTabVisible,
                         chatNotifications = { chatNotifyDialog = true },
                         toggleChatNotifications = { enabled ->
@@ -525,6 +530,8 @@ class MainActivity : ComponentActivity() {
                             phoneWritingAvailable = phoneStorageGranted && s.service == ServiceState.RUNNING,
                             onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
+                            previewMaxDimension = deviceCondition.previewMaxDimension,
+                            previewMaxPixels = deviceCondition.previewMaxPixels,
                             onExportFile = { files, path, name ->
                                 if (pendingFileExport == null) { pendingFileExport = files to path; exportSingleFile.launch(name) }
                             })

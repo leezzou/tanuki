@@ -1,5 +1,6 @@
 package com.tanuki.runtime
 
+import com.tanuki.TanukiApp
 import com.tanuki.download.Downloader
 import com.tanuki.download.DownloadHttpException
 import com.tanuki.download.DownloadRetryPolicy
@@ -241,7 +242,11 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
 
     private suspend fun download(entries: List<Archive>, sources: List<NpmArchiveSource>) = coroutineScope {
         val progress = NpmDownloadProgress(entries.size, MAX_BYTES)
-        val policy = NpmConcurrencyPolicy()
+        // 温控/省电上限只影响新领取的归档；已开始的归档继续完成，池子按目标退休多余 worker。
+        val app = manager.context.applicationContext as? TanukiApp
+        val policy = NpmConcurrencyPolicy(capProvider = {
+            app?.deviceConditions?.state?.value?.workerCap ?: 16
+        })
         val hosts = NpmHostLimiter()
         val usedSources = arrayOfNulls<String>(entries.size)
         val failedSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
