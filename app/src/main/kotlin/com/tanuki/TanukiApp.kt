@@ -26,6 +26,10 @@ class TanukiApp : Application() {
     val apkUpdateChecks by lazy { com.tanuki.update.ApkUpdateCheckRepository(this, runtime.paths) }
     /** DSH 引擎的后台检查状态，独立于 UpdateManager 的版本列表与安装事务。 */
     val dshUpdateChecks by lazy { com.tanuki.update.DshUpdateCheckRepository(runtime.paths) }
+    /** DSH 会话通知：页面事件只做最小化分类，正文不含会话内容。 */
+    val chatNotifications by lazy {
+        com.tanuki.notify.ChatNotificationCenter(this) { runtime.state.value.dsh }
+    }
     var browserController: com.tanuki.browser.AgentBrowserController? = null
         private set
     fun acquireBrowser(): com.tanuki.browser.AgentBrowserController {
@@ -69,6 +73,8 @@ class TanukiApp : Application() {
             com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this, checks)
         }
         deviceConditions.start()
+        // 先在系统设置中建立渠道，用户才能在权限/渠道被关闭时找到入口。
+        chatNotifications.ensureChannel()
         // 安装、切换或恢复 DSH 后只重算本地快照，不联网，也不覆盖已知远端 latest。
         runtime.scope.launch {
             runtime.state.map { it.dsh }.distinctUntilChanged().collect { version ->

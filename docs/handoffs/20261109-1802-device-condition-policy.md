@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：上述策略与接入点；中文注释；开关/阈值；状态持久化。
-- 已验证：合并 main 后完整 JVM+lint 通过；`DeviceConditionPolicyTest` 22 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 292 tests / 0 failures / 0 errors / 0 skipped。
+- 已验证：合并 main 后完整 JVM+lint 通过；`DeviceConditionPolicyTest` 22 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 310 tests / 0 failures / 0 errors / 0 skipped。
 - 待验证：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、设置页 UI、PDF 降级实际像素、独立 Review。
 - 当前分支：`ao/thermal-policy/device-condition-policy`，已合并 `origin/main=5fd1ab4` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，未合并、未触发 Review。
 - 没有运行中的设备安装或真实 DSH 任务；本轮未启动/停止模拟器，未安装 APK。
@@ -61,7 +61,7 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` | JDK17/SDK36，`/tmp/tanuki-thermal-30`，BUILD SUCCESSFUL（5m29s，19 tasks） | 编译通过；只有既有弃用警告 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | BUILD SUCCESSFUL；22/2/2/7/2 tests，0 failures/errors/skipped | 目标回归通过；不是完整套件 |
-| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` | BUILD SUCCESSFUL（3m14s，35 tasks）；292 tests / 0 failures / 0 errors / 0 skipped；lint 0 Error | 合并 main 后完整 JVM+lint；不代表设备测试 |
+| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` | BUILD SUCCESSFUL（3m19s，35 tasks）；310 tests / 0 failures / 0 errors / 0 skipped；lint 0 Error | 合并 main 后完整 JVM+lint；不代表设备测试 |
 | `./gradlew :app:lintModernDebug` | 与上一行组合执行；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本记录中的编译与目标回归均为本轮在 `/tmp` clone 新跑；前轮 205 tests 等历史数字未复用。
@@ -69,7 +69,7 @@
 
 ### 最终结果
 
-- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（3m14s，35 tasks executed）；43 个结果文件，292 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（3m19s，35 tasks executed）；46 个结果文件，310 tests / 0 failures / 0 errors / 0 skipped。
 
 ## 未完成与暂停项
 

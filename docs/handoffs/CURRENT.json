@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "record": "docs/handoffs/20261109-1802-device-condition-policy.md",
-  "recordSha256": "6fdd8d72cda67a78375657cef843995fdba397f4ae5b50e0ecdf46ca49019021",
-  "sourceFingerprint": "9c308d9de86a33c413202bb1e7a0f6896a2b77b062a79941fdf2ff271677c05a",
-  "fileCount": 501
+  "recordSha256": "8162ecdbd08ecbbcd9f99ced1858fd48241afea5fb22c0b7dde1189a13ae676d",
+  "sourceFingerprint": "a40d6c4c913cd0eed34dc2b15db9a3b96502597ce2d36133dcd6e3f2e0d97645",
+  "fileCount": 514
 }
