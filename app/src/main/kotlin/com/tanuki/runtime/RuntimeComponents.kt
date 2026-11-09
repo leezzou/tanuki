@@ -461,9 +461,19 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         DshSwitch.requireSwitchable(target,current,DshVersions.installedVersions(paths.engines),
             serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
             busy=false,liveChild=manager.hasLiveChild)
-        manager.phase("保存当前版本的数据快照",EnvironmentState.INSTALLING)
+        check(installedUbuntuVersion()!=null && installedNodeVersion()!=null &&
+            (File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile)) {
+            "请先安装 Ubuntu 和 Node.js，再切换 DSH 版本"
+        }
+        // 目标可能是在较新 Node 下安装的备用程序；当前 Node 降级后必须在这里拒绝，
+        // 否则切换成功后 start 才失败，而旧版回切又会被数据兼容规则拦住。
+        manager.phase("检查 DSH $target 与当前 Node.js 的兼容性",EnvironmentState.VERIFYING)
         val snapshot=DshSwitch.apply(meta,target,
-            snapshot={com.tanuki.storage.DataSnapshots.create(paths).name},
+            compatible={checkDshNodeCompatibility(target)},
+            snapshot={
+                manager.phase("保存当前版本的数据快照",EnvironmentState.INSTALLING)
+                com.tanuki.storage.DataSnapshots.create(paths).name
+            },
             write={paths.atomic("installed.json",it.toString())})
         refresh()
         manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",download=null) }

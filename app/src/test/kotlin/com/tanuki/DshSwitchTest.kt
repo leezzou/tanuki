@@ -81,17 +81,43 @@ class DshSwitchTest {
         val snapshot = DshSwitch.apply(
             previous = previous,
             target = "1.3.0",
+            compatible = { order += "compatible" },
             snapshot = { order += "snapshot"; "snapshot-123" },
             write = { order += "write"; written = JSONObject(it.toString()) }
         )
 
-        assertEquals(listOf("snapshot", "write"), order)
+        assertEquals(listOf("compatible", "snapshot", "write"), order)
         assertEquals("snapshot-123", snapshot)
         val output = requireNotNull(written)
         assertEquals("1.3.0", output.getString("dsh"))
         assertEquals("24.04", output.getString("ubuntu"))
         assertEquals("22.0.0", output.getString("node"))
         assertTrue(output.getBoolean("ready"))
+        assertEquals("1.2.0", previous.getString("dsh"))
+    }
+
+    @Test
+    fun compatibilityFailureLeavesMetadataAndSnapshotUntouched() = runBlocking {
+        val previous = JSONObject().put("ready", true).put("node", "20.0.0").put("dsh", "1.2.0")
+        var snapshots = 0
+        var writes = 0
+        var failure: Throwable? = null
+
+        try {
+            DshSwitch.apply(
+                previous = previous,
+                target = "1.3.0",
+                compatible = { throw IllegalStateException("DSH 1.3.0 要求 Node.js >=22") },
+                snapshot = { snapshots++; "snapshot-123" },
+                write = { writes++ }
+            )
+        } catch (error: Throwable) {
+            failure = error
+        }
+
+        assertEquals("DSH 1.3.0 要求 Node.js >=22", failure?.message)
+        assertEquals("兼容性失败时不能创建快照", 0, snapshots)
+        assertEquals("兼容性失败时不能改元数据", 0, writes)
         assertEquals("1.2.0", previous.getString("dsh"))
     }
 

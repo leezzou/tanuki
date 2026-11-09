@@ -178,15 +178,17 @@ object DshSwitch {
     }
 
     /**
-     * 先创建当前数据快照，再只改写 installed.json 的 dsh 字段。
-     * 快照失败时不动元数据；写入失败时把 previous 写回，旧程序目录始终保留。
+     * 先执行目标与当前环境的兼容性检查，再创建当前数据快照，最后只改写 installed.json 的 dsh 字段。
+     * 兼容性或快照失败时不动元数据；写入失败时把 previous 写回，旧程序目录始终保留。
      */
     suspend fun apply(
         previous: JSONObject,
         target: String,
+        compatible: suspend () -> Unit = {},
         snapshot: suspend () -> String,
         write: (JSONObject) -> Unit
     ): String {
+        compatible()
         val snapshotName = snapshot()
         val updated = JSONObject(previous.toString()).put("dsh", target)
         try {
