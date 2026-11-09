@@ -304,6 +304,9 @@ class RemoteHostController(
                 "远程主机密钥校验失败，已拒绝连接"
             text.contains("forward") ->
                 "SSH 隧道端口转发失败；请确认远程 DSH 端口正确"
+            text.contains("algorithm negotiation") || text.contains("ed25519") ||
+                text.contains("eddsa") || text.contains("unsupported") ->
+                "SSH 算法协商失败；当前切片仅支持 RSA/ECDSA 主机密钥与私钥，Ed25519 待后续"
             error is IOException ->
                 "SSH 连接失败；请检查网络后重试"
             else ->

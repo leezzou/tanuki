@@ -53,13 +53,14 @@ class JschSshTransport(private val timeoutMs: Int = 15_000) : SshTransport {
         try {
             // 未确认主机时 StrictHostKeyChecking=yes 会在认证前拒绝连接。
             session.connect(timeoutMs)
-        } catch (_: JSchException) {
-            // 预期失败；只要拿到了主机公钥就交给用户确认。
+        } catch (error: Throwable) {
+            // 预期失败；只要拿到了主机公钥就交给用户确认，不在这里发送凭据。
+            if (error is VirtualMachineError) throw error
         } finally {
             runCatching { session.disconnect() }
         }
         val fingerprint = observed.get()
-            ?: throw RemoteHostFailure("未获得远程主机密钥；请确认远程 SSH 服务可用")
+            ?: throw RemoteHostFailure("无法完成 SSH 主机密钥交换；请确认主机可达，当前切片支持 RSA/ECDSA 主机密钥")
         HostKeyProbe(fingerprint)
     }
 
