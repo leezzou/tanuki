@@ -56,6 +56,8 @@ import com.tanuki.storage.WorkspaceStorageState
 import com.tanuki.update.ApkUpdateCheckState
 import com.tanuki.update.DshUpdateCheckState
 import com.tanuki.update.Release
+import com.tanuki.web.DshUiMode
+import com.tanuki.web.DshUiSwitchPolicy
 import com.tanuki.web.WebViewSupport
 import com.tanuki.web.WebViewSupportState
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -95,8 +97,11 @@ data class TanukiUiModel(
     val chatNotifications: com.tanuki.notify.ChatNotificationStatus = com.tanuki.notify.ChatNotificationStatus(),
     val fileFullscreen: Boolean = false,
     val deviceCondition: DeviceConditionState = DeviceConditionState(),
-    val earlyStart: Boolean = true
-)
+    val earlyStart: Boolean = true,
+    /** 用户偏好；默认官方界面。 */
+    val nativeDshPreferred: Boolean = false,
+    /** 原生接口不可用时的回退原因；为空表示未回退。 */
+    val nativeDshFallback: String? = null)
 
 data class TanukiUiCallbacks(
     val command: (String) -> Unit,
@@ -143,7 +148,9 @@ data class TanukiUiCallbacks(
     val setLowBatteryThreshold: (Int) -> Unit = {},
     val dshVisible: (Boolean) -> Unit = {},
     val chatNotifications: () -> Unit = {},
-    val toggleChatNotifications: (Boolean) -> Unit = {}
+    val toggleChatNotifications: (Boolean) -> Unit = {},
+    val toggleNativeDsh: (Boolean) -> Unit = {},
+    val retryNativeDsh: () -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -159,6 +166,7 @@ internal enum class TanukiGlyph { Home, Terminal, Layers, Settings, Folder, File
 fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: WebView,
              filesPage: @Composable (Modifier, Dp) -> Unit = { _, _ -> },
              agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> },
+             nativeDshPage: @Composable (Modifier) -> Unit = {},
              browserOpenRequest: Int = 0, dshOpenRequest: Int = 0,
              browserControl: BrowserControlUiState = BrowserControlUiState()) {
     var tab by rememberSaveable(key = "tanuki-navigation-5") { mutableIntStateOf(0) }
@@ -177,14 +185,21 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     LaunchedEffect(tab) { callbacks.dshVisible(tab == 1) }
     DisposableEffect(Unit) { onDispose { callbacks.dshVisible(false) } }
     val s = model.snapshot
-    LaunchedEffect(tab, s.service) {
-        if (tab == 1 && s.service == ServiceState.RUNNING) callbacks.connectDsh()
+    val nativeActive = DshUiSwitchPolicy.useNative(
+        if (model.nativeDshPreferred) DshUiMode.NATIVE else DshUiMode.OFFICIAL,
+        s.service == ServiceState.RUNNING,
+        model.nativeDshFallback
+    )
+    LaunchedEffect(tab, s.service, nativeActive) {
+        if (tab == 1 && s.service == ServiceState.RUNNING && !nativeActive) callbacks.connectDsh()
     }
     LaunchedEffect(activeFullscreen) { callbacks.setFullscreen(activeFullscreen) }
     DisposableEffect(Unit) { onDispose { callbacks.setFullscreen(false) } }
     BackHandler(tab == 1) {
         if (activeFullscreen) {
             fullscreen = false
+        } else if (nativeActive) {
+            tab = 0
         } else if (s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED &&
             s.web != WebState.RENDER_ERROR && browserView.canGoBack()) browserView.goBack() else tab = 0
     }
@@ -274,6 +289,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 when (tab) {
                     1 -> DshPage(model, callbacks, browserView, pageModifier, home = { tab = 0 },
                         fullscreen = activeFullscreen, onFullscreen = { fullscreen = it }, settings = ::openSettings, bottomInset = bottomInset,
+                        native = nativeActive, nativePage = nativeDshPage, fallback = model.nativeDshFallback,
                         openBrowserWindow = {
                             if (callbacks.openBrowserOverlay != null) callbacks.openBrowserOverlay.invoke()
                             else { if (!floatingBrowser) callbacks.openBrowser(); floatingBrowser = !floatingBrowser }
@@ -595,7 +611,7 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
             "项目与备份" to "文件导入、项目导出与私有快照",
             "组件维护与诊断" to "Ubuntu、Node.js、DSH 的版本与维护",
             "运行与后台" to "通知权限、电池设置与后台运行",
-            "网页与兼容性" to "WebView 内核更新与能力检测",
+            "网页与兼容性" to "官方/原生 DSH 界面、WebView 内核与能力检测",
             "高级与关于" to "兼容选项、缓存与许可来源")
         Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("工作空间偏好", style = MaterialTheme.typography.headlineMedium)
@@ -661,6 +677,9 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         }
     }
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {
+        ToggleRow("界面：官方界面 / 原生界面", model.nativeDshPreferred, c.toggleNativeDsh)
+        Caption("关闭为官方 DSH 界面；开启后显示原生会话列表与只读消息。接口不可用时自动回退官方界面，切换不重启服务。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("官方更新入口", "当前 WebView ${model.support.version}", enabled = s.tanukiIdle, onClick = c.updateWebView)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("系统 WebView 设置", enabled = s.tanukiIdle, onClick = c.webViewSettings)
@@ -705,6 +724,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
 @Composable
 private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView, modifier: Modifier,
                     home: () -> Unit, fullscreen: Boolean, onFullscreen: (Boolean) -> Unit, settings: () -> Unit, bottomInset: Dp,
+                    native: Boolean, nativePage: @Composable (Modifier) -> Unit, fallback: String?,
                     openBrowserWindow: () -> Unit) {
     val s = model.snapshot
     val density = LocalDensity.current
@@ -720,8 +740,13 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
         onDispose { browser.setLayerType(originalLayer, null) }
     }
     Box(modifier.fillMaxSize().imePadding()) {
-        // One stable document and bounded native host in both window modes: no reload.
-        if (s.web != WebState.RENDER_ERROR) key(browser) {
+        // 原生页不持有 WebView；官方页仍是同一个 WebView 实例，切换界面不会重建或重启 DSH。
+        if (native) {
+            nativePage(
+                Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInset)
+                    .then(if (fullscreen) Modifier.statusBarsPadding() else Modifier)
+            )
+        } else if (s.web != WebState.RENDER_ERROR) key(browser) {
             // 正常模式预留导航及其间隙；键盘或全屏隐藏导航时 bottomInset 为零。
             AndroidView(factory = { context ->
                 android.widget.FrameLayout(context).apply {
@@ -734,7 +759,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                     browser.visibility = if (showBrowser) android.view.View.VISIBLE else android.view.View.INVISIBLE
                 })
         }
-        if (!showBrowser) Column(Modifier.fillMaxSize().padding(top = topInset).verticalScroll(rememberScrollState())
+        if (!native && !showBrowser) Column(Modifier.fillMaxSize().padding(top = topInset).verticalScroll(rememberScrollState())
             .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 20.dp + bottomInset), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             TanukiCard {
                 TanukiIcon(TanukiGlyph.Terminal, tint = MaterialTheme.colorScheme.primary)
@@ -756,18 +781,38 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
             OperationCard(s, c)
             if (model.support.state != WebViewSupportState.SUPPORTED) WebViewCard(model.support, s.tanukiIdle, c)
         }
+        if (!native && fallback != null && s.service == ServiceState.RUNNING && model.nativeDshPreferred) Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.align(Alignment.TopCenter).zIndex(0.6f).padding(top = topInset + 8.dp, start = 20.dp, end = 20.dp)
+        ) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("原生界面不可用，已显示官方界面", style = MaterialTheme.typography.labelLarge)
+                    Text(fallback, style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = c.retryNativeDsh) { Text("重试") }
+            }
+        }
         if (!fullscreen) Surface(color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.align(Alignment.TopCenter).zIndex(1f).onSizeChanged { headerPixels = it.height }) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = home) { TanukiIcon(TanukiGlyph.Back, "返回概览") }
                 Column(Modifier.weight(1f)) {
                     Text("DSH", style = MaterialTheme.typography.titleMedium)
-                    Text(s.web.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (native) "原生界面 · 只读" else s.web.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = openBrowserWindow) { TanukiIcon(TanukiGlyph.Browser, "浏览器小窗") }
                 IconButton(onClick = { onFullscreen(true) }) { TanukiIcon(TanukiGlyph.Expand, "进入全屏") }
-                IconButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED) {
-                    TanukiIcon(TanukiGlyph.Refresh, "重新连接 DSH 网页")
+                if (native) {
+                    IconButton(onClick = c.retryNativeDsh, enabled = s.service == ServiceState.RUNNING) {
+                        TanukiIcon(TanukiGlyph.Refresh, "刷新原生会话")
+                    }
+                } else {
+                    IconButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED) {
+                        TanukiIcon(TanukiGlyph.Refresh, "重新连接 DSH 网页")
+                    }
                 }
                 IconButton(onClick = settings) { TanukiIcon(TanukiGlyph.Settings, "设置") }
             }
