@@ -1,1 +1,7 @@
-{"schema":1}
+{
+  "schema": 1,
+  "record": "docs/handoffs/20261109-1812-runtime-safe-mode.md",
+  "recordSha256": "8265f94064f1455d3750b285983b2f0c03554d415085f7d631611c1d78e46920",
+  "sourceFingerprint": "2a5d406f59dadf7da0d236d2f4fe5a6a9f9dc076183b87470a617206b60d13d8",
+  "fileCount": 492
+}
