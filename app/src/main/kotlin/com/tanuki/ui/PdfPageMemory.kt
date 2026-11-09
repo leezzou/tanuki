@@ -89,6 +89,20 @@ internal class PdfPageMemory<K : Any, V : Any>(
         return evicted
     }
 
+    /**
+     * 主动放弃一页：从预算记账中移除；若仍显示，位图保留到 [hide] 再回收。
+     * 用于渲染分辨率收紧时先释放超出新上限的旧页，避免新旧位图同时驻留。
+     */
+    fun discard(key: K) {
+        val toRelease = mutableListOf<V>()
+        synchronized(lock) {
+            if (closed) return
+            cache.remove(key)
+            if (key !in displayed) values.remove(key)?.let { toRelease += it }
+        }
+        toRelease.forEach(release)
+    }
+
     /** 关闭文档：回收全部缓存值与延迟回收值。 */
     fun close() {
         val toRelease = mutableListOf<V>()

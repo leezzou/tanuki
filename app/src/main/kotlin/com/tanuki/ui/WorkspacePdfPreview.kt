@@ -244,7 +244,6 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
 
     // 缓存预算按应用堆计算；单页像素上限保证预算内至少容纳 3 页。
     val cacheBudget = remember { PdfMemoryPolicy.cacheBudgetBytes(Runtime.getRuntime().maxMemory()) }
-    val maxPagePixels = remember(cacheBudget) { PdfMemoryPolicy.maxPagePixels(cacheBudget) }
     val memory = remember(path) {
         PdfPageMemory<Int, PdfPageBitmap>(
             budgetBytes = cacheBudget,
@@ -334,6 +333,13 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
         ) {
             val viewport = IntSize(constraints.maxWidth, constraints.maxHeight)
             val renderPlan = PdfPreloadPolicy.renderPlan(visiblePages, currentPage, pageCount)
+            // 驻留页数 = 渲染计划 + 一页在途位图；单页上限随驻留集合缩小，受保护页总字节不超预算。
+            val maxPagePixels = remember(cacheBudget, renderPlan.size) {
+                PdfMemoryPolicy.maxPagePixels(
+                    cacheBudgetBytes = cacheBudget,
+                    residentPages = (renderPlan.size + 1).coerceAtLeast(PdfMemoryPolicy.CACHE_SLOTS),
+                )
+            }
             val readModifier = Modifier
                 .fillMaxSize()
                 .pdfReaderGestures(
@@ -375,11 +381,29 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
             }
 
             // 先加载同屏可见页，再预加载可见范围外的相邻页；集合变化会取消旧任务并回收位图。
-            LaunchedEffect(session, renderPlan, viewport.width, viewport.height, renderToken) {
+            LaunchedEffect(session, renderPlan, maxPagePixels, viewport.width, viewport.height, renderToken) {
                 val activeSession = session ?: return@LaunchedEffect
                 val protectedPages = renderPlan.toSet()
+                val maxPageBytes = maxPagePixels.toLong() * PdfMemoryPolicy.BYTES_PER_PIXEL
+                // 驻留页变多后单页上限会收紧：先放弃超限旧页并等组合释放，再按新上限渲染。
+                val oversized = renderPlan.filter { index ->
+                    pages[index]?.let { it.bytes > maxPageBytes } == true
+                }
+                if (oversized.isNotEmpty()) {
+                    oversized.forEach { index ->
+                        pages.remove(index)
+                        memory.discard(index)
+                    }
+                    // 等旧位图离开组合并被回收；最多等 3 帧，避免异常布局下无限等待。
+                    var attempts = 0
+                    while (attempts < 3 && oversized.any { memory.contains(it) }) {
+                        withFrameNanos { }
+                        attempts++
+                    }
+                }
                 for (index in renderPlan) {
-                    if (pages.containsKey(index)) {
+                    val cached = pages[index]
+                    if (cached != null && cached.bytes <= maxPageBytes) {
                         memory.get(index)
                         continue
                     }

@@ -58,6 +58,27 @@ class PdfPageMemoryTest {
         assertFalse(fixture.memory.contains(1))
     }
 
+    @Test fun discardRemovesPageFromBudgetAndReleasesWhenHidden() {
+        val fixture = Fixture(100)
+        val hidden = fixture.page(1, 40)
+        val shown = fixture.page(2, 40)
+        fixture.memory.store(1, hidden, setOf(1))
+        fixture.memory.store(2, shown, setOf(2))
+        fixture.memory.display(2)
+
+        fixture.memory.discard(1)
+        assertTrue(hidden.released)
+        assertFalse(fixture.memory.contains(1))
+        assertTrue(fixture.memory.contains(2))
+
+        fixture.memory.discard(2)
+        assertFalse("仍显示的位图不能立即回收", shown.released)
+        fixture.memory.hide(2)
+        assertTrue(shown.released)
+        assertFalse(fixture.memory.contains(2))
+        assertEquals(0, fixture.memory.usedBytes())
+    }
+
     @Test fun closeReleasesAllIncludingDeferredPages() {
         val fixture = Fixture(100)
         val first = fixture.page(1, 80)

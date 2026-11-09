@@ -24,10 +24,17 @@ internal object PdfMemoryPolicy {
         return width.toLong() * height.toLong() * BYTES_PER_PIXEL
     }
 
-    /** 单页可用的最大像素数，保证缓存预算内至少能放 3 页。 */
-    fun maxPagePixels(cacheBudgetBytes: Long): Int {
+    /**
+     * 单页可用的最大像素数。默认保证预算内至少放 3 页；连续阅读时由界面传入实际驻留页数
+     * （可见页 + 预加载 + 一页在途位图），使受保护页面的总字节数不超过缓存预算。
+     */
+    fun maxPagePixels(
+        cacheBudgetBytes: Long,
+        residentPages: Int = CACHE_SLOTS,
+    ): Int {
         val budget = cacheBudgetBytes.coerceAtLeast(1L)
-        val pixels = budget / BYTES_PER_PIXEL / CACHE_SLOTS
+        val slots = residentPages.coerceAtLeast(1)
+        val pixels = budget / BYTES_PER_PIXEL / slots
         return pixels.coerceIn(1L, PdfRenderPolicy.MAX_PIXELS.toLong()).toInt()
     }
 }
