@@ -2,6 +2,26 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## PDF 原生阅读体验打磨验证（2026-11-09，android_agent-35，非设备）
+
+- 范围：`WorkspacePdfPreview` 从单页重开改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；当前页前后各预加载 1 页；按字节 LRU 缓存与位图回收；适应宽度/适应页面；双指 1–5x、双击 1x/2.5x、放大后横向平移；页码/总页数、快速跳页；加密/损坏/超大/内存不足中文提示。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/pdf-reading/native-reading`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（改造后增量 3m08s）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` → BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + `ZoomPolicyTest` 6）。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=b9eeb75`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
+- 新增回归 59 项：`PdfPageCacheTest` 8（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 14（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记、discard 预算移除与延迟回收）；`PdfPreloadPolicyTest` 10（当前页优先、边界、半径、大文档小窗口、非法半径；可见页 >3 时全部进入渲染计划、首尾预加载、去重/边界、计划大小有界）；`PdfMemoryPolicyTest` 6（堆比例预算上下限、单页像素上限、驻留页数联动上限、位图字节记账、512 MiB 文件限制、渲染计划 + 在途页联合预算）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 10（适应宽度/整页、缩放范围、平移边界、缩放锚点、非 1× 连续放大/缩小补偿、1–5× 首尾可达、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
+- 复审修复（Codex 3 条 P2）：
+  - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。补偿延迟到下一帧（新留白完成测量后）执行，避免旧滚动边界截断。
+  - 纵向补偿改为 `(centroidY−H/2)×(1/oldScale−1/newScale)`；新增 2×→4× 与 4×→2× 回归，避免非 1× 起点捏合持续偏移。
+  - 渲染集合改为「全部可见页 + 可见范围外首尾各 1 页预加载」；同屏 >3 页时不再长期停留在“正在渲染”。
+  - 固定视口裁剪：外层阅读容器 `clipToBounds()`，缩放层不能绘制到标题栏/控制栏；该条依赖 Compose 绘制层，JVM 策略测试无法覆盖，需设备/截图验证。
+  - 预留失败原子性：先计算可淘汰页总字节，确认足够才淘汰；失败不改变缓存/界面，避免部分淘汰后丢失已回收键；新增失败→释放显示页→重试成功的回归。
+  - 分配前按实际驻留预留：`tryReserve` 淘汰未显示缓存页并返回键，界面在创建位图前移除；`store` 消耗预留并按实际驻留收紧，失败/取消归还；新增 LRU 已满后新计划页的峰值回归。
+  - 渲染集合与内存预算联动：单页像素上限按 `renderPlan.size + 1`（含在途页）分配，受保护页总字节不超过缓存预算；上限收紧时先 `discard` 超限旧页、等待组合回收后再按新上限渲染；新增计划 + 预算联合回归（4/8/12 个可见页）。
+  - 复审修复后目标测试 69 tests / 0 failures；rebase 后完整 JVM 365 / 0 与 lint 通过。
+- 未执行：lint、assemble、Android 仪器/真实设备；真实大文档（≥500 页）连续滚动与内存曲线、真实加密/损坏 PDF、捏合/双击/横向平移手感、5x 文字清晰度、深色主题均未验证。编译与 JVM 策略测试不能替代设备验收。
+- 已知限制：单页渲染受长边 2048、4,000,000 像素与缓存预算约束，5x 放大清晰度有限；缓存预算为堆的 1/8（24–64 MiB）；512 MiB 是产品打开上限；只读预览，不含编辑/搜索/文本选择。
+
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
 - `v0.1.8` tag 指向 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（0.1.8 发布点）；远端 `main` 已前进到 `a9aa507c06883c62048a89924384ef0a10e01470`（Wave0 PR #10/#11/#12 合并）。`artifacts/releases/0.1.8/` 六附件齐全：APK、`app-update.json`、完整源码 ZIP、原生对应源码 TAR、`RELEASE-SHA256SUMS`、`native-source-SHA256SUMS`。
@@ -21,7 +41,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，D8 正常打包 `com.github.mwiede:jsch:2.28.8`。
   - 远程分支 `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、**229 tests / 0 failures / 0 errors / 0 skipped**。
-  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，47 个结果文件、**337 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/94 warnings。
+  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，54 个结果文件、**396 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/94 warnings。
   - Review 修复后 `-PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；新增 Cookie 隔离与 Keystore 设备回归已编译，未运行。
   - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 80 warnings / 1 hint**；新增文件无 lint 告警。
   - `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` → 91 runtime artifacts；随后 `python3 scripts/collect-component-licenses.py` 刷新依赖许可清单。
