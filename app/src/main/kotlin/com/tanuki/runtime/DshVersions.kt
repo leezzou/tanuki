@@ -13,7 +13,7 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 
-/** 一个可运行的已安装 DSH 程序目录；字节数只统计目录内普通文件，不跟随链接。 */
+/** 一个可运行的已安装 DSH 程序目录；bytes 为目录占用，不跟随链接。 */
 data class InstalledDshVersion(
     val version: String,
     val bytes: Long,
@@ -96,19 +96,36 @@ object DshVersions {
         return expected.equals(actual, ignoreCase = true)
     }
 
-    /** 与 DirectoryUsage 不同，这里按逻辑文件长度统计，保证纯 JVM 可测且不跟随任何链接。 */
+    /**
+     * 优先按实际分配的磁盘块统计（与 DirectoryUsage 口径一致），失败时回退逻辑长度；
+     * 不跟随任何链接，并按 fileKey 去掉硬链接重复计数。
+     */
     private fun directoryBytes(root: File): Long {
         var total = 0L
+        val seen = HashSet<Any>()
+        fun add(path: Path, attrs: BasicFileAttributes) {
+            if (attrs.isSymbolicLink) return
+            val key = attrs.fileKey()
+            if (key != null && !seen.add(key)) return
+            val size = runCatching {
+                val blocks = Files.getAttribute(path, "unix:blocks", LinkOption.NOFOLLOW_LINKS) as? Number
+                if (blocks != null) Math.multiplyExact(blocks.toLong(), 512L) else attrs.size()
+            }.getOrDefault(attrs.size())
+            total = try {
+                Math.addExact(total, size)
+            } catch (_: ArithmeticException) {
+                Long.MAX_VALUE
+            }
+        }
         try {
             Files.walkFileTree(root.toPath(), emptySet(), 64, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(directory: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    add(directory, attrs)
+                    return FileVisitResult.CONTINUE
+                }
+
                 override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    if (!attrs.isSymbolicLink && attrs.isRegularFile) {
-                        total = try {
-                            Math.addExact(total, attrs.size())
-                        } catch (_: ArithmeticException) {
-                            Long.MAX_VALUE
-                        }
-                    }
+                    add(file, attrs)
                     return FileVisitResult.CONTINUE
                 }
 

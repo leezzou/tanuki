@@ -152,7 +152,7 @@ private fun InstalledDshRow(
             StatusPill(if (item.active) "当前" else "备用", item.active)
             StatusPill(if (item.verified) "已校验" else "未校验", item.verified)
         }
-        ManagerCaption("大小 ${formatDshBytes(item.bytes)} · 安装于 ${formatDshTime(item.installedAtMillis)}")
+        ManagerCaption("占用 ${formatDshBytes(item.bytes)} · 安装于 ${formatDshTime(item.installedAtMillis)}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (item.active) {
                 ManagerCaption("当前版本不可在此卸载；主界面仍保留原卸载入口。")
