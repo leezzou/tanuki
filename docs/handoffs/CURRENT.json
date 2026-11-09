@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "record": "docs/handoffs/20261109-1810-remote-host-ssh.md",
-  "recordSha256": "967958258e746e4b5de14955006b71c72952046d72838ec3c0532505a15d0a35",
-  "sourceFingerprint": "7822be23c451ac1bf5fc48a9b8f6519c7a8bd39ac02da5ebef3a20ff40aa210c",
+  "recordSha256": "3876b70fd53c6e4bcc44c7e3613f45d215d5d8ed3dd9d3a34b7ba70b8482ea8d",
+  "sourceFingerprint": "265c95379194baaeb879483f063c4653457d3908acbdd1dad0f9a1be6ac213e1",
   "fileCount": 566
 }

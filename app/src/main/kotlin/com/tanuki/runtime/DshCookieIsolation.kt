@@ -18,6 +18,12 @@ data class DshCookie(val name: String, val value: String) {
     fun setCookieValue(): String = "$name=$value; Path=/; HttpOnly; SameSite=Strict"
 }
 
+/** 切换 Cookie 前让旧 WebView 文档和在途请求失效；失败时拒绝切换。 */
+interface DshCookieSwitchGuard {
+    fun beforeSwitch(): Boolean
+    fun afterSwitch()
+}
+
 /** 纯 Kotlin 的逻辑主机 Cookie 分区，JVM 可回归，不接触 Android CookieManager。 */
 class DshCookieJar {
     private val jars = LinkedHashMap<String, List<DshCookie>>()
@@ -46,7 +52,8 @@ class DshCookieJar {
  */
 class DshCookieIsolation(
     private val cookieManager: CookieManager = CookieManager.getInstance(),
-    private val scopeStore: KeyValueStore? = null
+    private val scopeStore: KeyValueStore? = null,
+    private val guardProvider: () -> DshCookieSwitchGuard? = { null }
 ) {
     private val jar = DshCookieJar()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -60,11 +67,20 @@ class DshCookieIsolation(
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 throw IllegalStateException("Cookie 隔离不能在主线程执行")
             }
-            capture(activeScope)
-            if (!clearAll()) throw IllegalStateException("无法清理管理 WebView Cookie，已取消切换")
-            restore(scope)
-            activeScope = scope
-            scopeStore?.putString(KEY_SCOPE, scope)
+            val guard = guardProvider()
+            if (guard != null && !guard.beforeSwitch()) {
+                guard.afterSwitch()
+                throw IllegalStateException("无法让旧管理页停止请求，已取消切换")
+            }
+            try {
+                capture(activeScope)
+                if (!clearAll()) throw IllegalStateException("无法清理管理 WebView Cookie，已取消切换")
+                restore(scope)
+                activeScope = scope
+                scopeStore?.putString(KEY_SCOPE, scope)
+            } finally {
+                guard?.afterSwitch()
+            }
         }
     }
 

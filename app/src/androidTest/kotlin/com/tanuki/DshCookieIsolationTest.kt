@@ -49,10 +49,7 @@ class DshCookieIsolationTest {
             assertFalse(b.contains("authA=synthetic-a"))
             assertEquals("host-b", isolation.currentScope())
         } finally {
-            val latch = CountDownLatch(1)
-            manager.removeAllCookies { latch.countDown() }
-            latch.await(3, TimeUnit.SECONDS)
-            manager.flush()
+            clearCookies(manager)
             prefs.edit().clear().commit()
         }
     }
@@ -81,11 +78,42 @@ class DshCookieIsolationTest {
             assertEquals("host-b", isolation.currentScope())
             check(elapsed < 2_500) { "Cookie 切换等待过久：${'$'}elapsed ms" }
         } finally {
-            val latch = CountDownLatch(1)
-            manager.removeAllCookies { latch.countDown() }
-            latch.await(3, TimeUnit.SECONDS)
-            manager.flush()
+            clearCookies(manager)
             prefs.edit().clear().commit()
         }
+    }
+
+    @Test
+    fun switchIsRejectedWhenOldPageCannotBeStopped() = runBlocking(Dispatchers.IO) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("dsh-cookie-guard-${System.nanoTime()}", 0)
+        val isolation = DshCookieIsolation(
+            CookieManager.getInstance(),
+            SharedPreferencesKeyValueStore(prefs),
+            guardProvider = {
+                object : com.tanuki.runtime.DshCookieSwitchGuard {
+                    override fun beforeSwitch(): Boolean = false
+                    override fun afterSwitch() = Unit
+                }
+            }
+        )
+        try {
+            val failed = runCatching { isolation.switchTo("host-b") }.exceptionOrNull()
+            assertTrue(failed is IllegalStateException)
+            assertEquals("local", isolation.currentScope())
+        } finally {
+            clearCookies(CookieManager.getInstance())
+            prefs.edit().clear().commit()
+        }
+    }
+
+    /** 与生产实现一致：从主 Looper 发起删除，IO 测试线程等待回调。 */
+    private fun clearCookies(manager: CookieManager) {
+        val latch = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            manager.removeAllCookies { latch.countDown() }
+        }
+        check(latch.await(3, TimeUnit.SECONDS)) { "Cookie 清理回调超时" }
+        manager.flush()
     }
 }

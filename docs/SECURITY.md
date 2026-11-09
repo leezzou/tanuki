@@ -35,7 +35,7 @@ API Key 通过官方 Web UI 配置，不编译入 APK 或写进仓库。账号�
 - 主机、端口、用户名和远程 DSH 端口是非敏感配置；密码、私钥、私钥口令和远程 token 只经 Android Keystore 的 AES-256-GCM 密钥加密后写入应用私有 SharedPreferences。Keystore 不可用或解密失败时直接拒绝连接，不降级为明文、不导出到项目 ZIP 或日志；`RemoteHostConfig`/`RemoteEndpoint` 的 `toString()` 固定脱敏。
 - 首次连接先读取远程主机公钥并以 `SHA256:` 指纹请求用户确认，确认前不发送密码/私钥；之后按 `host:sshPort` 比对，指纹变化直接拒绝。当前每个主机只记录一个活动主机密钥算法，RSA/ECDSA 支持，Ed25519 待后续。
 - 远程 origin 仍是精确的 `http://127.0.0.1:<本地转发端口>`；本地转发只绑定 loopback。远程 token 只拼到该 loopback 启动 URL，经 SSH 隧道传输，不直接连接远程端口、不写日志。
-- 管理 WebView 的认证 Cookie 按逻辑主机隔离：本地 DSH 与每台远程 DSH 分别保存 Cookie header，切换前清空 CookieManager 并恢复目标主机；切换失败时页面置 `RENDER_ERROR`，连接层 `cookieReady` 门禁拒绝加载、认证、重试和下载；本地端点发布前必须先成功切回本地 Cookie，不把上一台主机的 Cookie 交给新端点。Cookie 端口不参与作用域，不能只靠 origin 检查隔离。
+- 管理 WebView 的认证 Cookie 按逻辑主机隔离：本地 DSH 与每台远程 DSH 分别保存 Cookie header，切换前清空 CookieManager 并恢复目标主机；切换失败时页面置 `RENDER_ERROR`，连接层 `cookieReady` 门禁拒绝加载、认证、重试和下载；交换前由管理 WebView 停止旧文档并阻断在途请求，guard 失败则取消切换；本地端点发布前必须先成功切回本地 Cookie，不把上一台主机的 Cookie 交给新端点。Cookie 端口不参与作用域，不能只靠 origin 检查隔离。
 - 连接失败或隧道断开关闭会话并恢复本地端点；管理 WebView 的 origin 隔离、TLS/明文策略、Cookie 校验和 Blob 导出边界不复用远程主机凭据，也不因远程模式放宽。
 - 这是用户主动配置的 SSH 通道，不是恶意远程主机沙箱，也不提供中继/WebRTC、远程 DSH 启停或多主机隔离。
 

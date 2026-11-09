@@ -41,10 +41,13 @@ class RuntimeManager(val context: Context) {
     val launcher = Launcher(context, paths, log)
     val state = MutableStateFlow(Snapshot())
     private val remoteMachine = RemoteHostMachine()
+    @Volatile var cookieSwitchGuard: DshCookieSwitchGuard? = null
+        private set
     private val cookieIsolation = DshCookieIsolation(
         scopeStore = SharedPreferencesKeyValueStore(
             context.getSharedPreferences("remote-host-cookie-scope", Context.MODE_PRIVATE)
-        )
+        ),
+        guardProvider = { cookieSwitchGuard }
     )
     val remoteHost = RemoteHostController(
         storage = androidRemoteHostStorage(context),
@@ -848,6 +851,10 @@ class RuntimeManager(val context: Context) {
                 }
             }
         }
+    }
+    /** 由管理 WebView 注册；切换 Cookie 前用于停止旧文档和在途请求。 */
+    fun installCookieSwitchGuard(guard: DshCookieSwitchGuard?) {
+        cookieSwitchGuard = guard
     }
     /** 管理页端点只有在 Cookie 作用域与状态机一致时才允许加载/认证/下载。 */
     fun cookieReady(): Boolean = cookieIsolation.currentScope() == remoteMachine.status.cookieScope

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.tanuki.TanukiApp
+import com.tanuki.runtime.DshCookieSwitchGuard
 import com.tanuki.runtime.RuntimeManager
 import com.tanuki.runtime.WebState
 import org.json.JSONObject
@@ -37,6 +38,8 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     }
     private val compactViewport = DshViewport { url -> OriginPolicy.sameOrigin(url, manager.origin) }
     private var destroyed = false
+    @Volatile private var cookiesSwitching = false
+    @Volatile private var cookieSwitchLatch: java.util.concurrent.CountDownLatch? = null
     val needsRecreation:Boolean get()=destroyed
     val support=kotlinx.coroutines.flow.MutableStateFlow(WebViewSupport())
     private var probeId=0
@@ -72,6 +75,7 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
         WebView.setWebContentsDebuggingEnabled(com.tanuki.BuildConfig.DEBUG)
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (cookiesSwitching) return true
                 val url = request.url.toString()
                 if (OriginPolicy.sameOrigin(url, manager.origin)) return false
                 // 官方账号会在异步初始化后跳转，只有固定授权入口可不依赖 Chromium 的瞬时手势标记。
@@ -80,6 +84,7 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
                 return true
             }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (cookiesSwitching) return WebResourceResponse("text/plain", "utf-8", 403, "Cookie switch", emptyMap(), ByteArrayInputStream("Cookie 切换中".toByteArray()))
                 val url = request.url.toString()
                 if (OriginPolicy.sameOrigin(url, manager.origin)) return null
                 if (!request.isForMainFrame && url.startsWith("blob:") && OriginPolicy.sameOrigin(url.removePrefix("blob:"), manager.origin)) return null
@@ -95,6 +100,10 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
                 }
             }
             override fun onPageFinished(view: WebView, url: String) {
+                if (cookiesSwitching && url == "about:blank") {
+                    cookieSwitchLatch?.countDown()
+                    return
+                }
                 authTrace("pageFinished bootstrap=${url==attachedAuthUrl}")
                 if(destroyed || authRetryPending)return
                 if(url==probeUrl && support.value.state==WebViewSupportState.CHECKING){finishProbe();return}
@@ -202,7 +211,35 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
             else Toast.makeText(activity, "此下载来源尚不支持；请从项目导出入口导出文件", Toast.LENGTH_LONG).show()
         }
     }
+    private val cookieGuard = object : DshCookieSwitchGuard {
+        override fun beforeSwitch(): Boolean {
+            if (destroyed) return true
+            cookiesSwitching = true
+            val latch = java.util.concurrent.CountDownLatch(1)
+            cookieSwitchLatch = latch
+            activity.runOnUiThread {
+                if (destroyed) {
+                    latch.countDown()
+                    return@runOnUiThread
+                }
+                if (view.url.isNullOrBlank() || view.url == "about:blank") {
+                    latch.countDown()
+                    return@runOnUiThread
+                }
+                view.stopLoading()
+                view.loadUrl("about:blank")
+                view.postDelayed({ latch.countDown() }, 750)
+            }
+            return latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        }
+
+        override fun afterSwitch() {
+            cookieSwitchLatch = null
+            cookiesSwitching = false
+        }
+    }
     init {
+        manager.installCookieSwitchGuard(cookieGuard)
         blobs = BlobDownloads(activity, view, blobDownload, manager.fileTransfers) { message -> manager.event(message); Toast.makeText(activity,message,Toast.LENGTH_LONG).show() }
         authObserver = activity.lifecycleScope.launch {
             manager.state.map { it.web }.distinctUntilChanged().collect { state ->
