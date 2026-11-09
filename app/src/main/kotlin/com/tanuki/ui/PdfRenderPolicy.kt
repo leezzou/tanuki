@@ -1,6 +1,7 @@
 package com.tanuki.ui
 
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -26,6 +27,35 @@ internal object PdfRenderPolicy {
         val byDimension = min(maxDimension.toDouble() / pageWidth, maxDimension.toDouble() / pageHeight)
         val byPixels = sqrt(maxPixels.toDouble() / (pageWidth.toDouble() * pageHeight))
         val scale = min(min(byDimension, byPixels), MAX_UPSCALE)
+        return Size(
+            floor(pageWidth * scale).toInt().coerceAtLeast(1),
+            floor(pageHeight * scale).toInt().coerceAtLeast(1),
+        )
+    }
+
+    /**
+     * 按阅读视口计算渲染尺寸：以视口宽度乘超采样倍率作为目标清晰度，
+     * 再受长边、总像素和单页内存预算约束。视口未知时退回 [targetSize]。
+     */
+    fun viewportSize(
+        pageWidth: Int,
+        pageHeight: Int,
+        viewportWidth: Int,
+        maxDimension: Int = MAX_DIMENSION,
+        maxPixels: Int = MAX_PIXELS,
+        oversample: Double = 1.5,
+    ): Size {
+        require(pageWidth > 0 && pageHeight > 0) { "PDF 页面尺寸无效" }
+        require(maxDimension > 0 && maxPixels > 0) { "PDF 渲染上限无效" }
+        if (viewportWidth <= 0) return targetSize(pageWidth, pageHeight, maxDimension, maxPixels)
+        val desiredWidth = max(pageWidth.toDouble(), viewportWidth * oversample.coerceAtLeast(1.0))
+        val scale = min(
+            desiredWidth / pageWidth,
+            min(
+                maxDimension.toDouble() / pageWidth,
+                maxDimension.toDouble() / pageHeight,
+            ),
+        ).coerceAtMost(sqrt(maxPixels.toDouble() / (pageWidth.toDouble() * pageHeight)))
         return Size(
             floor(pageWidth * scale).toInt().coerceAtLeast(1),
             floor(pageHeight * scale).toInt().coerceAtLeast(1),
