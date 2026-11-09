@@ -113,9 +113,8 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         // 冷启动时 Worker 可能先于 restore 被唤醒；等初始化完成后再评估和写入。
         startIfNeeded()
         initialization.awaitReady()
-        // Worker 本身运行在 WorkManager 后台线程，这里可以同步完成评估与写盘。
-        refreshNow(check)
-        return state.value.backgroundChecksAllowed
+        // Worker 本身运行在 WorkManager 后台线程，返回本次评估绑定的决定，不事后重读共享状态。
+        return refreshNow(check)
     }
 
     fun setEnabled(enabled: Boolean) {
@@ -184,37 +183,38 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
      * 调用方必须是后台线程。待办只有在 [onBackgroundWorkResumed] 返回确认集合后才清除；
      * 调度失败或进程在中途结束时保留待办，后续采样会重试。
      */
-    private fun refreshNow(workerCheck: DeviceWork?) {
+    private fun refreshNow(workerCheck: DeviceWork?): Boolean {
         val snapshot: DeviceConditionState
         val resumed: Set<DeviceWork>
         val expectedGenerations: Map<DeviceWork, Long>
         val sequence: Long
+        val allowed: Boolean
         synchronized(lock) {
             val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
             var state = evaluation.state
             var candidates = evaluation.resumedChecks
+            var decision = state.backgroundChecksAllowed
             if (workerCheck != null) {
-                if (state.backgroundChecksAllowed) {
-                    // 当前 Worker 会立刻执行这一项，不再为它排补跑任务。
-                    candidates = candidates - workerCheck
-                    state = DeviceConditionPolicy.acknowledgeChecks(state, setOf(workerCheck))
-                } else {
-                    state = DeviceConditionPolicy.markCheckSkipped(state, workerCheck)
-                }
+                val admission = DeviceConditionPolicy.admitCheck(state, workerCheck)
+                state = admission.state
+                decision = admission.allowed
+                // 当前 Worker 会立刻执行这一项，不再为它排补跑任务。
+                if (decision) candidates = candidates - workerCheck
             }
             mutable.value = state
             snapshot = state
             resumed = candidates
+            allowed = decision
             // 记录本次入队对应的待办代次；确认期间重新登记的同类检查不能被旧确认删除。
             expectedGenerations = candidates.associateWith { state.deferredGenerations[it] ?: 0L }
             sequence = refreshSequence.incrementAndGet()
         }
         persistState(snapshot, sequence)
-        if (resumed.isEmpty()) return
+        if (resumed.isEmpty()) return allowed
         val confirmed = runCatching {
             onBackgroundWorkResumed?.invoke(resumed) ?: emptySet()
         }.getOrDefault(emptySet())
-        if (confirmed.isEmpty()) return
+        if (confirmed.isEmpty()) return allowed
         val acknowledged: DeviceConditionState
         val ackSequence: Long
         synchronized(lock) {
@@ -227,6 +227,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             ackSequence = refreshSequence.incrementAndGet()
         }
         persistState(acknowledged, ackSequence)
+        return allowed
     }
 
     private fun readSignals(): DeviceSignals {

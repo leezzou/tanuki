@@ -352,6 +352,33 @@ class DeviceConditionPolicyTest {
         assertEquals(setOf(DeviceWork.DSH_UPDATE_CHECK), acknowledged.deferredChecks)
     }
 
+    /**
+     * Worker 准入决定必须与本次评估绑定；评估后共享状态被另一刷新改变，也不能改写本次返回值。
+     */
+    @Test
+    fun workerAdmissionIsBoundToEvaluationAndNotLaterState() {
+        val normal = evaluate(null, signals(now = 1_000L)).state
+        val admitted = DeviceConditionPolicy.admitCheck(normal, DeviceWork.APK_UPDATE_CHECK)
+        assertTrue(admitted.allowed)
+        assertTrue(admitted.state.deferredChecks.isEmpty())
+
+        // 评估后另一刷新把共享状态改为低电，但本次决定仍为允许。
+        val laterBlocked = evaluate(admitted.state, signals(battery = 5, now = 2_000L)).state
+        assertFalse(laterBlocked.backgroundChecksAllowed)
+        assertTrue(admitted.allowed)
+
+        // 反向：本次评估受限并登记待办，之后即使共享状态恢复，本次决定仍为拒绝。
+        val blocked = evaluate(null, signals(battery = 5, now = 3_000L)).state
+        val denied = DeviceConditionPolicy.admitCheck(blocked, DeviceWork.APK_UPDATE_CHECK)
+        assertFalse(denied.allowed)
+        assertTrue(denied.state.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+
+        val laterAllowed = evaluate(denied.state, signals(battery = 100, now = 4_000L)).state
+        assertTrue(laterAllowed.backgroundChecksAllowed)
+        assertFalse(denied.allowed)
+        assertTrue(laterAllowed.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+    }
+
     @Test
     fun skippedCheckRegistrationIsIdempotentAndLimitedToUpdates() {
         val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state

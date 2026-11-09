@@ -190,6 +190,12 @@ data class DeviceEvaluation(
     val resumedChecks: Set<DeviceWork> = emptySet(),
 )
 
+/** 一次 Worker 准入决定及其对应的状态更新；决定与本次评估绑定，不随后续共享状态变化。 */
+data class WorkAdmission(
+    val allowed: Boolean,
+    val state: DeviceConditionState,
+)
+
 /**
  * 状态机入口。
  *
@@ -236,6 +242,21 @@ object DeviceConditionPolicy {
             deferredChecks = state.deferredChecks - confirmed,
             deferredGenerations = state.deferredGenerations - confirmed,
         )
+    }
+
+    /**
+     * 为具体 Worker 生成本次准入决定并同步更新待办。
+     *
+     * 允许时消费该 Worker 自己的待办（它马上执行检查）；受限时登记该 Worker 的待办。
+     * 返回的 [WorkAdmission.allowed] 必须由调用方直接使用，不能事后重新读取共享状态。
+     */
+    fun admitCheck(state: DeviceConditionState, work: DeviceWork): WorkAdmission {
+        require(work in UPDATE_CHECK_WORK) { "只有后台更新检查可以申请准入" }
+        return if (state.backgroundChecksAllowed) {
+            WorkAdmission(allowed = true, state = acknowledgeChecks(state, setOf(work)))
+        } else {
+            WorkAdmission(allowed = false, state = markCheckSkipped(state, work))
+        }
     }
 
     fun evaluate(
