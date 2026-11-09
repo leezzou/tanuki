@@ -14,7 +14,7 @@
 | DSH | 正常 `web --no-open --host 127.0.0.1 --port 0`；安全模式 `rescue [--from-default-profile web]` + 独立最小 HOME/DSH_HOME；只采信官方就绪日志中的精确origin |
 | 认证 | 官方启动token→HTTP重定向→签名Cookie，不禁用认证或复制给独立浏览器 |
 
-当前已发布 0.1.8/code10（`v0.1.8` tag 为 `c196bbf`，远端 `main` 已前进到 `14d2884`，PR #13/#15 已合并）；**0.1.8 没有随版本记录设备测试**。构建和已测/未测以 [TEST-REPORT](TEST-REPORT.md) 为准，历史数字不当作 0.1.8 已通过。PRoot 依赖 ptrace 与宿主内核，Ubuntu 内模拟 root 不等于 Android Root。
+当前已发布 0.1.9/code11（`v0.1.9` tag 为 `5c680b9`，Pre-release）；**0.1.9 没有随版本记录完整设备测试**。0.1.10/code12 为本次发布候选（基线 `main=9e7edbb9`），执行 push/tag/Pre-release 上传。构建和已测/未测以 [TEST-REPORT](TEST-REPORT.md) 为准，历史数字不当作 0.1.9/0.1.10 已通过。PRoot 依赖 ptrace 与宿主内核，Ubuntu 内模拟 root 不等于 Android Root。
 
 ## WebView 要求
 

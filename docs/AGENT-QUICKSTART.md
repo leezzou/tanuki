@@ -131,7 +131,7 @@ bash scripts/verify-workspace.sh \
 
 ## 7. 完成与交付
 
-当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并；main CI 以 Actions 为准）。release 六附件保持原样；0.1.8 没有随版本记录设备测试。本轮是研发治理任务，分支 `chore/autonomous-development-governance`：新增编排/QA/经验/代码规范与合并前只读门禁，修正过期 main/分支表述，不改产品代码。0.1.7 视频/手机文件 debug 与 release 验证见 [测试现状](TEST-REPORT.md)，只能作为历史记录，不能混算成 0.1.8 已通过。
+当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`）；**0.1.10/code12** 正在最终发布（最终 `main=9e7edbb9`，包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机）。本轮完整 JVM 535 tests / 0 failures、lint 通过；设备 QA 仍未执行。0.1.7/0.1.8/0.1.9 历史证据见 [测试现状](TEST-REPORT.md)，不能混算成 0.1.10 已通过设备验收。
 
 1. 完成本次交接记录并更新 `AGENT-STATE.md`，诚实写明实际验证及未测范围。每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、删除已过期交接并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
 2. `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md`，再不带参数检查。
@@ -140,4 +140,4 @@ bash scripts/verify-workspace.sh \
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。
 6. 最终答复给清楚的产物路径、完成项、暂停/阻塞项和下一步，不留下只存在聊天里的必要信息。
 
-当前治理分支为 `chore/autonomous-development-governance`，基线为远端 `origin/main/14d2884`；只改治理文档、门禁脚本、回归和 CI Host 步骤，不改产品代码/协议，不直推 main、不创建 tag/Release、不重打 0.1.8 附件。合并前按 [编排规则](ORCHESTRATOR-RULES.md) 与 [QA 门禁](QA-GATES.md) 完成独立 Review/适用验证；未来发版仍须确认新版本和递增 code。
+本轮发布分支为 `ao/xlsx-preview/release-0.1.10`，最终基线为远端 `origin/main=9e7edbb9`；只改版本号、发布文档与交接，不改产品功能代码/协议。发布动作（push main、tag v0.1.10、Pre-release 上传）已获用户明确授权；合并已由用户完成。

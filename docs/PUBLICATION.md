@@ -1,6 +1,6 @@
 # Git 上传与脱敏
 
-当前已发布 **0.1.8/code10**：`v0.1.8` tag 为 `c196bbf`，远端 `main` 为 `14d2884`（PR #13/#15 已合并；main CI 以 Actions 为准）；release 六附件保持原样，0.1.8 没有随版本记录设备测试。0.1.7/code9 是上一轮已完成交付，只作历史参考。当前研发治理分支为 `chore/autonomous-development-governance`，只改治理文档/门禁脚本/CI Host 步骤，不改产品代码；状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`，APK SHA `210b6e...`、10,506,550 字节、证书 `371dc3...`）；0.1.9 没有随版本记录完整设备验收。**0.1.10/code12** 为本地候选，基线 `main=9e7edbb9`，本版执行 push main、创建 tag `v0.1.10` 与 Pre-release；状态以[交接](AGENT-STATE.md)为准。
 
 ## 只上传源码
 
@@ -34,7 +34,7 @@ git diff --cached --stat
 
 `check-publication.py --git` 分别检查索引blob和工作树候选，已暂存内容即使在工作树被清理也不会漏扫；不打开被忽略的凭据，已跟踪文件若违反忽略/公开边界只报告、不代删。检查本机身份路径、常见API/云/平台凭据格式、非示例邮箱和文档链接；归档检查包含ZIP/APK/TAR成员、TAR身份元数据与嵌套累计预算。输出文件位置也先脱敏，**不输出匹配值**。必要第三方许可/固定上游源码署名保留，第一方文件不作整包豁免。
 
-交付附件独立放在被忽略的artifacts；0.1.8及更早历史包与校验保持原样。本机配置、生成缓存、原始日志/截图、JDK、AVD数据/控制文件和其他任务的暂存不进入公开源码，不因整理本轮源码而删除历史交付、wipe设备或杀进程。
+交付附件独立放在被忽略的artifacts；0.1.9及更早历史包与校验保持原样。本机配置、生成缓存、原始日志/截图、JDK、AVD数据/控制文件和其他任务的暂存不进入公开源码，不因整理本轮源码而删除历史交付、wipe设备或杀进程。
 
 这不是全能Secret Scanner：不能识别所有姓名、任意插件输出、自定义凭据格式、所有图片像素或Git历史。历史截图/原始诊断已从docs清理；新增图片/附件必须人工检查像素、EXIF和内容。示例只能使用合成值/保留域名。
 
@@ -51,7 +51,7 @@ git config --local user.email "<GitHub提供的隐私邮箱>"
 
 ## 源码归档与二进制
 
-当前已发布0.1.8，versionCode为10；后续发版前须重新核对公开/设备/归档版本上限，确保严格递增。沿用同workspacecheck开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。0.1.8包含文件管理、手机共享存储与浏览器输入线程修复，行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)；候选release须独立验证，debug或0.1.7历史测试不能替代，实际范围见[测试现状](TEST-REPORT.md)。
+当前已发布 0.1.9（code11），0.1.10 为本地候选（code12）；后续发版前须重新核对公开/设备/归档版本上限，确保严格递增。沿用同 workspacecheck 开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。0.1.10 候选包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机 等已合并改动，行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)；候选 release 须独立验证，debug 或 0.1.8/0.1.9 历史测试不能替代，实际范围见[测试现状](TEST-REPORT.md)。
 
 ```bash
 python3 scripts/check-publication.py
@@ -62,8 +62,8 @@ python3 scripts/check-publication.py --archive artifacts/sources/Tanuki-<版本>
 
 Git检出不依赖本机构建附件。源码ZIP按明确目录清单生成；可选原生对应源码附件齐全时一并包含，否则在分发原生二进制前先准备对应源码并审核GPL等义务，见 [第三方声明](../THIRD_PARTY_NOTICES) 和 [发布说明](RELEASE.md)。只保留 `scripts/package-source.py` 这一个打包入口，删除无独立用途的旧兼容脚本。
 
-修改任何公开文件后都要更新交接/指纹；已发布的 0.1.8 附件不回写，下一次交付前重新打源码包，旧ZIP不能当作新版本。APK、用户数据和原始日志不提交Git；需要正式Release时另行验收、签名与授权发布。
+修改任何公开文件后都要更新交接/指纹；已发布的 0.1.9 附件不回写，下一次交付前重新打源码包，旧ZIP不能当作新版本。APK、用户数据和原始日志不提交Git；需要正式Release时另行验收、签名与授权发布。
 
-固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。0.1.8 已按该顺序交付到 `artifacts/releases/0.1.8/`，0.1.7及更早历史附件保持原样；后续发版仍由用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
+固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。0.1.9 已按该顺序交付到 `artifacts/releases/0.1.9/`，0.1.8及更早历史附件保持原样；后续发版仍由用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
 
-本轮工作分支为 `chore/autonomous-development-governance`，只改治理文档、门禁脚本/回归和 CI Host 步骤，经 PR 交付；0.1.8 及其更早交付附件保持原样。main 通过 PR 合入，由用户自行创建并合并 PR、创建 tag 及发布 Pre-release；Agent 不直推 main 或修改保护规则，合并前按 [编排规则](ORCHESTRATOR-RULES.md) 完成当前 SHA 的独立审查与适用验证。
+本轮为 0.1.10 本地发布准备（分支 `ao/xlsx-preview/release-0.1.10`，`/tmp` 独立 clone）；0.1.9 及更早交付附件保持原样。本版执行 push main、创建 tag `v0.1.10` 与 Pre-release、未上传；最终由用户确认合并与 Pre-release 上传，Agent 不直推 main 或修改保护规则，合并前按 [编排规则](ORCHESTRATOR-RULES.md) 完成当前 SHA 的独立审查与适用验证。
