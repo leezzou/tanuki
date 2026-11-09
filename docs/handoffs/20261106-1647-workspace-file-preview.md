@@ -17,7 +17,7 @@
 - 已验证：`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` BUILD SUCCESSFUL；126 个 JVM 测试，0 失败、0 错误、0 跳过（含新增 22 项）。
 - 待验证：真实设备上的手势、翻页、加密/损坏 PDF、真实复杂 DOCX 与深色主题；未运行 lint/assemble/仪器测试。
 - 当前基线：`main=cff09a377baf5d047990c0e81eb3984520e4a026`（PR #14 合并提交）；分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。初始代码提交 `dd3807bb5529c18c0e320ebdbc5de818b0f2788c`；review 修复后的最终 head 以 PR 页面为准。
-- 关键源码：[`WorkspaceFileManager.kt`](../../app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt)、[`DocxTextExtractor.kt`](../../app/src/main/kotlin/com/tanuki/storage/DocxTextExtractor.kt)、[`WorkspaceFileViewer.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt)、[`WorkspacePdfPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)、[`ZoomableContent.kt`](../../app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt)。
+- 关键源码：[`WorkspaceFileManager.kt`](../../app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt)、[DOCX 原生解析层](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxDocumentReader.kt)（F1 的纯文本提取器已由 android_agent-31 替换）、[`WorkspaceFileViewer.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt)、[`WorkspacePdfPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)、[`ZoomableContent.kt`](../../app/src/main/kotlin/com/tanuki/ui/ZoomableContent.kt)。
 
 ## 本次改动
 

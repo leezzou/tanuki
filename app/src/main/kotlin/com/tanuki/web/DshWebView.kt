@@ -40,6 +40,7 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     private var destroyed = false
     @Volatile private var cookiesSwitching = false
     @Volatile private var cookieSwitchLatch: java.util.concurrent.CountDownLatch? = null
+    @Volatile private var cookieSwitchPageStopped = false
     val needsRecreation:Boolean get()=destroyed
     val support=kotlinx.coroutines.flow.MutableStateFlow(WebViewSupport())
     private var probeId=0
@@ -101,6 +102,7 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
             }
             override fun onPageFinished(view: WebView, url: String) {
                 if (cookiesSwitching && url == "about:blank") {
+                    cookieSwitchPageStopped = true
                     cookieSwitchLatch?.countDown()
                     return
                 }
@@ -215,14 +217,17 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
         override fun beforeSwitch(): Boolean {
             if (destroyed) return true
             cookiesSwitching = true
+            cookieSwitchPageStopped = false
             val latch = java.util.concurrent.CountDownLatch(1)
             cookieSwitchLatch = latch
             activity.runOnUiThread {
                 if (destroyed) {
+                    cookieSwitchPageStopped = true
                     latch.countDown()
                     return@runOnUiThread
                 }
                 if (view.url.isNullOrBlank() || view.url == "about:blank") {
+                    cookieSwitchPageStopped = true
                     latch.countDown()
                     return@runOnUiThread
                 }
@@ -230,7 +235,8 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
                 view.loadUrl("about:blank")
                 view.postDelayed({ latch.countDown() }, 750)
             }
-            return latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            // 只有真正收到 about:blank 的 onPageFinished 才证明旧文档已退出；超时必须拒绝切换。
+            return latch.await(2, java.util.concurrent.TimeUnit.SECONDS) && cookieSwitchPageStopped
         }
 
         override fun afterSwitch() {
