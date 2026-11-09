@@ -53,7 +53,7 @@ class NpmDownloadPolicyTest {
         assertEquals(8, policy.current())
         policy.recordSuccess()
         assertEquals(10, policy.current())
-        repeat(24) { policy.recordSuccess() }
+        repeat(32) { policy.recordSuccess() }
         assertEquals(16, policy.current())
         repeat(8) { policy.recordSuccess() }
         assertEquals(16, policy.current())
@@ -63,6 +63,25 @@ class NpmDownloadPolicyTest {
         assertEquals(8, policy.current())
         policy.recordFailure()
         assertEquals(8, policy.current())
+    }
+
+    @Test fun externalCapLowersConcurrencyAndRestoresAfterRecovery() {
+        var cap = 16
+        val policy = NpmConcurrencyPolicy(capProvider = { cap })
+        repeat(32) { policy.recordSuccess() }
+        assertEquals(16, policy.current())
+
+        // 温控策略把上限降到 4 路：只影响新领取的归档，已开始的下载由池子自然收尾。
+        cap = 4
+        assertEquals(4, policy.current())
+
+        // 上限异常时仍保留至少一个 worker，避免队列完全停住。
+        cap = 0
+        assertEquals(1, policy.current())
+
+        // 设备恢复后上限回到 16，目标仍保留原来的 16。
+        cap = 16
+        assertEquals(16, policy.current())
     }
 
     @Test fun perHostLimiterAllowsAtMostEightConcurrentRequestsPerHost() = runBlocking {

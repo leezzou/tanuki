@@ -2,6 +2,17 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
+
+- 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查延后/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
+- 分支 `ao/thermal-policy/device-condition-policy`，基线 `main=2f3fac9`，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（5m29s，19 tasks）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 16 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
+- 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查延后与恢复、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
+- 完整 JVM：`./gradlew :app:testModernDebugUnitTest --rerun-tasks` → BUILD SUCCESSFUL（3m13s，28 tasks executed）；37 个结果文件，222 tests / 0 failures / 0 errors / 0 skipped（基线 205 + 新增 16 策略 + 1 下载上限）。
+- 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、lint/assemble/仪器测试。编译与 JVM 策略测试不能替代设备验收。
+
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
 - `v0.1.8` tag 指向 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（0.1.8 发布点）；远端 `main` 已前进到 `a9aa507c06883c62048a89924384ef0a10e01470`（Wave0 PR #10/#11/#12 合并）。`artifacts/releases/0.1.8/` 六附件齐全：APK、`app-update.json`、完整源码 ZIP、原生对应源码 TAR、`RELEASE-SHA256SUMS`、`native-source-SHA256SUMS`。

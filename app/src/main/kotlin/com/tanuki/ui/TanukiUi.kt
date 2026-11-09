@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.tanuki.R
+import com.tanuki.power.DeviceConditionState
 import com.tanuki.runtime.*
 import com.tanuki.storage.WorkspaceStorageState
 import com.tanuki.update.ApkUpdateCheckState
@@ -90,7 +92,8 @@ data class TanukiUiModel(
     val appInstallAllowed: Boolean = false,
     val apkUpdateCheck: ApkUpdateCheckState = ApkUpdateCheckState(),
     val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
-    val fileFullscreen: Boolean = false
+    val fileFullscreen: Boolean = false,
+    val deviceCondition: DeviceConditionState = DeviceConditionState()
 )
 
 data class TanukiUiCallbacks(
@@ -132,7 +135,9 @@ data class TanukiUiCallbacks(
     val checkAppUpdates: () -> Unit = {},
     val downloadAppUpdate: () -> Unit = {},
     val installAppUpdate: () -> Unit = {},
-    val cancelAppUpdate: () -> Unit = {}
+    val cancelAppUpdate: () -> Unit = {},
+    val setDeviceConditionEnabled: (Boolean) -> Unit = {},
+    val setLowBatteryThreshold: (Int) -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -559,7 +564,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         TanukiDetails("最近事件") { SelectableCopy(s.events.takeLast(12).joinToString("\n").ifBlank { "暂无事件" }) }
         TanukiDetails("脱敏日志") {
             val logs = model.liveLogs?.collectAsState()?.value ?: model.recentLogs
-            SelectableCopy(logs.takeLast(80).joinToString("\n").ifBlank { "暂无日志" })
+            // 热/低电时只减少界面展示行数，不影响落盘日志或正在执行的任务。
+            SelectableCopy(logs.takeLast(model.deviceCondition.logLineLimit.coerceAtLeast(1)).joinToString("\n").ifBlank { "暂无日志" })
         }
         if (s.error.isNotBlank()) SelectableCopy(s.error, error = true)
         }
@@ -626,6 +632,8 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         ActionRow("通知权限", "显示运行状态与停止入口", onClick = c.notifications)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        DeviceConditionSettings(model.deviceCondition, c)
         TanukiDetails("后台运行说明") {
             Caption("服务由你主动启动；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
         }
@@ -974,6 +982,37 @@ internal fun TanukiIcon(glyph: TanukiGlyph, description: String? = null, modifie
                 }
             }
             drawPath(path, tint, style = stroke)
+        }
+    }
+}
+
+/**
+ * 温控/省电设置。开关只影响非关键后台工作；阈值改变后立即重新采样，
+ * 正在运行的 DSH 任务和用户主动下载不会被取消。
+ */
+@Composable
+private fun DeviceConditionSettings(state: DeviceConditionState, c: TanukiUiCallbacks) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ToggleRow("温控与省电策略", state.enabled, c.setDeviceConditionEnabled)
+        Caption("温度、电量或内存紧张时降低后台更新、下载并发、日志与预览渲染；不暂停正在运行的 DSH 任务。")
+        Text("低电阈值", style = MaterialTheme.typography.bodyMedium)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(10, 15, 20, 25, 30).forEach { percent ->
+                FilterChip(
+                    selected = state.lowBatteryEnterPercent == percent,
+                    onClick = { c.setLowBatteryThreshold(percent) },
+                    label = { Text("${percent}%") },
+                )
+            }
+        }
+        Caption("低于阈值且未充电时暂停后台更新检查并把下载并发降到 4 路；退出阈值比进入阈值高 5 个百分点。")
+        Text("当前状态：${state.condition.label} · ${state.reasonText()}", style = MaterialTheme.typography.bodyMedium)
+        Caption("下载并发 ${state.workerCap} 路 · 日志 ${state.logLineLimit} 行 · PDF 预览上限 ${state.previewMaxDimension} 像素")
+        if (state.deferredWork.isNotEmpty()) {
+            Caption("后台更新检查已延后；状态恢复后由 WorkManager 自动补跑。")
         }
     }
 }

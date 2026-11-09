@@ -50,11 +50,15 @@ internal class PdfDocumentSession private constructor(
 ) : AutoCloseable {
     val pageCount: Int get() = renderer.pageCount
 
-    fun renderPage(index: Int): Bitmap {
+    fun renderPage(
+        index: Int,
+        maxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
+        maxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
+    ): Bitmap {
         require(index in 0 until pageCount) { "PDF 页码超出范围" }
         val page = renderer.openPage(index)
         try {
-            val size = PdfRenderPolicy.targetSize(page.width, page.height)
+            val size = PdfRenderPolicy.targetSize(page.width, page.height, maxDimension, maxPixels)
             val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
             try {
                 // PDF 页面本身是透明背景；铺白底避免深色主题下黑字看不清。
@@ -108,7 +112,13 @@ private data class PdfRenderResult(val pageCount: Int, val index: Int, val bitma
 
 /** 内置 PDF 逐页渲染；上一页/下一页、页码和缩放平移都在原生界面完成。 */
 @Composable
-internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Modifier = Modifier) {
+internal fun PdfPreview(
+    files: WorkspaceFileManager,
+    path: String,
+    modifier: Modifier = Modifier,
+    maxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
+    maxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
+) {
     var pageCount by remember(path) { mutableIntStateOf(0) }
     var pageIndex by remember(path) { mutableIntStateOf(0) }
     var bitmap by remember(path) { mutableStateOf<Bitmap?>(null) }
@@ -119,7 +129,7 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
         val current = bitmap
         onDispose { current?.takeUnless { it.isRecycled }?.recycle() }
     }
-    LaunchedEffect(path, pageIndex) {
+    LaunchedEffect(path, pageIndex, maxDimension, maxPixels) {
         loading = true
         error = null
         bitmap = null
@@ -131,7 +141,7 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                 try {
                     session = PdfDocumentSession.open(descriptor)
                     val index = pageIndex.coerceIn(0, session.pageCount - 1)
-                    PdfRenderResult(session.pageCount, index, session.renderPage(index).also { pending = it })
+                    PdfRenderResult(session.pageCount, index, session.renderPage(index, maxDimension, maxPixels).also { pending = it })
                 } finally {
                     if (session != null) session.close() else runCatching { descriptor.close() }
                 }
