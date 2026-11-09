@@ -194,10 +194,7 @@ class DshUpdateCheckRepository(private val paths: Paths) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
     private val mutable = MutableStateFlow(
-        BackgroundUpdateChecks.rebaseDshSnapshot(
-            saved = BackgroundUpdateChecks.decodeDsh(paths.read(FILE_NAME)),
-            installedVersion = installedVersion()
-        )
+        reconcileInstalled(BackgroundUpdateChecks.decodeDsh(paths.read(FILE_NAME)))
     )
     val state: StateFlow<DshUpdateCheckState> = mutable.asStateFlow()
     private var job: Job? = null
@@ -207,13 +204,22 @@ class DshUpdateCheckRepository(private val paths: Paths) {
         job = scope.launch { checkNow(force) }
     }
 
-    /** 实际安装版本变化时只重算本地可用性；不联网、不复用手动候选、不刷新 lastCheckedAt。 */
-    suspend fun syncInstalledVersion(installedVersion: String = installedVersion()) {
-        gate.withLock {
-            val updated = BackgroundUpdateChecks.rebaseDshSnapshot(mutable.value, installedVersion)
-            if (updated == mutable.value) return@withLock
-            mutable.value = updated
-            persist(updated)
+    /** 只按当前 installed.json 重算安装身份与可用性；保留 latest、检查时间、错误与通知去重。 */
+    fun reconcileInstalled(state: DshUpdateCheckState): DshUpdateCheckState =
+        BackgroundUpdateChecks.rebaseDshSnapshot(state, installedVersion())
+
+    /**
+     * 安装、切换或恢复 DSH 后调用：原子更新快照并持久化。
+     * 不联网、不复用手动候选、不刷新 lastCheckedAt。
+     */
+    fun refreshInstalled() {
+        scope.launch {
+            gate.withLock {
+                val updated = reconcileInstalled(mutable.value)
+                if (updated == mutable.value) return@withLock
+                mutable.value = updated
+                persist(updated)
+            }
         }
     }
 

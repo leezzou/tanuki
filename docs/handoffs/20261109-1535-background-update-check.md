@@ -32,10 +32,10 @@
 |---|---|
 | `app/build.gradle.kts` | 增加 WorkManager 依赖。 |
 | `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateChecks.kt` | 纯策略：30 分钟/24 小时间隔、唯一任务名、12 秒超时、版本比较、APK/DSH 状态编解码、DSH 安装身份重算、镜像回退、通知去重。 |
-| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt` | APK/DSH 两个独立仓库与受限 HTTPS 读取；恢复快照按当前安装身份重算；写 `apk-update-check.json`、`dsh-update-check.json`。 |
+| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt` | APK/DSH 两个独立仓库与受限 HTTPS 读取；`reconcileInstalled`/`refreshInstalled` 按当前安装身份重算快照；写 `apk-update-check.json`、`dsh-update-check.json`。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt` | 两个 `CoroutineWorker` 与 `UpdateCheckScheduler`（网络约束、UPDATE 唯一任务）。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateNotifier.kt` | `updates` 通知渠道、APK/DSH 通知、Android 13 权限检查。 |
-| `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 暴露两个仓库、注册周期任务，并观察 `RuntimeManager.state.dsh` 同步 DSH 快照。 |
+| `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 暴露两个仓库、注册周期任务，并观察 `RuntimeManager.state.dsh` 调用 `refreshInstalled()`。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 收集两份状态、手动检查申请通知权限；不再在 Activity 重建时回放旧同步。 |
 | `app/src/main/kotlin/com/tanuki/update/ApplicationUpdateManager.kt` | 手动 APK 检查成功时回调后台仓库，携带检查开始时间。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateManager.kt` | 手动 DSH 检查成功时回调后台仓库，携带检查开始时间；下载/安装逻辑未改。 |

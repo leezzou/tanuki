@@ -63,8 +63,8 @@ class TanukiApp : Application() {
         runtime = RuntimeManager(this)
         // 安装、切换或恢复 DSH 后只重算本地快照，不联网，也不覆盖已知远端 latest。
         runtime.scope.launch {
-            runtime.state.map { it.dsh }.distinctUntilChanged().collect { version ->
-                dshUpdateChecks.syncInstalledVersion(version)
+            runtime.state.map { it.dsh }.distinctUntilChanged().collect {
+                dshUpdateChecks.refreshInstalled()
             }
         }
         // 两个唯一周期任务由 WorkManager 持久化；UPDATE 保证重复启动不会堆积同名任务。
