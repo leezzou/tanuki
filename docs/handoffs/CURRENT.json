@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-1539-dsh-install-resilience.md",
-  "recordSha256": "b5a5687803246b04e336d802c87ae3c37f43ba16761ccbca97708f17d1bbc5c6",
-  "sourceFingerprint": "1f55657f4ca6411449b29b91b2cad2d831a5dd7ea4d2403f0c021a0d50346050",
-  "fileCount": 481
+  "record": "docs/handoffs/20261109-1810-remote-host-ssh.md",
+  "recordSha256": "8a1c49512e430fd9a00a60ab96a3fd7a43331e9e7be68cb0e7e8343b4b82c1b8",
+  "sourceFingerprint": "20ae8661e123c9a760e524ef27793d4f5a078a7d7fce480c222b8ca932f9a18a",
+  "fileCount": 507
 }

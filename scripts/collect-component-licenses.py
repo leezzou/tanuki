@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """Record the actual resolved Android runtime artifacts; no network or credentials."""
 from pathlib import Path
-import io,json,re,zipfile,xml.etree.ElementTree as ET
+import io,json,os,re,zipfile,xml.etree.ElementTree as ET
 
 project=Path(__file__).resolve().parent.parent
 entries=json.loads((project/'.build/runtime-dependencies.json').read_text())
-cache=Path.home()/'.gradle/caches/modules-2/files-2.1'
+# AO worktree 使用独立 GRADLE_USER_HOME；优先从当前构建缓存读取 POM/通知。
+cache_roots=[]
+if os.environ.get('GRADLE_USER_HOME'):
+    cache_roots.append(Path(os.environ['GRADLE_USER_HOME'])/'caches/modules-2/files-2.1')
+cache_roots.append(Path.home()/'.gradle/caches/modules-2/files-2.1')
+def artifact_dir(group,name,version):
+    for root in cache_roots:
+        candidate=root/group/name/version
+        if candidate.is_dir(): return candidate
+    return None
 notices=project/'licenses/android-runtime-notices'
 notices.mkdir(parents=True,exist_ok=True)
 rows=[];records=[]
@@ -15,7 +24,8 @@ for entry in entries:
     coordinate=f'{group}:{name}:{version}'
     folder=notices/f'{group}-{name}-{version}'
     folder.mkdir(exist_ok=True)
-    poms=sorted((cache/group/name/version).glob('*/*.pom'))
+    folder_dir=artifact_dir(group,name,version)
+    poms=sorted(folder_dir.glob('*/*.pom')) if folder_dir else []
     declared=[]
     if poms:
         pom=poms[0]

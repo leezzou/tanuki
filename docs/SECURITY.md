@@ -30,6 +30,14 @@ Tanuki APK 更新只使用本仓库 HTTPS 公开 Release/附件，不调用 GitH
 
 API Key 通过官方 Web UI 配置，不编译入 APK 或写进仓库。账号和会话保存在 App 私有空间；关闭 Android 自动备份，并通过 dataExtractionRules 排除云备份和设备迁移。内部快照可能包含凭据，不能直接明文分享。SAF 项目导出不含 userdata，排除常见凭据文件；源文件仍需用户自行检查。文件管理器按用户要求声明所有文件访问权限（Android 11+由系统设置明确授权，旧版为读取存储权限），用于原生手机共享存储浏览；不因此开放其他应用私有数据、网页读取桥或 DSH 自动挂载。外部应用只获得用户选中单文件缓存副本的临时只读 URI，专用 FileProvider 不接受写模式，不共享工作区或整个存储根。权限范围以 [Android 官方说明](https://developer.android.com/training/data-storage/manage-all-files) 为准。
 
+远程主机直连切片（SSH 本地端口转发）的边界：
+
+- 主机、端口、用户名和远程 DSH 端口是非敏感配置；密码、私钥、私钥口令和远程 token 只经 Android Keystore 的 AES-256-GCM 密钥加密后写入应用私有 SharedPreferences。Keystore 不可用或解密失败时直接拒绝连接，不降级为明文、不导出到项目 ZIP 或日志；`RemoteHostConfig`/`RemoteEndpoint` 的 `toString()` 固定脱敏。
+- 首次连接先读取远程主机公钥并以 `SHA256:` 指纹请求用户确认，确认前不发送密码/私钥；之后按 `host:sshPort` 比对，指纹变化直接拒绝。当前每个主机只记录一个活动主机密钥算法，RSA/ECDSA 支持，Ed25519 待后续。
+- 远程 origin 仍是精确的 `http://127.0.0.1:<本地转发端口>`；本地转发只绑定 loopback。远程 token 只拼到该 loopback 启动 URL，经 SSH 隧道传输，不直接连接远程端口、不写日志。
+- 连接失败或隧道断开关闭会话并恢复本地端点；管理 WebView 的 origin 隔离、TLS/明文策略、Cookie 校验和 Blob 导出边界不复用远程主机凭据，也不因远程模式放宽。
+- 这是用户主动配置的 SSH 通道，不是恶意远程主机沙箱，也不提供中继/WebRTC、远程 DSH 启停或多主机隔离。
+
 停止只作用于本 App 记录的 Java Process 与相应进程组，发送信号前检查 /proc starttime，防止 PID 重用；不使用 killall node。supervisor 设置独立 session 和 parent-death 信号，PRoot 额外启用 PTRACE_O_EXITKILL，避免 tracer 消失后客体失去路径转换仍继续执行。进程退出后不自动重放用户操作。系统强制停止后的恢复以实际文件和新进程检查为准。
 
 手机文件工具使用独立loopback RPC、随机短期连接能力与原生授权状态；拒绝网页Origin、未认证/超限/未知方法请求，接口不提供自授权写入方法。DSH只挂载工具客户端与私有连接描述，真实手机卷不直接bind；默认读取，写入必须由用户在原生文件页单独允许，停止DSH/撤回/进程重启默认恢复只读。每次分块及提交核对授权epoch、系统权限与路径/原版本；读写限制作用于此受控接口，不把PRoot或同UID连接能力宣传为恶意代码沙箱。客户端/服务不在日志中输出token或原始手机文件内容；测试只用新建UUID合成文件。实现见storage/PhoneFileAccess.kt、PhoneFileService.kt、PhoneFileIntegration.kt及assets/phone。

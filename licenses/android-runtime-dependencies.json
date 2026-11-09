@@ -641,6 +641,22 @@
   },
   {
     "group": "androidx.lifecycle",
+    "name": "lifecycle-livedata",
+    "version": "2.9.4",
+    "filename": "lifecycle-livedata-2.9.4.aar",
+    "sha256": "f240c2c94a96d4a5eae5d379c2a8589d426a33b989d83ae9f0e01f69502c0181",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": [
+      "META-INF_androidx_lifecycle_lifecycle-livedata_LICENSE.txt"
+    ]
+  },
+  {
+    "group": "androidx.lifecycle",
     "name": "lifecycle-livedata-core",
     "version": "2.9.4",
     "filename": "lifecycle-livedata-core-2.9.4.aar",
@@ -733,6 +749,22 @@
     ],
     "noticeFiles": [
       "META-INF_androidx_lifecycle_lifecycle-runtime-ktx_LICENSE.txt"
+    ]
+  },
+  {
+    "group": "androidx.lifecycle",
+    "name": "lifecycle-service",
+    "version": "2.9.4",
+    "filename": "lifecycle-service-2.9.4.aar",
+    "sha256": "674155d592d5de18175ef0727442f7827a86cf8fe68d9927ba6a4140b69a5bc9",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": [
+      "META-INF_androidx_lifecycle_lifecycle-service_LICENSE.txt"
     ]
   },
   {
@@ -858,6 +890,48 @@
     ]
   },
   {
+    "group": "androidx.room",
+    "name": "room-common",
+    "version": "2.5.0",
+    "filename": "room-common-2.5.0.jar",
+    "sha256": "0262e2a0e2a2e9c7267b9f7a405847ce636a06c4c16c52976cb68df77866b87d",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "androidx.room",
+    "name": "room-ktx",
+    "version": "2.5.0",
+    "filename": "room-ktx-2.5.0.aar",
+    "sha256": "10f76df56222534c7bf87c98643d6a0fdb7e9d342396a679c315e11036b045f1",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "androidx.room",
+    "name": "room-runtime",
+    "version": "2.5.0",
+    "filename": "room-runtime-2.5.0.aar",
+    "sha256": "9882841877a4437f2002ed9d353f757a5452e13b4ab0ebf195c63ccf0e2e0847",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
     "group": "androidx.savedstate",
     "name": "savedstate-android",
     "version": "1.3.3",
@@ -904,6 +978,34 @@
     "noticeFiles": [
       "META-INF_androidx_savedstate_savedstate-ktx_LICENSE.txt"
     ]
+  },
+  {
+    "group": "androidx.sqlite",
+    "name": "sqlite",
+    "version": "2.3.0",
+    "filename": "sqlite-2.3.0.aar",
+    "sha256": "d3d37e2403c523a5cee1983b27a6de7ad8dcbb502f446c3f76fca50ed73ce562",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "androidx.sqlite",
+    "name": "sqlite-framework",
+    "version": "2.3.0",
+    "filename": "sqlite-framework-2.3.0.aar",
+    "sha256": "8b5bd3acef01ea781a8545bdf710b1c06182417669a1a68cd0ae4a536cdae827",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
   },
   {
     "group": "androidx.startup",
@@ -1010,6 +1112,60 @@
     ]
   },
   {
+    "group": "androidx.work",
+    "name": "work-runtime",
+    "version": "2.9.1",
+    "filename": "work-runtime-2.9.1.aar",
+    "sha256": "1be76486b894af179462941a39cab242b00d7235c3aeb4d756f45262b0c2e4a3",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "androidx.work",
+    "name": "work-runtime-ktx",
+    "version": "2.9.1",
+    "filename": "work-runtime-ktx-2.9.1.aar",
+    "sha256": "8f4cc53ac1879665b14d2f17ad4fbcb3045a4b74774250b99829b1c13f7b7728",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "com.github.mwiede",
+    "name": "jsch",
+    "version": "2.28.8",
+    "filename": "jsch-2.28.8.jar",
+    "sha256": "2afca1357d816028f2ac33f22407d2488a68406682973949cebb1b8ea6688a8b",
+    "licenses": [
+      {
+        "name": "Revised BSD",
+        "url": "https://github.com/mwiede/jsch/blob/master/LICENSE.txt"
+      },
+      {
+        "name": "Revised BSD",
+        "url": "https://github.com/mwiede/jsch/blob/master/LICENSE.JZlib.txt"
+      },
+      {
+        "name": "ISC",
+        "url": "https://github.com/mwiede/jsch/blob/master/LICENSE.jBCrypt.txt"
+      }
+    ],
+    "noticeFiles": [
+      "META-INF_LICENSE.JZlib.txt",
+      "META-INF_LICENSE.jBCrypt.txt",
+      "META-INF_LICENSE.txt"
+    ]
+  },
+  {
     "group": "com.google.guava",
     "name": "listenablefuture",
     "version": "1.0",
@@ -1103,6 +1259,34 @@
     "licenses": [
       {
         "name": "Apache-2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "org.jetbrains.kotlin",
+    "name": "kotlin-stdlib-jdk7",
+    "version": "1.8.0",
+    "filename": "kotlin-stdlib-jdk7-1.8.0.jar",
+    "sha256": "4c889d1d9803f5f2eb6c1592a6b7e62369ac7660c9eee15aba16fec059163666",
+    "licenses": [
+      {
+        "name": "The Apache License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
+    "group": "org.jetbrains.kotlin",
+    "name": "kotlin-stdlib-jdk8",
+    "version": "1.8.0",
+    "filename": "kotlin-stdlib-jdk8-1.8.0.jar",
+    "sha256": "05b62804441b0c9a1920b6b7d5cf7329a4e24b6258478e32b1f046ca01900946",
+    "licenses": [
+      {
+        "name": "The Apache License, Version 2.0",
         "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
       }
     ],

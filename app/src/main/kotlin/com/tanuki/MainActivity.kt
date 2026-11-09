@@ -248,6 +248,7 @@ class MainActivity : ComponentActivity() {
                 val appUpdate by appUpdates.state.collectAsState()
                 val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
                 val dshUpdateCheck by dshUpdateChecks.state.collectAsState()
+                val remoteHost by manager.remoteHost.ui.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
                 val ubuntuSources=remember(components.selectedUbuntuVersion) { manager.components.sources(RuntimeComponent.UBUNTU) }
                 val nodeSources=remember(components.selectedNodeVersion) { manager.components.sources(RuntimeComponent.NODE) }
@@ -304,7 +305,10 @@ class MainActivity : ComponentActivity() {
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
                         appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
-                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck),
+                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,
+                        remoteHost=remoteHost.saved,remote=remoteHost.status,remoteBusy=remoteHost.busy,
+                        remoteMessage=remoteHost.message,remoteError=remoteHost.error,
+                        remotePendingFingerprint=remoteHost.pendingFingerprint),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -382,7 +386,13 @@ class MainActivity : ComponentActivity() {
                         checkAppUpdates = { requestUpdateNotifications(); appUpdates.check() },
                         downloadAppUpdate = appUpdates::download,
                         installAppUpdate = ::confirmApplicationUpdate,
-                        cancelAppUpdate = appUpdates::cancel
+                        cancelAppUpdate = appUpdates::cancel,
+                        testRemoteHost = manager.remoteHost::test,
+                        connectRemoteHost = manager.remoteHost::connect,
+                        confirmRemoteHostKey = manager.remoteHost::confirmHostKey,
+                        cancelRemoteHostKey = manager.remoteHost::cancelHostKey,
+                        disconnectRemoteHost = manager.remoteHost::disconnect,
+                        forgetRemoteHost = manager.remoteHost::forget
                     ),
                     browserView = browser.view,
                     browserOpenRequest = browserOpenRequest,

@@ -90,7 +90,13 @@ data class TanukiUiModel(
     val appInstallAllowed: Boolean = false,
     val apkUpdateCheck: ApkUpdateCheckState = ApkUpdateCheckState(),
     val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
-    val fileFullscreen: Boolean = false
+    val fileFullscreen: Boolean = false,
+    val remoteHost: RemoteHostConfig? = null,
+    val remote: RemoteHostStatus = RemoteHostStatus(),
+    val remoteBusy: Boolean = false,
+    val remoteMessage: String = "",
+    val remoteError: String = "",
+    val remotePendingFingerprint: String? = null
 )
 
 data class TanukiUiCallbacks(
@@ -132,7 +138,13 @@ data class TanukiUiCallbacks(
     val checkAppUpdates: () -> Unit = {},
     val downloadAppUpdate: () -> Unit = {},
     val installAppUpdate: () -> Unit = {},
-    val cancelAppUpdate: () -> Unit = {}
+    val cancelAppUpdate: () -> Unit = {},
+    val testRemoteHost: (RemoteHostConfig) -> Unit = {},
+    val connectRemoteHost: (RemoteHostConfig) -> Unit = {},
+    val confirmRemoteHostKey: () -> Unit = {},
+    val cancelRemoteHostKey: () -> Unit = {},
+    val disconnectRemoteHost: () -> Unit = {},
+    val forgetRemoteHost: () -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -161,15 +173,15 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     }
     LaunchedEffect(browserOpenRequest) { if (browserOpenRequest > 0) navigate(3) }
     val s = model.snapshot
-    LaunchedEffect(tab, s.service) {
-        if (tab == 1 && s.service == ServiceState.RUNNING) callbacks.connectDsh()
+    LaunchedEffect(tab, s.service, s.remote.phase, s.remote.localPort) {
+        if (tab == 1 && (s.service == ServiceState.RUNNING || s.remote.connected)) callbacks.connectDsh()
     }
     LaunchedEffect(activeFullscreen) { callbacks.setFullscreen(activeFullscreen) }
     DisposableEffect(Unit) { onDispose { callbacks.setFullscreen(false) } }
     BackHandler(tab == 1) {
         if (activeFullscreen) {
             fullscreen = false
-        } else if (s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED &&
+        } else if ((s.service == ServiceState.RUNNING || s.remote.connected) && model.support.state == WebViewSupportState.SUPPORTED &&
             s.web != WebState.RENDER_ERROR && browserView.canGoBack()) browserView.goBack() else tab = 0
     }
     var settingsReturn by rememberSaveable { mutableIntStateOf(0) }
@@ -576,6 +588,7 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
             "项目与备份" to "文件导入、项目导出与私有快照",
             "组件维护与诊断" to "Ubuntu、Node.js、DSH 的版本与维护",
             "运行与后台" to "通知权限、电池设置与后台运行",
+            "远程主机" to "通过 SSH 隧道连接远程 DSH（直连切片）",
             "网页与兼容性" to "WebView 内核更新与能力检测",
             "高级与关于" to "兼容选项、缓存与许可来源")
         Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -601,6 +614,7 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         return
     }
     if (section == "组件维护与诊断") { EnvironmentSection(model, c); return }
+    if (section == "远程主机") { RemoteHostSettings(model, c); return }
     if (section == "存储与空间") TanukiCard {
         WorkspaceStorageControls(model.workspaceStorage, s.tanukiIdle,
             onRefresh = c.refreshWorkspaceStorage, onSave = c.saveWorkspaceCapacity)
@@ -680,7 +694,8 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
     val density = LocalDensity.current
     var headerPixels by remember { mutableIntStateOf(with(density) { 60.dp.roundToPx() }) }
     val topInset = if (fullscreen) 0.dp else with(density) { headerPixels.toDp() }
-    val showBrowser = s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED && s.web != WebState.RENDER_ERROR
+    val remoteActive = s.remote.connected
+    val showBrowser = (s.service == ServiceState.RUNNING || remoteActive) && model.support.state == WebViewSupportState.SUPPORTED && s.web != WebState.RENDER_ERROR
     val originalLayer = remember(browser) { browser.layerType }
     DisposableEffect(browser, fullscreen) {
         // On some WebView/GPU combinations the direct draw path goes blank when system
@@ -709,16 +724,26 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
             TanukiCard {
                 TanukiIcon(TanukiGlyph.Terminal, tint = MaterialTheme.colorScheme.primary)
                 Text(when {
+                    remoteActive -> "远程 DSH 已连接"
                     s.service != ServiceState.RUNNING -> "工作空间尚未启动"
                     s.web == WebState.RENDER_ERROR -> "网页渲染已中断"
                     else -> "先准备兼容的网页内核"
                 }, style = MaterialTheme.typography.titleLarge)
-                Fact("DSH 进程", s.service.label)
-                Fact("本机 Web 服务", if (s.webHealthy) "就绪" else "未就绪")
+                if (remoteActive) {
+                    Fact("远程主机", s.remote.host)
+                    Fact("SSH 隧道", "127.0.0.1:${s.remote.localPort ?: "分配中"}")
+                    Fact("主机密钥", s.remote.fingerprint)
+                    Caption("远程 token 只通过本机 SSH 隧道传输；本地运行时保持原状。")
+                } else {
+                    Fact("DSH 进程", s.service.label)
+                    Fact("本机 Web 服务", if (s.webHealthy) "就绪" else "未就绪")
+                }
                 Caption("网页状态：${s.web.label}")
-                if (s.service != ServiceState.RUNNING) Button(onClick = { c.command(if (s.environment == EnvironmentState.READY) "START" else "INIT") },
+                if (!remoteActive && s.service != ServiceState.RUNNING) Button(onClick = { c.command(if (s.environment == EnvironmentState.READY) "START" else "INIT") },
                     enabled = !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { Text(if (s.environment == EnvironmentState.READY) "启动 DSH" else "下载并准备环境") }
-                if (s.web == WebState.RENDER_ERROR) OutlinedButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING) { Text("恢复网页连接") }
+                if (remoteActive) OutlinedButton(onClick = { c.disconnectRemoteHost() }) { Text("断开远程并切回本地") }
+                if (s.web == WebState.RENDER_ERROR) OutlinedButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING || remoteActive) { Text("恢复网页连接") }
+                if (s.remote.error.isNotBlank()) Caption(s.remote.error)
                 if (s.error.isNotBlank()) TanukiDetails("查看失败信息") { SelectableCopy(s.error, error = true) }
             }
             OperationCard(s, c)
@@ -730,11 +755,11 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                 IconButton(onClick = home) { TanukiIcon(TanukiGlyph.Back, "返回概览") }
                 Column(Modifier.weight(1f)) {
                     Text("DSH", style = MaterialTheme.typography.titleMedium)
-                    Text(s.web.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (remoteActive) "远程 · ${s.remote.host}" else s.web.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = openBrowserWindow) { TanukiIcon(TanukiGlyph.Browser, "浏览器小窗") }
                 IconButton(onClick = { onFullscreen(true) }) { TanukiIcon(TanukiGlyph.Expand, "进入全屏") }
-                IconButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING && model.support.state == WebViewSupportState.SUPPORTED) {
+                IconButton(onClick = { c.command("RECONNECT") }, enabled = (s.service == ServiceState.RUNNING || remoteActive) && model.support.state == WebViewSupportState.SUPPORTED) {
                     TanukiIcon(TanukiGlyph.Refresh, "重新连接 DSH 网页")
                 }
                 IconButton(onClick = settings) { TanukiIcon(TanukiGlyph.Settings, "设置") }

@@ -39,6 +39,14 @@ class RuntimeManager(val context: Context) {
     val log = EventLog(paths, scope)
     val launcher = Launcher(context, paths, log)
     val state = MutableStateFlow(Snapshot())
+    private val remoteMachine = RemoteHostMachine()
+    val remoteHost = RemoteHostController(
+        storage = androidRemoteHostStorage(context),
+        transport = JschSshTransport(),
+        scope = scope,
+        machine = remoteMachine,
+        onStatus = { status -> state.update { it.copy(remote = status) } }
+    )
     val fileTransfers = FileTransfers { android.os.SystemClock.elapsedRealtime() }
     val phoneFiles = com.tanuki.storage.PhoneFileService(context, paths, fileTransfers)
     val mutation = Mutex()
@@ -57,10 +65,8 @@ class RuntimeManager(val context: Context) {
     val npmSources = NpmSources(this)
     private val browserGeneration=AtomicLong()
     val hasActiveOperation: Boolean get() = job?.isActive == true || serverJob?.isActive == true || mutation.isLocked
-    @Volatile var authenticatedUrl: String? = null
-        private set
-    @Volatile var origin: String? = null
-        private set
+    val authenticatedUrl: String? get() = remoteMachine.authenticatedUrl
+    val origin: String? get() = remoteMachine.origin
     init {
         val componentRecovery=runCatching { components.recover() }
         val restoreRecovery=runCatching { com.tanuki.storage.DataSnapshots.recoverPreparedRestore(paths) }
@@ -546,10 +552,10 @@ class RuntimeManager(val context: Context) {
                         check(state.value.environment == EnvironmentState.READY) { "请先完成初始化" }
                         check(state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先恢复匹配快照或完成中断版本检查" }
                         workspaceStorage.requireCanStart()
-                        state.update { it.copy(service = ServiceState.STARTING, web = WebState.DISCONNECTED, webHealthy = false, error = "") }; paths.atomic("service", "starting")
+                        state.update { it.copy(service = ServiceState.STARTING, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, webHealthy = false, error = "") }; paths.atomic("service", "starting")
                         ensurePnpm()
                         ensureWorkspaceSupport()
-                        authenticatedUrl = null; origin = null
+                        clearLocalEndpoint()
                         val v = paths.metadata().getString("dsh")
                         components.checkDshNodeCompatibility(v)
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
@@ -561,8 +567,8 @@ class RuntimeManager(val context: Context) {
                         // Collection lives independently of the Activity and of the environment mutex.
                         val completion = scope.async { launcher.collect(c) { raw -> captureUrl(raw) } }
                         withTimeout(180000) {
-                            while (authenticatedUrl == null) { check(c.process.isAlive) { "DSH 在就绪前退出" }; delay(200) }
-                            while (!httpReady()) { check(c.process.isAlive); delay(300) }
+                            while (remoteMachine.localAuthenticatedUrl == null) { check(c.process.isAlive) { "DSH 在就绪前退出" }; delay(200) }
+                            while (!httpReady(remoteMachine.localOrigin)) { check(c.process.isAlive); delay(300) }
                         }
                         File(paths.engines, "$v/.web-verified").writeText("${Build.MODEL}; API ${Build.VERSION.SDK_INT}; target ${context.applicationInfo.targetSdkVersion}; debug ${BuildConfig.DEBUG}")
                         state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true) }; paths.atomic("service", "running"); paths.atomic("last-error",""); event("DSH 本机服务已就绪")
@@ -576,8 +582,8 @@ class RuntimeManager(val context: Context) {
                             while (child === c && c.process.isAlive) {
                                 delay(10000)
                                 if (child !== c || !c.process.isAlive) break
-                                val healthy = httpReady()
-                                state.update { it.copy(webHealthy = healthy, web = if (!healthy) WebState.DISCONNECTED else it.web) }
+                                val healthy = httpReady(remoteMachine.localOrigin)
+                                state.update { it.copy(webHealthy = healthy, web = if (!healthy && !remoteMachine.remoteActive) WebState.DISCONNECTED else it.web) }
                             }
                         }
                         scope.launch {
@@ -587,9 +593,9 @@ class RuntimeManager(val context: Context) {
                             }
                             if (child === c && !stopping) {
                                 phoneFiles.stop()
-                                child = null; authenticatedUrl = null; origin = null
+                                child = null; clearLocalEndpoint()
                                 val stopped = state.value.service == ServiceState.STOPPING
-                                state.update { it.copy(service = if (stopped) ServiceState.STOPPED else ServiceState.INTERRUPTED, webHealthy = false, web = WebState.DISCONNECTED, error = if (stopped) it.error else "DSH 退出 ${result.exitCode}；任务最终状态无法确认，不自动重放") }
+                                state.update { it.copy(service = if (stopped) ServiceState.STOPPED else ServiceState.INTERRUPTED, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, error = if (stopped) it.error else "DSH 退出 ${result.exitCode}；任务最终状态无法确认，不自动重放") }
                                 paths.atomic("service", if (stopped) "stopped" else "interrupted")
                             }
                         }
@@ -598,7 +604,7 @@ class RuntimeManager(val context: Context) {
                             withContext(NonCancellable) {
                                 child?.stop()
                                 phoneFiles.stop()
-                                child = null; authenticatedUrl = null; origin = null
+                                child = null; clearLocalEndpoint()
                             }
                         }.exceptionOrNull()
                         if (t is CancellationException && t !is TimeoutCancellationException) {
@@ -612,16 +618,23 @@ class RuntimeManager(val context: Context) {
             }
         }
     }
+    /** 只清理本地 DSH 端点；远程隧道仍在时保持远程 origin。 */
+    private fun clearLocalEndpoint() {
+        remoteMachine.localCleared()
+        state.update { it.copy(remote = remoteMachine.status) }
+    }
     private fun captureUrl(line: String) {
         if (!line.contains("dsh web:")) return
         val candidate = Regex("http://127\\.0\\.0\\.1:\\d+/[^\\s\\u001B]*").find(line)?.value ?: return
         val uri = runCatching { URI(candidate) }.getOrNull() ?: return
         if (uri.host == "127.0.0.1" && uri.port in 1..65535 && uri.userInfo == null && uri.rawQuery != null) {
-            origin = "http://127.0.0.1:${uri.port}"; authenticatedUrl = candidate
+            remoteMachine.localConnected("http://127.0.0.1:${uri.port}", candidate)
+            state.update { it.copy(remote = remoteMachine.status) }
         }
     }
-    private fun httpReady(): Boolean = runCatching {
-        val c = URL("${origin ?: return false}/").openConnection() as HttpURLConnection
+    /** 本地就绪检查必须绑定本地端点；远程模式不能拿远程 origin 冒充本地进程健康。 */
+    private fun httpReady(endpoint: String?): Boolean = runCatching {
+        val c = URL("${endpoint ?: return false}/").openConnection() as HttpURLConnection
         c.connectTimeout = 2000; c.readTimeout = 2000; c.instanceFollowRedirects = false
         try { c.responseCode in 200..399 || c.responseCode == 401 } finally { c.disconnect() }
     }.getOrDefault(false)
@@ -678,15 +691,14 @@ class RuntimeManager(val context: Context) {
                 phoneFiles.stop()
                 child = null
                 workspaceMonitor = null
-                authenticatedUrl = null
-                origin = null
+                clearLocalEndpoint()
                 val final = if (stopWasRequested) ServiceState.STOPPED else when (before) {
                     ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING -> ServiceState.INTERRUPTED
                     else -> before
                 }
                 runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
                 val interrupted = reason?.let { "$it；DSH 已停止，任务可能中断，不会自动重放。请调整预算或清理空间后手动启动" }
-                state.update { it.copy(service = final, webHealthy = false, web = WebState.DISCONNECTED, error = interrupted ?: it.error) }
+                state.update { it.copy(service = final, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, error = interrupted ?: it.error) }
                 if (interrupted != null) {
                     paths.atomic("last-error", interrupted)
                     event(interrupted)

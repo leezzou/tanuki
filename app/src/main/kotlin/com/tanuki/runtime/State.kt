@@ -36,7 +36,8 @@ data class Snapshot(
     val dsh: String = "未安装", val candidate: String = "", val events: List<String> = emptyList(),
     val phasePercent: Int? = null,
     val operation: String? = null,
-    val timing: OperationTiming = OperationTiming()
+    val timing: OperationTiming = OperationTiming(),
+    val remote: RemoteHostStatus = RemoteHostStatus()
 )
 class Paths(context: Context) {
     val base = context.filesDir

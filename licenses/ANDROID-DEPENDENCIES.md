@@ -1,6 +1,6 @@
 # Android 运行依赖实际清单
 
-由 Gradle modernProbeRuntimeClasspath 实际解析结果生成，共 79 个 AAR/JAR。哈希对应构建缓存中的真实归档；许可证声明来自发布 POM，归档内可识别的 LICENSE / NOTICE 文本一同保留。此表不包含构建工具、测试库或手机首次下载的 Ubuntu / Node / DSH。完整法律审阅仍需核对缺失声明和上游要求。
+由 Gradle modernProbeRuntimeClasspath 实际解析结果生成，共 91 个 AAR/JAR。哈希对应构建缓存中的真实归档；许可证声明来自发布 POM，归档内可识别的 LICENSE / NOTICE 文本一同保留。此表不包含构建工具、测试库或手机首次下载的 Ubuntu / Node / DSH。完整法律审阅仍需核对缺失声明和上游要求。
 
 | 组件 | 发布 POM 的许可声明 | 归档 SHA-256 |
 |---|---|---|
@@ -46,12 +46,14 @@
 | `androidx.lifecycle:lifecycle-common-java8:2.9.4` | The Apache Software License, Version 2.0 | `497dd84de9f2fd46324f25f9a3af032d3a23d087e87af515c4b19435f6d6a651` |
 | `androidx.lifecycle:lifecycle-common-jvm:2.9.4` | The Apache Software License, Version 2.0 | `37d89b2101f074ac6c260917dabb185607645ee200aa3018c7c5bde70edcf184` |
 | `androidx.lifecycle:lifecycle-livedata:2.9.4` | The Apache Software License, Version 2.0 | `f240c2c94a96d4a5eae5d379c2a8589d426a33b989d83ae9f0e01f69502c0181` |
+| `androidx.lifecycle:lifecycle-livedata:2.9.4` | The Apache Software License, Version 2.0 | `f240c2c94a96d4a5eae5d379c2a8589d426a33b989d83ae9f0e01f69502c0181` |
 | `androidx.lifecycle:lifecycle-livedata-core:2.9.4` | The Apache Software License, Version 2.0 | `ea866f0c379d1f92837994010ab5ac0a5d5499dbab521efc71b3bc2b497d6ba4` |
 | `androidx.lifecycle:lifecycle-livedata-core-ktx:2.9.4` | The Apache Software License, Version 2.0 | `f55b7a8d433e9b8163154ccaa42fa2be55c70cd1ede5eeea521a4b4b884dd4fe` |
 | `androidx.lifecycle:lifecycle-process:2.9.4` | The Apache Software License, Version 2.0 | `4784b8d083c211e076d9115bfa1737f7e0f62b553e801cf50caa4400e34a95d6` |
 | `androidx.lifecycle:lifecycle-runtime-android:2.9.4` | The Apache Software License, Version 2.0 | `86f16a1330eb23600ba90d0334b3e1db38d3a30c8b1efcd92ca21aa85afa8173` |
 | `androidx.lifecycle:lifecycle-runtime-compose-android:2.9.4` | The Apache Software License, Version 2.0 | `b6803f906a89fd85c77df343dd4aeeb349125ca79e12d55d68d4cf42f42231f6` |
 | `androidx.lifecycle:lifecycle-runtime-ktx-android:2.9.4` | The Apache Software License, Version 2.0 | `970199c9ed1ac13d620aa8de7f8abbc28ce80653c3ce328d0ac2f15272b56e1b` |
+| `androidx.lifecycle:lifecycle-service:2.9.4` | The Apache Software License, Version 2.0 | `674155d592d5de18175ef0727442f7827a86cf8fe68d9927ba6a4140b69a5bc9` |
 | `androidx.lifecycle:lifecycle-viewmodel:2.9.4` | The Apache Software License, Version 2.0 | `cab404b05d5faed209104a2aef14c0cbb316ab9fabe4a8f037b043e5d2f43435` |
 | `androidx.lifecycle:lifecycle-viewmodel-android:2.9.4` | The Apache Software License, Version 2.0 | `4b236b2e504db5ca5d09334fef05aa8cdc31ee35a433c3aa4d0420efa9613332` |
 | `androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4` | The Apache Software License, Version 2.0 | `b7d58bb86bb8e2ccc607d1f8570e714810f7cfb3feba37d375ff1646383435a1` |
@@ -60,9 +62,14 @@
 | `androidx.localbroadcastmanager:localbroadcastmanager:1.0.0` | The Apache Software License, Version 2.0 | `e71c328ceef5c4a7d76f2d86df1b65d65fe2acf868b1a4efd84a3f34336186d8` |
 | `androidx.print:print:1.0.0` | The Apache Software License, Version 2.0 | `1d5c7f3135a1bba661fc373fd72e11eb0a4adbb3396787826dd8e4190d5d9edd` |
 | `androidx.profileinstaller:profileinstaller:1.4.0` | The Apache Software License, Version 2.0 | `d502141fcce902430f62b674c32aecd0f75262e7ee2cd15c74adb617cd13130a` |
+| `androidx.room:room-common:2.5.0` | The Apache Software License, Version 2.0 | `0262e2a0e2a2e9c7267b9f7a405847ce636a06c4c16c52976cb68df77866b87d` |
+| `androidx.room:room-ktx:2.5.0` | The Apache Software License, Version 2.0 | `10f76df56222534c7bf87c98643d6a0fdb7e9d342396a679c315e11036b045f1` |
+| `androidx.room:room-runtime:2.5.0` | The Apache Software License, Version 2.0 | `9882841877a4437f2002ed9d353f757a5452e13b4ab0ebf195c63ccf0e2e0847` |
 | `androidx.savedstate:savedstate-android:1.3.3` | The Apache Software License, Version 2.0 | `3d40baf742e6bdc90ada4650502e1d08c55cb5d8c045870d2c7c6d89f237d064` |
 | `androidx.savedstate:savedstate-compose-android:1.3.3` | The Apache Software License, Version 2.0 | `ec3c09338a005136697824e8ca52ebb4a51b055258e670d4bd2e1f992e32945e` |
 | `androidx.savedstate:savedstate-ktx:1.3.3` | The Apache Software License, Version 2.0 | `c4df27ba3fef3674da4c5cae64f43ff251f8f9b7507c6597e95a5b7f64860c6c` |
+| `androidx.sqlite:sqlite:2.3.0` | The Apache Software License, Version 2.0 | `d3d37e2403c523a5cee1983b27a6de7ad8dcbb502f446c3f76fca50ed73ce562` |
+| `androidx.sqlite:sqlite-framework:2.3.0` | The Apache Software License, Version 2.0 | `8b5bd3acef01ea781a8545bdf710b1c06182417669a1a68cd0ae4a536cdae827` |
 | `androidx.startup:startup-runtime:1.1.1` | The Apache Software License, Version 2.0 | `e0a6329a371262fe4c450372b70fdaf33b769ef6917094723787cfce896b1dd3` |
 | `androidx.tracing:tracing:1.2.0` | The Apache Software License, Version 2.0 | `6faa90390d1fdbf0adb9a99bf99de67b94c6c6f35aea9510593a9d17973736a2` |
 | `androidx.transition:transition:1.6.0` | The Apache Software License, Version 2.0 | `248c45e1254d31181d2047b0b01394f09a2e539a5d9e89b773d53c62c96860f6` |
@@ -70,6 +77,9 @@
 | `androidx.webkit:webkit:1.10.0` | The Apache Software License, Version 2.0 | `fdc05992036d0665090b77d7050f9babce74dce95b5364c79026d1df4dc46aba` |
 | `androidx.window:window:1.5.0` | The Apache Software License, Version 2.0 | `5de2d48aa578402f46deb5294a955cee62f0c7d8c1840ef626fc7afb8abe22f9` |
 | `androidx.window:window-core-android:1.5.0` | The Apache Software License, Version 2.0 | `d0d50db0756194a6d49a66ad8dafd17b24b4c5fbd8379375056e2eb9bdfeaf22` |
+| `androidx.work:work-runtime:2.9.1` | The Apache Software License, Version 2.0 | `1be76486b894af179462941a39cab242b00d7235c3aeb4d756f45262b0c2e4a3` |
+| `androidx.work:work-runtime-ktx:2.9.1` | The Apache Software License, Version 2.0 | `8f4cc53ac1879665b14d2f17ad4fbcb3045a4b74774250b99829b1c13f7b7728` |
+| `com.github.mwiede:jsch:2.28.8` | Revised BSD; Revised BSD; ISC | `2afca1357d816028f2ac33f22407d2488a68406682973949cebb1b8ea6688a8b` |
 | `com.google.guava:listenablefuture:1.0` | POM 未声明，需人工核对 | `e4ad7607e5c0477c6f890ef26a49cb8d1bb4dffb650bab4502afee64644e3069` |
 | `commons-codec:commons-codec:1.17.1` | POM 未声明，需人工核对 | `f9f6cb103f2ddc3c99a9d80ada2ae7bf0685111fd6bffccb72033d1da4e6ff23` |
 | `commons-io:commons-io:2.16.1` | POM 未声明，需人工核对 | `f41f7baacd716896447ace9758621f62c1c6b0a91d89acee488da26fc477c84f` |
@@ -78,6 +88,8 @@
 | `org.apache.commons:commons-compress:1.27.1` | POM 未声明，需人工核对 | `293d80f54b536b74095dcd7ea3cf0a29bbfc3402519281332495f4420d370d16` |
 | `org.apache.commons:commons-lang3:3.16.0` | POM 未声明，需人工核对 | `08709dd74d602b705ce4017d26544210056a4ba583d5b20c09373406fe7a00f8` |
 | `org.jetbrains.kotlin:kotlin-stdlib:2.3.10` | Apache-2.0 | `f61662c6d3a2f8ef5bd34362a02d877772c39f393cd394feb259dfaf7f4d8437` |
+| `org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0` | The Apache License, Version 2.0 | `4c889d1d9803f5f2eb6c1592a6b7e62369ac7660c9eee15aba16fec059163666` |
+| `org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.0` | The Apache License, Version 2.0 | `05b62804441b0c9a1920b6b7d5cf7329a4e24b6258478e32b1f046ca01900946` |
 | `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0` | The Apache Software License, Version 2.0 | `bd783acd2f9738845d58380f46f45b5cde95d0cb03027d56725338b26bfc4d72` |
 | `org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.9.0` | The Apache Software License, Version 2.0 | `ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a` |
 | `org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.7.3` | The Apache Software License, Version 2.0 | `f0adde45864144475385cf4aa7e0b7feb27f61fcf9472665ed98cc971b06b1eb` |

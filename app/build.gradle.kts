@@ -75,6 +75,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.apache.commons:commons-compress:1.27.1")
+    // 直连 SSH 隧道：纯 Java、Revised BSD，避免为最小切片引入大型终端/中继框架。
+    implementation("com.github.mwiede:jsch:2.28.8")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // 仅 JVM 测试使用真实 XmlPullParser 实现；产品运行时依赖 Android 内置实现，不新增运行时库。

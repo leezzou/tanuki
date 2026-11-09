@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；android_agent-23 实现 DSH 安装提速与国内镜像；均不改协议、AO 配置、既有安全/暂停项或 0.1.8 附件。
+当前交接：[远程主机直连 SSH 切片](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34，基线 `2f3fac9`，PR 待创建）。上一记录：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-34 实现远程主机直连 SSH 切片；android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；android_agent-23 实现 DSH 安装提速与国内镜像；均不改 AO 配置、既有安全/暂停项或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
@@ -9,6 +9,16 @@
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
 - main CI 以 PR #13 合并后的 Actions 结果为准；Android job 使用 `-x buildNativeRuntime` 且仓库不跟踪 `jniLibs`，CI APK 无原生 `.so`，不能用于设备验收。
+
+### 远程主机直连 SSH 切片（android_agent-34，PR 待创建）
+
+- 基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/remote-host/remote-ssh` 将在独立 `/tmp` clone 创建，PR base `main`，未触发 AO Review、未合并。
+- 新增 `RemoteHostConfig`/`RemoteHostMachine`：host（IPv4/IPv6/域名）、SSH 端口、用户、密码或 OpenSSH/PEM 私钥（可带口令）、远程 DSH 端口、可选 token；校验不通过给出中文错误。远程 origin 固定 `http://127.0.0.1:<SSH 本地转发端口>`，本地/远程端点分别保存，远程优先、断开/失败自动回退本地；本地 DSH 停止不清除仍存活的远程端点。
+- SSH：`com.github.mwiede:jsch:2.28.8`（纯 Java、无传递依赖、Revised BSD），只做直连认证与 `direct-tcpip` 本地转发；本切片 RSA/ECDSA，Ed25519 需后续 BouncyCastle。首次连接先展示 `SHA256:` 主机指纹，确认前不发送认证信息；之后指纹不一致直接拒绝。
+- 安全：密码/私钥/口令/token 只经 AndroidKeyStore AES-256-GCM 加密后写入应用私有 SharedPreferences；Keystore 失败不降级明文；`toString()`/错误信息不含凭据；远程 token 只拼到 loopback 启动 URL 经隧道发送，不写日志、不导出。
+- UI：设置 → 远程主机支持测试连接、保存并连接、断开/清除、首次指纹确认；DSH 页显示远程主机/隧道/指纹，失败显示中文错误并回退。远程连接期间本地运行时保持原状；中继/WebRTC、远程 DSH 启停、多主机、自动重连未实现并标注后续。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`assembleModernDebug -x buildNativeRuntime` BUILD SUCCESSFUL（D8 正常打包 JSch）；完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped（新增 `RemoteHostTest` 24 项）；`lintModernDebug` 0 errors / 80 warnings / 1 hint；依赖清单 91 构件并刷新 JSch 许可。
+- 待验证：真实 Android 设备到真实 sshd、真实 Keystore/远程 DSH token、弱网/断线、设备 UI、Ed25519、Android 仪器/真机；未安装设备、未更新 0.1.8 附件。
 
 ### 后台更新检查（android_agent-24，PR #19 待审）
 
@@ -84,6 +94,7 @@
 
 ## 已实现、已验证与待验证
 
+- 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 0 errors/80 warnings；新增 `RemoteHostTest` 24 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（本轮 android_agent-23 新跑）：基线 `5c680b9` 上 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `:app:testModernDebugUnitTest` 155 tests / 0 failures / 0 errors / 0 skipped；Npm/Download/OperationProgress 目标回归 61 项通过。`cff09a3`/`41609cb` 基线上的 110/132 项与旧 CI 属历史结果，不是本轮复跑。
@@ -101,14 +112,16 @@
 
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：DSH 安装分支 `ao/dsh-install-2/install-resilience`，已 rebase 到 `origin/main=6136451`；在 `/tmp` 干净 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。视频/F1 分支已随 PR #17/#16 合并。
+- 当前分支：远程主机 `ao/remote-host/remote-ssh`（基线 `2f3fac9`，在独立 `/tmp` clone 提交/推送）；共享 worktree `ao/remote-host/root` 不含提交。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
 - 无当前产品修复阻塞；PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
-2. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-3. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
-4. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
-5. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
-6. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+1. 远程主机 PR：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实 Android 设备到真实 sshd、Keystore、远程 DSH token 与 UI QA 另行授权。
+2. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
+3. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
+4. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+5. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
+6. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
+7. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
