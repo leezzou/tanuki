@@ -151,6 +151,8 @@ data class DeviceConditionState(
     val deferredChecks: Set<DeviceWork> = emptySet(),
     /** 每项待办的登记代次；确认只清除入队时对应的代次，避免误删期间重新登记的待办。 */
     val deferredGenerations: Map<DeviceWork, Long> = emptyMap(),
+    /** 每项检查已发放的最大代次；确认清除待办后仍保留，防止下一次登记从 1 重用。 */
+    val deferredGenerationCounters: Map<DeviceWork, Long> = emptyMap(),
     val lowBatteryEnterPercent: Int = 20,
     val sinceMillis: Long = 0L,
     val updatedAtMillis: Long = 0L,
@@ -207,10 +209,11 @@ object DeviceConditionPolicy {
      */
     fun markCheckSkipped(state: DeviceConditionState, work: DeviceWork): DeviceConditionState {
         require(work in UPDATE_CHECK_WORK) { "只有后台更新检查可以登记延后" }
-        val generation = (state.deferredGenerations[work] ?: 0L) + 1L
+        val generation = (state.deferredGenerationCounters[work] ?: state.deferredGenerations[work] ?: 0L) + 1L
         return state.copy(
             deferredChecks = state.deferredChecks + work,
             deferredGenerations = state.deferredGenerations + (work to generation),
+            deferredGenerationCounters = state.deferredGenerationCounters + (work to generation),
         )
     }
 
@@ -265,6 +268,7 @@ object DeviceConditionPolicy {
                 // 待办要等 WorkManager 确认入队后才清除，关闭策略也不例外。
                 deferredChecks = prev.deferredChecks,
                 deferredGenerations = prev.deferredGenerations,
+                deferredGenerationCounters = prev.deferredGenerationCounters,
                 lowBatteryEnterPercent = config.lowBatteryEnterPercent,
                 sinceMillis = if (prev.condition == DeviceCondition.NORMAL) prev.sinceMillis else signals.nowMillis,
                 updatedAtMillis = signals.nowMillis,
@@ -320,6 +324,7 @@ object DeviceConditionPolicy {
             backgroundChecksAllowed = backgroundAllowed,
             deferredChecks = deferred,
             deferredGenerations = prev.deferredGenerations,
+            deferredGenerationCounters = prev.deferredGenerationCounters,
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = if (prev.condition == condition) prev.sinceMillis else signals.nowMillis,
             updatedAtMillis = signals.nowMillis,

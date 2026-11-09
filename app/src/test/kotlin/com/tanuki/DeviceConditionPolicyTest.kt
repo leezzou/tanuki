@@ -299,6 +299,48 @@ class DeviceConditionPolicyTest {
         assertTrue(freshAck.deferredGenerations.isEmpty())
     }
 
+    /**
+     * 旧确认悬停期间，另一确认先清除了同一待办，随后再次登记：下一轮代次不能从 1 重用。
+     */
+    @Test
+    fun oldConfirmationCannotDeleteCheckRegisteredAfterAnotherConfirmation() {
+        val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
+        val first = DeviceConditionPolicy.markCheckSkipped(hot, DeviceWork.APK_UPDATE_CHECK)
+        val oldExpected = first.deferredGenerations
+        assertEquals(1L, oldExpected[DeviceWork.APK_UPDATE_CHECK])
+
+        // 另一确认先清除代次 1；counters 必须保留已发放的最大代次。
+        val cleared = DeviceConditionPolicy.acknowledgeChecks(
+            first,
+            setOf(DeviceWork.APK_UPDATE_CHECK),
+            oldExpected,
+        )
+        assertTrue(cleared.deferredChecks.isEmpty())
+        assertEquals(1L, cleared.deferredGenerationCounters[DeviceWork.APK_UPDATE_CHECK])
+
+        // 设备再次受限，Worker 重新登记同类检查，代次必须递增到 2 而不是重用 1。
+        val reRegistered = DeviceConditionPolicy.markCheckSkipped(cleared, DeviceWork.APK_UPDATE_CHECK)
+        assertEquals(2L, reRegistered.deferredGenerations[DeviceWork.APK_UPDATE_CHECK])
+
+        // 最早那条旧确认此时才返回，只能匹配代次 1，不能删除代次 2 的新待办。
+        val stale = DeviceConditionPolicy.acknowledgeChecks(
+            reRegistered,
+            setOf(DeviceWork.APK_UPDATE_CHECK),
+            oldExpected,
+        )
+        assertTrue(stale.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+        assertEquals(2L, stale.deferredGenerations[DeviceWork.APK_UPDATE_CHECK])
+
+        // 代次 2 的新确认可以正常清除，counters 仍保留 2。
+        val fresh = DeviceConditionPolicy.acknowledgeChecks(
+            reRegistered,
+            setOf(DeviceWork.APK_UPDATE_CHECK),
+            reRegistered.deferredGenerations,
+        )
+        assertTrue(fresh.deferredChecks.isEmpty())
+        assertEquals(2L, fresh.deferredGenerationCounters[DeviceWork.APK_UPDATE_CHECK])
+    }
+
     @Test
     fun acknowledgementOnlyClearsConfirmedChecks() {
         val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state

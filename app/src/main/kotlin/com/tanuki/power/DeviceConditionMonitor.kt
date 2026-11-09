@@ -386,8 +386,9 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             previewMaxPixels = saved.optInt("previewMaxPixels", config.normalPreviewPixels),
             backgroundChecksAllowed = saved.optBoolean("backgroundChecksAllowed", true),
             deferredChecks = deferred,
-            // 代次不跨进程持久化；恢复后从 1 开始，新的跳过会继续递增。
+            // 恢复后从 1 开始；counters 保留已发放的最大值，后续登记继续递增。
             deferredGenerations = deferred.associateWith { 1L },
+            deferredGenerationCounters = deferred.associateWith { 1L },
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = saved.optLong("sinceMillis", 0L),
             updatedAtMillis = saved.optLong("updatedAtMillis", 0L),

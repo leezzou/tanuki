@@ -43,7 +43,7 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 - 额度降低后，`NpmAdaptiveWorkerPool` 只让多出的 worker 在领取下一个归档前退出；当前归档继续完成，不会中断已开始的下载。
 - 后台更新检查被阻塞时，具体 Worker 调用 `beginBackgroundWork(APK_UPDATE_CHECK/DSH_UPDATE_CHECK)`：只登记自己这一项并返回 `Result.success()`，不抛异常、不触发 WorkManager 重试轰炸。恢复时 `UpdateCheckScheduler.resumeDeferred()` 只入队实际登记过的检查；没有 Worker 被跳过时不会发起任何补跑请求。
 - 待办只有在 `resumeDeferred()` 确认 WorkManager 唯一任务已持久入队后才清除；入队失败或进程在该窗口结束都会保留待办，下一次采样继续重试，不会丢失。
-- 每项待办带登记代次；确认只清除与本次入队时代次一致的项。如果确认回调阻塞期间设备再次受限、同一检查被重新登记，旧确认不会删除新待办。
+- 每项待办带登记代次；确认只清除与本次入队时代次一致的项。已发放的最大代次单独保留，确认清除待办后也不会从 1 重用，因此“旧确认悬停、另一确认先清除、随后重新登记”的窗口同样不会误删新待办。
 - 主线程、电池广播和 thermal 回调只通过 `DeviceConditionRefreshQueue.request()` 投递合并请求；采样、策略评估和 `AtomicFile` 写盘统一在后台 collector 执行。`updatedAtMillis` 不参与持久化比较，常规采样状态未变时不重复写盘。
 - 冷启动时 `DeviceConditionInitialization` 建立一次性屏障：Worker 与设置入口先等待配置和 `restore()` 完成，再进入同一状态处理流程，避免 Worker 用默认状态覆盖磁盘待办，或 `restore()` 覆盖 Worker 刚登记的新待办。
 - PDF 预览降级只影响新渲染页；已显示页面不清空。图片、DOCX 和视频预览本轮未接入降级。
@@ -90,6 +90,6 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 
 ## 8. 验证与未验证
 
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 22 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 310 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 23 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 311 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
 - 未验证：真机/模拟器真实温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 预览降级实际像素、assemble/仪器测试。
 - 真机温控需要独立 QA 会话在无真实任务的设备上加热/充电/低电注入后验证；本轮 JVM 结果不能替代设备验收。
