@@ -72,7 +72,7 @@
 
 - 数据/设备/权限边界：未安装/启动 App，未操作设备，未读取真实凭据/日志；所有测试使用合成主机、合成 key/token 和内存存储。
 - 关键决策及理由：选 JSch 2.28.8（纯 Java、无传递依赖、约 700KB、Revised BSD）；选 AES-GCM + AndroidKeyStore 而不是明文/普通 SharedPreferences；远程 origin 仍走 loopback，避免放宽 `OriginPolicy`；首次 known_hosts 确认前不发送认证信息；本切片明确 RSA/ECDSA，Ed25519 留后续。
-- 失败尝试与避免重复踩坑：最初 JVM 测试使用 `com.sun.net.httpserver`，Android 单元测试 bootclasspath 不提供，改为 `ServerSocket` 合成 HTTP；`RemoteHostController` 在配置校验失败时曾会误关活跃远程隧道，已改为不触发回退并加回归；`SharedPreferences` 显式 `commit()` 需要检查返回值，保留同步写入并豁免 UseKtx 风格告警；清除配置失败时保留已保存状态并报错，不谎称已清除；SSH 算法协商失败（Ed25519 等）给出明确中文提示。
+- 失败尝试与避免重复踩坑：最初 JVM 测试使用 `com.sun.net.httpserver`，Android 单元测试 bootclasspath 不提供，改为 `ServerSocket` 合成 HTTP；`RemoteHostController` 在配置校验失败时曾会误关活跃远程隧道，已改为不触发回退并加回归；`SharedPreferences` 显式 `commit()` 需要检查返回值，保留同步写入并豁免 UseKtx 风格告警；清除配置失败时保留已保存状态并报错，不谎称已清除；SSH 算法协商失败（Ed25519 等）给出明确中文提示；私钥解析失败与连接失败共用会话清理路径。
 
 ## 产物与校验
 

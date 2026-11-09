@@ -69,18 +69,19 @@ class JschSshTransport(private val timeoutMs: Int = 15_000) : SshTransport {
         val session = newSession(jsch, config)
         val repository = checkingRepository(expectedFingerprint)
         session.hostKeyRepository = repository
-        if (config.auth == RemoteAuthType.PRIVATE_KEY) {
-            val passphrase = config.passphrase.ifBlank { null }?.toByteArray(Charsets.UTF_8)
-            jsch.addIdentity(
-                "tanuki-remote",
-                config.privateKey.toByteArray(Charsets.UTF_8),
-                null,
-                passphrase
-            )
-        } else {
-            session.setPassword(config.password.toByteArray(Charsets.UTF_8))
-        }
         try {
+            // 私钥解析也可能在连接前失败；与 connect 共用清理路径，避免残留会话。
+            if (config.auth == RemoteAuthType.PRIVATE_KEY) {
+                val passphrase = config.passphrase.ifBlank { null }?.toByteArray(Charsets.UTF_8)
+                jsch.addIdentity(
+                    "tanuki-remote",
+                    config.privateKey.toByteArray(Charsets.UTF_8),
+                    null,
+                    passphrase
+                )
+            } else {
+                session.setPassword(config.password.toByteArray(Charsets.UTF_8))
+            }
             session.connect(timeoutMs)
             val localPort = session.setPortForwardingL(0, "127.0.0.1", config.remoteDshPort)
             JschTunnel(session, localPort)
