@@ -284,6 +284,25 @@ class XlsxWorkbookParserTest {
     }
 
     @Test
+    fun mergePlaceholdersShareCellBudgetAcrossSheets() {
+        val merges = """<mergeCells count="2"><mergeCell ref="A1:J10"/><mergeCell ref="A12:J21"/></mergeCells>"""
+        val file = build(
+            listOf("一" to """<sheetData/>$merges""", "二" to """<sheetData/>$merges"""),
+        )
+        try {
+            val parsed = parse(file, XlsxWorkbookParser.Limits(maxCellsPerSheet = 10, maxTotalCells = 15))
+            assertTrue("合并占位超出预算时工作簿应标记截断", parsed.truncated)
+            assertTrue(parsed.sheets.all { it.truncated })
+            // 单表最多 10 格；全簿最多 15 格，第二张表只能再拿 5 格。
+            assertTrue(parsed.sheets[0].rows.sumOf { it.cells.size } <= 10)
+            assertTrue(parsed.sheets[1].rows.sumOf { it.cells.size } <= 5)
+            assertTrue(parsed.sheets.sumOf { sheet -> sheet.rows.sumOf { it.cells.size } } <= 15)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun rejectsNonZipMissingWorkbookAndMalformedSheetWithChineseMessages() {
         val notZip = Files.createTempFile("tanuki-xlsx-corrupt", ".xlsx").toFile()
         notZip.writeText("这不是 ZIP")

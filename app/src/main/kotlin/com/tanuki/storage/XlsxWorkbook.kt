@@ -610,6 +610,7 @@ internal object XlsxWorkbookParser {
             usedChars += allowed
             return allowed
         }
+        fun exhausted(): Boolean = usedSheet >= perSheet || usedTotal >= total
     }
 
     private class SheetResult(val sheet: XlsxSheet, val truncated: Boolean, val textTruncated: Boolean)
@@ -813,7 +814,7 @@ internal object XlsxWorkbookParser {
                 truncated, textTruncated,
             )
         }
-        applyMerges(rows, merges, rowCount, columnCount, limits, styles)
+        truncated = applyMerges(rows, merges, rowCount, columnCount, limits, styles, budget) || truncated
         val sheetRows = (0 until rowCount).map { index ->
             val source = rows[index]
             val cells = source?.cells.orEmpty()
@@ -839,7 +840,11 @@ internal object XlsxWorkbookParser {
         )
     }
 
-    /** 合并区域只有起点保存跨度和文本，其余单元格标记 covered；区域按行列上限裁剪。 */
+    /**
+     * 合并区域只有起点保存跨度和文本，其余单元格标记 covered；区域按行列上限裁剪。
+     * 合并生成的起点/占位单元格与普通单元格共享同一预算，避免小文件用大量空合并区域耗尽内存。
+     * 返回是否因预算或上限发生截断。
+     */
     private fun applyMerges(
         rows: LinkedHashMap<Int, MutableRow>,
         merges: List<MergeRef>,
@@ -847,8 +852,14 @@ internal object XlsxWorkbookParser {
         columnCount: Int,
         limits: Limits,
         styles: Styles,
-    ) {
-        for (merge in merges) {
+        budget: CellBudget,
+    ): Boolean {
+        var truncated = false
+        mergeLoop@ for (merge in merges) {
+            if (budget.exhausted()) {
+                truncated = true
+                break
+            }
             val rowStart = merge.rowStart.coerceAtLeast(0)
             val columnStart = merge.columnStart.coerceAtLeast(0)
             val rowEnd = merge.rowEnd.coerceAtMost(rowCount - 1)
@@ -857,22 +868,37 @@ internal object XlsxWorkbookParser {
             if (rowStart >= rowCount || columnStart >= columnCount) continue
             val area = (rowEnd - rowStart + 1).toLong() * (columnEnd - columnStart + 1)
             if (area > limits.maxMergeArea) continue
-            val origin = cellsAt(rows, rowStart, columnStart)
-                ?: MutableCell(rowStart, columnStart, "", styles.styleAt(null), false, false)
-                    .also { rows.getOrPut(rowStart) { MutableRow(rowStart, null) }.cells += it }
+            var origin = cellsAt(rows, rowStart, columnStart)
+            if (origin == null) {
+                if (!budget.take()) {
+                    truncated = true
+                    break@mergeLoop
+                }
+                origin = MutableCell(rowStart, columnStart, "", styles.styleAt(null), false, false)
+                rows.getOrPut(rowStart) { MutableRow(rowStart, null) }.cells += origin
+            }
             origin.columnSpan = columnEnd - columnStart + 1
             origin.rowSpan = rowEnd - rowStart + 1
             for (row in rowStart..rowEnd) {
                 for (column in columnStart..columnEnd) {
                     if (row == rowStart && column == columnStart) continue
-                    val covered = cellsAt(rows, row, column)
-                        ?: MutableCell(row, column, "", styles.styleAt(null), false, false)
-                            .also { rows.getOrPut(row) { MutableRow(row, null) }.cells += it }
-                    covered.covered = true
+                    val existing = cellsAt(rows, row, column)
+                    if (existing != null) {
+                        // 已存在的真实单元格不新占预算，但必须隐藏其文本并让合并区域覆盖。
+                        existing.covered = true
+                        continue
+                    }
+                    if (!budget.take()) {
+                        truncated = true
+                        break@mergeLoop
+                    }
+                    val created = MutableCell(row, column, "", styles.styleAt(null), false, false)
+                    created.covered = true
+                    rows.getOrPut(row) { MutableRow(row, null) }.cells += created
                 }
             }
         }
-        // 高度按行保留；合并区域不会修改行高，只隐藏被覆盖的单元格。
+        return truncated
     }
 
     private fun cellsAt(rows: Map<Int, MutableRow>, row: Int, column: Int): MutableCell? =
