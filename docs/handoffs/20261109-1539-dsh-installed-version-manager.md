@@ -42,7 +42,7 @@
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1539-dsh-installed-version-manager.md` | 通过 | 刷新 `docs/handoffs/CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：146 JVM 与编译均为本次新跑；历史 132 项、126 项不再冒充本轮结果。
+- 哪些是前一轮结果，哪些是本次新验证：147 JVM 与编译均为本次新跑；历史 132 项、126 项不再冒充本轮结果。
 - 未测试、超时、失败和暂未复现的情况：未跑 assemble/仪器/真机；未在真实 userdata 上执行切换快照；未验证 PR CI。
 
 ## 未完成与暂停项
