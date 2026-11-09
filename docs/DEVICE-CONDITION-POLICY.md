@@ -90,6 +90,6 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 
 ## 8. 验证与未验证
 
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 24 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 336 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 24 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 395 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
 - 未验证：真机/模拟器真实温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 预览降级实际像素、assemble/仪器测试。
 - 真机温控需要独立 QA 会话在无真实任务的设备上加热/充电/低电注入后验证；本轮 JVM 结果不能替代设备验收。

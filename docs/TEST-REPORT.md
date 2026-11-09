@@ -5,13 +5,32 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
 - 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
-- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=b9eeb75` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=0ba11da` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（5m29s，19 tasks）。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.DeviceConditionConfigWriterTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 24 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
 - 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查按具体 Worker 登记与恢复、无 Worker 跳过时恢复不发请求、只恢复实际跳过的一项、登记幂等、待办确认入队后才清除、入队失败保留重试、部分确认只清除已确认项、主线程刷新不内联写盘、突发刷新合并、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
-- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（4m32s，35 tasks executed）；49 个结果文件，336 tests / 0 failures / 0 errors / 0 skipped（合并 main 的冷启动/聊天通知/XLSX/安全模式回归后 + 新增 24 策略 + 1 配置写入 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（2m26s，35 tasks executed）；56 个结果文件，395 tests / 0 failures / 0 errors / 0 skipped（合并 main 的 PDF/冷启动/聊天通知/XLSX/安全模式回归后 + 新增 24 策略 + 1 配置写入 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
 - 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、assemble/仪器测试。编译、JVM 与 lint 不能替代设备验收。
+## PDF 原生阅读体验打磨验证（2026-11-09，android_agent-35，非设备）
+
+- 范围：`WorkspacePdfPreview` 从单页重开改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；当前页前后各预加载 1 页；按字节 LRU 缓存与位图回收；适应宽度/适应页面；双指 1–5x、双击 1x/2.5x、放大后横向平移；页码/总页数、快速跳页；加密/损坏/超大/内存不足中文提示。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/pdf-reading/native-reading`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（改造后增量 3m08s）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` → BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + `ZoomPolicyTest` 6）。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=b9eeb75`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
+- 新增回归 59 项：`PdfPageCacheTest` 8（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 14（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记、discard 预算移除与延迟回收）；`PdfPreloadPolicyTest` 10（当前页优先、边界、半径、大文档小窗口、非法半径；可见页 >3 时全部进入渲染计划、首尾预加载、去重/边界、计划大小有界）；`PdfMemoryPolicyTest` 6（堆比例预算上下限、单页像素上限、驻留页数联动上限、位图字节记账、512 MiB 文件限制、渲染计划 + 在途页联合预算）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 10（适应宽度/整页、缩放范围、平移边界、缩放锚点、非 1× 连续放大/缩小补偿、1–5× 首尾可达、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
+- 复审修复（Codex 3 条 P2）：
+  - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。补偿延迟到下一帧（新留白完成测量后）执行，避免旧滚动边界截断。
+  - 纵向补偿改为 `(centroidY−H/2)×(1/oldScale−1/newScale)`；新增 2×→4× 与 4×→2× 回归，避免非 1× 起点捏合持续偏移。
+  - 渲染集合改为「全部可见页 + 可见范围外首尾各 1 页预加载」；同屏 >3 页时不再长期停留在“正在渲染”。
+  - 固定视口裁剪：外层阅读容器 `clipToBounds()`，缩放层不能绘制到标题栏/控制栏；该条依赖 Compose 绘制层，JVM 策略测试无法覆盖，需设备/截图验证。
+  - 预留失败原子性：先计算可淘汰页总字节，确认足够才淘汰；失败不改变缓存/界面，避免部分淘汰后丢失已回收键；新增失败→释放显示页→重试成功的回归。
+  - 分配前按实际驻留预留：`tryReserve` 淘汰未显示缓存页并返回键，界面在创建位图前移除；`store` 消耗预留并按实际驻留收紧，失败/取消归还；新增 LRU 已满后新计划页的峰值回归。
+  - 渲染集合与内存预算联动：单页像素上限按 `renderPlan.size + 1`（含在途页）分配，受保护页总字节不超过缓存预算；上限收紧时先 `discard` 超限旧页、等待组合回收后再按新上限渲染；新增计划 + 预算联合回归（4/8/12 个可见页）。
+  - 复审修复后目标测试 69 tests / 0 failures；rebase 后完整 JVM 365 / 0 与 lint 通过。
+- 未执行：lint、assemble、Android 仪器/真实设备；真实大文档（≥500 页）连续滚动与内存曲线、真实加密/损坏 PDF、捏合/双击/横向平移手感、5x 文字清晰度、深色主题均未验证。编译与 JVM 策略测试不能替代设备验收。
+- 已知限制：单页渲染受长边 2048、4,000,000 像素与缓存预算约束，5x 放大清晰度有限；缓存预算为堆的 1/8（24–64 MiB）；512 MiB 是产品打开上限；只读预览，不含编辑/搜索/文本选择。
 
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
