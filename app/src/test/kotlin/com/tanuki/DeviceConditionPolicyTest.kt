@@ -8,6 +8,7 @@ import com.tanuki.power.DeviceSignals
 import com.tanuki.power.DeviceWork
 import com.tanuki.power.ThermalLevel
 import com.tanuki.power.WorkDisposition
+import com.tanuki.ui.PdfRenderPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -519,6 +520,28 @@ class DeviceConditionPolicyTest {
 
         val hotter = evaluate(same, signals(thermal = ThermalLevel.MODERATE, now = 3_000L)).state
         assertEquals(3_000L, hotter.sinceMillis)
+    }
+
+    /** CRITICAL 状态下长边与像素两项额度都必须进入 PDF 渲染入口并同时生效。 */
+    @Test
+    fun criticalPreviewLimitsReachRenderEntryWithBothBounds() {
+        val state = evaluate(null, signals(thermal = ThermalLevel.SEVERE, now = 1_000L)).state
+        assertEquals(1024, state.previewMaxDimension)
+        assertEquals(1_000_000, state.previewMaxPixels)
+
+        val limits = PdfRenderPolicy.limits(state.previewMaxDimension, state.previewMaxPixels)
+        assertEquals(1024, limits.maxDimension)
+        assertEquals(1_000_000, limits.maxPixels)
+
+        val size = PdfRenderPolicy.viewportSize(
+            pageWidth = 595,
+            pageHeight = 842,
+            viewportWidth = 1080,
+            maxDimension = limits.maxDimension,
+            maxPixels = limits.maxPixels,
+        )
+        assertTrue("长边不能超过 CRITICAL 的 1024", maxOf(size.width, size.height) <= 1024)
+        assertTrue("总像素不能超过 CRITICAL 的 1,000,000", size.width.toLong() * size.height <= 1_000_000L)
     }
 
     @Test

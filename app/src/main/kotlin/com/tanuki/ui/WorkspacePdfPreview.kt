@@ -230,6 +230,7 @@ internal fun PdfPreview(
     maxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     maxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
+    val renderLimits = remember(maxDimension, maxPixels) { PdfRenderPolicy.limits(maxDimension, maxPixels) }
     var session by remember(path) { mutableStateOf<PdfDocumentSession?>(null) }
     var opening by remember(path) { mutableStateOf(true) }
     var openError by remember(path) { mutableStateOf<String?>(null) }
@@ -344,11 +345,11 @@ internal fun PdfPreview(
             val viewport = IntSize(constraints.maxWidth, constraints.maxHeight)
             val renderPlan = PdfPreloadPolicy.renderPlan(visiblePages, currentPage, pageCount)
             // 驻留页数 = 渲染计划 + 一页在途位图；单页上限随驻留集合缩小，受保护页总字节不超预算。
-            val maxPagePixels = remember(cacheBudget, renderPlan.size, maxPixels) {
+            val maxPagePixels = remember(cacheBudget, renderPlan.size, renderLimits) {
                 minOf(PdfMemoryPolicy.maxPagePixels(
                     cacheBudgetBytes = cacheBudget,
                     residentPages = (renderPlan.size + 1).coerceAtLeast(PdfMemoryPolicy.CACHE_SLOTS),
-                ), maxPixels)
+                ), renderLimits.maxPixels)
             }
             val readModifier = Modifier
                 .fillMaxSize()
@@ -391,7 +392,7 @@ internal fun PdfPreview(
             }
 
             // 先加载同屏可见页，再预加载可见范围外的相邻页；集合变化会取消旧任务并回收位图。
-            LaunchedEffect(session, renderPlan, maxPagePixels, maxDimension, viewport.width, viewport.height, renderToken) {
+            LaunchedEffect(session, renderPlan, maxPagePixels, renderLimits, viewport.width, viewport.height, renderToken) {
                 val activeSession = session ?: return@LaunchedEffect
                 val protectedPages = renderPlan.toSet()
                 val maxPageBytes = maxPagePixels.toLong() * PdfMemoryPolicy.BYTES_PER_PIXEL
@@ -441,6 +442,7 @@ internal fun PdfPreview(
                             index = index,
                             viewportWidth = viewport.width,
                             maxPagePixels = maxPagePixels,
+                            maxDimension = renderLimits.maxDimension,
                             onBitmapCreated = { pending = it },
                         )
                         currentCoroutineContext().ensureActive()
