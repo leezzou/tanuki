@@ -47,6 +47,10 @@ class RuntimeManager(val context: Context) {
         machine = remoteMachine,
         onStatus = { status -> state.update { it.copy(remote = status) } }
     )
+    val failurePolicy = RuntimeFailurePolicy()
+    private val recoveryState = MutableStateFlow(RuntimeRecoveryState())
+    private var autoRestartJob: Job? = null
+    private var stabilityJob: Job? = null
     val fileTransfers = FileTransfers { android.os.SystemClock.elapsedRealtime() }
     val phoneFiles = com.tanuki.storage.PhoneFileService(context, paths, fileTransfers)
     val mutation = Mutex()
@@ -61,12 +65,16 @@ class RuntimeManager(val context: Context) {
     val workspaceStorage = WorkspaceStorage(paths)
     val requiredTools = MutableStateFlow(RequiredToolsStatus())
     internal val hasLiveChild: Boolean get() = child != null
+    internal val hasPendingAutoRestart: Boolean get() = autoRestartJob?.isActive == true
     val components = RuntimeComponents(this)
     val npmSources = NpmSources(this)
     private val browserGeneration=AtomicLong()
     val hasActiveOperation: Boolean get() = job?.isActive == true || serverJob?.isActive == true || mutation.isLocked
     val authenticatedUrl: String? get() = remoteMachine.authenticatedUrl
     val origin: String? get() = remoteMachine.origin
+    private data class RunAttempt(val mode: RecoveryMode) {
+        @Volatile var readyAtMillis: Long = 0L
+    }
     init {
         val componentRecovery=runCatching { components.recover() }
         val restoreRecovery=runCatching { com.tanuki.storage.DataSnapshots.recoverPreparedRestore(paths) }
@@ -78,12 +86,19 @@ class RuntimeManager(val context: Context) {
             (File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile) && selectedEngine!=null &&
             File(selectedEngine,".installed").isFile && File(selectedEngine,"node_modules/@deepseek-ai/dsh/lib/bin.js").isFile
         val previous = paths.read("service")
+        // 进程重启后恢复安全模式/试用状态；试用运行中进程消失视为试用失败，回到安全模式。
+        val persistedRecovery = failurePolicy.decode(paths.read("failure-state"))
+        val restoredRecovery = failurePolicy.afterProcessRestart(persistedRecovery, previous in setOf("running", "starting", "interrupted"), System.currentTimeMillis())
+        recoveryState.value = restoredRecovery
+        if (restoredRecovery != persistedRecovery) runCatching { paths.atomic("failure-state", failurePolicy.encode(restoredRecovery)) }
+        val processLossNote = restoredRecovery.mode == RecoveryMode.SAFE && persistedRecovery.mode == RecoveryMode.PROBATION
         state.value = Snapshot(environment = if (installed) EnvironmentState.READY else if (metadataExists || paths.stage.exists() || paths.read("transaction") != null) EnvironmentState.REPAIR else EnvironmentState.ABSENT,
             service = when(previous){"running","starting","interrupted"->ServiceState.INTERRUPTED;"failed"->ServiceState.FAILED;else->ServiceState.STOPPED},
-            error = paths.read("last-error") ?: "",
+            error = if (processLossNote) "上次正常模式试用期间进程中断，已回到安全模式" else paths.read("last-error") ?: "",
             confinement = runCatching { Confinement.valueOf(paths.read("confinement") ?: "UNKNOWN") }.getOrDefault(Confinement.UNKNOWN),
             stage = if (installed) "环境已安装，健康状态待检查" else "首次联网准备 Ubuntu、Node.js 和官方 DSH",
-            ubuntu = components.installedUbuntuVersion() ?: meta.optString("ubuntu", "未安装"), node = components.installedNodeVersion() ?: meta.optString("node", "未安装"), dsh = meta.optString("dsh", "未安装"))
+            ubuntu = components.installedUbuntuVersion() ?: meta.optString("ubuntu", "未安装"), node = components.installedNodeVersion() ?: meta.optString("node", "未安装"), dsh = meta.optString("dsh", "未安装"),
+            recovery = restoredRecovery)
         val updateJournal=paths.read("update-transaction")
         if(updateJournal!=null) {
             val phase=runCatching { JSONObject(updateJournal).optString("phase") }.getOrDefault("unknown")
@@ -540,14 +555,123 @@ class RuntimeManager(val context: Context) {
         event("项目容量预算已保存；现有文件保留")
         refreshWorkspaceStorage()
     }
-    fun start() {
+    private fun publishRecovery(recovery: RuntimeRecoveryState) {
+        recoveryState.value = recovery
+        state.update { it.copy(recovery = recovery) }
+        runCatching { paths.atomic("failure-state", failurePolicy.encode(recovery)) }
+    }
+
+    private fun failureEvidence(attempt: RunAttempt?, launched: Boolean, timedOut: Boolean, errorText: String, result: CommandResult?): FailureEvidence {
+        val output = buildString {
+            result?.stderr?.let { append(it) }
+            result?.stdout?.let { if (isNotEmpty()) append('\n'); append(it) }
+        }
+        return FailureEvidence(
+            launched = launched,
+            failedAtMillis = System.currentTimeMillis(),
+            readyAtMillis = attempt?.readyAtMillis?.takeIf { it > 0L },
+            // 就绪超时后的退出码来自主动清理，不能作为原始失败证据。
+            exitCode = if (timedOut) null else result?.exitCode,
+            output = output.takeLast(32_000),
+            errorText = Redact.text(errorText).takeLast(4_000),
+            timedOut = timedOut,
+            diskFreeBytes = runCatching { paths.base.usableSpace }.getOrDefault(-1L)
+        )
+    }
+
+    /** 记录一次失败并按策略决定是否自动重启；不删除用户数据、不重放任务。 */
+    private fun applyFailure(kind: FailureKind, result: CommandResult?) {
+        val decision = failurePolicy.onFailure(recoveryState.value, kind, System.currentTimeMillis(), result?.exitCode)
+        publishRecovery(decision.state)
+        val message = Redact.text(decision.summary)
+        runCatching { paths.atomic("last-error", message) }
+        runCatching { paths.atomic("service", if (kind == FailureKind.LAUNCH_FAILED || kind == FailureKind.STARTUP_FAILED) "failed" else "interrupted") }
+        state.update {
+            it.copy(
+                service = if (kind == FailureKind.LAUNCH_FAILED || kind == FailureKind.STARTUP_FAILED) ServiceState.FAILED else ServiceState.INTERRUPTED,
+                webHealthy = false,
+                web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
+                error = message
+            )
+        }
+        event(message)
+        if (decision.autoRestart) scheduleAutoRestart(decision.restartDelayMillis, decision.state.mode)
+    }
+
+    private fun scheduleAutoRestart(delayMillis: Long, expectedMode: RecoveryMode) {
+        autoRestartJob?.cancel()
+        val generation = synchronized(this) { runtimeGeneration }
+        autoRestartJob = scope.launch {
+            if (delayMillis > 0L) delay(delayMillis)
+            synchronized(this@RuntimeManager) {
+                if (stopping || serverJob?.isActive == true || child != null) return@launch
+                if (runtimeGeneration != generation || state.value.service == ServiceState.STOPPED) return@launch
+                if (recoveryState.value.mode != expectedMode) return@launch
+            }
+            val attempt = recoveryState.value.restartAttempts
+            val suffix = if (expectedMode == RecoveryMode.SAFE) "，使用安全模式" else ""
+            event("按失败策略自动重启（$attempt/${failurePolicy.maxRestartAttempts}）$suffix")
+            start(automatic = true)
+        }
+    }
+
+    private fun scheduleStability(c: Child) {
+        stabilityJob?.cancel()
+        stabilityJob = scope.launch {
+            delay(failurePolicy.probationWindowMillis)
+            if (child !== c || !c.process.isAlive || stopping) return@launch
+            val before = recoveryState.value
+            val stable = failurePolicy.onStable(before, System.currentTimeMillis())
+            if (stable != before) {
+                publishRecovery(stable)
+                when {
+                    before.mode == RecoveryMode.PROBATION && stable.mode == RecoveryMode.NORMAL -> event("正常模式试用通过，已恢复 normal")
+                    stable.mode == RecoveryMode.SAFE -> event("安全模式运行稳定；不会自动切回正常模式，可在界面点击尝试恢复")
+                    else -> event("服务稳定运行，启动失败计数已清零")
+                }
+            }
+        }
+    }
+
+    /** 用户显式从安全模式试用正常配置；失败会在试用窗口内自动回到安全模式。 */
+    suspend fun tryNormalMode() {
+        autoRestartJob?.cancel()
+        if (state.value.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING) || child != null || serverJob?.isActive == true) {
+            stop(userRequested = true)
+        }
+        publishRecovery(failurePolicy.toProbation(recoveryState.value, System.currentTimeMillis()))
+        event("开始试用正常模式；2 分钟内失败会自动回到安全模式")
+        start()
+    }
+
+    /** 用户显式退出正常模式试用，回到安全模式。 */
+    suspend fun returnToSafeMode() {
+        autoRestartJob?.cancel()
+        if (state.value.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING) || child != null || serverJob?.isActive == true) {
+            stop(userRequested = true)
+        }
+        publishRecovery(failurePolicy.toSafeByUser(recoveryState.value, System.currentTimeMillis()))
+        event("已退出正常模式试用，回到安全模式")
+        start()
+    }
+
+    fun start(automatic: Boolean = false) {
         synchronized(this) {
             if(stopping || state.value.service==ServiceState.STOPPING){event("服务正在停止，请稍后启动");return}
             if (serverJob?.isActive == true || child != null) return
+            if (!automatic) autoRestartJob?.cancel()
+            val nowMillis = System.currentTimeMillis()
+            val prepared = if (automatic) failurePolicy.prepareAutomaticStart(recoveryState.value, nowMillis)
+            else failurePolicy.prepareManualStart(recoveryState.value, nowMillis)
+            if (prepared != recoveryState.value) publishRecovery(prepared)
+            val attempt = RunAttempt(prepared.mode)
             runtimeGeneration++
-            state.update { it.copy(service=ServiceState.STARTING,error="") }
+            state.update { it.copy(service=ServiceState.STARTING,error="",recovery=prepared) }
             serverJob = scope.launch {
                 mutation.withLock {
+                    var completion: Deferred<CommandResult>? = null
+                    var launched = false
+                    var timedOut = false
                     try {
                         check(state.value.environment == EnvironmentState.READY) { "请先完成初始化" }
                         check(state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先恢复匹配快照或完成中断版本检查" }
@@ -559,24 +683,54 @@ class RuntimeManager(val context: Context) {
                         val v = paths.metadata().getString("dsh")
                         components.checkDshNodeCompatibility(v)
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
-                        // 只给客体受控客户端，不直接绑定真实手机卷，写权限默认关闭。
-                        phoneFiles.start()
-                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true)
+                        val safe = attempt.mode == RecoveryMode.SAFE
+                        val safeDshData = paths.safeDshData
+                        val rescueProfileExists = File(safeDshData, "profiles/rescue").isDirectory
+                        val dshArguments = failurePolicy.startArguments(v, safe, rescueProfileExists)
+                        // 正常模式只给客体受控客户端；安全模式不加载用户插件/配置，也不挂载手机写入工具。
+                        if (!safe) phoneFiles.start()
+                        val c = launcher.start(
+                            paths.root,
+                            listOf("/opt/node/bin/node") + dshArguments,
+                            home = if (safe) paths.safeHome else paths.home,
+                            dshHome = if (safe) safeDshData else paths.dshData,
+                            workspace = paths.workspaces,
+                            phoneFiles = !safe
+                        )
                         child = c
+                        launched = true
                         monitorWorkspace(c)
                         // Collection lives independently of the Activity and of the environment mutex.
-                        val completion = scope.async { launcher.collect(c) { raw -> captureUrl(raw) } }
-                        withTimeout(180000) {
-                            while (remoteMachine.localAuthenticatedUrl == null) { check(c.process.isAlive) { "DSH 在就绪前退出" }; delay(200) }
-                            while (!httpReady(remoteMachine.localOrigin)) { check(c.process.isAlive); delay(300) }
+                        val comp = scope.async {
+                            launcher.collect(c) { raw ->
+                                captureUrl(raw)
+                                if (remoteMachine.localAuthenticatedUrl != null && attempt.readyAtMillis == 0L) {
+                                    attempt.readyAtMillis = System.currentTimeMillis()
+                                }
+                            }
                         }
+                        completion = comp
+                        withTimeout(180000) {
+                            while (attempt.readyAtMillis == 0L) { check(c.process.isAlive) { "DSH 在就绪前退出" }; delay(200) }
+                            while (!httpReady(remoteMachine.localOrigin)) { check(c.process.isAlive) { "DSH 在就绪后退出" }; delay(300) }
+                        }
+                        val readyNow = System.currentTimeMillis()
+                        if (attempt.readyAtMillis == 0L) attempt.readyAtMillis = readyNow
+                        val preparedReady = failurePolicy.onReady(recoveryState.value, readyNow)
+                        publishRecovery(preparedReady)
                         File(paths.engines, "$v/.web-verified").writeText("${Build.MODEL}; API ${Build.VERSION.SDK_INT}; target ${context.applicationInfo.targetSdkVersion}; debug ${BuildConfig.DEBUG}")
-                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true) }; paths.atomic("service", "running"); paths.atomic("last-error",""); event("DSH 本机服务已就绪")
+                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true, recovery = preparedReady) }; paths.atomic("service", "running"); paths.atomic("last-error","")
+                        event(if (preparedReady.mode == RecoveryMode.SAFE) "DSH 已用安全模式启动：独立最小配置，未加载用户插件与配置" else "DSH 本机服务已就绪")
+                        scheduleStability(c)
                         if(state.value.update==UpdateState.RESTORED_PENDING_CHECK) {
-                            val restored=JSONObject(paths.read("restore-transaction") ?: "{}")
-                            paths.atomic("restore-transaction",restored.put("phase","verified").toString())
-                            state.update { it.copy(update=UpdateState.SUCCESS) }
-                            event("恢复后的版本已通过本机启动检查；会话内容仍可在官方页面核对")
+                            if (failurePolicy.canVerifyRestoredData(preparedReady.mode)) {
+                                val restored=JSONObject(paths.read("restore-transaction") ?: "{}")
+                                paths.atomic("restore-transaction",restored.put("phase","verified").toString())
+                                state.update { it.copy(update=UpdateState.SUCCESS) }
+                                event("恢复后的版本已通过本机启动检查；会话内容仍可在官方页面核对")
+                            } else {
+                                event("安全模式使用独立配置，未加载恢复的用户数据；恢复检查仍待正常模式完成")
+                            }
                         }
                         scope.launch {
                             while (child === c && c.process.isAlive) {
@@ -587,24 +741,34 @@ class RuntimeManager(val context: Context) {
                             }
                         }
                         scope.launch {
-                            val result = try { completion.await() } catch (t: Throwable) {
+                            val result = try { comp.await() } catch (t: Throwable) {
                                 fail(t); if (c.process.isAlive) c.stop()
                                 CommandResult(-1, "", Redact.text(t.message ?: "日志管道异常"))
                             }
+                            stabilityJob?.cancel()
                             if (child === c && !stopping) {
                                 phoneFiles.stop()
+                                workspaceMonitor?.cancel()
                                 child = null; clearLocalEndpoint()
                                 val stopped = state.value.service == ServiceState.STOPPING
-                                state.update { it.copy(service = if (stopped) ServiceState.STOPPED else ServiceState.INTERRUPTED, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, error = if (stopped) it.error else "DSH 退出 ${result.exitCode}；任务最终状态无法确认，不自动重放") }
-                                paths.atomic("service", if (stopped) "stopped" else "interrupted")
+                                if (stopped) {
+                                    state.update { it.copy(service = ServiceState.STOPPED, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED) }
+                                    paths.atomic("service", "stopped")
+                                } else {
+                                    val kind = failurePolicy.classify(failureEvidence(attempt, true, false, "", result))
+                                    applyFailure(kind, result)
+                                }
                             }
                         }
                     } catch (t: Throwable) {
+                        val errorText = Redact.text(t.message ?: t.javaClass.simpleName)
+                        timedOut = t is TimeoutCancellationException
                         val cleanup = runCatching {
                             withContext(NonCancellable) {
                                 child?.stop()
                                 phoneFiles.stop()
                                 child = null; clearLocalEndpoint()
+                                workspaceMonitor?.cancel(); workspaceMonitor = null
                             }
                         }.exceptionOrNull()
                         if (t is CancellationException && t !is TimeoutCancellationException) {
@@ -612,7 +776,11 @@ class RuntimeManager(val context: Context) {
                             throw t // A requested stop owns the final state; cancellation is not a failure.
                         }
                         cleanup?.let(t::addSuppressed)
-                        fail(t); state.update { it.copy(service = ServiceState.FAILED, webHealthy = false) }; runCatching { paths.atomic("service", "failed") }
+                        val result = completion?.let { runCatching { withTimeoutOrNull(3000) { it.await() } }.getOrNull() }
+                        val evidence = failureEvidence(attempt, launched, timedOut, errorText, result)
+                        val kind = failurePolicy.classify(evidence)
+                        fail(t)
+                        applyFailure(kind, result)
                     }
                 }
             }
@@ -675,6 +843,10 @@ class RuntimeManager(val context: Context) {
             if ((expected != null && child !== expected) || (expectedGeneration != null && runtimeGeneration != expectedGeneration)) return@withLock
             val previous = state.value.service
             stopping = true
+            // 停止入口优先于自动重启/试用计时，避免用户停止后又被后台拉起。
+            runtimeGeneration++
+            autoRestartJob?.cancel(); autoRestartJob = null
+            stabilityJob?.cancel(); stabilityJob = null
             phoneFiles.setWriteAllowed(false)
             state.update { it.copy(service = ServiceState.STOPPING) }
             previous

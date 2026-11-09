@@ -34,7 +34,42 @@ libsupervisor.so
 - `--host 127.0.0.1 --port 0`：只绑定 loopback，由内核分配端口；不监听 `0.0.0.0`，不使用固定端口。
 - 启动前要求环境 `EnvironmentState.READY`、无 `UpdateState.RECOVERY_REQUIRED`、工作区容量可启动；否则不启动。
 - 每次运行都会启动新的 phone 文件连接代次（第 4 节），并在启动 DSH 前发布 `connection.json`。
-- 失败、DSH 退出或用户停止时，先撤销 phone 写权限并关闭连接，再清理子进程和 `authenticatedUrl`/`origin`；不自动重放任务。
+- 失败、DSH 退出或用户停止时，先撤销 phone 写权限并关闭连接，再清理子进程和 `authenticatedUrl`/`origin`；自动重启只拉起服务，不重放任务。
+
+#### 1.1.1 安全模式与失败恢复
+
+正常运行仍使用 `web --no-open --host 127.0.0.1 --port 0` 与用户 `$HOME`/`DSH_HOME`。用户显式试用正常模式失败，或 normal 模式连续两次启动失败后，`RuntimeManager` 可进入安全模式：
+
+```text
+HOME=<files/runtime/safe-home> DSH_HOME=<files/runtime/safe-dsh>
+/opt/node/bin/node /opt/engines/<dsh-version>/node_modules/@deepseek-ai/dsh/lib/bin.js
+  rescue [--from-default-profile web] --no-open --host 127.0.0.1 --port 0
+```
+
+- `rescue` 使用独立的最小配置目录，不读取用户插件、用户 `cordis.patch.yml` 或用户会话；不挂载浏览器/phone 工具。项目工作区仍映射为 `/workspaces`，项目内容不改写。
+- `--from-default-profile web` 只在 `safe-dsh/profiles/rescue` 不存在时使用，用于首次初始化官方 web 模板；之后直接 boot `rescue`，避免每次安全启动都替换上一次安全模式目录。
+- 安全模式不删除用户数据、程序、配置、快照或项目；用户显式“尝试恢复正常模式”才切回 normal，并进入 probation。
+
+失败类型由 `RuntimeFailurePolicy` 按证据分类：
+
+| 类型 | 进入条件 |
+|---|---|
+| `LAUNCH_FAILED` | 进程未创建，或启动前的前置命令失败 |
+| `STARTUP_FAILED` | 进程已创建，但官方就绪行出现前超时/出现致命错误 |
+| `CRASHED_EARLY` | 官方就绪行后 2 分钟内出现致命错误 |
+| `CRASHED_LATE` | 官方就绪行后运行满 2 分钟再出现致命错误 |
+| `KILLED` | 无 DSH 致命错误的退出，或信号/低内存（如 137/OOM） |
+| `NO_SPACE` | 输出或磁盘空间不足（ENOSPC、低磁盘检查） |
+
+状态转换边界：
+
+- normal 下只有连续两次 `STARTUP_FAILED`/`CRASHED_EARLY` 自动进入安全模式；`LAUNCH_FAILED`、`KILLED`、`NO_SPACE`、`CRASHED_LATE` 不累计该连续计数。
+- 安全模式启动失败不再自动重启；`KILLED`/`NO_SPACE` 在 normal 下不自动重启，避免盲目循环。
+- 自动重启最多 **3** 次，等待约 2s、4s、8s 指数退避（封顶 30s）；达到上限后保持失败/中断状态，由用户手动启动。
+- 从安全模式显式试用 normal 时进入 `PROBATION`；试用窗口从官方就绪行开始计算 2 分钟。窗口内再次失败回到安全模式，稳定满 2 分钟后转为 normal。
+- 状态写入 `state/failure-state.json`，进程重启后恢复安全模式/试用；试用运行中进程消失视为试用失败并回到安全模式。停止入口会取消待执行的自动重启。
+
+前台通知继续由 `RuntimeService` 持有；自动重启等待期间不退出前台服务，`ServiceState`/`WebState` 的原语义不变。
 
 ### 1.2 官方就绪日志与精确 origin
 

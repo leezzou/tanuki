@@ -37,7 +37,8 @@ data class Snapshot(
     val phasePercent: Int? = null,
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
-    val remote: RemoteHostStatus = RemoteHostStatus()
+    val remote: RemoteHostStatus = RemoteHostStatus(),
+    val recovery: RuntimeRecoveryState = RuntimeRecoveryState()
 )
 class Paths(context: Context) {
     val base = context.filesDir
@@ -55,6 +56,9 @@ class Paths(context: Context) {
     val data = File(base, "userdata").apply { mkdirs() }
     val home = File(data, "home").apply { mkdirs() }
     val dshData = File(data, "dsh").apply { mkdirs() }
+    // 安全模式使用独立的最小 home/DSH_HOME，不读取用户插件与配置；目录只在本模式内复用。
+    val safeHome = File(runtime, "safe-home")
+    val safeDshData = File(runtime, "safe-dsh")
     val workspaces = File(base, "workspaces").apply { mkdirs() }
     val downloads = File(base, "downloads").apply { mkdirs() }
     val npmArchives = File(downloads, "npm")
