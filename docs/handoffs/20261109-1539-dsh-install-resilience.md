@@ -49,7 +49,7 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` | 通过（BUILD SUCCESSFUL） | 首次编译暴露注释嵌套/构造器重载问题，修复后通过；未跑 lint/assemble。 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Npm*' --tests 'com.tanuki.Download*' --tests 'com.tanuki.OperationProgressTest'` | 通过（目标回归 61 tests，0 failed） | 覆盖映射、归一化、锁快速路径、退避、Range、并发、缓存命中；不联网、不装设备。 |
-| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL，1m41s，28 tasks executed） | 31 个测试类，155 tests / 0 failures / 0 errors / 0 skipped；强制重跑，不联网、不装设备。 |
+| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL，28 tasks executed） | 31 个测试类，155 tests / 0 failures / 0 errors / 0 skipped；强制重跑，不联网、不装设备。并发用例改用 IO dispatcher，避免 2 核 CI 上 `Dispatchers.Default` 并行度不足导致抖动。 |
 | `python3 scripts/test-dsh-lock.py` | 通过（PASS） | 模拟 linux/arm64/glibc 三个 Node 版本，560 archives；官方 HTTPS/SHA-512 条目 686，3 个负例；不下载、不装设备。 |
 | `python3 scripts/check-handoff.py --record ...` / `check-handoff.py` | 通过 | 记录印章刷新；当前交接检查 468 public files。 |
 | `python3 scripts/package-source.py` | 通过 | 提交前生成源码包与校验清单（469 public files）；本记录不写包自身哈希，工作材料不提交。 |

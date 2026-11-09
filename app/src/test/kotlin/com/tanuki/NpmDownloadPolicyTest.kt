@@ -71,7 +71,7 @@ class NpmDownloadPolicyTest {
         val maximum = AtomicInteger()
         coroutineScope {
             repeat(32) {
-                launch(Dispatchers.Default) {
+                launch(Dispatchers.IO) {
                     limiter.withPermit("registry.npmmirror.com") {
                         val now = active.incrementAndGet()
                         synchronized(maximum) { if (now > maximum.get()) maximum.set(now) }
@@ -91,12 +91,12 @@ class NpmDownloadPolicyTest {
         val second = AtomicInteger()
         coroutineScope {
             repeat(4) {
-                launch(Dispatchers.Default) {
+                launch(Dispatchers.IO) {
                     limiter.withPermit("a.invalid") {
                         first.incrementAndGet(); delay(20); first.decrementAndGet()
                     }
                 }
-                launch(Dispatchers.Default) {
+                launch(Dispatchers.IO) {
                     limiter.withPermit("b.invalid") {
                         second.incrementAndGet(); delay(20); second.decrementAndGet()
                     }
