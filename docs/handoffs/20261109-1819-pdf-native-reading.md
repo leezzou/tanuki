@@ -14,9 +14,9 @@
 ## 当前状态
 
 - 已实现：上述阅读能力与策略层；文件查看入口、官方 DSH UI/模型/插件/Skills 未改，未新增依赖。
-- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 257 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 52 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
+- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 335 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 52 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
 - 待验证：真实设备上的连续滚动帧率、捏合/双击/横向平移手感、深色主题与字体缩放、真实大文档/加密/损坏 PDF、低内存设备预算表现；lint/assemble/Android 仪器未跑。
-- 当前分支：`ao/pdf-reading/root`（会话 worktree）；实际交付分支为从该 SHA 拉出的 `ao/pdf-reading/native-reading`；基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`（以实际 Git 为准，`docs/AGENT-STATE.md` 中旧基线说明是其他会话历史）。
+- 当前分支：`ao/pdf-reading/root`（会话 worktree）；实际交付分支为 `ao/pdf-reading/native-reading`，已 rebase 到 `origin/main=c2f1b44`。
 - 关键事实与可定位源码：`app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt`（会话/界面/手势）、`PdfRenderPolicy.kt`（视口渲染尺寸）、`PdfPageCache.kt`、`PdfPageMemory.kt`、`PdfPreloadPolicy.kt`、`PdfMemoryPolicy.kt`、`PdfViewportPolicy.kt`、`PdfJumpPolicy.kt`。
 
 ## 本次改动
@@ -54,7 +54,7 @@
 | `./gradlew compileModernDebugKotlin`（open 回调调用点清理后） | BUILD SUCCESSFUL（1m34s） | 仅调用点整理，未改策略行为 |
 | 追加自审修复后 `./gradlew testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` | BUILD SUCCESSFUL，52 tests / 0 failures | 修复适应页面水平居中与文件缺失中文原因透传；未改缓存/缩放策略 |
 | 复审修复后同目标测试 | BUILD SUCCESSFUL，62 tests / 0 failures | 新增首尾可达、非 1× 补偿、同屏 >3 页渲染集合、计划 + 内存预算联合回归 |
-| 复审修复后完整 `./gradlew testModernDebugUnitTest lintModernDebug` | BUILD SUCCESSFUL，257 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 最终提交前复跑；未跑设备/仪器 |
+| rebase 到 `origin/main=c2f1b44` 后完整 `./gradlew testModernDebugUnitTest lintModernDebug` | BUILD SUCCESSFUL，335 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 合并 XLSX/安全模式后复跑；未跑设备/仪器 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1819-pdf-native-reading.md`、`python3 scripts/check-handoff.py` | 见本轮收尾输出 | 以实际命令输出为准 |
 | `python3 scripts/package-source.py` | 见本轮收尾输出 | 只写 `.gitignore` 的 `artifacts/`，不作为发布附件 |
 
