@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 聊天通知](handoffs/20261109-1742-dsh-chat-notifications.md)（android_agent-29，基线 `2f3fac9`；PR [#22](https://github.com/leezzou/tanuki/pull/22) 待审）。main 已合并记录：[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（android_agent-28；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已合并为 `5fd1ab4`）与 [XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（android_agent-32；PR [#23](https://github.com/leezzou/tanuki/pull/23) 已合并为 `f5debf5`）。并行记录保留：DSH 已安装版本管理、后台更新检查、DSH 安装提速与国内镜像、视频全屏、F1 文件预览、研发治理门禁与 W8 的 Android QA 核查报告。本轮 android_agent-29 实现 DSH 回合完成/等待确认/错误/权限请求通知、前台会话可见抑制、session/version/event 去重、Android 13 权限/渠道/分组与点击回会话；不改 DSH 安装、协议、AO 配置、既有安全/暂停项或 0.1.8 附件。
+当前交接：[DSH 聊天通知](handoffs/20261109-1742-dsh-chat-notifications.md)（android_agent-29，基线 `2f3fac9`；PR [#22](https://github.com/leezzou/tanuki/pull/22) 待审）。main 已合并记录：[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（android_agent-28；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已合并为 `5fd1ab4`）与 [XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（android_agent-32；PR [#23](https://github.com/leezzou/tanuki/pull/23) 已合并为 `f5debf5`）。并行记录保留：DSH 已安装版本管理、后台更新检查、DSH 安装提速与国内镜像、视频全屏、F1 文件预览、研发治理门禁与 W8 的 Android QA 核查报告。本轮 android_agent-29 实现 DSH 回合完成/等待确认/错误/权限请求通知、前台会话可见抑制、session/version/event 去重、Android 13 权限/渠道/分组与点击回会话；不改 DSH 安装、协议、AO 配置、既有安全/暂停项或 0.1.8 附件。 本轮另新增 [DSH 冷启动优化](handoffs/20261109-1700-dsh-cold-start.md)（android_agent-27，独立 worktree，基线 `2f3fac9`）：启动期只读路径缓存与首帧前提前启动，未改 PRoot 边界、官方 npm 包、DSH UI/协议。
 - `artifacts/releases/0.1.8/` 六附件齐全。W1 只读复核 APK：`com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
@@ -25,6 +25,14 @@
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；rebase 后完整 `testModernDebugUnitTest` 205 tests / 0 failures / 0 errors / 0 skipped；目标 Npm/Download 回归 61 项通过，`NpmAdaptiveWorkerPoolTest` 升降档 2/2。
 - 待验证：真实 Android 设备/PRoot 首次 DSH 安装、弱网与镜像 404/429 注入、4000 包端到端吞吐；未跑 lint/assemble/仪器/真机。
 
+### DSH 冷启动优化（android_agent-27，PR #27 待复审）
+
+- 分支 `ao/cold-start/root`，基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，独立 worktree；已合并 `origin/main=c2f1b44`（安全模式 PR #25、XLSX PR #23、聊天通知 PR #22），解决 `RuntimeManager.start()` 与文档/印章冲突。
+- 启动期只读路径缓存：宿主把 `assets/dsh-startup/path-cache.cjs` 复制到应用私有目录并绑定 `/opt/tanuki-startup`，仅在绑定成功时给 DSH `web` 的 node 注入 `--require`；只缓存 `/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录的 `realpathSync`/`realpathSync.native`/`existsSync` 和只读 `package.json`；含 `.`/`..`/空段的路径直接交原生，避免符号链接后 `..` 被词法折叠串项；缺失路径/非只读目录不缓存；官方 `dsh web:` 地址行或默认 30 秒超时后卸载，之后直通 `node:fs`；`TANUKI_DSH_PATH_CACHE=0|false|off|no` 关闭；缓存异常逐调用回退原生；两个配置经 `DshStartupConfig` 校验后显式传入 guest，保留 `env -i` 清理边界。
+- 首帧前提前启动：`MainActivity.onCreate()` 在 `setContent` 前请求，复用既有前台服务与 `RuntimeManager.start()`；仅 `READY + STOPPED + 无 job/child + 非 stopping + 无 RECOVERY_REQUIRED` 且为 Launcher `MAIN + LAUNCHER` 冷启动；`Snapshot.operationActive` 与独立更新忙碌信号排除 STAGING/TESTING/RESTORING；每进程一次；服务端 `START_EARLY` 再校验；设置 → 运行与后台新增“启动应用时自动运行 DSH”（默认开启，可关闭）。
+- 已验证（合并后本轮新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；306 tests / 0 failures / 0 errors / 0 skipped（含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项，以及 main 的安全模式/聊天通知/XLSX 回归）；`node scripts/test-dsh-path-cache.mjs` 10/10 场景 PASS。
+- 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准；待独立 Review 与合并授权。
+- 待验证：真实 Android/PRoot 内 DSH 启动与冷启动计时、首帧提前启动时序、设置开关 UI、assemble、真机。
 ### DSH 聊天通知（android_agent-29，PR #22 待审）
 
 - 事件来源：官方 `/api/remote.mux` 的 `$events` 转发流；页面 DocumentStartScript 旁路现有 WebSocket 监听，原生只接收 `api-session/status`、`api-session/error`、`approval/request`、`user-questions/request` 的最小字段。
@@ -109,6 +117,7 @@
 
 ## 已实现、已验证与待验证
 
+- 已验证（合并后本轮新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；306 tests / 0 failures / 0 errors / 0 skipped（含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项，以及 main 的安全模式/聊天通知/XLSX 回归）；`node scripts/test-dsh-path-cache.mjs` 10/10 场景 PASS。未跑 assemble/设备/真实 PRoot DSH 启动。
 - 已验证（rebase 后 android_agent-29 新跑）：rebase 到 `main=5fd1ab4`（含安全模式 PR #25 与 XLSX PR #23）后 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
 - 已验证（PR #22 分支 android_agent-29 新跑）：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；223 tests / 0 failures / 0 errors / 0 skipped（既有 205 + 新增 18），新增 `ChatNotificationPolicyTest` 10 项、`ChatNotificationRoutingTest` 4 项与 `DshChatProtocolTest` 4 项；`node scripts/test-chat-session-open.mjs` 通过。未跑 assemble/仪器/真实设备/ROM。
 - 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 18 项、格式化 4 项、缩放策略 5 项与 `.xlsx` 分类 1 项；`lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/设备/仪器。
@@ -132,6 +141,7 @@
 
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：`ao/dsh-chat-notify/root`（android_agent-29 worktree），基线 `main=2f3fac9`；PR [#22](https://github.com/leezzou/tanuki/pull/22)（分支 `ao/dsh-chat-notify/chat-notifications`，head 以 PR 页面为准）在 `/tmp` 独立 clone 提交，不使用共享 worktree 的 `.git` 写操作。main 已合并安全模式分支 `ao/runtime-safe-mode/root`（PR #25，`5fd1ab4`）与 XLSX 分支 `ao/xlsx-preview/xlsx-native-preview`（PR #23，`f5debf5`）；DSH 安装分支已随 PR #20 合并；视频/F1 分支已随 PR #17/#16 合并。
+- 当前分支：冷启动优化分支 `ao/cold-start/root`，基于 `main=2f3fac9`，已合并 `origin/main=c2f1b44`；在 `/tmp` 干净 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
 - 无当前产品修复阻塞；PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
 

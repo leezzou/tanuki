@@ -14,6 +14,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## DSH 冷启动优化验证（2026-11-09，android_agent-27，非设备）
+
+- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
+- 实际执行：
+  - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
+  - 合并 `origin/main=c2f1b44` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
+  - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
+  - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+- 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
+- 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
 ## DSH 运行失败分类与安全模式验证（2026-11-09，android_agent-28，非设备）
 
 - 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`（rebase 后 `dc0494b`）；范围：新增纯 Kotlin `RuntimeFailurePolicy`，覆盖 `LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类、连续两次 startup/early 进入安全模式、安全模式 rescue 启动参数、probation 2 分钟窗口、自动重启上限/退避、noSpace/killed 不自动重启，以及 `state/failure-state.json` 跨进程恢复。RuntimeManager/RuntimeService 接入安全模式与前端入口。

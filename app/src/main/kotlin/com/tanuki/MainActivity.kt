@@ -223,6 +223,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 首帧前提前拉起：只走既有前台服务 START 链路，条件和幂等由 RuntimeManager 判定。
+        // 仅 Launcher 冷启动触发；仪器测试/通知/内部显式启动不会意外拉起。
+        manager.requestEarlyStart(
+            getSharedPreferences("runtime", MODE_PRIVATE)
+                .getBoolean(EarlyRuntimeStart.PREFERENCE, true) &&
+                EarlyRuntimeStart.launchedFromLauncher(
+                    intent?.action,
+                    intent?.categories?.contains(Intent.CATEGORY_LAUNCHER) == true,
+                )
+        )
         // 系统栏占位始终交给Compose，避免全屏往返后窗口与页面重复避让。
         WindowCompat.setDecorFitsSystemWindows(window, false)
         consumeBrowserIntent(intent)
@@ -273,6 +283,7 @@ class MainActivity : ComponentActivity() {
                 val webSupport by browser.support.collectAsState()
                 var legacyShim by remember { mutableStateOf(getSharedPreferences("web", MODE_PRIVATE).getBoolean("legacyPromise", true)) }
                 var blobExport by remember { mutableStateOf(getSharedPreferences("web", MODE_PRIVATE).getBoolean("blobExport", true)) }
+                var earlyStart by remember { mutableStateOf(getSharedPreferences("runtime", MODE_PRIVATE).getBoolean(EarlyRuntimeStart.PREFERENCE, true)) }
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
                 var confirmation by remember { mutableStateOf<String?>(null) }
@@ -320,6 +331,7 @@ class MainActivity : ComponentActivity() {
                 TanukiUi(
                     model = TanukiUiModel(s, webSupport, versions, emptyList(), storageUsage, deviceInfo,
                         backgroundResult, legacyShim, blobExport, BuildConfig.VERSION_NAME, freeBytes,liveLogs=manager.log.recent,
+                        earlyStart=earlyStart,
                         components=components,ubuntuSources=ubuntuSources,nodeSources=nodeSources,
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
@@ -354,6 +366,11 @@ class MainActivity : ComponentActivity() {
                         toggleBlob = { enabled ->
                             blobExport = enabled
                             getSharedPreferences("web", MODE_PRIVATE).edit().putBoolean("blobExport", enabled).apply()
+                        },
+                        toggleEarlyStart = { enabled ->
+                            earlyStart = enabled
+                            getSharedPreferences("runtime", MODE_PRIVATE).edit().putBoolean(EarlyRuntimeStart.PREFERENCE, enabled).apply()
+                            manager.event(if (enabled) "已开启：下次启动应用时自动运行上次正常停止的 DSH" else "已关闭：启动应用后需手动运行 DSH")
                         },
                         showNotices = {
                             lifecycleScope.launch {
