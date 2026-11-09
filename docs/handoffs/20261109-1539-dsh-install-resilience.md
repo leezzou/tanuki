@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-23（DSH Worker）；android_agent-25 接续收尾
 - 时间：2026-11-09 15:39 CST（UTC+8）
-- 状态：已完成（实现与 JVM 验证通过；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待独立 Review）
+- 状态：已完成（已 rebase 到 `origin/main=6136451`；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待独立 Review）
 - 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)（PR #18 已合并为 `9b32051`）、[视频全屏允许旋转（FULL_SENSOR）](20261106-1735-video-fullscreen-full-sensor.md)（PR #17 已合并为 `5c680b9`）
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -20,8 +20,9 @@
 - 已验证：`compileModernDebugKotlin` 通过；完整 JVM 套件 161 tests / 0 failures / 0 errors / 0 skipped（含 `NpmLockTrustTest` 6 项）；目标 Npm/Download 回归 60 项通过；`test-dsh-lock.py` 通过。
 - 合并后验证（本轮新跑）：同步 main `9b32051` 后 `compileModernDebugKotlin` + 完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，180 tests / 0 failures / 0 errors / 0 skipped。
 - 接续验证（android_agent-25 新跑）：新增实际 worker 调度回归后 `compileModernDebugKotlin` + 完整 `testModernDebugUnitTest` 通过，182 tests / 0 failures / 0 errors / 0 skipped（含 `NpmAdaptiveWorkerPoolTest` 2 项）。
+- Rebase 收尾（android_agent-25 新跑）：rebase 到 `origin/main=6136451`，保留 #19 更新检查与 #20 下载/镜像/并发改动；`compileModernDebugKotlin` + 完整 JVM 通过，205 tests / 0 failures / 0 errors / 0 skipped。
 - 待验证：新 head 的 CI；真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换与降并发；真实 4000 包规模吞吐对比；独立 Review。
-- 当前目标包名、分支/无Git状态、是否有运行中任务：AO 会话 worktree（android_agent-23），分支 `ao/dsh-install-2/root`，基线 `5c680b99075b87953a74cf22cfaee89608d058c1`；PR [#20](https://github.com/leezzou/tanuki/pull/20)，源分支 `ao/dsh-install-2/install-resilience`，head 以 PR 页面为准。
+- 当前目标包名、分支/无Git状态、是否有运行中任务：`ao/dsh-install-2/install-resilience`，已 rebase 到 `origin/main=6136451`（含 #19）；PR [#20](https://github.com/leezzou/tanuki/pull/20)，head 以 PR 页面为准。
 - 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmAdaptiveWorkerPool.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`NpmLockTrust.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
 
 ## 本次改动
@@ -60,6 +61,7 @@
 | `python3 scripts/check-handoff.py --record ...` / `check-handoff.py` | 通过 | 记录印章刷新；当前交接检查 468 public files。 |
 | `./gradlew :app:compileModernDebugKotlin` | 通过（BUILD SUCCESSFUL） | 接续轮在 `/tmp/tanuki-pr20` 独立 clone，head `906c500` + 本地改动；仅既有弃用告警。 |
 | `./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 182 tests / 0 failures / 0 errors / 0 skipped；新增 `NpmAdaptiveWorkerPoolTest` 2/2。 |
+| rebase 到 `origin/main=6136451` 后 `:app:compileModernDebugKotlin` + `:app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 205 tests / 0 failures / 0 errors / 0 skipped；#19 与 #20 组合代码同时保留。 |
 | `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.NpmAdaptiveWorkerPoolTest --rerun-tasks` | 通过（BUILD SUCCESSFUL） | 重复运行实际调度用例，0 failed。 |
 | `python3 scripts/package-source.py` | 通过 | 提交前生成源码包与校验清单（469 public files）；本记录不写包自身哈希，工作材料不提交。 |
 
