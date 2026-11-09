@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-28
 - 时间：2026-11-09 18:12 CST
-- 状态：部分完成（实现与 JVM 已验证；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已创建，独立 Review、设备/真机未完成）
+- 状态：部分完成（实现、JVM 与 PR CI 已验证；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已创建，独立 Review、设备/真机未完成）
 - 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)
 
 ## 用户目标与范围
@@ -15,8 +15,8 @@
 ## 当前状态
 
 - 已实现：六类失败分类；normal 下连续两次 `STARTUP_FAILED`/`CRASHED_EARLY` 自动进入安全模式；`rescue` 最小启动参数与独立 `safe-home`/`safe-dsh`；安全模式不删除用户数据；显式“尝试恢复正常模式”进入 `PROBATION`，2 分钟内失败回安全模式；自动重启最多 3 次、2s/4s/8s 退避、killed/noSpace 不自动重启；`state/failure-state.json` 持久化与进程重启恢复；UI 失败类型/安全模式/退出试用入口；前台服务在自动重启等待期间保持。
-- 已验证：`/tmp` 独立 clone 中 `compileModernDebugKotlin` 与完整 `testModernDebugUnitTest` 通过；完整 JVM 230 tests / 0 failures / 0 errors / 0 skipped，新增 `RuntimeFailurePolicyTest` 25/25。
-- 待验证：真机崩溃/低内存、真实磁盘满、PRoot 内 rescue、真实插件配置隔离、UI 视觉/大字体/深色、lint/assemble/仪器；PR、CI、独立 Review、合并未完成。
+- 已验证：`/tmp` 独立 clone 中 `compileModernDebugKotlin` 与完整 `testModernDebugUnitTest` 通过；完整 JVM 230 tests / 0 failures / 0 errors / 0 skipped，新增 `RuntimeFailurePolicyTest` 25/25。PR #25 的功能提交 `b4a6ef5` 与文档提交 `e2583b2` 的 push/PR CI 均通过（Host scripts + handoff、Android build/JVM/lint）；Android CI 不重建原生 `.so`，不能当设备验收。
+- 待验证：真机崩溃/低内存、真实磁盘满、PRoot 内 rescue、真实插件配置隔离、UI 视觉/大字体/深色、独立 Review、合并；本机 lint/assemble/仪器未跑（CI 已跑 lint，不能替代设备验收）。
 - 当前目标包名：未构建 APK；PR [#25](https://github.com/leezzou/tanuki/pull/25)，分支 `ao/runtime-safe-mode/root`，功能提交 `b4a6ef5ffe0c573bb44de2b7604dc43d91f79bf9`，基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp/tanuki-safe-mode` clone 验证，未使用共享 worktree 的 `.git` 写操作。
 - 关键事实与可定位源码：`app/src/main/kotlin/com/tanuki/runtime/RuntimeFailurePolicy.kt`、`RuntimeManager.kt`、`RuntimeService.kt`、`State.kt`、`ui/SetupScreens.kt`、`ui/TanukiUi.kt`、`ui/Labels.kt`、`MainActivity.kt`；契约见 [INTERFACES](../INTERFACES.md) 1.1.1。
 
@@ -49,14 +49,15 @@
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1812-runtime-safe-mode.md` | 结果见提交前最终输出 | 刷新 `CURRENT.json` 印章。 |
 | `python3 scripts/check-handoff.py` | 结果见提交前最终输出 | 当前交接一致性。 |
 | `python3 scripts/check-publication.py --git` | 结果见提交前最终输出 | 本地链接/身份路径/凭据边界。 |
-| `python3 scripts/package-source.py` | 结果见提交前最终输出 | 源码 ZIP/`SOURCE-SHA256SUMS` 为工作材料，不提交。 |
+| `python3 scripts/package-source.py` | PASS；`source_files=485`，源码 ZIP/`SOURCE-SHA256SUMS` 已生成 | 工作材料，不提交。 |
+| GitHub Actions run 42602010730（push）/ 42602805776（PR） | 均 success：Host scripts + handoff、Android build/JVM/lint | Android CI 使用 `-x buildNativeRuntime`，其 APK 无原生 `.so`，不能用于设备验收。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：230 JVM 与 compile 为本轮新跑；205 项中的既有测试源码来自基线，不能记成前轮设备结果。未运行前轮 PR 的 CI/设备结果，也未复跑 lint/assemble。
 - 未测试、超时、失败和暂未复现的情况：真实 DSH 崩溃/低内存/磁盘满、PRoot rescue、插件配置隔离、UI 实机、lint/assemble/仪器均未执行。Maven Central DNS 不稳定，本轮仅用临时镜像完成依赖解析；不是产品网络行为验证。
 
 ## 未完成与暂停项
 
-- 未完成：PR #25 的 CI、独立 Codex High Review、设备/真机验证、lint/assemble/仪器。
+- 未完成：PR #25 的独立 Codex High Review、设备/真机验证、本机 assemble/仪器。
 - 外部阻塞：当前环境 Maven Central DNS 不稳定，已用临时镜像绕过，未改仓库；若 CI 网络正常则不受影响。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续暂停；未在本轮恢复。
 
