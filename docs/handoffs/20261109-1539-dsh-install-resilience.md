@@ -1,9 +1,9 @@
 # 交接：20261109-1539-dsh-install-resilience
 
-- Agent/会话标识：android_agent-23（DSH Worker）
+- Agent/会话标识：android_agent-23（DSH Worker）；android_agent-25 接续收尾
 - 时间：2026-11-09 15:39 CST（UTC+8）
 - 状态：已完成（实现与 JVM 验证通过；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待独立 Review）
-- 前一记录：[视频全屏允许旋转（FULL_SENSOR）](20261106-1735-video-fullscreen-full-sensor.md)
+- 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)（PR #18 已合并为 `9b32051`）、[视频全屏允许旋转（FULL_SENSOR）](20261106-1735-video-fullscreen-full-sensor.md)（PR #17 已合并为 `5c680b9`）
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
 
@@ -18,9 +18,11 @@
 
 - 已实现：上述 DSH 依赖解析、镜像映射、下载重试/续传、并发与进度改动；P1 复审后补官方元数据逐项核验、v3 锁缓存与 `.lock-trusted` 安装标记。
 - 已验证：`compileModernDebugKotlin` 通过；完整 JVM 套件 161 tests / 0 failures / 0 errors / 0 skipped（含 `NpmLockTrustTest` 6 项）；目标 Npm/Download 回归 60 项通过；`test-dsh-lock.py` 通过。
-- 待验证：P1 修复后新 head 的 CI；真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换；真实 4000 包规模吞吐对比；独立 Review。
+- 合并后验证（本轮新跑）：同步 main `9b32051` 后 `compileModernDebugKotlin` + 完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，180 tests / 0 failures / 0 errors / 0 skipped。
+- 接续验证（android_agent-25 新跑）：新增实际 worker 调度回归后 `compileModernDebugKotlin` + 完整 `testModernDebugUnitTest` 通过，182 tests / 0 failures / 0 errors / 0 skipped（含 `NpmAdaptiveWorkerPoolTest` 2 项）。
+- 待验证：新 head 的 CI；真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换与降并发；真实 4000 包规模吞吐对比；独立 Review。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：AO 会话 worktree（android_agent-23），分支 `ao/dsh-install-2/root`，基线 `5c680b99075b87953a74cf22cfaee89608d058c1`；PR [#20](https://github.com/leezzou/tanuki/pull/20)，源分支 `ao/dsh-install-2/install-resilience`，head 以 PR 页面为准。
-- 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`NpmLockTrust.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
+- 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmAdaptiveWorkerPool.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`NpmLockTrust.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
 
 ## 本次改动
 
@@ -34,11 +36,13 @@
 | `app/src/main/kotlin/com/tanuki/download/Downloader.kt` | 429/5xx 分类退避；404/410 立即上抛；临时文件哈希通过后 `ATOMIC_MOVE` 提交；Range 解析改为可测试函数；保留 30s connect/read 与部分文件续传。 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmDependencyLocks.kt` | 锁身份改为 version+integrity+platform（Node/npm 升级不再强制重新解析）；v3 只接纳官方核验后的锁；saved→installed→bundled 候选逐个校验，全部不可用才解析；重定向缓存返回 null。 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmSources.kt` | 自动模式国内镜像优先、官方最后；手动选择仍优先用户来源；暴露 host 供单 host 限流。 |
-| `app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt` | 镜像元数据只生成候选，官方锁逐项核验后才使用；官方核验不可用时 fail-closed；安装成功写 `.lock-trusted`；并发 8→16、单 host≤8、404/410 快速换源、429/5xx 退避降级。 |
+| `app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt` | 镜像元数据只生成候选，官方锁逐项核验后才使用；官方核验不可用时 fail-closed；安装成功写 `.lock-trusted`；下载调度改用 `NpmAdaptiveWorkerPool`，单 host≤8、404/410 快速换源、429/5xx 退避降级。 |
+| `app/src/main/kotlin/com/tanuki/runtime/NpmAdaptiveWorkerPool.kt`（新增） | 接续 P2：领取下一个归档前检查目标；目标降低时用 CAS 退休名额让超出者完成当前归档后退出，调度协程只补到目标，不重新拉起已退休 worker。 |
 | `app/src/test/kotlin/com/tanuki/NpmArchiveMappingTest.kt`（新增） | 映射/非法 host/端口/参数/穿越/白名单回归。 |
 | `app/src/test/kotlin/com/tanuki/NpmLockNormalizerTest.kt`（新增） | 镜像锁归一化、SRI/版本保持、未知 host/非 HTTPS 拒绝。 |
 | `app/src/test/kotlin/com/tanuki/NpmLockTrustTest.kt`（新增） | P1 回归：镜像 URL 等价接受；传递依赖 SRI/版本/路径篡改、缺包/多包、入口 SRI 篡改、非 SHA-512 均拒绝。 |
 | `app/src/test/kotlin/com/tanuki/NpmDownloadPolicyTest.kt`（新增） | 退避值、状态分类、元数据源顺序/超时、并发 8–16、单 host 8。 |
+| `app/src/test/kotlin/com/tanuki/NpmAdaptiveWorkerPoolTest.kt`（新增） | 实际调度回归：16→8 时超出目标的 worker 完成当前任务后退出、活跃回落到 8、队列继续完成；8→16 时补足 worker。 |
 | `app/src/test/kotlin/com/tanuki/DownloaderRetryTest.kt`（新增） | 429/503 重试与退避、404/410 不重试、重试耗尽、断点续传 Range。 |
 | `app/src/test/kotlin/com/tanuki/DownloadRangeTest.kt`（新增） | Content-Range 合法/非法解析、坏 206 整包重下。 |
 | `app/src/test/kotlin/com/tanuki/NpmDependencyLocksTest.kt` | 适配锁身份/候选列表；新增 saved 锁不兼容时回退 installed、不触发元数据；重定向缓存安全返回 null。 |
@@ -54,6 +58,9 @@
 | `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL） | 32 个测试类，161 tests / 0 failures / 0 errors / 0 skipped；含 P1 `NpmLockTrustTest` 6 项；不联网、不装设备。 |
 | `python3 scripts/test-dsh-lock.py` | 通过（PASS） | 模拟 linux/arm64/glibc 三个 Node 版本，560 archives；官方 HTTPS/SHA-512 条目 686，3 个负例；不下载、不装设备。 |
 | `python3 scripts/check-handoff.py --record ...` / `check-handoff.py` | 通过 | 记录印章刷新；当前交接检查 468 public files。 |
+| `./gradlew :app:compileModernDebugKotlin` | 通过（BUILD SUCCESSFUL） | 接续轮在 `/tmp/tanuki-pr20` 独立 clone，head `906c500` + 本地改动；仅既有弃用告警。 |
+| `./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 182 tests / 0 failures / 0 errors / 0 skipped；新增 `NpmAdaptiveWorkerPoolTest` 2/2。 |
+| `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.NpmAdaptiveWorkerPoolTest --rerun-tasks` | 通过（BUILD SUCCESSFUL） | 重复运行实际调度用例，0 failed。 |
 | `python3 scripts/package-source.py` | 通过 | 提交前生成源码包与校验清单（469 public files）；本记录不写包自身哈希，工作材料不提交。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本轮首次编译/目标 JVM 测试是新验证；完整 JVM、锁脚本、交接/源码包检查待补。前轮 132 tests 不作为本轮结果。
@@ -61,13 +68,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR #20 的 CI/独立 Review；真实设备/弱网 QA。完整 JVM、`test-dsh-lock.py`、交接/公开检查已完成。
+- 未完成：PR #20 的 CI/独立 Review；真实设备/弱网 QA 与真实降并发验收。完整 JVM、`test-dsh-lock.py`、交接/公开检查已完成。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续等待用户恢复；本轮未触碰。
 
 ## 下一步
 
-1. 运行完整 `:app:testModernDebugUnitTest` 并记录真实 tests/failures；运行 `scripts/test-dsh-lock.py`、`check-handoff.py`、`check-publication.py --git`、`package-source.py`。
+1. 推送新 head 后确认 CI；需要时按 review 继续修复，不合并、不触发 Review。
 2. PR [#20](https://github.com/leezzou/tanuki/pull/20) 等待 CI 与独立 Codex High Review；不合并、不触发 AO Review。
 3. Review 意见逐条修复后重审当前完整 SHA；真实设备/弱网 QA 另行授权后执行。
 

@@ -7,9 +7,7 @@ import com.tanuki.download.DownloadLimitException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -249,8 +247,6 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
         val failedSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val failures = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
         val missingPackageReported = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-        val workers = AtomicInteger()
-        val completed = AtomicInteger()
         val mutex = Any()
         var networkUsed = false
         var sampleTime = System.nanoTime()
@@ -299,7 +295,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                     synchronized(mutex) { usedSources[index] = source.title }
                     publish(index, 0)
                     var transferred = false
-                    // 自适应并发只放大总窗口；同一 host 始终不超过 8 路。
+                    // 自适应总窗口可在故障时回落；同一 host 始终不超过 8 路。
                     hosts.withPermit(source.host) {
                         Downloader { received, length ->
                             transferred = true
@@ -344,33 +340,12 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 policy.recordFailure()
                 throw IOException("依赖下载失败：${downloadFailure(lastError)}；已校验缓存保留，请检查网络或切换下载源后重试")
             }
-            completed.incrementAndGet()
             policy.recordSuccess()
             // A verified cache hit does not invoke Downloader's callback.
             publish(index, entry.file.length(), complete = true)
         }
 
-        val nextIndex = AtomicInteger()
-        fun launchWorker() {
-            workers.incrementAndGet()
-            launch(Dispatchers.IO) {
-                try {
-                    while (true) {
-                        val index = nextIndex.getAndIncrement()
-                        if (index >= entries.size) break
-                        fetch(index)
-                    }
-                } finally { workers.decrementAndGet() }
-            }
-        }
-
-        repeat(minOf(policy.current(), entries.size)) { launchWorker() }
-        launch {
-            while (completed.get() < entries.size) {
-                delay(300)
-                while (workers.get() < policy.current() && nextIndex.get() < entries.size) launchWorker()
-            }
-        }
+        NpmAdaptiveWorkerPool(entries.size, policy).run { index -> fetch(index) }
     }
 
     private fun downloadFailure(error: Exception?): String {
