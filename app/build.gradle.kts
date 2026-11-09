@@ -71,6 +71,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("io.github.kyant0:backdrop:1.0.6")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
+    // APK 每 30 分钟、DSH 每 24 小时的周期检查由 WorkManager 持久化，并要求联网。
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.apache.commons:commons-compress:1.27.1")
     testImplementation("junit:junit:4.13.2")

@@ -8,23 +8,38 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.tanuki.update.ApkUpdateCheckState
 import com.tanuki.update.AppUpdatePhase
 import com.tanuki.update.AppUpdateState
+import com.tanuki.update.UpdateCheckStatus
 import kotlinx.coroutines.delay
 import java.util.Locale
 
 /** 单列操作兼容小屏和大字体，状态、真实字节进度与安装确认始终分开。 */
 @Composable
 internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String, installAllowed: Boolean,
-    onCheck: () -> Unit, onDownload: () -> Unit, onInstall: () -> Unit, onCancel: () -> Unit) {
+    onCheck: () -> Unit, onDownload: () -> Unit, onInstall: () -> Unit, onCancel: () -> Unit,
+    background: ApkUpdateCheckState = ApkUpdateCheckState()) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(state.busy, state.startedAt) {
         while (state.busy) { now = SystemClock.elapsedRealtime(); delay(1_000) }
+    }
+    val lastChecked = remember(background.lastCheckedAt) {
+        if (background.lastCheckedAt <= 0L) "尚未检查"
+        else runCatching { java.text.SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(java.util.Date(background.lastCheckedAt)) }
+            .getOrDefault("未知")
     }
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Tanuki 应用更新", style = MaterialTheme.typography.titleLarge)
             Text("当前版本 $currentVersion", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            background.badgeText()?.let { Row { StatusPill(it, true) } }
+            Text("后台每 30 分钟检查一次（需联网） · 上次 $lastChecked", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (background.status == UpdateCheckStatus.FAILED) {
+                Text("上次后台检查未成功，已静默记录；将在下个周期重试，不影响手动检查。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text(state.message, style = MaterialTheme.typography.bodyMedium,
                 color = if (state.phase == AppUpdatePhase.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             OutlinedButton(onClick = onCheck, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {

@@ -12,7 +12,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class Release(val version: String, val integrity: String, val source: String, val node: String, val notes: String, val verified: Boolean)
-class UpdateManager(private val manager: RuntimeManager) {
+class UpdateManager(
+    private val manager: RuntimeManager,
+    /** 手动检查成功时同步后台快照；携带开始时间，旧结果不得覆盖较新的后台结果。 */
+    private val onCheckCompleted: suspend (String, Long) -> Unit = { _, _ -> }
+) {
     val releases = MutableStateFlow<List<Release>>(emptyList())
     private var job: Job? = null
     val hasActiveOperation: Boolean get() = job?.isActive == true
@@ -24,6 +28,7 @@ class UpdateManager(private val manager: RuntimeManager) {
     fun check() {
         if (job?.isActive == true) return
         job = manager.scope.launch {
+            val startedAt = System.currentTimeMillis()
             manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", download = null, bytes = 0, total = -1, phasePercent = null) }
             try {
                 val connection = URL("https://registry.npmjs.org/@deepseek-ai%2Fdsh").openConnection() as HttpURLConnection
@@ -43,6 +48,9 @@ class UpdateManager(private val manager: RuntimeManager) {
                 }
                 releases.value = list
                 val candidate = metadata.getJSONObject("dist-tags").getString("latest")
+                try { onCheckCompleted(candidate, startedAt) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Throwable) { }
                 manager.paths.atomic("releases.json", metadata.toString())
                 manager.state.update { it.copy(candidate = candidate, stage = "官方版本列表已更新", update = if (candidate == it.dsh) UpdateState.CURRENT else UpdateState.AVAILABLE) }
                 manager.event("官方 npm 版本检查完成：$candidate")

@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-1539-dsh-installed-version-manager.md",
-  "recordSha256": "0cdce1f2dddcb0f70be626652aa0d4000d8116a59454750fa9e55159980b1b7a",
-  "sourceFingerprint": "855641180b553ce9b3bfe83fbc07b3f518a5b74bcb65a9a852494b9f52ebc550",
-  "fileCount": 463
+  "record": "docs/handoffs/20261109-1535-background-update-check.md",
+  "recordSha256": "5410f0d8b4bfd3c61846e000b890053bb410135b696b9e59e59bb502713c5233",
+  "sourceFingerprint": "127f146ec8d0079df5beffb0def0ddecd690dcea0f3e4724511ec00d4144997f",
+  "fileCount": 467
 }
