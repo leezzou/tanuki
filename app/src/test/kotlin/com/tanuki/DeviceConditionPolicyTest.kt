@@ -259,6 +259,46 @@ class DeviceConditionPolicyTest {
         assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
     }
 
+    /**
+     * 确认回调阻塞期间同一检查被重新登记：旧代次的确认不能删除新待办。
+     */
+    @Test
+    fun staleAcknowledgementKeepsCheckReRegisteredWhileConfirmationPending() {
+        val hot = DeviceConditionPolicy.markCheckSkipped(
+            evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state,
+            DeviceWork.APK_UPDATE_CHECK,
+        )
+        var result = evaluate(hot, signals(thermal = ThermalLevel.NONE, now = 2_000L))
+        result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
+        val expectedAtEnqueue = result.state.deferredGenerations
+        assertEquals(1L, expectedAtEnqueue[DeviceWork.APK_UPDATE_CHECK])
+
+        // 确认尚未返回时设备再次受限，Worker 重新登记同一检查，代次递增到 2。
+        var reblocked = evaluate(result.state, signals(thermal = ThermalLevel.MODERATE, now = 33_000L)).state
+        assertEquals(DeviceCondition.HOT, reblocked.condition)
+        reblocked = DeviceConditionPolicy.markCheckSkipped(reblocked, DeviceWork.APK_UPDATE_CHECK)
+        assertEquals(2L, reblocked.deferredGenerations[DeviceWork.APK_UPDATE_CHECK])
+
+        // 旧确认只对应代次 1，必须保留代次 2 的新待办。
+        val staleAck = DeviceConditionPolicy.acknowledgeChecks(
+            reblocked,
+            setOf(DeviceWork.APK_UPDATE_CHECK),
+            expectedAtEnqueue,
+        )
+        assertTrue(staleAck.deferredChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+        assertEquals(2L, staleAck.deferredGenerations[DeviceWork.APK_UPDATE_CHECK])
+
+        // 新代次确认后才能清除。
+        val freshAck = DeviceConditionPolicy.acknowledgeChecks(
+            reblocked,
+            setOf(DeviceWork.APK_UPDATE_CHECK),
+            reblocked.deferredGenerations,
+        )
+        assertTrue(freshAck.deferredChecks.isEmpty())
+        assertTrue(freshAck.deferredGenerations.isEmpty())
+    }
+
     @Test
     fun acknowledgementOnlyClearsConfirmedChecks() {
         val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state

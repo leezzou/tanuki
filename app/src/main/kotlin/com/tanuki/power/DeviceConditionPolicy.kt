@@ -149,6 +149,8 @@ data class DeviceConditionState(
     val backgroundChecksAllowed: Boolean = true,
     /** 已实际被跳过的具体后台检查；仅由 Worker 在确认无法运行时登记。 */
     val deferredChecks: Set<DeviceWork> = emptySet(),
+    /** 每项待办的登记代次；确认只清除入队时对应的代次，避免误删期间重新登记的待办。 */
+    val deferredGenerations: Map<DeviceWork, Long> = emptyMap(),
     val lowBatteryEnterPercent: Int = 20,
     val sinceMillis: Long = 0L,
     val updatedAtMillis: Long = 0L,
@@ -205,15 +207,33 @@ object DeviceConditionPolicy {
      */
     fun markCheckSkipped(state: DeviceConditionState, work: DeviceWork): DeviceConditionState {
         require(work in UPDATE_CHECK_WORK) { "只有后台更新检查可以登记延后" }
-        return state.copy(deferredChecks = state.deferredChecks + work)
+        val generation = (state.deferredGenerations[work] ?: 0L) + 1L
+        return state.copy(
+            deferredChecks = state.deferredChecks + work,
+            deferredGenerations = state.deferredGenerations + (work to generation),
+        )
     }
 
     /**
      * 补跑任务已经可靠入队后才确认清除待办；入队失败时保留，下一次采样可重试。
-     * 只清除 [checks] 中确认过的项，未确认的检查继续保留。
+     * 只有当前代次仍等于 [expectedGenerations] 的项才清除；若确认期间同一检查被重新登记，
+     * 代次已变化，新待办保留给下一轮恢复。
      */
-    fun acknowledgeChecks(state: DeviceConditionState, checks: Set<DeviceWork>): DeviceConditionState =
-        state.copy(deferredChecks = state.deferredChecks - checks)
+    fun acknowledgeChecks(
+        state: DeviceConditionState,
+        checks: Set<DeviceWork>,
+        expectedGenerations: Map<DeviceWork, Long> = state.deferredGenerations,
+    ): DeviceConditionState {
+        val confirmed = checks.filterTo(mutableSetOf()) { work ->
+            val expected = expectedGenerations[work]
+            val current = state.deferredGenerations[work]
+            expected != null && current != null && current == expected
+        }
+        return state.copy(
+            deferredChecks = state.deferredChecks - confirmed,
+            deferredGenerations = state.deferredGenerations - confirmed,
+        )
+    }
 
     fun evaluate(
         previous: DeviceConditionState?,
@@ -244,6 +264,7 @@ object DeviceConditionPolicy {
                 backgroundChecksAllowed = true,
                 // 待办要等 WorkManager 确认入队后才清除，关闭策略也不例外。
                 deferredChecks = prev.deferredChecks,
+                deferredGenerations = prev.deferredGenerations,
                 lowBatteryEnterPercent = config.lowBatteryEnterPercent,
                 sinceMillis = if (prev.condition == DeviceCondition.NORMAL) prev.sinceMillis else signals.nowMillis,
                 updatedAtMillis = signals.nowMillis,
@@ -298,6 +319,7 @@ object DeviceConditionPolicy {
             previewMaxPixels = previewPixels,
             backgroundChecksAllowed = backgroundAllowed,
             deferredChecks = deferred,
+            deferredGenerations = prev.deferredGenerations,
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = if (prev.condition == condition) prev.sinceMillis else signals.nowMillis,
             updatedAtMillis = signals.nowMillis,

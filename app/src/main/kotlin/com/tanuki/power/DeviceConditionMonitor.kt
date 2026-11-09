@@ -187,6 +187,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     private fun refreshNow(workerCheck: DeviceWork?) {
         val snapshot: DeviceConditionState
         val resumed: Set<DeviceWork>
+        val expectedGenerations: Map<DeviceWork, Long>
         val sequence: Long
         synchronized(lock) {
             val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
@@ -204,6 +205,8 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             mutable.value = state
             snapshot = state
             resumed = candidates
+            // 记录本次入队对应的待办代次；确认期间重新登记的同类检查不能被旧确认删除。
+            expectedGenerations = candidates.associateWith { state.deferredGenerations[it] ?: 0L }
             sequence = refreshSequence.incrementAndGet()
         }
         persistState(snapshot, sequence)
@@ -215,7 +218,11 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         val acknowledged: DeviceConditionState
         val ackSequence: Long
         synchronized(lock) {
-            acknowledged = DeviceConditionPolicy.acknowledgeChecks(mutable.value, confirmed)
+            acknowledged = DeviceConditionPolicy.acknowledgeChecks(
+                mutable.value,
+                confirmed,
+                expectedGenerations,
+            )
             mutable.value = acknowledged
             ackSequence = refreshSequence.incrementAndGet()
         }
@@ -359,6 +366,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
                 lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             )
         }
+        val deferred = workOr(saved.optJSONArray("deferredChecks"))
         return DeviceConditionState(
             condition = enumOr(saved.optString("condition"), DeviceCondition.NORMAL),
             reasons = reasonsOr(saved.optJSONArray("reasons")),
@@ -377,7 +385,9 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             previewMaxDimension = saved.optInt("previewMaxDimension", config.normalPreviewDimension),
             previewMaxPixels = saved.optInt("previewMaxPixels", config.normalPreviewPixels),
             backgroundChecksAllowed = saved.optBoolean("backgroundChecksAllowed", true),
-            deferredChecks = workOr(saved.optJSONArray("deferredChecks")),
+            deferredChecks = deferred,
+            // 代次不跨进程持久化；恢复后从 1 开始，新的跳过会继续递增。
+            deferredGenerations = deferred.associateWith { 1L },
             lowBatteryEnterPercent = config.lowBatteryEnterPercent,
             sinceMillis = saved.optLong("sinceMillis", 0L),
             updatedAtMillis = saved.optLong("updatedAtMillis", 0L),
