@@ -17,6 +17,7 @@
 - 已实现：直连 SSH + 端口转发 + local/remote origin 切换 + 设置页 + 失败回退 + 加密凭据/主机密钥校验 + JVM 回归。
 - 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件。
 - 待验证：真实 Android 设备到真实 sshd、真实 Android Keystore、真实远程 DSH token 登录、弱网/断线、UI 手势、Ed25519、Android 仪器测试、真机。
+- 主线同步：已合入 `main=f5debf5`（PR #23 XLSX 预览），冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，代码自动合并；文档保留 XLSX 与远程两节。
 - 当前目标包名/分支：仅 JVM/APK 构建，未安装设备；分支 `ao/remote-host/remote-ssh` 已从基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建，PR [#29](https://github.com/leezzou/tanuki/pull/29) 已创建，base `main`，未触发 Review；head 以 PR 页面为准。无运行中任务。
 - 关键事实：远程 origin 固定 `http://127.0.0.1:<隧道本地端口>`；远程 token 只拼到该 loopback URL；凭据只在 `remote-host-credentials` SharedPreferences 的 AES-GCM 密文，密钥来自 AndroidKeyStore；主机指纹保存在 `remote-host-known-hosts`。
 
