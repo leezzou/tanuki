@@ -339,10 +339,12 @@ object DocxPageFramePolicy {
     fun compute(availableWidthDp: Float, pageWidthDp: Float): DocxPageFrame {
         val available = availableWidthDp.coerceAtLeast(1f)
         val page = pageWidthDp.coerceAtLeast(1f)
+        // 视口小于最小纸张时，框架至少容纳整张纸，否则页面会被压窄且横向滚动无法找回。
+        val frameWidth = maxOf(available, page)
         return DocxPageFrame(
-            widthDp = available,
+            widthDp = frameWidth,
             pageWidthDp = page,
-            sidePaddingDp = ((available - page) / 2f).coerceAtLeast(0f),
+            sidePaddingDp = ((frameWidth - page) / 2f).coerceAtLeast(0f),
         )
     }
 }

@@ -50,6 +50,16 @@ class DocxLayoutPolicyTest {
     }
 
     @Test
+    fun tinyViewportFrameKeepsMinimumPaperWidth() {
+        val geometry = DocxPageGeometryPolicy.compute(DocxPageSetup(), availableWidthDp = 100f)
+        val frame = DocxPageFramePolicy.compute(100f, geometry.pageWidthDp)
+        assertEquals(240f, frame.pageWidthDp, 0.01f)
+        assertEquals(240f, frame.widthDp, 0.01f)
+        assertEquals(0f, frame.sidePaddingDp, 0.01f)
+        assertTrue(frame.widthDp >= frame.pageWidthDp)
+    }
+
+    @Test
     fun pageWidthIsCappedOnWideScreens() {
         val geometry = DocxPageGeometryPolicy.compute(DocxPageSetup(), availableWidthDp = 1200f)
         assertEquals(DocxPageGeometryPolicy.MAX_PAGE_WIDTH_DP, geometry.pageWidthDp, 0.01f)
