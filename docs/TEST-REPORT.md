@@ -2,6 +2,16 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
+
+- 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=0ba11da` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（5m29s，19 tasks）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.DeviceConditionConfigWriterTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 25 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
+- 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查按具体 Worker 登记与恢复、无 Worker 跳过时恢复不发请求、只恢复实际跳过的一项、登记幂等、待办确认入队后才清除、入队失败保留重试、部分确认只清除已确认项、主线程刷新不内联写盘、突发刷新合并、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（2m17s，35 tasks executed）；59 个结果文件，424 tests / 0 failures / 0 errors / 0 skipped（合并 main 的原生界面/PDF/冷启动/聊天通知/XLSX/安全模式回归后 + 新增 25 策略 + 1 配置写入 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
+- 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、assemble/仪器测试。编译、JVM 与 lint 不能替代设备验收。
 ## PDF 原生阅读体验打磨验证（2026-11-09，android_agent-35，非设备）
 
 - 范围：`WorkspacePdfPreview` 从单页重开改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；当前页前后各预加载 1 页；按字节 LRU 缓存与位图回收；适应宽度/适应页面；双指 1–5x、双击 1x/2.5x、放大后横向平移；页码/总页数、快速跳页；加密/损坏/超大/内存不足中文提示。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/pdf-reading/native-reading`。
@@ -126,12 +136,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
 
-- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 merge 到 `main=d9b4aa2`（含 XLSX 预览 PR #23、运行时安全模式 PR #25、聊天通知 PR #22、冷启动 PR #27、PDF 阅读 PR #24 与原生界面 PR #26），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 merge 到 `main=f5f3bf3`（含温控 PR #21、XLSX 预览 PR #23、运行时安全模式 PR #25、聊天通知 PR #22、冷启动 PR #27、PDF 阅读 PR #24 与原生界面 PR #26），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，80 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 25）。
   - `./gradlew :app:testModernDebugUnitTest`（rebase 前）→ BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped。
-  - merge `main=d9b4aa2` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，463 tests / 0 failures / 0 errors / 0 skipped（main 393 - 旧 DOCX 文本测试 10 + 新增 80；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
+  - merge `main=f5f3bf3` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
 - 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算、单元格预算/分段、超高表格行限制。
 - 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；早期对文本切片使用 `wrapContentHeight(unbounded = true)`，现已由“复用 `TextLayoutResult` + 按页合并绘制”替代，避免每行重新排版整段；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并合并 runtime 安全模式、聊天通知、冷启动与 PDF 文档，重新生成交接印章。Review P1/P2 修复：Bitmap 清理捕获 effect 快照；文本切片改为复用已测量布局并逐页合并、长段落按 8,000 字有界分段；表格列宽用 Long 求和并限制正文宽度；页首 gap 清零；渲染预算在行循环内生效并反馈截断；单元格段落共享原子预算并按 8,000 字分段，单元格内容高度限制在页面内容高度内，表格行高在创建 Compose 尺寸约束前 clamp；宽屏居中留白移到纸张宽度约束之外，页面按完整测量宽度绘制；超高单元格按已测量行边界保留可见文本前缀；极小视口框架至少容纳最小纸张宽度。
 - 未执行：assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。lint 与 JVM/编译不能替代设备与真实样本验收。

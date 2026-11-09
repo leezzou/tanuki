@@ -4,12 +4,18 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.ConcurrentHashMap
 
-/** 默认 8 路，连续成功后逐步升到 16；出现可重试故障时回落到 8。 */
+/**
+ * 默认 8 路，连续成功后逐步升到 16；出现可重试故障时回落到 8。
+ *
+ * [capProvider] 由设备温控/省电策略提供外部上限。上限降低时，[NpmAdaptiveWorkerPool]
+ * 只让多出的 worker 在完成当前归档后退休，不会中断已开始的下载。
+ */
 internal class NpmConcurrencyPolicy(
     private val initial: Int = 8,
     private val maximum: Int = 16,
     private val step: Int = 2,
     private val growAfter: Int = 8,
+    private val capProvider: () -> Int = { Int.MAX_VALUE },
 ) {
     init {
         require(initial in 1..maximum && maximum <= 16 && step > 0 && growAfter > 0) { "并发策略参数无效" }
@@ -18,7 +24,7 @@ internal class NpmConcurrencyPolicy(
     private var target = initial
     private var streak = 0
 
-    @Synchronized fun current(): Int = target
+    @Synchronized fun current(): Int = minOf(target, capProvider().coerceAtLeast(1))
 
     @Synchronized fun recordSuccess() {
         streak++

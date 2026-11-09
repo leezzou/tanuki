@@ -53,7 +53,9 @@ fun WorkspaceFilesPage(
     onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> },
     fullscreen: Boolean = false, onFullscreen: (Boolean) -> Unit = {},
     phoneWriteAllowed: Boolean = false, phoneWritingAvailable: Boolean = false,
-    onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {}
+    onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {},
+    previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
+    previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
     var writePermissionDialog by remember { mutableStateOf(false) }
     var location by rememberSaveable { mutableStateOf(FileLocation.WORKSPACE) }
@@ -166,6 +168,7 @@ fun WorkspaceFilesPage(
     openedEntry?.let { entry ->
         WorkspaceFileViewer(files, entry, modifier, bottomInset, actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
             canEdit = location.writable && !runtimeRunning && !entry.linked,
+            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
             onClose = { onFullscreen(false); openedEntry = null },
             onExport = { onExportFile(files, entry.path, entry.name) },
             onEdit = { runTask {

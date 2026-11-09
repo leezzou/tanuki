@@ -16,6 +16,14 @@ internal object PdfRenderPolicy {
 
     data class Size(val width: Int, val height: Int)
 
+    /** 渲染入口统一携带长边与总像素两项上限，避免只传其中一项。 */
+    data class Limits(val maxDimension: Int, val maxPixels: Int)
+
+    fun limits(maxDimension: Int = MAX_DIMENSION, maxPixels: Int = MAX_PIXELS): Limits {
+        require(maxDimension > 0 && maxPixels > 0) { "PDF 渲染上限无效" }
+        return Limits(maxDimension, maxPixels)
+    }
+
     fun targetSize(
         pageWidth: Int,
         pageHeight: Int,
