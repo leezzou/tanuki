@@ -549,6 +549,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         Fact("网页认证", s.web.label)
         Fact("健康检查", s.health.label)
         Fact("DSH 沙箱探测", s.confinement.label)
+        Fact("启动模式", s.recovery.mode.label)
+        s.recovery.lastFailure?.let { Fact("最近失败", it.label) }
         Caption("模型上下文会发送至你选择的 API 服务商。工具执行在 DSH 中逐次确认；停止后的任务不会自动重放。")
         ActionRow("重启 DSH", "可能中断当前任务", enabled = s.environment == EnvironmentState.READY && !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { c.command("RESTART") }
         ActionRow("固定健康检查", enabled = s.tanukiIdle && s.environment == EnvironmentState.READY) { c.command("HEALTH") }
@@ -715,6 +717,8 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                 }, style = MaterialTheme.typography.titleLarge)
                 Fact("DSH 进程", s.service.label)
                 Fact("本机 Web 服务", if (s.webHealthy) "就绪" else "未就绪")
+                Fact("启动模式", s.recovery.mode.label)
+                s.recovery.lastFailure?.let { Fact("最近失败", it.label) }
                 Caption("网页状态：${s.web.label}")
                 if (s.service != ServiceState.RUNNING) Button(onClick = { c.command(if (s.environment == EnvironmentState.READY) "START" else "INIT") },
                     enabled = !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { Text(if (s.environment == EnvironmentState.READY) "启动 DSH" else "下载并准备环境") }
