@@ -691,17 +691,28 @@ private class DocxMeasurer(
                             val chunk = full.subSequence(range.first, end)
                             val metrics = paragraphMetrics(block, widthDp, chunk)
                             if (metrics.layout.lineCount > 0) {
+                                val gap = if (chunkIndex == 0) spaceBefore else 0f
                                 val height = metrics.layout.size.height / density
-                                if (!addBlock(
-                                        DocxCellBlock.Text(
-                                            metrics.annotated,
-                                            metrics.style,
-                                            if (chunkIndex == 0) spaceBefore else 0f,
-                                            height,
-                                        ),
-                                        height + if (chunkIndex == 0) spaceBefore else 0f,
-                                    )
-                                ) {
+                                if (usedHeight + gap + height <= cellCap) {
+                                    if (!addBlock(
+                                            DocxCellBlock.Text(metrics.annotated, metrics.style, gap, height),
+                                            height + gap,
+                                        )
+                                    ) {
+                                        budgetStopped = true
+                                        return@forEachIndexed
+                                    }
+                                } else {
+                                    // 分段整体高于剩余空间时，按已测量行边界保留可见前缀，不能整段丢弃。
+                                    val remaining = (cellCap - usedHeight - gap).coerceAtLeast(0f)
+                                    val prefix = cellTextPrefix(metrics, remaining)
+                                    if (prefix != null) {
+                                        addBlock(
+                                            DocxCellBlock.Text(prefix.text, metrics.style, gap, prefix.heightDp),
+                                            prefix.heightDp + gap,
+                                        )
+                                    }
+                                    truncated = true
                                     budgetStopped = true
                                     return@forEachIndexed
                                 }
@@ -756,6 +767,24 @@ private class DocxMeasurer(
             }
         }
         return DocxCellResult(output, usedHeight, truncated)
+    }
+
+    private data class CellTextPrefix(val text: AnnotatedString, val heightDp: Float)
+
+    private fun cellTextPrefix(metrics: ParagraphMetrics, availableHeightDp: Float): CellTextPrefix? {
+        if (metrics.layout.lineCount <= 0) return null
+        val bottoms = (0 until metrics.layout.lineCount).map { metrics.layout.getLineBottom(it) / density }
+        val last = DocxCellPrefixPolicy.lastVisibleLine(bottoms, availableHeightDp)
+        if (last < 0) return null
+        val end = if (last + 1 < metrics.layout.lineCount) {
+            metrics.layout.getLineStart(last + 1)
+        } else {
+            metrics.annotated.length
+        }
+        if (end <= 0) return null
+        val height = ((metrics.layout.getLineBottom(last) - metrics.layout.getLineTop(0)) / density)
+            .coerceAtMost(availableHeightDp.coerceAtLeast(0f))
+        return CellTextPrefix(metrics.annotated.subSequence(0, end), height)
     }
 
     private fun paragraphMetrics(

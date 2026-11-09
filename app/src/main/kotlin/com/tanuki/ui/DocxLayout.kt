@@ -346,3 +346,17 @@ object DocxPageFramePolicy {
         )
     }
 }
+
+
+/** 超高单元格的可见行前缀：只保留底部不超过剩余高度的行，后续内容标记截断。 */
+object DocxCellPrefixPolicy {
+    fun lastVisibleLine(lineBottomsDp: List<Float>, availableHeightDp: Float): Int {
+        if (!availableHeightDp.isFinite() || availableHeightDp <= 0f) return -1
+        var last = -1
+        for ((index, bottom) in lineBottomsDp.withIndex()) {
+            if (!bottom.isFinite() || bottom > availableHeightDp + 0.5f) break
+            last = index
+        }
+        return last
+    }
+}

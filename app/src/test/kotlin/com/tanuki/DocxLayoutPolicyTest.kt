@@ -8,6 +8,7 @@ import com.tanuki.ui.DocxPageFramePolicy
 import com.tanuki.ui.DocxPageGeometryPolicy
 import com.tanuki.ui.DocxRenderBudget
 import com.tanuki.ui.DocxCellPlanner
+import com.tanuki.ui.DocxCellPrefixPolicy
 import com.tanuki.ui.DocxTableWidths
 import com.tanuki.ui.DocxTableRowPolicy
 import com.tanuki.ui.DocxTextChunking
@@ -169,6 +170,16 @@ class DocxLayoutPolicyTest {
         assertTrue(plan.truncated)
         assertEquals(DocxCellPlanner.MAX_CHUNKS, plan.chunks.values.sumOf { it.size })
         assertTrue(plan.chunks.values.flatten().all { it.first == 0 && it.last == 0 })
+    }
+
+    @Test
+    fun cellPrefixKeepsLinesThatFitRemainingHeight() {
+        val bottoms = listOf(24f, 48f, 72f, 96f)
+        assertEquals(1, DocxCellPrefixPolicy.lastVisibleLine(bottoms, 50f))
+        assertEquals(2, DocxCellPrefixPolicy.lastVisibleLine(bottoms, 72f))
+        assertEquals(-1, DocxCellPrefixPolicy.lastVisibleLine(bottoms, 0f))
+        assertEquals(-1, DocxCellPrefixPolicy.lastVisibleLine(bottoms, Float.NaN))
+        assertEquals(3, DocxCellPrefixPolicy.lastVisibleLine(bottoms, 200f))
     }
 
     @Test
