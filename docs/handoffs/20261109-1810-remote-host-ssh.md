@@ -49,13 +49,14 @@
 | `./gradlew :app:testModernDebugUnitTest` | BUILD SUCCESSFUL，37 结果文件，229 tests / 0 failures / 0 errors / 0 skipped | 最终代码；含既有 205 + 新增 24 |
 | `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL，0 errors / 80 warnings / 1 hint | 新增文件无告警；既有告警未处理 |
 | `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` + `python3 scripts/collect-component-licenses.py` | 91 runtime artifacts，5 个仍无 POM 许可声明 | JSch 为 Revised BSD / JZlib Revised BSD / jBCrypt ISC；清单位于 `licenses/` |
+| PR [#29](https://github.com/leezzou/tanuki/pull/29) CI（head `9dbaacc`） | Host scripts 与 Android build/JVM/lint 均 success | 公开 Actions；不替代独立 Review 或设备验收 |
 
 - 哪些是前一轮结果：229 中的既有 205 项来自此前 #19/#20 组合；本轮新增 24 项并复跑完整套件。
 - 未测试/失败/暂未复现：真实 sshd/设备/Keystore/token、Ed25519、断线重连、UI 操作、仪器、真机；未做设备安装。
 
 ## 未完成与暂停项
 
-- 未完成：独立 Codex High Review、CI 结果确认、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
+- 未完成：独立 Codex High Review、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
 - 外部阻塞：无（缺少真实 SSH 主机/设备，属于未验证而非代码阻塞）。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续按既有要求等待授权/恢复。
 - 不代合、不触发 AO Review、不创建 tag/Release。
