@@ -240,11 +240,28 @@ class RuntimeFailurePolicyTest {
         assertEquals(RecoveryMode.NORMAL, normal.mode)
     }
 
-    @Test fun automaticStartPromotesExpiredProbation() {
-        val probation = RuntimeRecoveryState(mode = RecoveryMode.PROBATION, probationStartedAtMillis = 1_000L)
+    @Test fun automaticStartKeepsUnprovenProbation() {
+        val probation = RuntimeRecoveryState(
+            mode = RecoveryMode.PROBATION,
+            probationStartedAtMillis = 1_000L,
+            lastReadyAtMillis = 2_000L
+        )
         val prepared = policy.prepareAutomaticStart(probation, 200_000L)
-        assertEquals(RecoveryMode.NORMAL, prepared.mode)
-        assertEquals(0, prepared.startupFailureStreak)
+        // 只有存活稳定计时器能提交 NORMAL；墙钟过期不能证明进程实际稳定运行。
+        assertEquals(RecoveryMode.PROBATION, prepared.mode)
+        assertEquals(0L, prepared.lastReadyAtMillis)
+    }
+
+    @Test fun manualStartAfterExpiredProbationStartsFreshTrial() {
+        val probation = RuntimeRecoveryState(
+            mode = RecoveryMode.PROBATION,
+            probationStartedAtMillis = 1_000L,
+            lastReadyAtMillis = 1_500L
+        )
+        val prepared = policy.prepareManualStart(probation, 200_000L)
+        assertEquals(RecoveryMode.PROBATION, prepared.mode)
+        assertEquals(200_000L, prepared.probationStartedAtMillis)
+        assertEquals(0L, prepared.lastReadyAtMillis)
     }
 
     @Test fun processRestartDuringProbationReturnsSafeMode() {
@@ -253,14 +270,28 @@ class RuntimeFailurePolicyTest {
         val interrupted = policy.afterProcessRestart(ready, serviceWasActive = true, nowMillis = 50_000L)
         assertEquals(RecoveryMode.SAFE, interrupted.mode)
 
-        val expired = policy.afterProcessRestart(ready, serviceWasActive = true, nowMillis = 200_000L)
-        assertEquals(RecoveryMode.NORMAL, expired.mode)
+        val reopenedLater = policy.afterProcessRestart(ready, serviceWasActive = true, nowMillis = 700_000L)
+        assertEquals(RecoveryMode.SAFE, reopenedLater.mode)
+    }
+
+    @Test fun processRestartWhenServiceWasNotActiveKeepsProbation() {
+        val probation = policy.toProbation(RuntimeRecoveryState(), 1_000L)
+        val ready = policy.onReady(probation, 2_000L)
+        val restarted = policy.afterProcessRestart(ready, serviceWasActive = false, nowMillis = 700_000L)
+        assertEquals(RecoveryMode.PROBATION, restarted.mode)
+        assertEquals(0L, restarted.lastReadyAtMillis)
     }
 
     @Test fun processRestartDuringProbationStartupReturnsSafeModeEvenAfterWindow() {
         val probation = policy.toProbation(RuntimeRecoveryState(), 1_000L)
         val interrupted = policy.afterProcessRestart(probation, serviceWasActive = true, nowMillis = 200_000L)
         assertEquals(RecoveryMode.SAFE, interrupted.mode)
+    }
+
+    @Test fun restoreVerificationRequiresRestoredUserDataMode() {
+        assertFalse(policy.canVerifyRestoredData(RecoveryMode.SAFE))
+        assertTrue(policy.canVerifyRestoredData(RecoveryMode.NORMAL))
+        assertTrue(policy.canVerifyRestoredData(RecoveryMode.PROBATION))
     }
 
     @Test fun persistenceRoundTripsAndRejectsInvalidData() {

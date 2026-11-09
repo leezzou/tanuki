@@ -107,6 +107,7 @@ internal fun RuntimeRecoveryCard(s: Snapshot, c: TanukiUiCallbacks) {
         when (recovery.mode) {
             RecoveryMode.SAFE -> {
                 SetupCaption("当前使用独立的最小救援配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
+                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
                 Button(
                     onClick = { c.command("RECOVERY_TRIAL") },
                     enabled = !s.setupBusy,

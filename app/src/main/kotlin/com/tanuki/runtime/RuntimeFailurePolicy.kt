@@ -109,19 +109,16 @@ class RuntimeFailurePolicy(
         else FailureKind.CRASHED_LATE
     }
 
-    /** 用户手动启动：清空本轮自动重启次数；仍在试用时重新计时。 */
-    fun prepareManualStart(state: RuntimeRecoveryState, nowMillis: Long): RuntimeRecoveryState {
-        val current = settleExpiredProbation(state, nowMillis)
-        return current.copy(
-            restartAttempts = 0,
-            lastReadyAtMillis = 0L,
-            probationStartedAtMillis = if (current.mode == RecoveryMode.PROBATION) nowMillis else current.probationStartedAtMillis
-        )
-    }
+    /** 用户手动启动：清空本轮自动重启次数；仍在试用时从本次启动重新计时。 */
+    fun prepareManualStart(state: RuntimeRecoveryState, nowMillis: Long): RuntimeRecoveryState = state.copy(
+        restartAttempts = 0,
+        lastReadyAtMillis = 0L,
+        probationStartedAtMillis = if (state.mode == RecoveryMode.PROBATION) nowMillis else state.probationStartedAtMillis
+    )
 
-    /** 自动重启：保留重启次数；试用已过窗口则先转为 normal。 */
+    /** 自动重启：保留重启次数；只有存活稳定计时器能把 probation 提升为 normal。 */
     fun prepareAutomaticStart(state: RuntimeRecoveryState, nowMillis: Long): RuntimeRecoveryState =
-        settleExpiredProbation(state, nowMillis).copy(lastReadyAtMillis = 0L)
+        state.copy(lastReadyAtMillis = 0L)
 
     /** 就绪后记录时间；试用窗口从真正就绪开始计算，避免启动耗时吞掉试用期。 */
     fun onReady(state: RuntimeRecoveryState, nowMillis: Long): RuntimeRecoveryState {
@@ -170,26 +167,24 @@ class RuntimeFailurePolicy(
         }
     }
 
-    /** 进程重启后恢复状态：试用窗口内进程消失则回到安全模式；窗口已过则视为试用通过。 */
+    /**
+     * 进程重启后恢复状态：只要持久化仍是 PROBATION，就说明存活稳定计时器没有提交 NORMAL。
+     * 上次服务处于活动状态时一律按试用失败回到安全模式，不能用重新打开 App 的墙钟时间补足 2 分钟。
+     * 服务未活动（用户主动停止）时保留 PROBATION，下一次手动启动重新计时。
+     */
     fun afterProcessRestart(state: RuntimeRecoveryState, serviceWasActive: Boolean, nowMillis: Long): RuntimeRecoveryState {
         if (state.mode != RecoveryMode.PROBATION) {
             return if (serviceWasActive && state.mode == RecoveryMode.NORMAL) state.copy(restartAttempts = 0) else state
         }
-        // 尚未出现就绪行时无法证明试用通过，进程消失一律按试用失败处理。
-        val within = state.lastReadyAtMillis <= 0L || probationStartedAtMillis(state) == 0L ||
-            nowMillis - probationStartedAtMillis(state) <= probationWindowMillis
-        return when {
-            serviceWasActive && within -> state.copy(
-                mode = RecoveryMode.SAFE,
-                safeModeEnteredAtMillis = nowMillis,
-                probationStartedAtMillis = 0L,
-                restartAttempts = 0,
-                lastFailure = state.lastFailure ?: FailureKind.KILLED,
-                lastFailureAtMillis = if (state.lastFailure == null) nowMillis else state.lastFailureAtMillis
-            )
-            !serviceWasActive && within -> state.copy(restartAttempts = 0, lastReadyAtMillis = 0L)
-            else -> onStable(state, nowMillis)
-        }
+        if (!serviceWasActive) return state.copy(restartAttempts = 0, lastReadyAtMillis = 0L)
+        return state.copy(
+            mode = RecoveryMode.SAFE,
+            safeModeEnteredAtMillis = nowMillis,
+            probationStartedAtMillis = 0L,
+            restartAttempts = 0,
+            lastFailure = state.lastFailure ?: FailureKind.KILLED,
+            lastFailureAtMillis = if (state.lastFailure == null) nowMillis else state.lastFailureAtMillis
+        )
     }
 
     /** 当前是否处于试用窗口内；未就绪或时间戳缺失时保守视为仍在试用。 */
@@ -199,6 +194,9 @@ class RuntimeFailurePolicy(
         val started = probationStartedAtMillis(state)
         return started <= 0L || nowMillis - started <= probationWindowMillis
     }
+
+    /** 恢复快照的启动检查必须使用实际恢复的 userdata；安全模式使用独立配置，不能提交该检查。 */
+    fun canVerifyRestoredData(mode: RecoveryMode): Boolean = mode != RecoveryMode.SAFE
 
     /** 后退避时间：2s、4s、8s…… 不超过 maxBackoffMillis。 */
     fun backoffMillis(attempt: Int): Long {
@@ -379,13 +377,6 @@ class RuntimeFailurePolicy(
             restartDelayMillis = delay,
             summary = "$reason；将在 ${delay / 1000} 秒后自动重启（$attempt/$maxRestartAttempts 次），已中断任务不会自动重放"
         )
-    }
-
-    private fun settleExpiredProbation(state: RuntimeRecoveryState, nowMillis: Long): RuntimeRecoveryState {
-        if (state.mode != RecoveryMode.PROBATION) return state
-        val started = probationStartedAtMillis(state)
-        if (started > 0L && nowMillis - started >= probationWindowMillis) return onStable(state, nowMillis)
-        return state
     }
 
     private fun probationStartedAtMillis(state: RuntimeRecoveryState): Long =

@@ -715,10 +715,14 @@ class RuntimeManager(val context: Context) {
                         event(if (preparedReady.mode == RecoveryMode.SAFE) "DSH 已用安全模式启动：独立最小配置，未加载用户插件与配置" else "DSH 本机服务已就绪")
                         scheduleStability(c)
                         if(state.value.update==UpdateState.RESTORED_PENDING_CHECK) {
-                            val restored=JSONObject(paths.read("restore-transaction") ?: "{}")
-                            paths.atomic("restore-transaction",restored.put("phase","verified").toString())
-                            state.update { it.copy(update=UpdateState.SUCCESS) }
-                            event("恢复后的版本已通过本机启动检查；会话内容仍可在官方页面核对")
+                            if (failurePolicy.canVerifyRestoredData(preparedReady.mode)) {
+                                val restored=JSONObject(paths.read("restore-transaction") ?: "{}")
+                                paths.atomic("restore-transaction",restored.put("phase","verified").toString())
+                                state.update { it.copy(update=UpdateState.SUCCESS) }
+                                event("恢复后的版本已通过本机启动检查；会话内容仍可在官方页面核对")
+                            } else {
+                                event("安全模式使用独立配置，未加载恢复的用户数据；恢复检查仍待正常模式完成")
+                            }
                         }
                         scope.launch {
                             while (child === c && c.process.isAlive) {
