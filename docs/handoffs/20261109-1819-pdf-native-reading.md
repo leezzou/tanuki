@@ -40,6 +40,7 @@
 - 缩放首尾可达：`LazyColumn` 仍按 1× 测量，但按 `PdfViewportPolicy.zoomEdgePadding(H, scale)=H×(scale−1)/(2×scale)` 增加上下滚动留白；1× 留白为 0。第一页顶部在滚动 0 处贴视口上沿，最后一页底部在最大滚动处贴视口下沿；捏合/双击补偿同时计入留白变化。补偿先累积，等下一帧新留白完成测量后再执行，避免文档末尾放大时被旧滚动范围截断。
 - 纵向补偿公式：由 `(centroidY−H/2)×(1−old/new)` 修正为 `(centroidY−H/2)×(1/oldScale−1/newScale)`，非 1× 起点连续放大/缩小不再累积偏移；新增 2×→4×（62.5）、4×→2×（−62.5）回归。
 - 可见页渲染：新增 `PdfPreloadPolicy.renderPlan`，`visiblePages` 通过 `snapshotFlow` 单独跟踪；同屏超过 3 页时全部可见页优先加载，再补首尾各 1 页预加载；已淘汰但仍显示的位图保留到离开组合，避免绘制已回收 Bitmap。
+- 固定视口裁剪（第五轮 P2）：在未参与缩放的阅读视口 `Box` 上加 `clipToBounds()`；`graphicsLayer.clip` 只裁剪层内坐标，层放大后仍会绘制到标题栏/控制栏，外层裁剪才能把 PDF 像素限制在阅读区域内。
 - 渲染集合与内存预算联动（第四轮 P2）：单页像素上限按 `renderPlan.size + 1`（含一页在途位图）分配，受保护页总字节不超过 `cacheBudget`；计划变大导致上限收紧时，先 `discard` 超限旧页并等待组合回收，再按新上限渲染。新增 `PdfPageMemory.discard`、驻留页数像素上限、渲染计划 + 预算联合回归。
 
 ## 验证记录

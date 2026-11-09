@@ -54,6 +54,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -442,7 +443,8 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                 }
             }
 
-            Box(readModifier) {
+            // 固定视口裁剪：缩放层自身 clip 会随 scale 一起放大，必须由未变换的外层容器裁剪。
+            Box(readModifier.clipToBounds()) {
                 val density = LocalDensity.current
                 val horizontalPaddingPx = with(density) { (PDF_PAGE_HORIZONTAL_PADDING * 2).toPx() }
                 val verticalPaddingPx = with(density) { (PDF_PAGE_SPACING * 2).toPx() }
