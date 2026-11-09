@@ -2,6 +2,17 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## PDF 原生阅读体验打磨验证（2026-11-09，android_agent-35，非设备）
+
+- 范围：`WorkspacePdfPreview` 从单页重开改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；当前页前后各预加载 1 页；按字节 LRU 缓存与位图回收；适应宽度/适应页面；双指 1–5x、双击 1x/2.5x、放大后横向平移；页码/总页数、快速跳页；加密/损坏/超大/内存不足中文提示。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/pdf-reading/native-reading`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（改造后增量 3m08s）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` → BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + `ZoomPolicyTest` 6）。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，247 tests / 0 failures / 0 errors / 0 skipped。
+- 新增回归 42 项：`PdfPageCacheTest` 7（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 7（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记）；`PdfPreloadPolicyTest` 5（当前页优先、边界、半径、大文档小窗口、非法半径）；`PdfMemoryPolicyTest` 4（堆比例预算上下限、单页像素上限、位图字节记账、512 MiB 文件限制）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 8（适应宽度/整页、缩放范围、平移边界、缩放锚点、滚动补偿、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
+- 未执行：lint、assemble、Android 仪器/真实设备；真实大文档（≥500 页）连续滚动与内存曲线、真实加密/损坏 PDF、捏合/双击/横向平移手感、5x 文字清晰度、深色主题均未验证。编译与 JVM 策略测试不能替代设备验收。
+- 已知限制：单页渲染受长边 2048、4,000,000 像素与缓存预算约束，5x 放大清晰度有限；缓存预算为堆的 1/8（24–64 MiB）；512 MiB 是产品打开上限；只读预览，不含编辑/搜索/文本选择。
+
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
 - `v0.1.8` tag 指向 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（0.1.8 发布点）；远端 `main` 已前进到 `a9aa507c06883c62048a89924384ef0a10e01470`（Wave0 PR #10/#11/#12 合并）。`artifacts/releases/0.1.8/` 六附件齐全：APK、`app-update.json`、完整源码 ZIP、原生对应源码 TAR、`RELEASE-SHA256SUMS`、`native-source-SHA256SUMS`。
