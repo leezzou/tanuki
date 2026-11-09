@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-23（DSH Worker）
 - 时间：2026-11-09 15:39 CST（UTC+8）
-- 状态：已完成（实现与 JVM 验证通过；PR 待创建/独立 Review）
+- 状态：已完成（实现与 JVM 验证通过；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待独立 Review）
 - 前一记录：[视频全屏允许旋转（FULL_SENSOR）](20261106-1735-video-fullscreen-full-sensor.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -19,7 +19,7 @@
 - 已实现：上述 DSH 依赖解析、镜像映射、下载重试/续传、并发与进度改动。
 - 已验证：`compileModernDebugKotlin` 通过；完整 JVM 套件 155 tests / 0 failures / 0 errors / 0 skipped；目标 Npm/Download/OperationProgress 回归 61 项通过；`test-dsh-lock.py` 通过。
 - 待验证：真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换；真实 4000 包规模吞吐对比；独立 Review 与 CI。
-- 当前目标包名、分支/无Git状态、是否有运行中任务：AO 会话 worktree（android_agent-23），分支 `ao/dsh-install-2/root`，基线 `5c680b99075b87953a74cf22cfaee89608d058c1`；最终提交在独立 `/tmp` clone 的 `ao/dsh-install-2/install-resilience` 分支。
+- 当前目标包名、分支/无Git状态、是否有运行中任务：AO 会话 worktree（android_agent-23），分支 `ao/dsh-install-2/root`，基线 `5c680b99075b87953a74cf22cfaee89608d058c1`；PR [#20](https://github.com/leezzou/tanuki/pull/20)，源分支 `ao/dsh-install-2/install-resilience`，head 以 PR 页面为准。
 - 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
 
 ## 本次改动
@@ -52,22 +52,22 @@
 | `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL，1m41s，28 tasks executed） | 31 个测试类，155 tests / 0 failures / 0 errors / 0 skipped；强制重跑，不联网、不装设备。 |
 | `python3 scripts/test-dsh-lock.py` | 通过（PASS） | 模拟 linux/arm64/glibc 三个 Node 版本，560 archives；官方 HTTPS/SHA-512 条目 686，3 个负例；不下载、不装设备。 |
 | `python3 scripts/check-handoff.py --record ...` / `check-handoff.py` | 通过 | 记录印章刷新；当前交接检查 468 public files。 |
-| `python3 scripts/package-source.py` | 待执行/提交前执行 | 只在提交前核对源码包；工作材料不提交。 |
+| `python3 scripts/package-source.py` | 通过 | 提交前生成源码包与校验清单（469 public files）；本记录不写包自身哈希，工作材料不提交。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本轮首次编译/目标 JVM 测试是新验证；完整 JVM、锁脚本、交接/源码包检查待补。前轮 132 tests 不作为本轮结果。
 - 未测试、超时、失败和暂未复现的情况（不能抹掉）：未在 Android 设备/真实 PRoot 环境执行 DSH 安装；未做真实弱网/镜像 404/429 注入；未做 4000 包端到端吞吐基准；未跑 lint、assemble、仪器测试、真机/MIUI/低 API。
 
 ## 未完成与暂停项
 
-- 未完成：公开检查复核、源码包检查、PR 创建与 CI；完整 JVM、`test-dsh-lock.py`、交接检查已完成。
+- 未完成：PR #20 的 CI/独立 Review；真实设备/弱网 QA。完整 JVM、`test-dsh-lock.py`、交接/公开检查已完成。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续等待用户恢复；本轮未触碰。
 
 ## 下一步
 
 1. 运行完整 `:app:testModernDebugUnitTest` 并记录真实 tests/failures；运行 `scripts/test-dsh-lock.py`、`check-handoff.py`、`check-publication.py --git`、`package-source.py`。
-2. 在 `/tmp` 独立 clone 创建 `ao/dsh-install-2/install-resilience`，提交本轮源码与文档，推送并开 PR；目标 `main`，不合并、不触发 AO Review。
-3. PR 后由独立 Codex High 审查当前完整 SHA；真实设备/弱网 QA 另行授权后执行。
+2. PR [#20](https://github.com/leezzou/tanuki/pull/20) 等待 CI 与独立 Codex High Review；不合并、不触发 AO Review。
+3. Review 意见逐条修复后重审当前完整 SHA；真实设备/弱网 QA 另行授权后执行。
 
 ## 约束与风险
 
