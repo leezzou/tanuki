@@ -297,6 +297,11 @@ class RuntimeFailurePolicy(
     }
 
     private fun handleLateCrash(state: RuntimeRecoveryState, nowMillis: Long): RecoveryDecision {
+        // 日志就绪可能早于 HTTP 就绪；按日志判为晚崩溃时，试用窗口可能仍未结束。
+        // 先按实际 probation 计时处理，避免跳过“窗口内失败回安全模式”的保证。
+        if (inProbationWindow(state, nowMillis)) {
+            return enterSafeAfterFailure(state, nowMillis, "试用正常模式在延迟就绪后晚崩溃")
+        }
         val stable = onStable(state, nowMillis).copy(
             lastFailure = state.lastFailure,
             lastFailureAtMillis = state.lastFailureAtMillis,

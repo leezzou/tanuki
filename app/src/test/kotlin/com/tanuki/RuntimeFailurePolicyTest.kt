@@ -184,6 +184,17 @@ class RuntimeFailurePolicyTest {
         assertTrue(decision.autoRestart)
     }
 
+    @Test fun probationLateCrashWithinDelayedHttpWindowReturnsSafeMode() {
+        val probation = policy.toProbation(RuntimeRecoveryState(), 1_000L)
+        // 日志就绪在 1s，HTTP 就绪延迟到 11s；126s 崩溃相对日志已超过 120s，
+        // 但相对实际 HTTP 就绪只经过 115s，仍应回安全模式。
+        val ready = policy.onReady(probation, 11_000L)
+        val decision = policy.onFailure(ready, FailureKind.CRASHED_LATE, 126_000L, 1)
+        assertEquals(RecoveryMode.SAFE, decision.state.mode)
+        assertTrue(decision.autoRestart)
+        assertTrue(decision.summary.contains("安全模式"))
+    }
+
     @Test fun probationKilledOrNoSpaceReturnsSafeWithoutAutoRestart() {
         listOf(FailureKind.KILLED, FailureKind.NO_SPACE).forEach { kind ->
             val probation = policy.toProbation(RuntimeRecoveryState(), 1_000L)
