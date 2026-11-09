@@ -326,3 +326,23 @@ object DocxTableRowPolicy {
         return DocxRowHeight(limited, limited < rawHeightDp || !rawHeightDp.isFinite() || rawHeightDp <= 0f)
     }
 }
+
+
+/** 宽屏居中框架：整张纸保持测量宽度，留白只加在纸张两侧，不能压窄页面内容。 */
+data class DocxPageFrame(
+    val widthDp: Float,
+    val pageWidthDp: Float,
+    val sidePaddingDp: Float,
+)
+
+object DocxPageFramePolicy {
+    fun compute(availableWidthDp: Float, pageWidthDp: Float): DocxPageFrame {
+        val available = availableWidthDp.coerceAtLeast(1f)
+        val page = pageWidthDp.coerceAtLeast(1f)
+        return DocxPageFrame(
+            widthDp = available,
+            pageWidthDp = page,
+            sidePaddingDp = ((available - page) / 2f).coerceAtLeast(0f),
+        )
+    }
+}

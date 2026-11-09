@@ -4,6 +4,7 @@ import com.tanuki.storage.docx.DocxPageSetup
 import com.tanuki.ui.DocxImagePolicy
 import com.tanuki.ui.DocxImageSize
 import com.tanuki.ui.DocxBitmapLifetime
+import com.tanuki.ui.DocxPageFramePolicy
 import com.tanuki.ui.DocxPageGeometryPolicy
 import com.tanuki.ui.DocxRenderBudget
 import com.tanuki.ui.DocxCellPlanner
@@ -26,6 +27,25 @@ class DocxLayoutPolicyTest {
         // 11 磅正文放大后可读，且保持相对字号比例。
         assertEquals(12.63f, geometry.fontDp(22), 0.2f)
         assertEquals(geometry.fontDp(22) * 2, geometry.fontDp(44), 0.01f)
+    }
+
+    @Test
+    fun wideViewportCentersFullPageWithoutCompressingIt() {
+        val geometry = DocxPageGeometryPolicy.compute(DocxPageSetup(), availableWidthDp = 1200f)
+        val frame = DocxPageFramePolicy.compute(1200f, geometry.pageWidthDp)
+        assertEquals(1200f, frame.widthDp, 0.01f)
+        assertEquals(720f, frame.pageWidthDp, 0.01f)
+        assertEquals(240f, frame.sidePaddingDp, 0.01f)
+        assertEquals(geometry.pageWidthDp, frame.pageWidthDp, 0.01f)
+        assertTrue(frame.widthDp - frame.sidePaddingDp * 2f >= geometry.pageWidthDp)
+    }
+
+    @Test
+    fun narrowViewportFrameUsesFullWidthWithoutSidePadding() {
+        val geometry = DocxPageGeometryPolicy.compute(DocxPageSetup(), availableWidthDp = 360f)
+        val frame = DocxPageFramePolicy.compute(360f, geometry.pageWidthDp)
+        assertEquals(360f, frame.widthDp, 0.01f)
+        assertEquals(0f, frame.sidePaddingDp, 0.01f)
     }
 
     @Test

@@ -12,7 +12,7 @@
 - 列表：`numbering.xml` 的 `abstractNum`/`num`、多级 `ilvl`、`%1.%2` 占位符、decimal/letter/roman/decimalZero/bullet；段落样式上的 `numPr` 也生效。
 - 表格：`tblGrid` 列宽、`gridSpan`、单元格底纹、表头标记、单元格内多段落；表格按行参与分页。单元格文本与正文共享渲染预算和 8,000 字分段，超高行在绘制前截断。
 - 图片：正文内 DrawingML（`a:blip r:embed`）与旧式 VML（`v:imagedata r:id`），读取 `wp:extent` 尺寸与 `wp:docPr descr/title`；只读取正文实际引用、位于 `word/media/` 的图片。
-- 页面：`sectPr` 的 `pgSz`、`pgMar`；A4 默认值；显式 `w:br w:type="page"` 与 `pageBreakBefore`；连续页面滚动。
+- 页面：`sectPr` 的 `pgSz`、`pgMar`；A4 默认值；显式 `w:br w:type="page"` 与 `pageBreakBefore`；连续页面滚动；宽屏时整张纸居中，留白不压窄纸张内容。
 - 交互：1.0–4.0 倍缩放（按钮、双指、双击），横向/纵向滚动，复制纯文本，支持范围说明。
 
 ## 明确不支持

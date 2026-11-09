@@ -175,7 +175,9 @@ private fun DocxDocumentView(document: DocxDocument, modifier: Modifier = Modifi
             val pages = remember(atoms, geometry.contentHeightDp) {
                 DocxPaginator.paginate(atoms.map { it.atom }, geometry.contentHeightDp)
             }
-            val contentPadding = ((availableWidth - geometry.pageWidthDp.dp).value / 2f).coerceAtLeast(0f)
+            val frame = remember(availableWidth, geometry) {
+                DocxPageFramePolicy.compute(availableWidth.value, geometry.pageWidthDp)
+            }
             Box(
                 Modifier.fillMaxSize()
                     .pointerInput(Unit) {
@@ -206,8 +208,8 @@ private fun DocxDocumentView(document: DocxDocument, modifier: Modifier = Modifi
                         LocalDensity provides Density(baseDensity.density * zoom, baseDensity.fontScale),
                     ) {
                         Column(
-                            Modifier.width(geometry.pageWidthDp.dp)
-                                .padding(start = contentPadding.dp, top = 8.dp, bottom = 20.dp),
+                            Modifier.width(frame.widthDp.dp).padding(top = 8.dp, bottom = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             pages.forEachIndexed { index, page ->
                                 DocxPageCard(
