@@ -1,6 +1,5 @@
 # Tanuki 当前状态
 
-当前交接：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR 待创建）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。F1 [文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（PR #16 已合并为 `41609cb`）、W5 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 继续保留。本轮由 android_agent-24 从 `origin/main=5c680b9` 创建 `ao/workmanager-updates/background-update-check`，实现独立后台更新检查；不改 DSH 下载/安装逻辑、视频全屏、文件预览、协议、AO 配置或 0.1.8 附件。
 当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md）保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；不改下载加速、更新检查周期、协议或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
@@ -11,7 +10,7 @@
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
 - main CI 以 PR #13 合并后的 Actions 结果为准；Android job 使用 `-x buildNativeRuntime` 且仓库不跟踪 `jniLibs`，CI APK 无原生 `.so`，不能用于设备验收。
 
-### 后台更新检查（android_agent-24，PR 待创建）
+### 后台更新检查（android_agent-24，PR #19 待审）
 
 - 分支 `ao/workmanager-updates/background-update-check`，基线 `origin/main=5c680b9`；独立 `/tmp` clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - WorkManager 依赖 `androidx.work:work-runtime-ktx:2.9.1`；两个唯一周期任务：APK `tanuki-apk-update-check` 每 30 分钟、DSH `dsh-engine-update-check` 每 24 小时，均要求联网。
@@ -95,7 +94,7 @@
 
 ## 下一步
 
-1. 后台更新检查：在独立 `/tmp` clone 提交并推送 `ao/workmanager-updates/background-update-check`，创建 PR；由 Orchestrator/用户决定当前 head 的独立 Codex High Review。
+1. 后台更新检查：PR [#19](https://github.com/leezzou/tanuki/pull/19) 已创建（功能提交 `d19cf48`），等待 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review。
 2. 后台更新检查设备 QA（另行授权）：验证 30 分钟/24 小时周期、重启保留、Android 13 权限、同版本只通知一次、失败静默、APK/DSH 徽标独立。
 3. PR #17：由 Orchestrator 触发当前 head 的独立 Codex High Review（`d5b83fe` 已有批准，新 head 需重审）；设备旋转验收另行授权后执行。
 4. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。

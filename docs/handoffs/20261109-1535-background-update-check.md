@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-24（DSH Worker）
 - 时间：2026-11-09 15:35 CST
-- 状态：已完成，PR 待创建；未合并、未触发独立 Review
+- 状态：已完成，[PR #19](https://github.com/leezzou/tanuki/pull/19) 已创建（功能提交 `d19cf48`）；未合并、未触发独立 Review
 - 前一记录：[视频全屏允许旋转（FULL_SENSOR）](20261106-1735-video-fullscreen-full-sensor.md)
 
 > 本记录只描述本轮后台更新检查；视频全屏 PR #17、F1 文件预览、0.1.8 发布附件均未改动。
@@ -65,7 +65,7 @@
 
 ## 下一步
 
-1. 在独立 `/tmp` clone 提交并推送 `ao/workmanager-updates/background-update-check`，创建 PR；PR 正文使用本记录的命令和 148 项结果。
+1. PR [#19](https://github.com/leezzou/tanuki/pull/19)：等待 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review；PR 正文已记录本轮的 148 项结果。
 2. 由 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review；不要用 Worker 自评替代。
 3. 设备 QA（另行授权）检查：APK/DSH 徽标、30 分钟/24 小时调度、同版本只通知一次、Android 13 权限、重启后任务保留、失败静默。
 4. 合并与发布需用户明确授权；本轮不代合、不创建 tag/Release。
