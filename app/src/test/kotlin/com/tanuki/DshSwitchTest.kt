@@ -15,10 +15,11 @@ class DshSwitchTest {
         target: String,
         current: String = "1.2.0",
         installed: Set<String> = setOf("1.2.0", "1.3.0"),
+        targetLockVerified: Boolean = true,
         serviceStopped: Boolean = true,
         busy: Boolean = false,
         liveChild: Boolean = false
-    ) = DshSwitch.requireSwitchable(target, current, installed, serviceStopped, busy, liveChild)
+    ) = DshSwitch.requireSwitchable(target, current, installed, targetLockVerified, serviceStopped, busy, liveChild)
 
     @Test
     fun rejectsCurrentVersion() {
@@ -55,6 +56,22 @@ class DshSwitchTest {
     }
 
     @Test
+    fun rejectsTargetWithMissingOrMismatchedLock() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            requireSwitchable("1.3.0", targetLockVerified = false)
+        }
+        assertTrue(error.message!!.contains("依赖锁缺失或与 .installed 不一致"))
+    }
+
+    @Test
+    fun rejectsSwitchWhenCurrentProgramIsMissing() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            requireSwitchable("1.3.0", current = "1.2.0", installed = setOf("1.3.0"))
+        }
+        assertTrue(error.message!!.contains("当前 DSH 1.2.0 程序缺失或不完整"))
+    }
+
+    @Test
     fun rejectsInvalidCurrentMetadata() {
         val error = assertThrows(IllegalArgumentException::class.java) {
             requireSwitchable("1.3.0", current = "")
@@ -65,7 +82,7 @@ class DshSwitchTest {
     @Test
     fun allowsNewerInstalledVersionWhenIdle() {
         requireSwitchable("1.3.0")
-        requireSwitchable("1.3.0", current = "1.2.0-alpha.2")
+        requireSwitchable("1.3.0", current = "1.2.0-alpha.2", installed = setOf("1.2.0-alpha.2", "1.3.0"))
     }
 
     @Test

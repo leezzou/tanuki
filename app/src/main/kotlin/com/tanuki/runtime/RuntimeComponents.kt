@@ -459,6 +459,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         val meta=paths.metadata()
         val current=meta.optString("dsh")
         DshSwitch.requireSwitchable(target,current,DshVersions.installedVersions(paths.engines),
+            targetLockVerified=DshVersions.isLockVerified(paths.engines,target),
             serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
             busy=false,liveChild=manager.hasLiveChild)
         check(installedUbuntuVersion()!=null && installedNodeVersion()!=null &&

@@ -157,7 +157,7 @@ private fun InstalledDshRow(
             if (!DshVersions.canUninstallFromManager(item.version, activeVersion)) {
                 ManagerCaption("当前版本不可在此卸载；主界面仍保留原卸载入口。")
             } else {
-                OutlinedButton(onClick = { onSwitch(item.version) }, enabled = idle && !older,
+                OutlinedButton(onClick = { onSwitch(item.version) }, enabled = idle && !older && item.lockVerified,
                     modifier = Modifier.heightIn(min = 44.dp)) { Text("切换") }
                 TextButton(onClick = { onUninstall(item.version) }, enabled = idle,
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("卸载") }
@@ -166,6 +166,10 @@ private fun InstalledDshRow(
         if (older) {
             Text(DshVersions.DOWNGRADE_MESSAGE + "；当前数据可能与旧版不兼容。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (!item.lockVerified) {
+            Text("依赖锁缺失或与 .installed 不一致，无法切换；可卸载后重装该版本。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
 }

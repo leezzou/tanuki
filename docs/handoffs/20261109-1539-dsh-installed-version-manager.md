@@ -14,35 +14,35 @@
 ## 当前状态
 
 - 已实现：`DshVersions` 纯逻辑清单与切换策略；`RuntimeComponents.installedDshDetails()` 与 `switchDsh()`；`RuntimeService` 的 `DSH_SWITCH`；独立 `DshVersionManagerDialog`；TanukiUi 入口与 MainActivity 回调。
-- 已验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` 均 BUILD SUCCESSFUL；148 JVM 测试 0 失败/0 错误/0 跳过，其中 `DshVersionsTest` 6 项、`DshSwitchTest` 10 项。
+- 已验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` 均 BUILD SUCCESSFUL；151 JVM 测试 0 失败/0 错误/0 跳过，其中 `DshVersionsTest` 7 项、`DshSwitchTest` 12 项。
 - 待验证：PR 的 Host/Android CI、独立 Codex High Review、真实设备上的对话框布局/切换/卸载、`DataSnapshots.create` 的真实数据量耗时与失败路径。
 - 当前分支：`ao/dsh-version-manager/root`（独立 worktree，基线 `5c680b9`）；未运行真实 DSH 任务。
-- 关键事实：`DshVersions` 只把程序目录、`.installed`、依赖入口与中间目录都非符号链接的版本视为已安装；`verified` 还要求依赖锁哈希与 `.installed` 一致且存在 `.web-verified`。
+- 关键事实：`DshVersions` 只把程序目录、`.installed`、依赖入口与中间目录都非符号链接的版本视为已安装；`lockVerified` 要求依赖锁哈希与 `.installed` 一致；`verified` 还要求存在 `.web-verified`。
 
 ## 本次改动
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/runtime/DshVersions.kt` | 新增纯 Kotlin 清单/校验/切换策略与元数据事务；优先按 `unix:blocks` 统计实际占用并对硬链接去重；不依赖 Android API。 |
-| `app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt` | 清单统一走 `DshVersions`；新增 `installedDshDetails()` 与 `switchDsh()`；切换前检查基础环境与目标 Node 兼容性；复用同一版本正则。 |
+| `app/src/main/kotlin/com/tanuki/runtime/DshVersions.kt` | 新增纯 Kotlin 清单/校验/切换策略与元数据事务；输出 `lockVerified`；切换前复核目标依赖锁与当前程序完整性；优先按 `unix:blocks` 统计实际占用并对硬链接去重；不依赖 Android API。 |
+| `app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt` | 清单统一走 `DshVersions`；新增 `installedDshDetails()` 与 `switchDsh()`；切换前检查基础环境、目标 Node 兼容性与目标依赖锁；拒绝当前程序缺失；复用同一版本正则。 |
 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeService.kt` | 新增 `DSH_SWITCH` 前台服务动作。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshVersionManagerDialog.kt` | 新增独立“已安装 DSH 版本”对话框：总占用、当前/备用、校验、切换/卸载确认与降级说明。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 仅新增入口按钮、对话框调用与 3 个回调字段。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 仅接线清单读取、切换与卸载回调，并把 `DSH_SWITCH` 纳入前台通知条件。 |
-| `app/src/test/kotlin/com/tanuki/DshVersionsTest.kt` | 清单校验、占用/时间、符号链接、校验状态与版本管理卸载保护回归。 |
-| `app/src/test/kotlin/com/tanuki/DshSwitchTest.kt` | 当前/未安装/运行中/降级拒绝、成功元数据更新、写入失败回滚、快照/兼容性失败不动元数据。 |
+| `app/src/test/kotlin/com/tanuki/DshVersionsTest.kt` | 清单校验、占用/时间、符号链接、锁校验、校验状态与版本管理卸载保护回归。 |
+| `app/src/test/kotlin/com/tanuki/DshSwitchTest.kt` | 当前/未安装/运行中/降级/锁损坏/当前程序缺失拒绝、成功元数据更新、写入失败回滚、快照/兼容性失败不动元数据。 |
 
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` | 通过（BUILD SUCCESSFUL，2m45s） | 本 worktree，JDK17；仅告警既有弃用项。 |
-| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 148 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 6/6、`DshSwitchTest` 10/10。 |
+| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 151 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 7/7、`DshSwitchTest` 12/12。 |
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m07s） | 仅有既有弃用/可读性告警；lint 报告写入工作材料，不提交。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1539-dsh-installed-version-manager.md` | 通过 | 刷新 `docs/handoffs/CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：148 JVM 与编译均为本次新跑；历史 132 项、126 项不再冒充本轮结果。
+- 哪些是前一轮结果，哪些是本次新验证：151 JVM 与编译均为本次新跑；历史 132 项、126 项不再冒充本轮结果。
 - 未测试、超时、失败和暂未复现的情况：未跑 assemble/仪器/真机；未在真实 userdata 上执行切换快照；未验证 PR CI。
 
 ## 未完成与暂停项
@@ -55,7 +55,7 @@
 
 1. 在 `/tmp` 独立 clone 提交并开 PR；PR 描述写明基线、改动、测试与未验证项。
 2. PR CI 若失败，按实际日志修复并重新推送；不自行合并、不触发 Review。
-3. 设备验收覆盖：对话框列出多版本与总占用、当前版本卸载禁用、非当前卸载后刷新、较新版本切换成功且元数据更新、较旧版本按钮禁用并显示“需恢复匹配的数据快照”、运行中禁用操作；另验证 Node 降级后目标版本不兼容时切换被拒绝且指针/快照未变。
+3. 设备验收覆盖：对话框列出多版本与总占用、当前版本卸载禁用、非当前卸载后刷新、较新版本切换成功且元数据更新、较旧版本按钮禁用并显示“需恢复匹配的数据快照”、运行中禁用操作；另验证 Node 降级后目标版本不兼容、目标依赖锁损坏、当前程序已卸载时切换均被拒绝且指针/快照未变。
 
 ## 约束与风险
 

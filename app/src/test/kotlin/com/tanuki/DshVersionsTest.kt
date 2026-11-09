@@ -31,6 +31,7 @@ class DshVersionsTest {
         assertTrue(inventory.versions.first().active)
         assertFalse(inventory.versions.last().active)
         assertTrue(inventory.versions.all { it.verified })
+        assertTrue(inventory.versions.all { it.lockVerified })
         assertEquals(oldMarker.lastModified(), inventory.versions.last().installedAtMillis)
         assertTrue("大小应包含目录内普通文件", inventory.versions.first().bytes >= 4096L)
         assertEquals(inventory.versions.sumOf { it.bytes }, inventory.totalBytes)
@@ -81,8 +82,25 @@ class DshVersionsTest {
         val byVersion = DshVersions.scan(engines, "1.0.0").versions.associateBy { it.version }
 
         assertTrue(byVersion.getValue("1.0.0").verified)
+        assertTrue(byVersion.getValue("1.0.0").lockVerified)
         assertFalse("依赖锁哈希不一致必须标记未校验", byVersion.getValue("1.0.1").verified)
+        assertFalse(byVersion.getValue("1.0.1").lockVerified)
         assertFalse("缺少本机启动检查标记必须标记未校验", byVersion.getValue("1.0.2").verified)
+        assertTrue("缺少 .web-verified 不能等同于锁损坏", byVersion.getValue("1.0.2").lockVerified)
+    }
+
+    @Test
+    fun lockVerificationRejectsMissingOrMismatchedLock() {
+        val engines = temporary.newFolder("engines")
+        seed(engines, "1.0.0")
+        seed(engines, "1.0.1", marker = "0".repeat(64))
+        seed(engines, "1.0.2")
+        File(engines, "1.0.2/package-lock.json").delete()
+
+        assertTrue(DshVersions.isLockVerified(engines, "1.0.0"))
+        assertFalse("锁哈希不匹配必须拒绝切换", DshVersions.isLockVerified(engines, "1.0.1"))
+        assertFalse("锁文件缺失必须拒绝切换", DshVersions.isLockVerified(engines, "1.0.2"))
+        assertFalse(DshVersions.isLockVerified(engines, "9.9.9"))
     }
 
     @Test

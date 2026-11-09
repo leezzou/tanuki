@@ -19,6 +19,7 @@ data class InstalledDshVersion(
     val bytes: Long,
     val installedAtMillis: Long,
     val active: Boolean,
+    val lockVerified: Boolean,
     val verified: Boolean
 )
 
@@ -72,12 +73,14 @@ object DshVersions {
             .sortedWith { left, right -> VersionOrder.compare(right.name, left.name) }
             .map { directory ->
                 val marker = File(directory, ".installed")
+                val lockVerified = lockMatches(directory, marker)
                 InstalledDshVersion(
                     version = directory.name,
                     bytes = directoryBytes(directory),
                     installedAtMillis = marker.lastModified().takeIf { it > 0L } ?: directory.lastModified(),
                     active = directory.name == activeVersion,
-                    verified = isVerified(directory, marker)
+                    lockVerified = lockVerified,
+                    verified = lockVerified && hasStartMarker(directory)
                 )
             }
         return InstalledDshInventory(versions)
@@ -90,9 +93,20 @@ object DshVersions {
     fun canUninstallFromManager(version: String, activeVersion: String): Boolean =
         version.matches(VERSION) && version != activeVersion
 
-    private fun isVerified(directory: File, marker: File): Boolean {
-        val webVerified = File(directory, ".web-verified")
-        if (!Files.isRegularFile(webVerified.toPath(), LinkOption.NOFOLLOW_LINKS)) return false
+    /**
+     * 切换前只复核依赖锁与 .installed；缺少 .web-verified 只代表没有本机启动记录，
+     * 不能等同于锁损坏，因此不在这里拒绝。
+     */
+    fun isLockVerified(engines: File, version: String): Boolean {
+        if (!isInstalled(engines, version)) return false
+        val directory = File(engines, version)
+        return lockMatches(directory, File(directory, ".installed"))
+    }
+
+    private fun hasStartMarker(directory: File): Boolean =
+        Files.isRegularFile(File(directory, ".web-verified").toPath(), LinkOption.NOFOLLOW_LINKS)
+
+    private fun lockMatches(directory: File, marker: File): Boolean {
         val lock = File(directory, "package-lock.json")
         if (!Files.isRegularFile(lock.toPath(), LinkOption.NOFOLLOW_LINKS) || marker.length() != 64L) return false
         val expected = runCatching { marker.readText().trim() }.getOrNull() ?: return false
@@ -164,6 +178,7 @@ object DshSwitch {
         target: String,
         current: String,
         installed: Set<String>,
+        targetLockVerified: Boolean,
         serviceStopped: Boolean,
         busy: Boolean,
         liveChild: Boolean
@@ -172,8 +187,10 @@ object DshSwitch {
         check(serviceStopped) { "请先停止 DSH 服务再切换版本" }
         require(target.matches(DshVersions.VERSION)) { "DSH 版本格式无效" }
         require(current.matches(DshVersions.VERSION)) { "当前安装元数据缺少有效 DSH 版本；请先恢复匹配的数据快照" }
+        require(current in installed) { "当前 DSH $current 程序缺失或不完整；请先重装当前版本或恢复匹配的数据快照，再切换" }
         require(target != current) { "DSH $target 已是当前版本" }
         require(target in installed) { "DSH $target 未安装或程序目录不完整" }
+        check(targetLockVerified) { "DSH $target 的依赖锁缺失或与 .installed 不一致；请先卸载并重装该版本，当前版本保留" }
         check(!DshVersions.isOlder(target, current)) { DshVersions.DOWNGRADE_MESSAGE }
     }
 
