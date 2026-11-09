@@ -11,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +41,8 @@ import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
 import com.tanuki.ui.TanukiUiCallbacks
 import com.tanuki.ui.TanukiUiModel
+import com.tanuki.notify.ChatNotificationPreferences
+import com.tanuki.notify.ChatNotifier
 import com.tanuki.update.Release
 import com.tanuki.web.DshWebView
 import com.tanuki.web.DshFileChooser
@@ -66,6 +71,10 @@ class MainActivity : ComponentActivity() {
     private var browserUnavailable by mutableStateOf<String?>(null)
     private var overlayPermissionPrompt by mutableStateOf(false)
     private var browserOpenRequest by mutableIntStateOf(0)
+    private var dshOpenRequest by mutableIntStateOf(0)
+    private var pendingChatSession by mutableStateOf<String?>(null)
+    private var activityResumed = false
+    private var dshTabVisible = false
     private val overlayPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (android.provider.Settings.canDrawOverlays(this)) (application as TanukiApp).showBrowserOverlay()
         else {
@@ -117,6 +126,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume()
+        activityResumed = true
+        applyChatForeground()
+        (application as TanukiApp).chatNotifications.refresh()
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
         if (!PhoneStorageAccess.isWriteGranted(this)) manager.phoneFiles.setWriteAllowed(false)
     }
@@ -186,6 +198,11 @@ class MainActivity : ComponentActivity() {
     }
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         manager.event(if (granted) "通知权限已授予" else "通知权限未授予；可在系统设置开启")
+        (application as TanukiApp).chatNotifications.refresh()
+    }
+    private val chatNotificationsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        (application as TanukiApp).chatNotifications.refresh()
+        if (!granted) openChatNotificationSettings()
     }
 
     /** 手动触发更新检查时顺带申请通知权限；拒绝后后台检查仍静默运行。 */
@@ -209,6 +226,7 @@ class MainActivity : ComponentActivity() {
         // 系统栏占位始终交给Compose，避免全屏往返后窗口与页面重复避让。
         WindowCompat.setDecorFitsSystemWindows(window, false)
         consumeBrowserIntent(intent)
+        consumeChatIntent(intent)
         browser = DshWebView(this, manager,
             chooser = ::chooseDshFiles,
             download = { url, name ->
@@ -248,6 +266,7 @@ class MainActivity : ComponentActivity() {
                 val appUpdate by appUpdates.state.collectAsState()
                 val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
                 val dshUpdateCheck by dshUpdateChecks.state.collectAsState()
+                val chatStatus by (application as TanukiApp).chatNotifications.status.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
                 val ubuntuSources=remember(components.selectedUbuntuVersion) { manager.components.sources(RuntimeComponent.UBUNTU) }
                 val nodeSources=remember(components.selectedNodeVersion) { manager.components.sources(RuntimeComponent.NODE) }
@@ -257,6 +276,7 @@ class MainActivity : ComponentActivity() {
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
                 var confirmation by remember { mutableStateOf<String?>(null) }
+                var chatNotifyDialog by remember { mutableStateOf(false) }
                 var selected by remember { mutableStateOf<Release?>(null) }
                 val deviceInfo = remember { manager.deviceInfo() }
                 val backgroundResult by produceState<String?>(null, s.stage) {
@@ -304,7 +324,7 @@ class MainActivity : ComponentActivity() {
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
                         appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
-                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck),
+                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,chatNotifications=chatStatus),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -383,10 +403,17 @@ class MainActivity : ComponentActivity() {
                         checkAppUpdates = { requestUpdateNotifications(); appUpdates.check() },
                         downloadAppUpdate = appUpdates::download,
                         installAppUpdate = ::confirmApplicationUpdate,
-                        cancelAppUpdate = appUpdates::cancel
+                        cancelAppUpdate = appUpdates::cancel,
+                        dshVisible = ::setDshTabVisible,
+                        chatNotifications = { chatNotifyDialog = true },
+                        toggleChatNotifications = { enabled ->
+                            ChatNotificationPreferences.setEnabled(this@MainActivity, enabled)
+                            (application as TanukiApp).chatNotifications.refresh()
+                        }
                     ),
                     browserView = browser.view,
                     browserOpenRequest = browserOpenRequest,
+                    dshOpenRequest = dshOpenRequest,
                     browserControl = browserControl,
                     filesPage = { modifier, bottomInset ->
                         WorkspaceFilesPage(workspaceFiles,
@@ -420,6 +447,24 @@ class MainActivity : ComponentActivity() {
                             }
                     }
                 )
+                LaunchedEffect(s.web, pendingChatSession) { consumeChatSessionWhenReady(s.web) }
+                if (chatNotifyDialog) AlertDialog(onDismissRequest = { chatNotifyDialog = false },
+                    title = { Text("DSH 聊天通知") },
+                    text = {
+                        Column {
+                            Text(chatStatus.summaryText())
+                            Spacer(Modifier.height(8.dp))
+                            Text("只在应用不在前台或对应会话不可见时提醒；正文只说明事件类型，不包含会话内容。", style = MaterialTheme.typography.bodySmall)
+                            Row {
+                                if (android.os.Build.VERSION.SDK_INT >= 33 && !chatStatus.permission.runtimeGranted) {
+                                    TextButton(onClick = { chatNotifyDialog = false; requestChatNotificationPermission() }) { Text("申请通知权限") }
+                                }
+                                TextButton(onClick = { openChatChannelSettings() }) { Text("渠道设置") }
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { chatNotifyDialog = false; openChatNotificationSettings() }) { Text("系统通知设置") } },
+                    dismissButton = { TextButton(onClick = { chatNotifyDialog = false }) { Text("关闭") } })
                 if (overlayPermissionPrompt) AlertDialog(onDismissRequest = { overlayPermissionPrompt = false },
                     title = { Text("允许浏览器悬浮窗") },
                     text = { Text("需要在系统设置允许「显示在其他应用上层」。授权后，浏览器可停留在其他应用上方；拖动顶部移动，拖动右下角调整大小。只显示本应用的网页，不读取其他应用内容。可以随时关闭窗口或撤销系统授权。") },
@@ -620,7 +665,12 @@ class MainActivity : ComponentActivity() {
             (application as TanukiApp).hideBrowserOverlay()
         }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); consumeBrowserIntent(intent) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeBrowserIntent(intent)
+        consumeChatIntent(intent)
+    }
     private fun confirmApplicationUpdate() {
         if (!appUpdates.installAllowed()) {
             android.widget.Toast.makeText(this, "请先停止 DSH，并等待环境与文件任务结束", android.widget.Toast.LENGTH_LONG).show()
@@ -647,12 +697,80 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
     private fun openAppSettings() { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+
+    /** 只在 Activity 前台且 DSH 标签实际显示时抑制对应会话的通知。 */
+    private fun applyChatForeground() {
+        (application as TanukiApp).chatNotifications.setAppForeground(activityResumed && dshTabVisible)
+    }
+
+    private fun setDshTabVisible(visible: Boolean) {
+        dshTabVisible = visible
+        applyChatForeground()
+    }
+
+    private fun requestChatNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            chatNotificationsPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else openChatNotificationSettings()
+    }
+
+    private fun openChatNotificationSettings() {
+        val notifier = ChatNotifier(this)
+        val candidates = listOf(notifier.notificationSettingsIntent(), notifier.appNotificationSettingsIntent(),
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        for (candidate in candidates) {
+            try { startActivity(candidate); return }
+            catch (_: android.content.ActivityNotFoundException) { }
+            catch (_: SecurityException) { }
+        }
+        android.widget.Toast.makeText(this, "无法打开系统通知设置，请从系统应用管理进入", android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    private fun openChatChannelSettings() {
+        val notifier = ChatNotifier(this)
+        runCatching { startActivity(notifier.notificationSettingsIntent()) }
+            .onFailure { openChatNotificationSettings() }
+    }
+
+    private fun consumeChatIntent(value: Intent?) {
+        val sessionId = value?.getStringExtra(ChatNotifier.EXTRA_SESSION_ID) ?: return
+        value.removeExtra(ChatNotifier.EXTRA_SESSION_ID)
+        if (sessionId.isBlank() || sessionId.length > 128 || !sessionId.all { it.code in 0x21..0x7e }) return
+        pendingChatSession = sessionId
+        dshOpenRequest += 1
+    }
+
+    private fun consumeChatSessionWhenReady(web: WebState) {
+        val sessionId = pendingChatSession ?: return
+        if (web != WebState.CONNECTED) return
+        pendingChatSession = null
+        // 页面连通时侧栏可能收起/还没渲染；脚本会展开侧栏与工作区分组，并在实际选中后返回 true。
+        lifecycleScope.launch {
+            repeat(15) {
+                val opened = CompletableDeferred<Boolean>()
+                browser.openSession(sessionId) { opened.complete(it) }
+                if (withTimeoutOrNull(1200) { opened.await() } == true) return@launch
+                delay(300)
+            }
+            if (!isFinishing && !isDestroyed) {
+                android.widget.Toast.makeText(this@MainActivity,
+                    "无法定位该会话，请在 DSH 侧栏手动打开；任务本身未受影响", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         val b = Bundle(); browser.save(b); outState.putBundle("web", b)
         agentBrowser?.let { controller -> val state = Bundle(); controller.saveState(state); outState.putBundle("agentBrowser", state) }
     }
-    override fun onPause() { agentBrowser?.setVisible(false); super.onPause() }
+    override fun onPause() {
+        activityResumed = false
+        applyChatForeground()
+        agentBrowser?.setVisible(false)
+        super.onPause()
+    }
     override fun onDestroy() {
         val callback = filesCallback
         filesCallback = null

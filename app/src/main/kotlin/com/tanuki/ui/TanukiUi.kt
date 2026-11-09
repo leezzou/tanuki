@@ -90,6 +90,7 @@ data class TanukiUiModel(
     val appInstallAllowed: Boolean = false,
     val apkUpdateCheck: ApkUpdateCheckState = ApkUpdateCheckState(),
     val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
+    val chatNotifications: com.tanuki.notify.ChatNotificationStatus = com.tanuki.notify.ChatNotificationStatus(),
     val fileFullscreen: Boolean = false
 )
 
@@ -132,7 +133,10 @@ data class TanukiUiCallbacks(
     val checkAppUpdates: () -> Unit = {},
     val downloadAppUpdate: () -> Unit = {},
     val installAppUpdate: () -> Unit = {},
-    val cancelAppUpdate: () -> Unit = {}
+    val cancelAppUpdate: () -> Unit = {},
+    val dshVisible: (Boolean) -> Unit = {},
+    val chatNotifications: () -> Unit = {},
+    val toggleChatNotifications: (Boolean) -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -148,7 +152,8 @@ internal enum class TanukiGlyph { Home, Terminal, Layers, Settings, Folder, File
 fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: WebView,
              filesPage: @Composable (Modifier, Dp) -> Unit = { _, _ -> },
              agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> },
-             browserOpenRequest: Int = 0, browserControl: BrowserControlUiState = BrowserControlUiState()) {
+             browserOpenRequest: Int = 0, dshOpenRequest: Int = 0,
+             browserControl: BrowserControlUiState = BrowserControlUiState()) {
     var tab by rememberSaveable(key = "tanuki-navigation-5") { mutableIntStateOf(0) }
     val pageStates = rememberSaveableStateHolder()
     var fullscreen by rememberSaveable { mutableStateOf(false) }
@@ -160,6 +165,10 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
         tab = index
     }
     LaunchedEffect(browserOpenRequest) { if (browserOpenRequest > 0) navigate(3) }
+    // 通知点击可能要求直接回到 DSH 页；保留当前会话选择，只切换导航。
+    LaunchedEffect(dshOpenRequest) { if (dshOpenRequest > 0) tab = 1 }
+    LaunchedEffect(tab) { callbacks.dshVisible(tab == 1) }
+    DisposableEffect(Unit) { onDispose { callbacks.dshVisible(false) } }
     val s = model.snapshot
     LaunchedEffect(tab, s.service) {
         if (tab == 1 && s.service == ServiceState.RUNNING) callbacks.connectDsh()
@@ -625,11 +634,17 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         }
     }
     if (section == "运行与后台") SettingsGroup("运行与后台") {
-        ActionRow("通知权限", "显示运行状态与停止入口", onClick = c.notifications)
+        ToggleRow("DSH 聊天通知", model.chatNotifications.permission.userEnabled, c.toggleChatNotifications)
+        Caption("回合完成、等待确认、错误或权限请求时提醒；只在对应会话不可见时发送，正文不含会话内容。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ActionRow("聊天通知权限与系统入口", model.chatNotifications.summaryText(), onClick = c.chatNotifications)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ActionRow("更新通知权限", "后台发现新版本时提示；手动检查时申请", onClick = c.notifications)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
         TanukiDetails("后台运行说明") {
             Caption("服务由你主动启动；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
+            Caption("部分厂商系统还需要在系统的通知、电池或自启动设置中允许 Tanuki，否则后台提醒可能被延迟或拦截。")
         }
     }
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {

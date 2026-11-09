@@ -65,6 +65,21 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：rebase 后 `:app:compileModernDebugKotlin` 与完整 `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，205 tests / 0 failures / 0 errors / 0 skipped。`NpmAdaptiveWorkerPoolTest` 升降档 2/2；目标 Npm/Download 回归 61 项通过。
 - 未执行：真实 Android/PRoot DSH 首次安装、弱网/镜像 404/429 注入、4000 包端到端吞吐、lint/assemble/仪器/真机；独立 Review 未触发。
 
+## DSH 聊天通知验证（2026-11-09，android_agent-29，非设备）
+
+- 范围：官方 `/api/remote.mux` `$events` 旁路（`api-session/status`、`api-session/error`、`approval/request`、`user-questions/request`）；回合完成/等待确认/错误/权限请求分类；session + DSH 版本 + event 去重；前台且对应会话可见时抑制；Android 13 权限、`dsh-chat` 渠道、group/summary、设置入口、点击打开会话；通知正文固定最小文案。基线 `main=2f3fac9`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（首次约 4m29s）。
+  - `:app:testModernDebugUnitTest --tests 'com.tanuki.ChatNotificationPolicyTest' --tests 'com.tanuki.ChatNotificationRoutingTest' --tests 'com.tanuki.DshChatProtocolTest'` → BUILD SUCCESSFUL，18 tests / 0 failures。
+  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，223 tests / 0 failures / 0 errors / 0 skipped（39 个 XML 结果文件；既有 205 + 新增 18）。
+  - `:app:lintModernDebug` → BUILD SUCCESSFUL（约 4m44s）。
+  - 抽取注入脚本后 `node --check` → OK；用合成 Fake WebSocket 发送 status true/false、error、approval、question 五帧 → `JS_BRIDGE_TEST_OK 5`，原生消息未包含合成的 `secret` 工具名/错误文本/消息内容，脚本未读取 `innerText`/`textContent`/localStorage。
+- 新增回归：`ChatNotificationPolicyTest` 10 项（首次 false 基线、true→false、重复 false、同/异会话前台抑制、后台、版本/会话/事件去重、旧通知未清除时新事件仍提醒、权限/渠道/用户开关、Android<33、非法 id、状态文案）；`ChatNotificationRoutingTest` 4 项（同会话跨进程稳定 tag/id、不同会话 Identity、子通知可再次提醒/摘要静默、非法 id）；`DshChatProtocolTest` 4 项（四类事件、running 补种、非法载荷、脚本只读边界与打开会话函数）。
+- Review 修复回归：`node scripts/test-chat-session-open.mjs` → `CHAT_SESSION_OPEN_TEST_OK`，覆盖侧栏初始收起、保留非空搜索且当前为其他会话、通过官方清除入口解除搜索过滤、只展开一次、异步选中前不谎报成功、已选中目标与非法 id；Host CI 已新增该步骤。假 DOM 只有在搜索清除且分组展开后才为目标 id 返回会话行。
+- PR #22 GitHub Actions `verify`：Host checks 与 Android build+JVM+lint 均 pass。首轮 Android 唯一失败为既有 `NpmAdaptiveWorkerPoolTest` 并发时序（非本轮代码），重跑通过；Review 修复提交 `21cc811` 与搜索过滤修复提交 `462d266` 的 Host/Android 两 job 均全绿，未修改该并发测试。
+- rebase 到 `main=5fd1ab4`（含安全模式 PR #25 与 XLSX PR #23）后，在 `/tmp/tanuki-chat-notify` 复跑 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` → BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
+- 未执行：assemble、Android 仪器/真实设备、Android 13 权限弹窗与通知展示、group/summary/渠道设置、点击通知切会话、同会话新事件再次提醒的设备声音/振动、真实 DSH WebSocket、后台/息屏送达、MIUI/其他 ROM、DSH 升级后事件表/页面属性复核。编译/JVM/lint 不能替代设备与 ROM 验收。
+
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
 - 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
