@@ -21,13 +21,23 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，D8 正常打包 `com.github.mwiede:jsch:2.28.8`。
   - 远程分支 `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、**229 tests / 0 failures / 0 errors / 0 skipped**。
-  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，45 个结果文件、**311 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/93 warnings。
+  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，47 个结果文件、**334 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/94 warnings。
   - Review 修复后 `-PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；新增 Cookie 隔离与 Keystore 设备回归已编译，未运行。
   - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 80 warnings / 1 hint**；新增文件无 lint 告警。
   - `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` → 91 runtime artifacts；随后 `python3 scripts/collect-component-licenses.py` 刷新依赖许可清单。
 - Review 修复（PR #29）：Keystore 加密改为 provider 生成 IV（`cipher.init(ENCRYPT_MODE, key)` 后保存 `cipher.iv`），新增 AndroidKeyStore 设备回归；管理页 Cookie 按逻辑主机分区（本地/每台远程分别保存 header，切换前清空并恢复，失败关闭页面），新增 JVM 分区测试与真实 CookieManager 设备回归；认证校验/自动重试改绑活动端点，不再要求本地 ServiceState.RUNNING；设备测试夹具改用 `attachLocalEndpointForTesting`，移除已删除字段反射；测试连接确认对话框显示实际 SHA256 指纹。
 - 新增 `RemoteHostTest` 24 项、`DshRemoteIsolationTest` 4 项：主机/端口/用户名/IPv4/IPv6/token/私钥校验；token URL 只落临时 loopback 端口并编码；配置与端点 `toString` 脱敏；SHA-256 主机指纹固定向量；本地/远程 origin 切换、本地停止保持远程、失败回退、无本地时清空端点；加密存储往返且不落明文、密文篡改不降级、清除配置/凭据/known_hosts；首次指纹确认前不认证、确认后才信任；主机密钥变化拒绝；测试连接不切换 origin 也不保存配置；失败回退中文错误且不泄露密码；隧道探测失败关闭隧道；HTTP 探测 200/302/401/500 与连接拒绝；Cookie 分区、两远程主机不串 Cookie、本地 STOPPED 不误认证、远程活动端点可认证/重试。
 - 未执行：真实 Android 设备到真实 sshd、真实 Keystore 加解密、真实远程 DSH token 登录、弱网/断线、设备 UI、Ed25519、Android 仪器测试、真机。JVM 与 mock SSH 不能替代真实主机/设备验收。
+## DSH 冷启动优化验证（2026-11-09，android_agent-27，非设备）
+
+- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
+- 实际执行：
+  - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
+  - 合并 `origin/main=c2f1b44` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
+  - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
+  - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+- 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
+- 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
 ## DSH 运行失败分类与安全模式验证（2026-11-09，android_agent-28，非设备）
 
 - 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`（rebase 后 `dc0494b`）；范围：新增纯 Kotlin `RuntimeFailurePolicy`，覆盖 `LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类、连续两次 startup/early 进入安全模式、安全模式 rescue 启动参数、probation 2 分钟窗口、自动重启上限/退避、noSpace/killed 不自动重启，以及 `state/failure-state.json` 跨进程恢复。RuntimeManager/RuntimeService 接入安全模式与前端入口。

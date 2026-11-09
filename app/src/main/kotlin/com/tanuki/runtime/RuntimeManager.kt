@@ -1,6 +1,7 @@
 package com.tanuki.runtime
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Process
@@ -73,6 +74,9 @@ class RuntimeManager(val context: Context) {
     private var serverJob: Job? = null
     private var workspaceMonitor: Job? = null
     private var workspaceRefresh: Job? = null
+    private val earlyStartGate = EarlyStartGate()
+    /** 独立更新管理器（DSH 安装/备用/恢复、APK 更新）的忙碌信号，由 TanukiApp 注入。 */
+    @Volatile private var externalBusy: () -> Boolean = { false }
     @Volatile private var stopping = false
     private var runtimeGeneration = 0L
     @Volatile private var child: Child? = null
@@ -569,6 +573,39 @@ class RuntimeManager(val context: Context) {
         event("项目容量预算已保存；现有文件保留")
         refreshWorkspaceStorage()
     }
+    /**
+     * 首帧前提前拉起已安装且空闲的运行时。
+     *
+     * 只发起既有前台服务 START 动作，安装/密钥/用户数据仍走 [start] 的原有流程；
+     * 条件不满足、重复调用或系统拒绝时返回 false，不改变当前状态。
+     */
+    fun requestEarlyStart(enabled: Boolean): Boolean {
+        return earlyStartGate.request(earlyConditions(enabled)) {
+            try {
+                context.startForegroundService(Intent(context, RuntimeService::class.java).setAction("START_EARLY"))
+                event("启动优化：已请求在首帧前提前拉起已就绪的 DSH")
+            } catch (error: Throwable) {
+                event("提前启动未能发起，仍可手动启动：${Redact.text(error.message ?: error.javaClass.simpleName)}")
+                throw error
+            }
+        }
+    }
+    /** 由 Application 注入独立更新/恢复任务的忙碌信号；默认不阻塞。 */
+    fun registerBusySignal(signal: () -> Boolean) {
+        externalBusy = signal
+    }
+    private fun externalBusyActive(): Boolean = runCatching { externalBusy() }.getOrDefault(false)
+    private fun earlyConditions(enabled: Boolean): EarlyRuntimeStart.Conditions {
+        val snapshot = state.value
+        return EarlyRuntimeStart.conditionsFrom(
+            enabled = enabled,
+            snapshot = snapshot,
+            runtimeOperationActive = job?.isActive == true || serverJob?.isActive == true,
+            independentOperationActive = externalBusyActive(),
+            liveChild = child != null,
+            stopping = stopping,
+        )
+    }
     private fun publishRecovery(recovery: RuntimeRecoveryState) {
         recoveryState.value = recovery
         state.update { it.copy(recovery = recovery) }
@@ -669,8 +706,10 @@ class RuntimeManager(val context: Context) {
         start()
     }
 
-    fun start(automatic: Boolean = false) {
+    fun start(early: Boolean = false, automatic: Boolean = false) {
         synchronized(this) {
+            // 服务端收到 START_EARLY 时重新校验，避免请求后环境变化或已被安装/手动启动占用。
+            if (early && !EarlyRuntimeStart.shouldStart(earlyConditions(true))) return
             if(stopping || state.value.service==ServiceState.STOPPING){event("服务正在停止，请稍后启动");return}
             if (serverJob?.isActive == true || child != null) return
             if (!automatic) autoRestartJob?.cancel()
@@ -697,6 +736,9 @@ class RuntimeManager(val context: Context) {
                         val v = paths.metadata().getString("dsh")
                         components.checkDshNodeCompatibility(v)
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
+                        // 启动期只读路径缓存只覆盖官方 web 启动；准备失败时按原生方式启动。
+                        val startupTools = DshStartup.prepare(context, paths)
+                        val startupConfig = DshStartupConfig.fromEnvironment()
                         val safe = attempt.mode == RecoveryMode.SAFE
                         val safeDshData = paths.safeDshData
                         val rescueProfileExists = File(safeDshData, "profiles/rescue").isDirectory
@@ -709,7 +751,9 @@ class RuntimeManager(val context: Context) {
                             home = if (safe) paths.safeHome else paths.home,
                             dshHome = if (safe) safeDshData else paths.dshData,
                             workspace = paths.workspaces,
-                            phoneFiles = !safe
+                            phoneFiles = !safe,
+                            startupTools = startupTools,
+                            startupConfig = startupConfig
                         )
                         child = c
                         launched = true

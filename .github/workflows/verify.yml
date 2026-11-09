@@ -43,6 +43,8 @@ jobs:
         run: node scripts/test-browser-client.mjs
       - name: Test Phone client
         run: node scripts/test-phone-client.mjs
+      - name: Test DSH startup path cache
+        run: node scripts/test-dsh-path-cache.mjs
       - name: Test chat session opener
         run: node scripts/test-chat-session-open.mjs
       # 交接门禁放在最后：W1 的恢复记录未合并前它必然失败，
