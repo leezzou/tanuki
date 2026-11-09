@@ -294,6 +294,23 @@ object BackgroundUpdateChecks {
         state.available && state.latestVersion.isNotBlank() && state.notifiedVersion != state.latestVersion
 
     /**
+     * 用当前已安装的 DSH 版本重算快照。
+     *
+     * 安装/切换/卸载会改写 installed.json，但不应清掉已知 latest、lastCheckedAt
+     * 或 notifiedVersion；这里只更新 installedVersion 与 available，不联网。
+     */
+    fun rebaseDshSnapshot(
+        saved: DshUpdateCheckState,
+        installedVersion: String
+    ): DshUpdateCheckState {
+        val installed = installedVersion.takeIf(::isValidVersion).orEmpty()
+        return saved.copy(
+            installedVersion = installed,
+            available = isUpdateAvailable(installed, saved.latestVersion)
+        )
+    }
+
+    /**
      * 合并手动刷新得到的官方 latest；与 APK 一样，开始时间早于现有后台结果时拒绝覆盖。
      */
     fun applyManualDsh(

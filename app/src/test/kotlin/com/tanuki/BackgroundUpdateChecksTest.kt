@@ -193,6 +193,45 @@ class BackgroundUpdateChecksTest {
         assertEquals("上次后台检查未成功", result.statusText())
     }
 
+    @Test fun dshSnapshotRebasesAfterInstallingNewlyFoundVersion() {
+        val discovered = DshUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.2.1",
+            latestVersion = "0.2.2",
+            available = true,
+            lastCheckedAt = 1_000L,
+            source = DshRegistry.MIRROR.label,
+            notifiedVersion = "0.2.2"
+        )
+        // 安装 0.2.2 后离线重启：文件里的旧 installedVersion 必须按当前安装身份重算。
+        val decoded = BackgroundUpdateChecks.decodeDsh(BackgroundUpdateChecks.encodeDsh(discovered))
+        val rebased = BackgroundUpdateChecks.rebaseDshSnapshot(decoded, "0.2.2")
+        assertFalse(rebased.available)
+        assertEquals("0.2.2", rebased.installedVersion)
+        assertEquals("0.2.2", rebased.latestVersion)
+        assertEquals(1_000L, rebased.lastCheckedAt)
+        assertEquals("0.2.2", rebased.notifiedVersion)
+        assertEquals(DshRegistry.MIRROR.label, rebased.source)
+    }
+
+    @Test fun dshSnapshotKeepsBadgeWhenRemoteStillHasNewerVersion() {
+        val saved = DshUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.2.1",
+            latestVersion = "0.2.3",
+            available = true,
+            lastCheckedAt = 2_000L,
+            notifiedVersion = "0.2.2"
+        )
+        val rebased = BackgroundUpdateChecks.rebaseDshSnapshot(saved, "0.2.2")
+        assertTrue(rebased.available)
+        assertEquals("0.2.2", rebased.installedVersion)
+        assertEquals("0.2.3", rebased.latestVersion)
+        assertEquals(2_000L, rebased.lastCheckedAt)
+        assertEquals("0.2.2", rebased.notifiedVersion)
+        assertEquals("有更新：0.2.3", rebased.badgeText())
+    }
+
     @Test fun staleManualApkReplayCannotClearNewerBackgroundSnapshot() {
         val background = ApkUpdateCheckState(
             status = UpdateCheckStatus.SUCCEEDED,

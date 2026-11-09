@@ -193,13 +193,28 @@ class ApkUpdateCheckRepository(private val context: Context, private val paths: 
 class DshUpdateCheckRepository(private val paths: Paths) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
-    private val mutable = MutableStateFlow(BackgroundUpdateChecks.decodeDsh(paths.read(FILE_NAME)))
+    private val mutable = MutableStateFlow(
+        BackgroundUpdateChecks.rebaseDshSnapshot(
+            saved = BackgroundUpdateChecks.decodeDsh(paths.read(FILE_NAME)),
+            installedVersion = installedVersion()
+        )
+    )
     val state: StateFlow<DshUpdateCheckState> = mutable.asStateFlow()
     private var job: Job? = null
 
     fun startCheck(force: Boolean = false) {
         if (job?.isActive == true) return
         job = scope.launch { checkNow(force) }
+    }
+
+    /** 实际安装版本变化时只重算本地可用性；不联网、不复用手动候选、不刷新 lastCheckedAt。 */
+    suspend fun syncInstalledVersion(installedVersion: String = installedVersion()) {
+        gate.withLock {
+            val updated = BackgroundUpdateChecks.rebaseDshSnapshot(mutable.value, installedVersion)
+            if (updated == mutable.value) return@withLock
+            mutable.value = updated
+            persist(updated)
+        }
     }
 
     suspend fun checkNow(force: Boolean = false): DshUpdateCheckState = gate.withLock {

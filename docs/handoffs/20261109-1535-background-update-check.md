@@ -21,7 +21,7 @@
 ## 当前状态
 
 - 已实现：后台检查纯策略、两个仓库、两个 Worker、调度器、通知、UI 徽标、手动结果同步。
-- 已验证：`:app:compileModernDebugKotlin` BUILD SUCCESSFUL；`:app:testModernDebugUnitTest` BUILD SUCCESSFUL，172 tests / 0 failures / 0 errors / 0 skipped。新增 `BackgroundUpdateChecksTest` 21 项全过。
+- 已验证：`:app:compileModernDebugKotlin` BUILD SUCCESSFUL；`:app:testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped。新增 `BackgroundUpdateChecksTest` 23 项全过。
 - 待验证：真实 WorkManager 调度与进程重启、Android 13 通知权限与通知展示、真实 GitHub/npmmirror/npm 网络、设备 UI、lint/assemble/仪器。
 - 当前分支：`ao/workmanager-updates/background-update-check`（从 `origin/main=5c680b9` 创建，2026-11-09 rebase 到 `origin/main=9b32051`；在本会话 worktree 实现，验证与提交在独立 `/tmp` clone 完成）。
 - 未运行设备、未启动模拟器、未安装 APK、未发布。
@@ -31,19 +31,19 @@
 | 文件 | 改动与目的 |
 |---|---|
 | `app/build.gradle.kts` | 增加 WorkManager 依赖。 |
-| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateChecks.kt` | 纯策略：30 分钟/24 小时间隔、唯一任务名、12 秒超时、版本比较、APK/DSH 状态编解码、镜像回退、通知去重。 |
-| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt` | APK/DSH 两个独立仓库与受限 HTTPS 读取；写 `apk-update-check.json`、`dsh-update-check.json`。 |
+| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateChecks.kt` | 纯策略：30 分钟/24 小时间隔、唯一任务名、12 秒超时、版本比较、APK/DSH 状态编解码、DSH 安装身份重算、镜像回退、通知去重。 |
+| `app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt` | APK/DSH 两个独立仓库与受限 HTTPS 读取；恢复快照按当前安装身份重算；写 `apk-update-check.json`、`dsh-update-check.json`。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt` | 两个 `CoroutineWorker` 与 `UpdateCheckScheduler`（网络约束、UPDATE 唯一任务）。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateNotifier.kt` | `updates` 通知渠道、APK/DSH 通知、Android 13 权限检查。 |
-| `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 暴露两个仓库并注册周期任务。 |
+| `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 暴露两个仓库、注册周期任务，并观察 `RuntimeManager.state.dsh` 同步 DSH 快照。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 收集两份状态、手动检查申请通知权限；不再在 Activity 重建时回放旧同步。 |
 | `app/src/main/kotlin/com/tanuki/update/ApplicationUpdateManager.kt` | 手动 APK 检查成功时回调后台仓库，携带检查开始时间。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateManager.kt` | 手动 DSH 检查成功时回调后台仓库，携带检查开始时间；下载/安装逻辑未改。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 模型/回调接入；DSH 摘要与版本更新行显示“有更新：<version>”；“刷新”改为“刷新版本列表”。 |
 | `app/src/main/kotlin/com/tanuki/ui/ApplicationUpdateCard.kt` | APK 卡片显示后台徽标、上次检查时间与静默失败说明。 |
-| `app/src/test/kotlin/com/tanuki/BackgroundUpdateChecksTest.kt` | 21 项离网 JVM 回归。 |
+| `app/src/test/kotlin/com/tanuki/BackgroundUpdateChecksTest.kt` | 23 项离网 JVM 回归。 |
 | `docs/APP-UPDATES.md` | 增加后台周期检查说明。 |
-| `docs/TEST-REPORT.md` | 记录本轮命令、172 项结果与未验证范围；更新清理后的历史链接。 |
+| `docs/TEST-REPORT.md` | 记录本轮命令、174 项结果与未验证范围；更新清理后的历史链接。 |
 | `docs/AGENT-STATE.md` | 更新当前交接、实现/验证/待验证与下一步。 |
 | `docs/handoffs/20261105-1509-browser-input-thread.md`、`docs/handoffs/20261105-1625-video-shared-storage.md` | 删除过期交接；结论已保留在 `docs/TEST-REPORT.md`、`BROWSER-WORKSPACE.md`、`WORKSPACE-STORAGE.md`。 |
 
@@ -51,12 +51,12 @@
 
 - 评论：Activity 重建会重新执行同步 `LaunchedEffect`，把 Application 中保留的旧手动结果写回，可能清除较新的后台 latest/available。
 - 修复：删除两个 `LaunchedEffect`；`ApplicationUpdateManager`/`UpdateManager` 在手动检查成功事件回调后台仓库，并携带检查开始时间。`applyManualApk`/`applyManualDsh` 在 `startedAt < previous.lastCheckedAt` 时保留后台快照，覆盖“手动旧结果 → 后台新结果 → Activity 重建”的 APK/DSH 两条链路。
-- 回归：`staleManualApkReplayCannotClearNewerBackgroundSnapshot`、`staleManualDshReplayCannotClearNewerBackgroundSnapshot` 均通过；策略测试 21 项，完整 JVM 172 项。
+- 回归：`staleManualApkReplayCannotClearNewerBackgroundSnapshot`、`staleManualDshReplayCannotClearNewerBackgroundSnapshot` 均通过；策略测试 23 项，完整 JVM 174 项。
 
 ## Rebase
 
 - 2026-11-09 rebase 到 `origin/main=9b32051`（PR #18 DSH 已安装版本管理），解决 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json` 冲突。
-- 保留 main 的当前交接（android_agent-25）与本 PR 的并行记录；rebase 后重新运行 `compileModernDebugKotlin` 与完整 JVM：172 tests / 0 failures / 0 errors / 0 skipped（既有 151 + 新增 21）。
+- 保留 main 的当前交接（android_agent-25）与本 PR 的并行记录；rebase 后重新运行 `compileModernDebugKotlin` 与完整 JVM：174 tests / 0 failures / 0 errors / 0 skipped（既有 151 + 新增 23）。
 - 修复冲突合并时 `AGENT-STATE` 当前交接中 W8 链接的全角括号。
 
 ## 验证记录
@@ -65,7 +65,7 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` | BUILD SUCCESSFUL（3m36s，19 tasks） | 本轮新跑；仅有既有弃用警告。 |
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.BackgroundUpdateChecksTest'` | BUILD SUCCESSFUL；21 tests / 0 failures | 目标类快速回归。 |
-| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest --stacktrace` | BUILD SUCCESSFUL；27 个结果文件，172 tests / 0 failures / 0 errors / 0 skipped | 本轮完整 JVM；172 = 既有 151 + 新增 21。 |
+| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest --stacktrace` | BUILD SUCCESSFUL；27 个结果文件，174 tests / 0 failures / 0 errors / 0 skipped | 本轮完整 JVM；174 = 既有 151 + 新增 23。 |
 | `grep` 合并清单 | 含 `WorkManagerInitializer`、`SystemJobService`、`RescheduleReceiver`、`RECEIVE_BOOT_COMPLETED`、`POST_NOTIFICATIONS` | 证明 WorkManager 清单合并生效；未在设备运行。 |
 
 - 前一轮结果：0.1.8 设备冒烟、F1 126 JVM、PR #17 132 JVM 均为历史记录，未在本轮复跑。
@@ -79,7 +79,7 @@
 
 ## 下一步
 
-1. PR [#19](https://github.com/leezzou/tanuki/pull/19)：等待 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review；PR 正文已记录本轮的 172 项结果。
+1. PR [#19](https://github.com/leezzou/tanuki/pull/19)：等待 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review；PR 正文已记录本轮的 174 项结果。
 2. 由 Orchestrator/用户决定是否触发当前 head 的独立 Codex High Review；不要用 Worker 自评替代。
 3. 设备 QA（另行授权）检查：APK/DSH 徽标、30 分钟/24 小时调度、同版本只通知一次、Android 13 权限、重启后任务保留、失败静默。
 4. 合并与发布需用户明确授权；本轮不代合、不创建 tag/Release。

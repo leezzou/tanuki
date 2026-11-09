@@ -16,8 +16,8 @@
 - WorkManager 依赖 `androidx.work:work-runtime-ktx:2.9.1`；两个唯一周期任务：APK `tanuki-apk-update-check` 每 30 分钟、DSH `dsh-engine-update-check` 每 24 小时，均要求联网。
 - APK 只读稳定 Release `app-update.json` 并与 `BuildConfig.VERSION_CODE` 比较；DSH 先读 npmmirror，失败/结构不完整回退官方 npm，连接与读取超时各 12 秒；均只提示，不自动下载/安装，不改 DSH 下载逻辑。
 - 状态分离：`apk-update-check.json` 与 `dsh-update-check.json` 各自保存 `lastCheckedAt/latest/available/lastError/notifiedVersion`；不复用 `AppUpdateState` 或 `RuntimeManager` 的 `UpdateState`。
-- 前台：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动检查保留，仅在检查完成事件同步独立后台快照（不重复联网），开始时间早于后台结果的旧结果不覆盖较新快照；APK 判定与恢复统一按 `versionCode`。后台：`updates` 通知渠道按版本去重；Android 13+ 检查 `POST_NOTIFICATIONS`，手动检查入口顺带申请；失败静默记录。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，172 tests / 0 failures / 0 errors / 0 skipped；新增 `BackgroundUpdateChecksTest` 21 项。
+- 前台：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动检查保留，仅在检查完成事件同步独立后台快照（不重复联网），开始时间早于后台结果的旧结果不覆盖较新快照；APK 判定与恢复统一按 `versionCode`；DSH 快照在仓库恢复及实际安装版本变化时只按当前安装身份重算 `installedVersion/available`，保留远端 latest 与通知去重。后台：`updates` 通知渠道按版本去重；Android 13+ 检查 `POST_NOTIFICATIONS`，手动检查入口顺带申请；失败静默记录。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped；新增 `BackgroundUpdateChecksTest` 23 项。
 - 待验证：真实 WorkManager 调度/重启恢复、通知权限与展示、真实 GitHub/npmmirror/npm 请求、设备 UI；lint/assemble/仪器未跑。独立 Codex High Review、合并与发布未授权/未完成。
 
 ## Phase 2 交付状态
@@ -75,7 +75,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，172 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 21 项全过。未跑 lint/assemble/设备/真实网络。
+- 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（F1 本轮）：`compileModernDebugKotlin` 与 `testModernDebugUnitTest` BUILD SUCCESSFUL；126 JVM，0 失败/错误/跳过；新增分类、DOCX 合成 zip（多段/空段/DOCTYPE/未定义实体/数字引用/CDATA/超限/损坏）、缩放 clamp/边界/重置、PDF 渲染上限回归。真实命令与限制见 1647 交接。
 - 已验证（PR #14 rebase 后复跑，历史）：`check-handoff.py --record ...` 刷新印章；`check-handoff.py` 当前；`test-development-gates.py` 28 项离线通过（含 app 内 SKILL.md 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝）；`test-agent-workflow.py` 19 项与目标 device-lock 用例 10/10 通过；`check-publication.py --git` 0 findings；`package-source.py` 生成源码包与校验清单（工作材料，不提交）。真实输出见 1415 交接记录。
