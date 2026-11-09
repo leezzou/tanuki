@@ -208,6 +208,13 @@ object DeviceConditionPolicy {
         return state.copy(deferredChecks = state.deferredChecks + work)
     }
 
+    /**
+     * 补跑任务已经可靠入队后才确认清除待办；入队失败时保留，下一次采样可重试。
+     * 只清除 [checks] 中确认过的项，未确认的检查继续保留。
+     */
+    fun acknowledgeChecks(state: DeviceConditionState, checks: Set<DeviceWork>): DeviceConditionState =
+        state.copy(deferredChecks = state.deferredChecks - checks)
+
     fun evaluate(
         previous: DeviceConditionState?,
         signals: DeviceSignals,
@@ -235,7 +242,8 @@ object DeviceConditionPolicy {
                 previewMaxDimension = config.normalPreviewDimension,
                 previewMaxPixels = config.normalPreviewPixels,
                 backgroundChecksAllowed = true,
-                deferredChecks = emptySet(),
+                // 待办要等 WorkManager 确认入队后才清除，关闭策略也不例外。
+                deferredChecks = prev.deferredChecks,
                 lowBatteryEnterPercent = config.lowBatteryEnterPercent,
                 sinceMillis = if (prev.condition == DeviceCondition.NORMAL) prev.sinceMillis else signals.nowMillis,
                 updatedAtMillis = signals.nowMillis,
@@ -266,9 +274,9 @@ object DeviceConditionPolicy {
         val previewPixels = previewPixels(thermalCondition, lowBattery, config)
         val backgroundAllowed = thermalCondition != DeviceCondition.HOT &&
             thermalCondition != DeviceCondition.CRITICAL && !lowBattery
-        // 恢复时只清理并报告“确实被跳过的具体检查”；状态本身不凭空制造待办。
+        // 恢复时只报告“确实被跳过的具体检查”；待办保留到调度器确认补跑已入队。
         val resumed = if (backgroundAllowed) prev.deferredChecks else emptySet()
-        val deferred = prev.deferredChecks - resumed
+        val deferred = prev.deferredChecks
 
         val state = DeviceConditionState(
             condition = condition,

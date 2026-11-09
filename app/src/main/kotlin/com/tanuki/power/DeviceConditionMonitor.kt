@@ -39,12 +39,27 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     private val power = appContext.getSystemService(PowerManager::class.java)
     private val activityManager = appContext.getSystemService(ActivityManager::class.java)
 
-    private var config: DeviceConditionConfig = loadConfig()
-    private val mutable = MutableStateFlow(restore())
+    private var config: DeviceConditionConfig = DeviceConditionConfig()
+    private var configLoaded = false
+    private val mutable = MutableStateFlow(
+        DeviceConditionState(
+            enabled = config.enabled,
+            workerCap = config.normalWorkerCap,
+            logLineLimit = config.normalLogLines,
+            previewMaxDimension = config.normalPreviewDimension,
+            previewMaxPixels = config.normalPreviewPixels,
+        )
+    )
     val state = mutable.asStateFlow()
 
-    /** 状态恢复到允许后台工作时回调；参数是本次真正恢复的类别。 */
-    var onBackgroundWorkResumed: ((Set<DeviceWork>) -> Unit)? = null
+    /**
+     * 状态恢复到允许后台工作时回调；参数是本次需要补跑的检查，
+     * 返回值必须是调度器确认已持久入队的检查集合；未确认项会保留待办并重试。
+     */
+    var onBackgroundWorkResumed: ((Set<DeviceWork>) -> Set<DeviceWork>)? = null
+
+    /** 主线程/热回调只投递请求，采样与写盘统一在后台 collector 中串行完成。 */
+    private val refreshQueue = DeviceConditionRefreshQueue(scope) { refreshNow(null) }
 
     private var started = false
     private var receiver: BroadcastReceiver? = null
@@ -60,7 +75,20 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         }
         registerBatteryReceiver()
         registerThermalListener()
-        refresh()
+        scope.launch {
+            // 设置和已有状态也在后台读取，避免 Application.onCreate 主线程做磁盘 I/O。
+            // 若用户在加载完成前已修改设置，以内存中的新值为准，避免被旧文件覆盖。
+            synchronized(lock) {
+                if (!configLoaded) {
+                    config = loadConfig()
+                    configLoaded = true
+                }
+            }
+            val restored = restore()
+            synchronized(lock) { mutable.value = restored }
+            refreshNow(null)
+            refreshQueue.start()
+        }
         scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MILLIS)
@@ -92,68 +120,86 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
      */
     fun beginBackgroundWork(check: DeviceWork): Boolean {
         require(check in DeviceConditionPolicy.UPDATE_CHECK_WORK) { "只有后台更新检查可以使用此入口" }
-        val snapshot: DeviceConditionState
-        val resumed: Set<DeviceWork>
-        val sequence: Long
-        synchronized(lock) {
-            val evaluation = evaluateLocked(check)
-            snapshot = evaluation.first
-            resumed = evaluation.second
-            sequence = refreshSequence.incrementAndGet()
-        }
-        persistState(snapshot, sequence)
-        if (resumed.isNotEmpty()) onBackgroundWorkResumed?.invoke(resumed)
-        return snapshot.backgroundChecksAllowed
+        // Worker 本身运行在 WorkManager 后台线程，这里可以同步完成评估与写盘。
+        refreshNow(check)
+        return state.value.backgroundChecksAllowed
     }
 
     fun setEnabled(enabled: Boolean) {
-        synchronized(lock) { config = config.copy(enabled = enabled) }
-        persistConfig()
-        refresh()
+        synchronized(lock) {
+            configLoaded = true
+            config = config.copy(enabled = enabled)
+        }
+        scope.launch {
+            persistConfigNow()
+            refreshNow(null)
+        }
     }
 
     /** 界面只调低电阈值；退出阈值固定比进入阈值高 5 个百分点，避免频繁抖动。 */
     fun setLowBatteryThreshold(enterPercent: Int) {
         val enter = enterPercent.coerceIn(5, 45)
         synchronized(lock) {
+            configLoaded = true
             config = config.copy(
                 lowBatteryEnterPercent = enter,
                 lowBatteryExitPercent = (enter + 5).coerceAtMost(100),
             )
         }
-        persistConfig()
-        refresh()
+        scope.launch {
+            persistConfigNow()
+            refreshNow(null)
+        }
     }
 
+    /** 主线程/广播回调只投递合并请求；实际采样、评估和写盘在后台串行执行。 */
     fun refresh() {
+        if (!started) return
+        refreshQueue.request()
+    }
+
+    /**
+     * 采样、评估、持久化并处理恢复补跑。
+     *
+     * 调用方必须是后台线程。待办只有在 [onBackgroundWorkResumed] 返回确认集合后才清除；
+     * 调度失败或进程在中途结束时保留待办，后续采样会重试。
+     */
+    private fun refreshNow(workerCheck: DeviceWork?) {
         val snapshot: DeviceConditionState
         val resumed: Set<DeviceWork>
         val sequence: Long
         synchronized(lock) {
-            val evaluation = evaluateLocked()
-            snapshot = evaluation.first
-            resumed = evaluation.second
+            val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
+            var state = evaluation.state
+            var candidates = evaluation.resumedChecks
+            if (workerCheck != null) {
+                if (state.backgroundChecksAllowed) {
+                    // 当前 Worker 会立刻执行这一项，不再为它排补跑任务。
+                    candidates = candidates - workerCheck
+                    state = DeviceConditionPolicy.acknowledgeChecks(state, setOf(workerCheck))
+                } else {
+                    state = DeviceConditionPolicy.markCheckSkipped(state, workerCheck)
+                }
+            }
+            mutable.value = state
+            snapshot = state
+            resumed = candidates
             sequence = refreshSequence.incrementAndGet()
         }
         persistState(snapshot, sequence)
-        if (resumed.isNotEmpty()) onBackgroundWorkResumed?.invoke(resumed)
-    }
-
-    /** 在持有 [lock] 时采样、评估并写入当前状态；可选地由当前 Worker 登记或消费自己的检查。 */
-    private fun evaluateLocked(workerCheck: DeviceWork? = null): Pair<DeviceConditionState, Set<DeviceWork>> {
-        val evaluation = DeviceConditionPolicy.evaluate(mutable.value, readSignals(), config)
-        var snapshot = evaluation.state
-        var resumed = evaluation.resumedChecks
-        if (workerCheck != null) {
-            if (snapshot.backgroundChecksAllowed) {
-                // 当前 Worker 会立刻执行这一项，不需要再为它排一次补跑。
-                resumed = resumed - workerCheck
-            } else {
-                snapshot = DeviceConditionPolicy.markCheckSkipped(snapshot, workerCheck)
-            }
+        if (resumed.isEmpty()) return
+        val confirmed = runCatching {
+            onBackgroundWorkResumed?.invoke(resumed) ?: emptySet()
+        }.getOrDefault(emptySet())
+        if (confirmed.isEmpty()) return
+        val acknowledged: DeviceConditionState
+        val ackSequence: Long
+        synchronized(lock) {
+            acknowledged = DeviceConditionPolicy.acknowledgeChecks(mutable.value, confirmed)
+            mutable.value = acknowledged
+            ackSequence = refreshSequence.incrementAndGet()
         }
-        mutable.value = snapshot
-        return snapshot to resumed
+        persistState(acknowledged, ackSequence)
     }
 
     private fun readSignals(): DeviceSignals {
@@ -229,7 +275,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         )
     }
 
-    private fun persistConfig() {
+    private fun persistConfigNow() {
         val snapshot = synchronized(lock) { config }
         val json = JSONObject()
             .put("schema", SCHEMA)
@@ -265,7 +311,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             .put("deferredChecks", JSONArray(snapshot.deferredChecks.map { it.name }))
             .put("lowBatteryEnterPercent", snapshot.lowBatteryEnterPercent)
             .put("sinceMillis", snapshot.sinceMillis)
-            .put("updatedAtMillis", snapshot.updatedAtMillis)
+            // updatedAtMillis 每次采样都变化，不写入磁盘；否则会退化为每 30 秒写一次。
             .toString()
         // 采样可能来自主线程热回调与后台轮询；序号保证旧快照不会后写覆盖新快照。
         synchronized(persistLock) {

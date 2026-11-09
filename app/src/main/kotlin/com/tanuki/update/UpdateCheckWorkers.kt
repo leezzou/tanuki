@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -72,6 +73,7 @@ class DshUpdateCheckWorker(context: Context, params: WorkerParameters) : Corouti
 object UpdateCheckScheduler {
     const val APK_RESUME_WORK_NAME = "tanuki-apk-update-resume"
     const val DSH_RESUME_WORK_NAME = "dsh-engine-update-resume"
+    private const val ENQUEUE_CONFIRM_TIMEOUT_SECONDS = 10L
 
     fun schedule(context: Context) {
         val app = context.applicationContext
@@ -108,35 +110,47 @@ object UpdateCheckScheduler {
      * [checks] 来自 Worker 自己的登记；空集合不会发起任何网络任务。使用唯一的
      * OneTimeWorkRequest 和 REPLACE，避免多次状态抖动堆积任务；网络仍由约束控制。
      */
-    fun resumeDeferred(context: Context, checks: Set<DeviceWork>) {
+    fun resumeDeferred(context: Context, checks: Set<DeviceWork>): Set<DeviceWork> {
         val apk = DeviceWork.APK_UPDATE_CHECK in checks
         val dsh = DeviceWork.DSH_UPDATE_CHECK in checks
-        if (!apk && !dsh) return
+        if (!apk && !dsh) return emptySet()
         val app = context.applicationContext
         val spec = BackgroundUpdateChecks.schedule
-        runCatching {
-            val manager = WorkManager.getInstance(app)
-            val constraints = Constraints.Builder()
+        val manager = runCatching { WorkManager.getInstance(app) }.getOrNull() ?: return emptySet()
+        val constraints = runCatching {
+            Constraints.Builder()
                 .setRequiredNetworkType(
                     if (spec.requiresNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED
                 )
                 .build()
-            if (apk) manager.enqueueUniqueWork(
-                APK_RESUME_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                OneTimeWorkRequestBuilder<ApkUpdateCheckWorker>()
-                    .setConstraints(constraints)
-                    .addTag(spec.apkUniqueName)
-                    .build()
-            )
-            if (dsh) manager.enqueueUniqueWork(
-                DSH_RESUME_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                OneTimeWorkRequestBuilder<DshUpdateCheckWorker>()
-                    .setConstraints(constraints)
-                    .addTag(spec.dshUniqueName)
-                    .build()
-            )
+        }.getOrNull() ?: return emptySet()
+
+        val confirmed = mutableSetOf<DeviceWork>()
+        if (apk) {
+            val request = OneTimeWorkRequestBuilder<ApkUpdateCheckWorker>()
+                .setConstraints(constraints)
+                .addTag(spec.apkUniqueName)
+                .build()
+            if (enqueueConfirmed(manager, APK_RESUME_WORK_NAME, request)) confirmed += DeviceWork.APK_UPDATE_CHECK
         }
+        if (dsh) {
+            val request = OneTimeWorkRequestBuilder<DshUpdateCheckWorker>()
+                .setConstraints(constraints)
+                .addTag(spec.dshUniqueName)
+                .build()
+            if (enqueueConfirmed(manager, DSH_RESUME_WORK_NAME, request)) confirmed += DeviceWork.DSH_UPDATE_CHECK
+        }
+        return confirmed
     }
+
+    /**
+     * WorkManager 的 enqueue 返回 Operation；只有其持久化结果完成才确认待办已入队。
+     * 失败时返回 false，待办由监控保留并在后续采样重试。
+     */
+    private fun enqueueConfirmed(manager: WorkManager, name: String, request: OneTimeWorkRequest): Boolean =
+        runCatching {
+            manager.enqueueUniqueWork(name, ExistingWorkPolicy.REPLACE, request)
+                .result.get(ENQUEUE_CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            true
+        }.getOrDefault(false)
 }

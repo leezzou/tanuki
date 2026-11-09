@@ -190,11 +190,18 @@ class DeviceConditionPolicyTest {
         assertEquals(DeviceCondition.WARM, result.state.condition)
         assertTrue(result.state.backgroundChecksAllowed)
         assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
-        assertTrue(result.state.deferredChecks.isEmpty())
+        // 入队确认前待办必须保留，避免进程在此窗口结束时丢失补跑。
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
+        assertEquals(
+            WorkDisposition.DEFER,
+            DeviceConditionPolicy.decide(result.state, DeviceWork.APK_UPDATE_CHECK).disposition,
+        )
 
+        val acknowledged = DeviceConditionPolicy.acknowledgeChecks(result.state, result.resumedChecks)
+        assertTrue(acknowledged.deferredChecks.isEmpty())
         assertEquals(
             WorkDisposition.RUN,
-            DeviceConditionPolicy.decide(result.state, DeviceWork.APK_UPDATE_CHECK).disposition,
+            DeviceConditionPolicy.decide(acknowledged, DeviceWork.APK_UPDATE_CHECK).disposition,
         )
     }
 
@@ -227,6 +234,40 @@ class DeviceConditionPolicyTest {
         result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
         assertEquals(setOf(DeviceWork.DSH_UPDATE_CHECK), result.resumedChecks)
         assertFalse(result.resumedChecks.contains(DeviceWork.APK_UPDATE_CHECK))
+        assertEquals(setOf(DeviceWork.DSH_UPDATE_CHECK), result.state.deferredChecks)
+    }
+
+    /** 补跑入队失败时不确认清除；后续采样仍会再次报告同一待办。 */
+    @Test
+    fun failedResumeKeepsPendingForRetry() {
+        val hot = DeviceConditionPolicy.markCheckSkipped(
+            evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state,
+            DeviceWork.APK_UPDATE_CHECK,
+        )
+        // 先进入 HOT 的降级观察期，再等满 30 秒。
+        var result = evaluate(hot, signals(thermal = ThermalLevel.NONE, now = 2_000L))
+        assertEquals(DeviceCondition.HOT, result.state.condition)
+        assertTrue(result.resumedChecks.isEmpty())
+
+        result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
+
+        // 没有调用 acknowledgeChecks，相当于入队失败：下一次采样仍待补跑。
+        result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 33_000L))
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
+    }
+
+    @Test
+    fun acknowledgementOnlyClearsConfirmedChecks() {
+        val hot = evaluate(null, signals(thermal = ThermalLevel.MODERATE, now = 1_000L)).state
+        val pending = DeviceConditionPolicy.markCheckSkipped(
+            DeviceConditionPolicy.markCheckSkipped(hot, DeviceWork.APK_UPDATE_CHECK),
+            DeviceWork.DSH_UPDATE_CHECK,
+        )
+        val acknowledged = DeviceConditionPolicy.acknowledgeChecks(pending, setOf(DeviceWork.APK_UPDATE_CHECK))
+        assertEquals(setOf(DeviceWork.DSH_UPDATE_CHECK), acknowledged.deferredChecks)
     }
 
     @Test
@@ -297,13 +338,15 @@ class DeviceConditionPolicyTest {
         )
         assertEquals(DeviceCondition.NORMAL, result.state.condition)
         assertFalse(result.state.enabled)
-        assertTrue(result.state.deferredChecks.isEmpty())
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
         assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
         assertEquals(16, result.state.workerCap)
         assertTrue(result.state.backgroundChecksAllowed)
+        val acknowledged = DeviceConditionPolicy.acknowledgeChecks(result.state, result.resumedChecks)
+        assertTrue(acknowledged.deferredChecks.isEmpty())
         assertEquals(
             WorkDisposition.RUN,
-            DeviceConditionPolicy.decide(result.state, DeviceWork.APK_UPDATE_CHECK).disposition,
+            DeviceConditionPolicy.decide(acknowledged, DeviceWork.APK_UPDATE_CHECK).disposition,
         )
     }
 
@@ -326,7 +369,8 @@ class DeviceConditionPolicyTest {
         result = evaluate(result.state, signals(thermal = ThermalLevel.NONE, now = 32_000L))
         assertEquals(DeviceCondition.NORMAL, result.state.condition)
         assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.resumedChecks)
-        assertTrue(result.state.deferredChecks.isEmpty())
+        assertEquals(setOf(DeviceWork.APK_UPDATE_CHECK), result.state.deferredChecks)
+        assertTrue(DeviceConditionPolicy.acknowledgeChecks(result.state, result.resumedChecks).deferredChecks.isEmpty())
     }
 
     @Test

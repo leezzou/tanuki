@@ -42,6 +42,8 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 - 依赖下载额度是**上限**，不是强制目标；`NpmConcurrencyPolicy` 原有的 8→16 自适应增长、故障回落和单 host 8 路限流继续生效。
 - 额度降低后，`NpmAdaptiveWorkerPool` 只让多出的 worker 在领取下一个归档前退出；当前归档继续完成，不会中断已开始的下载。
 - 后台更新检查被阻塞时，具体 Worker 调用 `beginBackgroundWork(APK_UPDATE_CHECK/DSH_UPDATE_CHECK)`：只登记自己这一项并返回 `Result.success()`，不抛异常、不触发 WorkManager 重试轰炸。恢复时 `UpdateCheckScheduler.resumeDeferred()` 只入队实际登记过的检查；没有 Worker 被跳过时不会发起任何补跑请求。
+- 待办只有在 `resumeDeferred()` 确认 WorkManager 唯一任务已持久入队后才清除；入队失败或进程在该窗口结束都会保留待办，下一次采样继续重试，不会丢失。
+- 主线程、电池广播和 thermal 回调只通过 `DeviceConditionRefreshQueue.request()` 投递合并请求；采样、策略评估和 `AtomicFile` 写盘统一在后台 collector 执行。`updatedAtMillis` 不参与持久化比较，常规采样状态未变时不重复写盘。
 - PDF 预览降级只影响新渲染页；已显示页面不清空。图片、DOCX 和视频预览本轮未接入降级。
 
 ## 4. 接入点
@@ -49,7 +51,8 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 | 位置 | 作用 |
 |---|---|
 | `TanukiApp` | 创建并启动 `DeviceConditionMonitor`，绑定后台工作恢复回调 |
-| `DeviceConditionMonitor` | 监听 thermal status、电池广播、充电状态和系统低内存，每 30 秒兜底采样；读写状态与设置 |
+| `DeviceConditionMonitor` | 监听 thermal status、电池广播、充电状态和系统低内存；后台串行采样/保存，每 30 秒兜底刷新 |
+| `DeviceConditionRefreshQueue` | 合并主线程/广播刷新请求，`request()` 只投递、不执行采样或写盘 |
 | `UpdateCheckWorkers` | 两个周期 Worker 分别调用 `beginBackgroundWork(APK_UPDATE_CHECK/DSH_UPDATE_CHECK)`；不允许时只登记自己并直接成功返回 |
 | `UpdateCheckScheduler` | 保留原周期任务；恢复时只按实际登记的检查入队对应的唯一一次性任务 |
 | `NpmConcurrencyPolicy` | 新增 `capProvider` 外部上限；`current()` 取自适应目标与设备额度的较小值 |
@@ -64,25 +67,26 @@ Android 采样与持久化：`app/src/main/kotlin/com/tanuki/power/DeviceConditi
 - 总开关关闭后立即回到 `NORMAL` 额度，并补跑实际登记过的后台检查；不会触发任何 DSH 任务取消。
 - 低电阈值提供 10%/15%/20%/25%/30% 五档，默认 20%；退出阈值固定为进入阈值 +5，减少阈值附近抖动。
 - 代码级阈值集中在 `DeviceConditionConfig`：热等级、低电进入/退出、热/内存迟滞时间、下载并发、日志行数、预览尺寸/像素。构造时会校验单调性和取值范围。
-- 设置持久化文件：`files/state/device-condition-settings.json`；运行状态：`files/state/device-condition.json`。
+- 设置持久化文件：`files/state/device-condition-settings.json`；运行状态：`files/state/device-condition.json`。设置修改也通过后台协程写入。
 
 ## 6. 进程重启恢复
 
 - 启动时先读取上次状态（含主状态、热状态、低电标记、实际被跳过的检查集合和迟滞起点），再注册监听并立即采样。
 - 如果重启时设备已经恢复，策略仍按迟滞规则等待观察期结束；结束后只把 `deferredChecks` 中实际登记过的 APK/DSH 检查报告给 `UpdateCheckScheduler.resumeDeferred()`。
+- 只有调度器返回确认入队集合后，监控才调用 `acknowledgeChecks()` 清除对应待办；若在“已恢复、尚未确认入队”窗口进程结束，重启后待办仍在并再次尝试补跑。
 - 如果重启时设备仍热/低电，已登记的待办保持不变；没有 Worker 登记过时不会因为状态进入受限而凭空补跑。
-- 状态写入使用 `Paths.atomic()`（`AtomicFile`），内容不变时不重复写盘。
+- 状态写入使用 `Paths.atomic()`（`AtomicFile`），并排除每次采样都变化的 `updatedAtMillis`；内容不变时不重复写盘。
 
 ## 7. 兼容性与安全边界
 
 - **前台服务**：`RuntimeService` 的启动、停止、唤醒锁和通知逻辑未改；温控不会通过服务发送 `STOP` 或取消任务。
-- **WorkManager**：保留两个唯一周期任务及联网约束；补跑任务按 APK/DSH 分别唯一命名 + `REPLACE`，不会堆积，也不会在无实际待办时发起请求。
+- **WorkManager**：保留两个唯一周期任务及联网约束；补跑任务按 APK/DSH 分别唯一命名 + `REPLACE`，不会堆积，也不会在无实际待办时发起请求；只有 `Operation` 持久化结果确认成功才清除待办，失败保留重试。
 - **下载**：只限并发，不限单请求；Range/206 续传、SRI 校验、镜像切换和缓存复用不变。
 - **用户可见性**：非正常状态在首页显示原因和降级额度；设置页显示当前状态、阈值和延后说明。
 - **隐私**：只读取系统热状态、电量/充电和内存压力，不采集温度传感器原始值、位置或账号信息。
 
 ## 8. 验证与未验证
 
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 19 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 225 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 21 项、`DeviceConditionRefreshQueueTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 229 tests / 0 failures；`:app:lintModernDebug` 0 个 Error。
 - 未验证：真机/模拟器真实温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 预览降级实际像素、assemble/仪器测试。
 - 真机温控需要独立 QA 会话在无真实任务的设备上加热/充电/低电注入后验证；本轮 JVM 结果不能替代设备验收。
