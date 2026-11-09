@@ -44,6 +44,7 @@
 | `./gradlew testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` | BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + Zoom 6） | 纯 JVM，使用 Android 桩类；未触真机 |
 | `./gradlew testModernDebugUnitTest` | 提交前最终复跑：BUILD SUCCESSFUL，247 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不能替代设备/仪器 |
 | `./gradlew compileModernDebugKotlin`（open 回调调用点清理后） | BUILD SUCCESSFUL（1m34s） | 仅调用点整理，未改策略行为 |
+| 追加自审修复后 `./gradlew testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` | BUILD SUCCESSFUL，52 tests / 0 failures | 修复适应页面水平居中与文件缺失中文原因透传；未改缓存/缩放策略 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1819-pdf-native-reading.md`、`python3 scripts/check-handoff.py` | 见本轮收尾输出 | 以实际命令输出为准 |
 | `python3 scripts/package-source.py` | 见本轮收尾输出 | 只写 `.gitignore` 的 `artifacts/`，不作为发布附件 |
 

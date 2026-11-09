@@ -416,6 +416,7 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                         },
                     contentPadding = PaddingValues(vertical = PDF_PAGE_SPACING),
                     verticalArrangement = Arrangement.spacedBy(PDF_PAGE_SPACING),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     items(count = pageCount, key = { it }) { index ->
                         val aspect = aspects[index]?.takeIf { it.isFinite() && it > 0f } ?: PDF_DEFAULT_ASPECT
@@ -721,8 +722,9 @@ private fun Modifier.pdfReaderGestures(
 private fun pdfFailureMessage(failure: Exception): String = when (failure) {
     is PdfPreviewException -> failure.message ?: "无法打开此 PDF。"
     is SecurityException -> "此 PDF 已加密（需要密码），暂不支持内置预览；可使用其他应用打开。"
-    is IllegalArgumentException -> "此 PDF 的页面无法渲染，文件可能已损坏。"
-    else -> "此 PDF 无法解析，文件可能已损坏；可使用其他应用打开。"
+    // 文件已被移除或存储卷不可用时，保留文件管理器的中文原因。
+    else -> failure.message?.takeIf { message -> message.any { it in '\u4e00'..'\u9fff' } }
+        ?: "此 PDF 无法解析，文件可能已损坏；可使用其他应用打开。"
 }
 
 private fun pdfBytesLabel(bytes: Long): String = when {
