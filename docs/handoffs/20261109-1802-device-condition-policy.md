@@ -49,10 +49,11 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` | JDK17/SDK36，`/tmp/tanuki-thermal-30`，BUILD SUCCESSFUL（5m29s，19 tasks） | 编译通过；只有既有弃用警告 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | BUILD SUCCESSFUL；16/7/2 tests，0 failures/errors/skipped | 目标回归通过；不是完整套件 |
-| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 完整 JVM 套件结果见下方“最终结果” | 运行时间较长；不代表设备测试 |
+| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | BUILD SUCCESSFUL；222 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不代表设备测试 |
+| `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL（3m35s，29 tasks）；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本记录中的编译与目标回归均为本轮在 `/tmp` clone 新跑；前轮 205 tests 等历史数字未复用。
-- 未测试、超时、失败和暂未复现的情况：真实温控/电池/低内存、WorkManager 调度/重启恢复、通知、设置页交互、PDF 降级像素、lint/assemble/仪器、独立 Review 均未执行。
+- 未测试、超时、失败和暂未复现的情况：真实温控/电池/低内存、WorkManager 调度/重启恢复、通知、设置页交互、PDF 降级像素、assemble/仪器、独立 Review 均未执行；lint 已在本轮通过。
 
 ### 最终结果
 
@@ -60,7 +61,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建后等待独立 Codex High Review；真机/模拟器温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素、lint/assemble/仪器测试。
+- 未完成：PR 创建后等待独立 Codex High Review；真机/模拟器温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素、assemble/仪器测试。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号、真机验收继续暂停；合并/发布/触发 Review 未获授权。
 

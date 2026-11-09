@@ -11,7 +11,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 16 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
 - 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查延后与恢复、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
 - 完整 JVM：`./gradlew :app:testModernDebugUnitTest --rerun-tasks` → BUILD SUCCESSFUL（3m13s，28 tasks executed）；37 个结果文件，222 tests / 0 failures / 0 errors / 0 skipped（基线 205 + 新增 16 策略 + 1 下载上限）。
-- 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、lint/assemble/仪器测试。编译与 JVM 策略测试不能替代设备验收。
+  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL（3m35s，29 tasks），0 个 lint Error。
+- 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、assemble/仪器测试。编译、JVM 与 lint 不能替代设备验收。
 
 ## 0.1.8 发布状态（2026-11-06，只读复核）
 
