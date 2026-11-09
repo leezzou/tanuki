@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17 接替 android_agent-15；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。上一记录 [文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）。W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留；其设备验收门禁实现已随 PR #13 合并。本轮由 android_agent-17 在独立 clone 中实现视频全屏 `FULL_SENSOR` 允许旋转与退出恢复，不改文件查看器预览、协议、AO 配置或 0.1.8 附件。
+当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；不改下载加速、更新检查周期、协议或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
@@ -56,8 +56,16 @@
 - `WorkspaceVideoPlayer`：进入视频全屏记录 `hostActivity.requestedOrientation` 并请求 `FULL_SENSOR`，退出全屏/返回/Composable 销毁时恢复；非视频全屏与找不到 Activity 时不改方向；播放器仍复用同一 `VideoView`/`MediaPlayer`，播放状态、位置、倍速逻辑未改；`WorkspaceFileViewer.kt` 视频调用签名未改。
 - 证据：PR [#17](https://github.com/leezzou/tanuki/pull/17)（base `main`，分支 `ao/video-fullscreen-rotatio/full-sensor`）；已 rebase 到 `origin/main` `41609cb`，功能提交 `8ce9882`，head 与 CI 以 PR 页面为准；rebase 后本地 132 tests / 0 failures，`VideoFullscreenPolicyTest` 6/6。未做设备旋转验收、未触发独立 Review、未合并/发布。
 
+### DSH 已安装版本管理（android_agent-25，待 PR/Review）
+
+- 新增纯 Kotlin `DshVersions`：扫描 `engines/<version>`，要求目录、`.installed`、`node_modules/@deepseek-ai/dsh/lib/bin.js` 及中间目录均未被符号链接重定向；输出版本、实际占用、安装时间、当前/备用、`lockVerified` 与校验状态。`verified` 要求依赖锁 SHA-256 与 `.installed` 一致且存在 `.web-verified`。
+- `RuntimeComponents.installedDshDetails()` 提供完整清单；`switchDsh(version)` 在服务停止且无活动操作时，先校验基础环境、目标 Node 兼容性与目标依赖锁，并要求当前程序仍完整安装；再用 `DataSnapshots.create` 保存当前数据快照，最后只改写 `installed.json` 的 `dsh`。兼容性/锁/快照/写入失败均保留当前指针与旧程序目录；目标低于当前版本时返回“旧版切换需先恢复匹配的数据快照”，不绕过既有数据兼容规则。
+- 新对话框 `DshVersionManagerDialog` 列出当前/备用、占用、安装时间、总占用；非当前版本可确认卸载（保留用户数据），当前版本禁用卸载；旧版切换按钮禁用并显示快照说明；TanukiUi/MainActivity 只加入口、回调与 `DSH_SWITCH` 前台服务动作。
+- 本轮验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` BUILD SUCCESSFUL；151 JVM / 0 失败/错误/跳过，新增 `DshVersionsTest` 7 项与 `DshSwitchTest` 12 项；`:app:lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/仪器/设备；PR #18、CI、独立 Review 待办。
+
 ## 已实现、已验证与待验证
 
+- 已验证（本轮 android_agent-25 新跑）：`compileModernDebugKotlin`、`testModernDebugUnitTest` 与 `lintModernDebug` 通过，151 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 7/7、`DshSwitchTest` 12/12；`check-handoff.py` 当前。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（F1 本轮）：`compileModernDebugKotlin` 与 `testModernDebugUnitTest` BUILD SUCCESSFUL；126 JVM，0 失败/错误/跳过；新增分类、DOCX 合成 zip（多段/空段/DOCTYPE/未定义实体/数字引用/CDATA/超限/损坏）、缩放 clamp/边界/重置、PDF 渲染上限回归。真实命令与限制见 1647 交接。
 - 已验证（PR #14 rebase 后复跑，历史）：`check-handoff.py --record ...` 刷新印章；`check-handoff.py` 当前；`test-development-gates.py` 28 项离线通过（含 app 内 SKILL.md 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝）；`test-agent-workflow.py` 19 项与目标 device-lock 用例 10/10 通过；`check-publication.py --git` 0 findings；`package-source.py` 生成源码包与校验清单（工作材料，不提交）。真实输出见 1415 交接记录。

@@ -236,16 +236,19 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         return (head+successful+options).distinctBy { it.id }
     }
     fun baseReady(): Boolean = state.value.ubuntuInstalled && state.value.nodeInstalled && installedUbuntuVersion()!=null && installedNodeVersion()!=null
+    /** 完整已安装清单（含体积/时间/校验）；会遍历 node_modules，调用方应在 IO 线程执行。 */
+    fun installedDshDetails(): InstalledDshInventory = DshVersions.scan(paths.engines,paths.metadata().optString("dsh"))
     fun refresh(updateEnvironment: Boolean = true) {
         val meta=paths.metadata()
         val version=meta.optString("dsh")
         val engine=if(version.matches(VERSION)) File(paths.engines,version) else null
+        val installedDshVersions=DshVersions.installedVersions(paths.engines)
         val inventory=ComponentInventory(
             File(paths.root,".base-verified").isFile,
             File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile,
-            engine!=null && File(engine,".installed").isFile && File(engine,"node_modules/@deepseek-ai/dsh/lib/bin.js").isFile,
+            engine!=null && version in installedDshVersions,
             sourceFor(RuntimeComponent.UBUNTU).id,sourceFor(RuntimeComponent.NODE).id,
-            paths.engines.listFiles().orEmpty().filter { it.name.matches(VERSION) && File(it,".installed").isFile && File(it,"node_modules/@deepseek-ai/dsh/lib/bin.js").isFile }.map { it.name }.toSet(),installedUbuntuVersion() ?: "未知镜像",installedNodeVersion() ?: "未安装",
+            installedDshVersions,installedUbuntuVersion() ?: "未知镜像",installedNodeVersion() ?: "未安装",
             selected(RuntimeComponent.UBUNTU).version,selected(RuntimeComponent.NODE).version,
             choice(RuntimeComponent.UBUNTU).mode==AUTO,choice(RuntimeComponent.NODE).mode==AUTO)
         if(meta.optBoolean("ready") && inventory.ubuntuInstalled && inventory.nodeInstalled && installedUbuntuVersion()!=null && installedNodeVersion()!=null &&
@@ -445,5 +448,37 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         com.tanuki.storage.L2sStore.collectUnreferenced(paths)
         manager.state.update { it.copy(stage="DSH $selected 已卸载；配置、会话、扩展与项目保留",error="") }
     }
-    companion object { private val VERSION=Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?") }
+    /**
+     * 在已安装程序之间切换当前版本。只改写 installed.json 并保留切换前数据快照；
+     * 不重新下载、不删除目标或旧版本程序；较旧目标仍由数据兼容规则拒绝。
+     */
+    fun switchDsh(version: String?) = manager.launchExclusive("component-switch-dsh") {
+        recover()
+        check(manager.state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先处理上次更新恢复，再切换已安装版本" }
+        val target=version?.trim().orEmpty()
+        val meta=paths.metadata()
+        val current=meta.optString("dsh")
+        DshSwitch.requireSwitchable(target,current,DshVersions.installedVersions(paths.engines),
+            targetLockVerified=DshVersions.isLockVerified(paths.engines,target),
+            serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
+            busy=false,liveChild=manager.hasLiveChild)
+        check(installedUbuntuVersion()!=null && installedNodeVersion()!=null &&
+            (File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile)) {
+            "请先安装 Ubuntu 和 Node.js，再切换 DSH 版本"
+        }
+        // 目标可能是在较新 Node 下安装的备用程序；当前 Node 降级后必须在这里拒绝，
+        // 否则切换成功后 start 才失败，而旧版回切又会被数据兼容规则拦住。
+        manager.phase("检查 DSH $target 与当前 Node.js 的兼容性",EnvironmentState.VERIFYING)
+        val snapshot=DshSwitch.apply(meta,target,
+            compatible={checkDshNodeCompatibility(target)},
+            snapshot={
+                manager.phase("保存当前版本的数据快照",EnvironmentState.INSTALLING)
+                com.tanuki.storage.DataSnapshots.create(paths).name
+            },
+            write={paths.atomic("installed.json",it.toString())})
+        refresh()
+        manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",download=null) }
+        manager.event("DSH 已切换到 $target；未重新下载或删除版本，切换前快照 $snapshot 保留")
+    }
+    companion object { private val VERSION=DshVersions.VERSION }
 }
