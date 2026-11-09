@@ -18,7 +18,7 @@
 - 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、远程分支完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件；合入 `main=5fd1ab4`（安全模式 + XLSX）后完整 JVM 289/0/0/0（41 结果文件）、lint 0 errors/81 warnings/1 hint；review 修复并合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、lint 0 errors/95 warnings，androidTest 编译通过。
 - 待验证：真实 Android 设备到真实 sshd、真实 Android Keystore、真实远程 DSH token 登录、弱网/断线、UI 手势、Ed25519、Android 仪器测试、真机。
 - 状态顺序：按串行合并候选要求，`AGENT-STATE` 将已合并的冷启动作为当前交接，远程主机作为并行记录；`CURRENT.json` 仍绑定本记录以便交接指纹校验。
-- 主线同步：最终合入 `main=192a6f4`（PR #27 DSH 冷启动，含 PR #22 聊天通知、PR #25 安全模式与 PR #23 XLSX）；同步包含 `.github/workflows/verify.yml`、`scripts/test-chat-session-open.mjs` 与冷启动的 `scripts/test-dsh-path-cache.mjs`，交接指纹已按合并树刷新。`RuntimeManager`/`State.kt`/`TanukiUi.kt` 与安全模式有代码冲突，已保留远程 origin 与安全模式恢复策略：本地端点单独清理、远程连接时本地失败不强制断开网页；文档保留远程、XLSX、安全模式三节。
+- 主线同步：最终合入 `main=192a6f4`（PR #28 DOCX 原生预览，含 PR #21 温控、PR #26 原生界面、PR #24 PDF、PR #27 冷启动、PR #22 聊天通知、PR #25 安全模式与 PR #23 XLSX）；同步包含 `.github/workflows/verify.yml`、`scripts/test-chat-session-open.mjs` 与冷启动的 `scripts/test-dsh-path-cache.mjs`，交接指纹已按合并树刷新。`RuntimeManager`/`State.kt`/`TanukiUi.kt` 与安全模式有代码冲突，已保留远程 origin 与安全模式恢复策略：本地端点单独清理、远程连接时本地失败不强制断开网页；文档保留远程、XLSX、安全模式三节。
 - 当前目标包名/分支：仅 JVM/APK 构建，未安装设备；分支 `ao/remote-host/remote-ssh` 已从基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建，PR [#29](https://github.com/leezzou/tanuki/pull/29) 已创建，base `main`，未触发 Review；head 以 PR 页面为准。无运行中任务。
 - 关键事实：远程 origin 固定 `http://127.0.0.1:<隧道本地端口>`；远程 token 只拼到该 loopback URL；凭据只在 `remote-host-credentials` SharedPreferences 的 AES-GCM 密文，密钥来自 AndroidKeyStore；主机指纹保存在 `remote-host-known-hosts`。
 
