@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-34（Tanuki DSH Worker）
 - 时间：2026-11-09 19:10 Asia/Shanghai
-- 状态：已完成（PR 待创建/待审）
+- 状态：已完成（PR [#29](https://github.com/leezzou/tanuki/pull/29) 待审）
 - 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)（android_agent-25）；并行记录 [后台更新检查](20261109-1535-background-update-check.md)、[DSH 安装提速与国内镜像](20261109-1539-dsh-install-resilience.md)
 
 ## 用户目标与范围
@@ -17,7 +17,7 @@
 - 已实现：直连 SSH + 端口转发 + local/remote origin 切换 + 设置页 + 失败回退 + 加密凭据/主机密钥校验 + JVM 回归。
 - 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件。
 - 待验证：真实 Android 设备到真实 sshd、真实 Android Keystore、真实远程 DSH token 登录、弱网/断线、UI 手势、Ed25519、Android 仪器测试、真机。
-- 当前目标包名/分支：仅 JVM/APK 构建，未安装设备；分支 `ao/remote-host/remote-ssh` 将从基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建，PR 待创建。无运行中任务。
+- 当前目标包名/分支：仅 JVM/APK 构建，未安装设备；分支 `ao/remote-host/remote-ssh` 已从基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建，PR [#29](https://github.com/leezzou/tanuki/pull/29) 已创建，base `main`，未触发 Review；head 以 PR 页面为准。无运行中任务。
 - 关键事实：远程 origin 固定 `http://127.0.0.1:<隧道本地端口>`；远程 token 只拼到该 loopback URL；凭据只在 `remote-host-credentials` SharedPreferences 的 AES-GCM 密文，密钥来自 AndroidKeyStore；主机指纹保存在 `remote-host-known-hosts`。
 
 ## 本次改动
@@ -55,15 +55,15 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建、独立 Codex High Review、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
+- 未完成：独立 Codex High Review、CI 结果确认、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
 - 外部阻塞：无（缺少真实 SSH 主机/设备，属于未验证而非代码阻塞）。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续按既有要求等待授权/恢复。
 - 不代合、不触发 AO Review、不创建 tag/Release。
 
 ## 下一步
 
-1. 在 `/tmp` 独立 clone 以基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建 `ao/remote-host/remote-ssh`，提交并推送，创建以 `main` 为 base 的 PR；不触发 Review。
-2. PR 正文写明本次改动、验证命令、未验证项（真实 SSH/设备/Ed25519）与后续中继/WebRTC，不引用参考项目。
+1. PR [#29](https://github.com/leezzou/tanuki/pull/29)：base `main`，已推送；head 以 PR 页面为准，不触发 Review。
+2. PR 正文已写明本次改动、验证命令、未验证项（真实 SSH/设备/Ed25519）与后续中继/WebRTC。
 3. 由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；设备/真实主机 QA 另行授权。
 4. Review 意见逐条修复并重审；用户明确授权后才合并。
 
@@ -75,6 +75,7 @@
 
 ## 产物与校验
 
+- PR [#29](https://github.com/leezzou/tanuki/pull/29)，base `main`，head 以 PR 页面为准。
 - 未生成 APK/ZIP 交付附件；本轮只有源码与文档，不更新 0.1.8 六附件、不创建 tag/Release。
 - 依赖许可：`licenses/JSch-BSD.txt`、`JSch-JZlib.txt`、`JSch-jBCrypt.txt`，以及刷新后的 `ANDROID-DEPENDENCIES.md`/`android-runtime-dependencies.json`/`android-runtime-notices`。
 - 提交/推送前清理的过期交接：本轮未删除旧记录；旧记录包含历史验证/未完成事项，暂不判定过期。新记录保留；`CURRENT.json` 由检查脚本刷新。
