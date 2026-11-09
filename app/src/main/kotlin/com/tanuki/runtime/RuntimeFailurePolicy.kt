@@ -82,7 +82,7 @@ class RuntimeFailurePolicy(
         require(diskReserveBytes >= 0) { "磁盘保留空间不能为负" }
     }
 
-    /** 按证据分类；NO_SPACE 与低内存/信号终止优先于通用致命错误。 */
+    /** 按证据分类；NO_SPACE 优先；启动就绪超时必须保持 STARTUP_FAILED，不能被清理信号覆盖。 */
     fun classify(evidence: FailureEvidence): FailureKind {
         val text = buildString {
             append(evidence.output)
@@ -94,11 +94,14 @@ class RuntimeFailurePolicy(
         val lowDisk = evidence.diskFreeBytes?.let { it in 0 until diskReserveBytes } == true
         if (looksLikeNoSpace(text) || lowDisk) return FailureKind.NO_SPACE
         if (!evidence.launched) return FailureKind.LAUNCH_FAILED
+        // 启动超时后 RuntimeManager 会主动停止子进程，退出码 143/137 与 "Killed" 是清理结果，
+        // 不能据此把“未就绪/HTTP 未可用”的原始失败改判为 KILLED。
+        if (evidence.timedOut) return FailureKind.STARTUP_FAILED
         val killed = looksLikeKilled(text, evidence.exitCode)
         val readyAt = evidence.readyAtMillis?.takeIf { it > 0L }
         if (readyAt == null) {
             if (killed) return FailureKind.KILLED
-            return if (evidence.timedOut || hasFatalOutput(text)) FailureKind.STARTUP_FAILED else FailureKind.KILLED
+            return if (hasFatalOutput(text)) FailureKind.STARTUP_FAILED else FailureKind.KILLED
         }
         if (killed) return FailureKind.KILLED
         if (!hasFatalOutput(text)) return FailureKind.KILLED

@@ -564,7 +564,8 @@ class RuntimeManager(val context: Context) {
             launched = launched,
             failedAtMillis = System.currentTimeMillis(),
             readyAtMillis = attempt?.readyAtMillis?.takeIf { it > 0L },
-            exitCode = result?.exitCode,
+            // 就绪超时后的退出码来自主动清理，不能作为原始失败证据。
+            exitCode = if (timedOut) null else result?.exitCode,
             output = output.takeLast(32_000),
             errorText = Redact.text(errorText).takeLast(4_000),
             timedOut = timedOut,

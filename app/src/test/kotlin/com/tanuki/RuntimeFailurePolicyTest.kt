@@ -43,6 +43,41 @@ class RuntimeFailurePolicyTest {
         assertEquals(FailureKind.STARTUP_FAILED, policy.classify(evidence(output = "UnhandledPromiseRejection: startup failed")))
     }
 
+    @Test fun startupTimeoutKeepsStartupFailedDespiteCleanupSignal() {
+        listOf(143, 137).forEach { exit ->
+            assertEquals(
+                FailureKind.STARTUP_FAILED,
+                policy.classify(evidence(timedOut = true, exitCode = exit, output = "Killed"))
+            )
+        }
+        assertEquals(
+            FailureKind.STARTUP_FAILED,
+            policy.classify(evidence(timedOut = true, exitCode = 143, output = "SIGKILL"))
+        )
+    }
+
+    @Test fun httpReadinessTimeoutAfterReadyLineRemainsStartupFailed() {
+        assertEquals(
+            FailureKind.STARTUP_FAILED,
+            policy.classify(
+                evidence(
+                    timedOut = true,
+                    readyAt = 1_000L,
+                    failedAt = 181_000L,
+                    exitCode = 143,
+                    output = "dsh web: http://127.0.0.1:43210/?token=redacted\nKilled"
+                )
+            )
+        )
+    }
+
+    @Test fun startupTimeoutStillYieldsToNoSpaceEvidence() {
+        assertEquals(
+            FailureKind.NO_SPACE,
+            policy.classify(evidence(timedOut = true, exitCode = 143, output = "ENOSPC: no space left on device"))
+        )
+    }
+
     @Test fun classifiesEarlyAndLateCrashesByReadyLineWindow() {
         val fatal = "FATAL ERROR: plugin failed to start"
         assertEquals(FailureKind.CRASHED_EARLY, policy.classify(evidence(failedAt = 121_000L, readyAt = 1_000L, output = fatal)))
