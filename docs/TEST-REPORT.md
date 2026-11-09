@@ -20,7 +20,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（最终代码）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，D8 正常打包 `com.github.mwiede:jsch:2.28.8`。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、**229 tests / 0 failures / 0 errors / 0 skipped**。
+  - 远程分支 `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、**229 tests / 0 failures / 0 errors / 0 skipped**。
+  - 合入 `main=f5debf5`（XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，40 个结果文件、**257 tests / 0 failures / 0 errors / 0 skipped**。
   - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 80 warnings / 1 hint**；新增文件无 lint 告警。
   - `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` → 91 runtime artifacts；随后 `python3 scripts/collect-component-licenses.py` 刷新依赖许可清单。
 - 新增 `RemoteHostTest` 24 项：主机/端口/用户名/IPv4/IPv6/token/私钥校验；token URL 只落临时 loopback 端口并编码；配置与端点 `toString` 脱敏；SHA-256 主机指纹固定向量；本地/远程 origin 切换、本地停止保持远程、失败回退、无本地时清空端点；加密存储往返且不落明文、密文篡改不降级、清除配置/凭据/known_hosts；首次指纹确认前不认证、确认后才信任；主机密钥变化拒绝；测试连接不切换 origin 也不保存配置；失败回退中文错误且不泄露密码；隧道探测失败关闭隧道；HTTP 探测 200/302/401/500 与连接拒绝。
