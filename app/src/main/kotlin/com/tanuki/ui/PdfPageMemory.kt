@@ -50,24 +50,28 @@ internal class PdfPageMemory<K : Any, V : Any>(
         val evicted = mutableListOf<K>()
         val granted = synchronized(lock) {
             if (closed) return@synchronized false
-            var resident = residentBytesLocked()
-            while (resident + bytes > budgetBytes) {
+            val resident = residentBytesLocked()
+            val evictable = cache.keysInLruOrder()
+                .filter { it !in protectedKeys && it !in displayed && values.containsKey(it) }
+                .sumOf { key -> values[key]?.let(sizeOf) ?: 0L }
+            // 先确认全部可淘汰页释放后仍不够，就保持现状失败；避免部分淘汰后返回 null 让界面持有已回收位图。
+            if (resident + bytes - evictable > budgetBytes) {
+                return@synchronized false
+            }
+            var remaining = resident
+            while (remaining + bytes > budgetBytes) {
                 val victim = cache.keysInLruOrder().firstOrNull {
                     it !in protectedKeys && it !in displayed && values.containsKey(it)
                 } ?: break
                 cache.remove(victim)
                 evicted += victim
                 values.remove(victim)?.let {
-                    resident -= sizeOf(it)
+                    remaining -= sizeOf(it)
                     toRelease += it
                 }
             }
-            if (resident + bytes <= budgetBytes) {
-                reservedBytes += bytes
-                true
-            } else {
-                false
-            }
+            reservedBytes += bytes
+            true
         }
         toRelease.forEach(release)
         return if (granted) evicted else null

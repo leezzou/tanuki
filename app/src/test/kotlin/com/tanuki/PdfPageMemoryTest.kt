@@ -109,6 +109,30 @@ class PdfPageMemoryTest {
         assertTrue(first.released)
     }
 
+    @Test fun failedReservationDoesNotPartiallyEvictPages() {
+        val fixture = Fixture(100)
+        val displayed = fixture.page(1, 80)
+        val cached = fixture.page(2, 20)
+        fixture.memory.store(1, displayed, setOf(1))
+        fixture.memory.display(1)
+        fixture.memory.store(2, cached, setOf(2))
+        assertEquals(100, fixture.memory.residentBytes())
+
+        // 可淘汰 20 字节但还差 10 字节：必须整体失败，不能回收 cached 后返回 null。
+        assertNull(fixture.memory.tryReserve(30, emptySet()))
+        assertTrue(fixture.memory.contains(2))
+        assertFalse(cached.released)
+        assertEquals(100, fixture.memory.residentBytes())
+
+        // 显示页释放后重试才成功，并返回此前的缓存页键供界面清理。
+        fixture.memory.discard(1)
+        fixture.memory.hide(1)
+        assertEquals(listOf(2), fixture.memory.tryReserve(90, emptySet()))
+        assertTrue(cached.released)
+        assertFalse(fixture.memory.contains(2))
+        assertEquals(90, fixture.memory.residentBytes())
+    }
+
     @Test fun reservationIsConsumedByStoreWithoutDoubleCounting() {
         val fixture = Fixture(100)
         val page = fixture.page(1, 40)

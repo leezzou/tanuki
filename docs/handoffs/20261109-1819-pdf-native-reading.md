@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 已实现：上述阅读能力与策略层；文件查看入口、官方 DSH UI/模型/插件/Skills 未改，未新增依赖。
-- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 364 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 58 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
+- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 365 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 59 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
 - 待验证：真实设备上的连续滚动帧率、捏合/双击/横向平移手感、深色主题与字体缩放、真实大文档/加密/损坏 PDF、低内存设备预算表现；lint/assemble/Android 仪器未跑。
 - 当前分支：`ao/pdf-reading/root`（会话 worktree）；实际交付分支为 `ao/pdf-reading/native-reading`，已 rebase 到 `origin/main=b9eeb75`。
 - 关键事实与可定位源码：`app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt`（会话/界面/手势）、`PdfRenderPolicy.kt`（视口渲染尺寸）、`PdfPageCache.kt`、`PdfPageMemory.kt`、`PdfPreloadPolicy.kt`、`PdfMemoryPolicy.kt`、`PdfViewportPolicy.kt`、`PdfJumpPolicy.kt`。
@@ -41,6 +41,7 @@
 - 纵向补偿公式：由 `(centroidY−H/2)×(1−old/new)` 修正为 `(centroidY−H/2)×(1/oldScale−1/newScale)`，非 1× 起点连续放大/缩小不再累积偏移；新增 2×→4×（62.5）、4×→2×（−62.5）回归。
 - 可见页渲染：新增 `PdfPreloadPolicy.renderPlan`，`visiblePages` 通过 `snapshotFlow` 单独跟踪；同屏超过 3 页时全部可见页优先加载，再补首尾各 1 页预加载；已淘汰但仍显示的位图保留到离开组合，避免绘制已回收 Bitmap。
 - 固定视口裁剪（第五轮 P2）：在未参与缩放的阅读视口 `Box` 上加 `clipToBounds()`；`graphicsLayer.clip` 只裁剪层内坐标，层放大后仍会绘制到标题栏/控制栏，外层裁剪才能把 PDF 像素限制在阅读区域内。
+- 预留失败原子性（第七轮 P2）：`tryReserve` 先计算全部可淘汰页能释放的字节，确认足够后才执行淘汰；失败保持缓存/界面不变，避免部分淘汰后返回 null 让 `pages` 持有已回收位图。新增“可淘汰但总量仍不足→失败不回收→释放显示页后重试成功”的回归。
 - 分配前预留驻留空间（第六轮 P2）：`PdfPageMemory.tryReserve` 按「缓存值 + 延迟回收/替换旧值 + 在途预留」的实际字节淘汰未显示页，返回被淘汰键供界面同步移除；`store` 消耗预留并按实际驻留再收紧一次，渲染失败/取消归还预留。新增 LRU 已满后新计划页先腾空间再分配的峰值回归。
 - 渲染集合与内存预算联动（第四轮 P2）：单页像素上限按 `renderPlan.size + 1`（含一页在途位图）分配，受保护页总字节不超过 `cacheBudget`；计划变大导致上限收紧时，先 `discard` 超限旧页并等待组合回收，再按新上限渲染。新增 `PdfPageMemory.discard`、驻留页数像素上限、渲染计划 + 预算联合回归。
 
@@ -54,8 +55,8 @@
 | `./gradlew testModernDebugUnitTest` | 提交前最终复跑：BUILD SUCCESSFUL，247 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不能替代设备/仪器 |
 | `./gradlew compileModernDebugKotlin`（open 回调调用点清理后） | BUILD SUCCESSFUL（1m34s） | 仅调用点整理，未改策略行为 |
 | 追加自审修复后 `./gradlew testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` | BUILD SUCCESSFUL，52 tests / 0 failures | 修复适应页面水平居中与文件缺失中文原因透传；未改缓存/缩放策略 |
-| 复审修复后同目标测试 | BUILD SUCCESSFUL，68 tests / 0 failures | 新增首尾可达、非 1× 补偿、同屏 >3 页渲染集合、计划 + 内存预算联合回归 |
-| rebase 到 `origin/main=b9eeb75` 后完整 `./gradlew testModernDebugUnitTest lintModernDebug` | BUILD SUCCESSFUL，364 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 合并 XLSX/安全模式后复跑；未跑设备/仪器 |
+| 复审修复后同目标测试 | BUILD SUCCESSFUL，69 tests / 0 failures | 新增首尾可达、非 1× 补偿、同屏 >3 页渲染集合、计划 + 内存预算联合回归 |
+| rebase 到 `origin/main=b9eeb75` 后完整 `./gradlew testModernDebugUnitTest lintModernDebug` | BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 合并 XLSX/安全模式后复跑；未跑设备/仪器 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1819-pdf-native-reading.md`、`python3 scripts/check-handoff.py` | 见本轮收尾输出 | 以实际命令输出为准 |
 | `python3 scripts/package-source.py` | 见本轮收尾输出 | 只写 `.gitignore` 的 `artifacts/`，不作为发布附件 |
 
