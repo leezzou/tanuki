@@ -73,7 +73,10 @@ internal object PdfViewportPolicy {
 
     /**
      * 围绕视口中心缩放时，为保持指下内容纵向不动，列表需要滚动的像素数。
-     * 内容层按比例放大后，列表只需滚动补偿值的旧比例部分。
+     *
+     * 屏幕坐标 = 视口中心 + scale × (列表坐标 − 滚动量 − 视口中心)，由此解出
+     * 滚动增量 = (centroidY − 视口中心) × (1/oldScale − 1/newScale)。
+     * 除以旧缩放是必要的：列表滚动量使用未缩放的列表像素。
      */
     fun zoomScrollCompensation(
         centroidY: Float,
@@ -82,8 +85,31 @@ internal object PdfViewportPolicy {
         newScale: Float,
     ): Float {
         if (viewportHeight <= 0f || oldScale <= 0f || !oldScale.isFinite() || !newScale.isFinite()) return 0f
-        val ratio = newScale / oldScale
-        return (centroidY - viewportHeight / 2f) * (1f - 1f / ratio)
+        return (centroidY - viewportHeight / 2f) * (1f / oldScale - 1f / newScale)
+    }
+
+    /**
+     * 放大后可滚动内容的首尾边缘留白（上下各一份）。
+     *
+     * LazyColumn 的测量高度与滚动边界按 1× 计算，仅用 graphicsLayer 放大时首尾页会
+     * 移出可达范围。补上与缩放对应的留白后，第一页顶部在滚动 0 处正好贴住视口上沿，
+     * 最后一页底部在最大滚动处正好贴住视口下沿；1× 时留白为 0，不改变原有布局。
+     */
+    fun zoomEdgePadding(viewportHeight: Float, scale: Float): Float {
+        if (viewportHeight <= 0f || !scale.isFinite() || !isZoomed(scale)) return 0f
+        val bounded = ZoomPolicy.clampScale(scale)
+        return viewportHeight * (bounded - 1f) / (2f * bounded)
+    }
+
+    /** 便于推导与回归测试：列表坐标在缩放后的屏幕纵坐标（视口顶部为 0）。 */
+    fun scaledScreenY(
+        listY: Float,
+        scroll: Float,
+        viewportHeight: Float,
+        scale: Float,
+    ): Float {
+        if (viewportHeight <= 0f || !scale.isFinite()) return 0f
+        return viewportHeight / 2f + scale * (listY - scroll - viewportHeight / 2f)
     }
 
     data class VisiblePage(val index: Int, val offset: Int, val size: Int)

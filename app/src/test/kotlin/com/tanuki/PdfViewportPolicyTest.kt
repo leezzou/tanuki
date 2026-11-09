@@ -59,8 +59,57 @@ class PdfViewportPolicyTest {
         // 内容视觉上移 250px，列表需向前滚动 125px。
         assertEquals(125f, PdfViewportPolicy.zoomScrollCompensation(750f, 1000f, 1f, 2f), 0.01f)
         assertEquals(-125f, PdfViewportPolicy.zoomScrollCompensation(250f, 1000f, 1f, 2f), 0.01f)
+        // 非 1× 起点：屏幕位移 250px 在 oldScale=2 时只对应 125 列表像素，
+        // 再放大到 4× 只需滚动 125 − 250/4 = 62.5 列表像素。
+        assertEquals(62.5f, PdfViewportPolicy.zoomScrollCompensation(750f, 1000f, 2f, 4f), 0.01f)
+        assertEquals(-62.5f, PdfViewportPolicy.zoomScrollCompensation(750f, 1000f, 4f, 2f), 0.01f)
         assertEquals(0f, PdfViewportPolicy.zoomScrollCompensation(750f, 1000f, 2f, 2f), 0f)
         assertEquals(0f, PdfViewportPolicy.zoomScrollCompensation(750f, 0f, 1f, 2f), 0f)
+    }
+
+    @Test fun zoomEdgePaddingIsZeroAtOneAndGrowsWithScale() {
+        assertEquals(0f, PdfViewportPolicy.zoomEdgePadding(1000f, 1f), 0.01f)
+        assertEquals(0f, PdfViewportPolicy.zoomEdgePadding(1000f, 1.005f), 0.01f)
+        assertEquals(250f, PdfViewportPolicy.zoomEdgePadding(1000f, 2f), 0.01f)
+        assertEquals(300f, PdfViewportPolicy.zoomEdgePadding(1000f, 2.5f), 0.01f)
+        assertEquals(400f, PdfViewportPolicy.zoomEdgePadding(1000f, 5f), 0.01f)
+        assertEquals(0f, PdfViewportPolicy.zoomEdgePadding(0f, 2f), 0f)
+        assertEquals(0f, PdfViewportPolicy.zoomEdgePadding(1000f, Float.NaN), 0f)
+        assertTrue(
+            PdfViewportPolicy.zoomEdgePadding(1000f, 3f) >
+                PdfViewportPolicy.zoomEdgePadding(1000f, 2f),
+        )
+    }
+
+    @Test fun zoomedFirstAndLastTextStayReachableForSingleAndMultiPage() {
+        val viewportHeight = 1000f
+        val pageHeight = viewportHeight - 16f
+        for (scale in listOf(1f, 1.5f, 2f, 2.5f, 4f, 5f)) {
+            val padding = PdfViewportPolicy.zoomEdgePadding(viewportHeight, scale)
+            // 第一页顶部在滚动 0 处贴住视口上沿。
+            assertEquals(
+                "首端不可达 scale=$scale",
+                0f,
+                PdfViewportPolicy.scaledScreenY(padding, 0f, viewportHeight, scale),
+                0.05f,
+            )
+            for (pageCount in listOf(1, 3, 20)) {
+                val contentHeight = pageHeight * pageCount
+                val maxScroll = contentHeight + padding * 2f - viewportHeight
+                // 最后一页底部在最大滚动处贴住视口下沿。
+                assertEquals(
+                    "末端不可达 scale=$scale pages=$pageCount",
+                    viewportHeight,
+                    PdfViewportPolicy.scaledScreenY(
+                        padding + contentHeight,
+                        maxScroll,
+                        viewportHeight,
+                        scale,
+                    ),
+                    0.6f,
+                )
+            }
+        }
     }
 
     @Test fun currentPageFollowsViewportCenter() {

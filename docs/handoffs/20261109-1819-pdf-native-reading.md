@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 已实现：上述阅读能力与策略层；文件查看入口、官方 DSH UI/模型/插件/Skills 未改，未新增依赖。
-- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 247 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 42 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
+- 已验证：本 worktree `compileModernDebugKotlin` 成功；完整 `testModernDebugUnitTest` 254 tests / 0 failures / 0 errors / 0 skipped；其中本轮新增 49 项 PDF 策略测试，既有 `ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。
 - 待验证：真实设备上的连续滚动帧率、捏合/双击/横向平移手感、深色主题与字体缩放、真实大文档/加密/损坏 PDF、低内存设备预算表现；lint/assemble/Android 仪器未跑。
 - 当前分支：`ao/pdf-reading/root`（会话 worktree）；实际交付分支为从该 SHA 拉出的 `ao/pdf-reading/native-reading`；基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`（以实际 Git 为准，`docs/AGENT-STATE.md` 中旧基线说明是其他会话历史）。
 - 关键事实与可定位源码：`app/src/main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt`（会话/界面/手势）、`PdfRenderPolicy.kt`（视口渲染尺寸）、`PdfPageCache.kt`、`PdfPageMemory.kt`、`PdfPreloadPolicy.kt`、`PdfMemoryPolicy.kt`、`PdfViewportPolicy.kt`、`PdfJumpPolicy.kt`。
@@ -27,13 +27,19 @@
 | `app/src/main/kotlin/com/tanuki/ui/PdfRenderPolicy.kt` | 保留既有 `targetSize`（测试兼容）；新增 `viewportSize`，按视口宽度、长边 2048、总像素 4,000,000 与缓存预算计算渲染尺寸。 |
 | `app/src/main/kotlin/com/tanuki/ui/PdfPageCache.kt` | 新增按字节记账的 LRU 缓存（纯 Kotlin）。 |
 | `app/src/main/kotlin/com/tanuki/ui/PdfPageMemory.kt` | 新增位图生命周期管理：预算淘汰、显示中延迟回收、离开组合/关闭时回收。 |
-| `app/src/main/kotlin/com/tanuki/ui/PdfPreloadPolicy.kt` | 新增当前页 + 前后各一页的预加载窗口与保护集合。 |
+| `app/src/main/kotlin/com/tanuki/ui/PdfPreloadPolicy.kt` | 新增当前页 + 前后各一页的预加载窗口与保护集合；复审后新增 `renderPlan`：同屏可见页全部优先加载，再在可见范围外补首尾预加载。 |
 | `app/src/main/kotlin/com/tanuki/ui/PdfMemoryPolicy.kt` | 新增堆比例缓存预算（24–64 MiB）、单页像素上限与 512 MiB 文件打开上限。 |
-| `app/src/main/kotlin/com/tanuki/ui/PdfViewportPolicy.kt` | 新增适应宽度/整页尺寸、横向平移边界、围绕手指缩放的平移/滚动补偿、视口中心当前页判定。 |
+| `app/src/main/kotlin/com/tanuki/ui/PdfViewportPolicy.kt` | 新增适应宽度/整页尺寸、横向平移边界、围绕手指缩放的平移/滚动补偿、视口中心当前页判定；复审后修正纵向补偿为 `(centroidY−H/2)×(1/oldScale−1/newScale)`，并新增放大首尾边缘留白 `zoomEdgePadding` 与屏幕坐标推导 `scaledScreenY`。 |
 | `app/src/main/kotlin/com/tanuki/ui/PdfJumpPolicy.kt` | 新增页码输入解析（`12`、`12/50`、`第12页` 等）、页码与倍率文案。 |
 | `app/src/test/kotlin/com/tanuki/PdfPageCacheTest.kt` 等 7 个新增测试文件 | 新增 42 项纯 JVM 策略测试：缓存淘汰/保护、显示中延迟回收/关闭回收、预加载窗口、内存上限与文件限制、跳页解析、视口/平移/缩放补偿/当前页、视口渲染尺寸。 |
 | `docs/handoffs/20261109-1819-pdf-native-reading.md` | 本记录。 |
 | `docs/AGENT-STATE.md`、`docs/TEST-REPORT.md` | 记录本轮状态与验证事实。 |
+
+### 复审修复（PR #24 Codex P2，3 条）
+
+- 缩放首尾可达：`LazyColumn` 仍按 1× 测量，但按 `PdfViewportPolicy.zoomEdgePadding(H, scale)=H×(scale−1)/(2×scale)` 增加上下滚动留白；1× 留白为 0。第一页顶部在滚动 0 处贴视口上沿，最后一页底部在最大滚动处贴视口下沿；捏合/双击补偿同时计入留白变化。
+- 纵向补偿公式：由 `(centroidY−H/2)×(1−old/new)` 修正为 `(centroidY−H/2)×(1/oldScale−1/newScale)`，非 1× 起点连续放大/缩小不再累积偏移；新增 2×→4×（62.5）、4×→2×（−62.5）回归。
+- 可见页渲染：新增 `PdfPreloadPolicy.renderPlan`，`visiblePages` 通过 `snapshotFlow` 单独跟踪；同屏超过 3 页时全部可见页优先加载，再补首尾各 1 页预加载；已淘汰但仍显示的位图保留到离开组合，避免绘制已回收 Bitmap。
 
 ## 验证记录
 
@@ -45,6 +51,8 @@
 | `./gradlew testModernDebugUnitTest` | 提交前最终复跑：BUILD SUCCESSFUL，247 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不能替代设备/仪器 |
 | `./gradlew compileModernDebugKotlin`（open 回调调用点清理后） | BUILD SUCCESSFUL（1m34s） | 仅调用点整理，未改策略行为 |
 | 追加自审修复后 `./gradlew testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` | BUILD SUCCESSFUL，52 tests / 0 failures | 修复适应页面水平居中与文件缺失中文原因透传；未改缓存/缩放策略 |
+| 复审修复后同目标测试 | BUILD SUCCESSFUL，59 tests / 0 failures | 新增首尾可达、非 1× 补偿、同屏 >3 页渲染集合回归 |
+| 复审修复后完整 `./gradlew testModernDebugUnitTest lintModernDebug` | BUILD SUCCESSFUL，254 tests / 0 failures / 0 errors / 0 skipped；lint 通过 | 最终提交前复跑；未跑设备/仪器 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1819-pdf-native-reading.md`、`python3 scripts/check-handoff.py` | 见本轮收尾输出 | 以实际命令输出为准 |
 | `python3 scripts/package-source.py` | 见本轮收尾输出 | 只写 `.gitignore` 的 `artifacts/`，不作为发布附件 |
 

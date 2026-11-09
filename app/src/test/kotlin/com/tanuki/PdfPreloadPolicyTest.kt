@@ -31,6 +31,40 @@ class PdfPreloadPolicyTest {
         assertEquals(setOf(4_999, 5_000, 5_001), PdfPreloadPolicy.protectedKeys(5_000, 50_000))
     }
 
+    @Test fun renderPlanFallsBackToPreloadWindowWithoutVisibility() {
+        assertEquals(listOf(5, 6, 4), PdfPreloadPolicy.renderPlan(emptyList(), 5, 20))
+        assertEquals(emptyList<Int>(), PdfPreloadPolicy.renderPlan(listOf(0, 1), 0, 0))
+    }
+
+    @Test fun renderPlanLoadsEveryVisiblePageWhenMoreThanThreeAreOnScreen() {
+        val visible = listOf(2, 3, 4, 5, 6)
+        val plan = PdfPreloadPolicy.renderPlan(visible, current = 4, pageCount = 20)
+        assertEquals(listOf(4, 3, 5, 2, 6, 7, 1), plan)
+        assertTrue(plan.containsAll(visible))
+        assertEquals(visible.size + 2, plan.size) // 仅补首尾各一页预加载
+    }
+
+    @Test fun renderPlanPrefersCenterThenNearbyVisibleThenOuterPreload() {
+        val plan = PdfPreloadPolicy.renderPlan(listOf(7, 8, 9, 10), current = 9, pageCount = 20)
+        assertEquals(listOf(9, 8, 10, 7, 11, 6), plan)
+        assertEquals(listOf(11, 6), plan.drop(4))
+    }
+
+    @Test fun renderPlanDeduplicatesAndClampsEdges() {
+        assertEquals(listOf(0, 1, 2), PdfPreloadPolicy.renderPlan(listOf(0, 1), 0, 5))
+        assertEquals(listOf(4, 3, 2), PdfPreloadPolicy.renderPlan(listOf(4, 3), 4, 5))
+        assertTrue(PdfPreloadPolicy.renderPlan(listOf(-1, 0, 99), 0, 5).none { it !in 0..4 })
+    }
+
+    @Test fun renderPlanStaysBoundedForLargeVisibleSets() {
+        val visible = (100..107).toList()
+        val plan = PdfPreloadPolicy.renderPlan(visible, current = 104, pageCount = 1_000)
+        assertTrue(plan.containsAll(visible))
+        assertTrue(plan.size <= visible.size + 2)
+        assertEquals(99, plan.last { it < 100 })
+        assertEquals(108, plan.last { it > 107 })
+    }
+
     @Test fun negativeRadiusIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             PdfPreloadPolicy.window(1, 10, ahead = -1)

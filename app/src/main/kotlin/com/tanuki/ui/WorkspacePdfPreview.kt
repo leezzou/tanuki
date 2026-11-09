@@ -72,6 +72,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -232,6 +233,7 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
     val pages = remember(path) { mutableStateMapOf<Int, PdfPageBitmap>() }
     val aspects = remember(path) { mutableStateMapOf<Int, Float>() }
     val pageErrors = remember(path) { mutableStateMapOf<Int, String>() }
+    var visiblePages by remember(path) { mutableStateOf(emptyList<Int>()) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val zoom = remember(path) { mutableFloatStateOf(ZoomPolicy.MIN_SCALE) }
@@ -328,7 +330,7 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                 .background(MaterialTheme.colorScheme.surfaceContainerLow),
         ) {
             val viewport = IntSize(constraints.maxWidth, constraints.maxHeight)
-            val window = PdfPreloadPolicy.window(currentPage, pageCount)
+            val renderPlan = PdfPreloadPolicy.renderPlan(visiblePages, currentPage, pageCount)
             val readModifier = Modifier
                 .fillMaxSize()
                 .pdfReaderGestures(
@@ -337,6 +339,13 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                     panX = panX,
                     onScrollCompensation = { delta -> listState.dispatchRawDelta(delta) },
                 )
+
+            // 只记录可见页索引的变化，避免滚动过程中每一帧都触发重新组合。
+            LaunchedEffect(listState, pageCount) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collect { indices -> visiblePages = indices }
+            }
 
             LaunchedEffect(listState, pageCount, viewport) {
                 snapshotFlow {
@@ -353,11 +362,11 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                     .collect { index -> if (index != null) currentPage = index }
             }
 
-            // 只渲染当前页与相邻页；窗口变化会取消旧任务，取消时回收已分配位图。
-            LaunchedEffect(session, window, viewport.width, viewport.height, renderToken) {
+            // 先加载同屏可见页，再预加载可见范围外的相邻页；集合变化会取消旧任务并回收位图。
+            LaunchedEffect(session, renderPlan, viewport.width, viewport.height, renderToken) {
                 val activeSession = session ?: return@LaunchedEffect
-                val protectedPages = window.toSet()
-                for (index in window) {
+                val protectedPages = renderPlan.toSet()
+                for (index in renderPlan) {
                     if (pages.containsKey(index)) {
                         memory.get(index)
                         continue
@@ -381,7 +390,8 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                         aspects[index] = rendered.aspect
                         pages[index] = page
                         val evicted = memory.store(index, page, protectedPages)
-                        evicted.forEach { key -> pages.remove(key) }
+                        // 已淘汰但仍显示在屏上的页保留到离开组合，避免绘制已回收位图。
+                        evicted.forEach { key -> if (!memory.isDisplayed(key)) pages.remove(key) }
                     } catch (failure: CancellationException) {
                         throw failure
                     } catch (failure: OutOfMemoryError) {
@@ -402,6 +412,10 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                 val verticalPaddingPx = with(density) { (PDF_PAGE_SPACING * 2).toPx() }
                 val pageWidthPx = (viewport.width - horizontalPaddingPx).coerceAtLeast(1f)
                 val pageViewportHeightPx = (viewport.height - verticalPaddingPx).coerceAtLeast(1f)
+                // 放大后补首尾滚动空间，否则第一页顶部与最后一页底部会移出可达范围。
+                val zoomPadding = with(density) {
+                    PdfViewportPolicy.zoomEdgePadding(viewport.height.toFloat(), zoom.floatValue).toDp()
+                }
 
                 LazyColumn(
                     state = listState,
@@ -414,7 +428,10 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                             transformOrigin = TransformOrigin.Center
                             clip = true
                         },
-                    contentPadding = PaddingValues(vertical = PDF_PAGE_SPACING),
+                    contentPadding = PaddingValues(
+                        top = PDF_PAGE_SPACING + zoomPadding,
+                        bottom = PDF_PAGE_SPACING + zoomPadding,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(PDF_PAGE_SPACING),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -656,13 +673,15 @@ private fun Modifier.pdfReaderGestures(
                             newScale = nextScale,
                         )
                         zoom.floatValue = nextScale
+                        val viewportHeight = viewport.height.toFloat()
                         onScrollCompensation(
                             PdfViewportPolicy.zoomScrollCompensation(
                                 centroidY = centroid.y,
-                                viewportHeight = viewport.height.toFloat(),
+                                viewportHeight = viewportHeight,
                                 oldScale = oldScale,
                                 newScale = nextScale,
-                            ),
+                            ) + PdfViewportPolicy.zoomEdgePadding(viewportHeight, nextScale) -
+                                PdfViewportPolicy.zoomEdgePadding(viewportHeight, oldScale),
                         )
                     }
                 }
@@ -702,13 +721,15 @@ private fun Modifier.pdfReaderGestures(
                     )
                 }
                 zoom.floatValue = nextScale
+                val viewportHeight = viewport.height.toFloat()
                 onScrollCompensation(
                     PdfViewportPolicy.zoomScrollCompensation(
                         centroidY = upPosition.y,
-                        viewportHeight = viewport.height.toFloat(),
+                        viewportHeight = viewportHeight,
                         oldScale = oldScale,
                         newScale = nextScale,
-                    ),
+                    ) + PdfViewportPolicy.zoomEdgePadding(viewportHeight, nextScale) -
+                        PdfViewportPolicy.zoomEdgePadding(viewportHeight, oldScale),
                 )
                 lastTapTime = 0L
             } else {
