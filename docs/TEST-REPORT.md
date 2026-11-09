@@ -97,13 +97,14 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
 
-- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/docx-preview/root`，PR 待创建；不改官方 DSH UI、不引入运行时文档库。
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `main=f5debf5`（含 XLSX 预览 PR #23），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，65 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 10）。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped（完整 JVM 套件；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）。
+  - `./gradlew :app:testModernDebugUnitTest`（rebase 前）→ BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped。
+  - rebase 到 `main=f5debf5` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，288 tests / 0 failures / 0 errors / 0 skipped（main 233 - 旧 DOCX 文本测试 10 + 新增 65；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）。
 - 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算。
-- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；Compose 文本切片增加 `wrapContentHeight(unbounded = true)` 后再裁剪，避免后续行被测量约束截断；表格单元格渲染 padding 与测量宽度统一。
+- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；Compose 文本切片增加 `wrapContentHeight(unbounded = true)` 后再裁剪，避免后续行被测量约束截断；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并重新生成交接印章。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。编译与 JVM 不能替代设备与真实样本验收。
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）

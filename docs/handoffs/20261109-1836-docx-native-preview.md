@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-31（DSH Worker）
 - 时间：2026-11-09 18:36 CST
-- 状态：进行中（实现与 JVM 验证完成；PR [#28](https://github.com/leezzou/tanuki/pull/28) 已创建，等待独立 Review 与设备 QA）
+- 状态：进行中（实现、JVM 验证与 rebase 完成；PR [#28](https://github.com/leezzou/tanuki/pull/28) 已创建，等待独立 Review 与设备 QA）
 - 前一记录：[DSH 安装提速与国内镜像](20261109-1539-dsh-install-resilience.md)
 
 ## 用户目标与范围
@@ -15,9 +15,9 @@
 
 - 已实现：`.docx` 打开后进入原生分页预览；支持常用字符/段落/标题/列表/表格/图片/页面设置；连续滚动、1–4 倍按钮/双指/双击缩放；复制纯文本；支持范围对话框如实列出不支持项。
 - 已实现安全边界：归档/条目/总解压/单条目/正文/辅助 XML/图片大小与数量、XML 元素与深度、文字量、块数/单元格数上限；拒绝路径穿越、重复条目、DOCTYPE、未定义实体与不安全关系目标；外部关系不联网；图片解码采样与总像素预算；损坏/加密/超限返回中文错误。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped，其中新增 DOCX 回归 65 项。
+- 已验证：rebase 到 `main=f5debf5` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，288 tests / 0 failures / 0 errors / 0 skipped（main 233 - 被替换的 DOCX 纯文本测试 10 + 新增 65），其中新增 DOCX 回归 65 项。
 - 待验证：真实设备上的双指缩放/横向滚动/深色主题/超大文档性能、真实 Word 复杂样本、低 API/真机；lint、assemble、Android 仪器未跑。
-- 当前基线：`main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/docx-preview/root`（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；功能提交 `e2db04f1a24ad49754a5edb0821fda7f04087b02`；PR 后续仅有交接/状态文档回填提交，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
+- 当前基线：`main=f5debf5`（已包含 XLSX 原生预览 PR #23）；分支 `ao/docx-preview/root` 已 rebase 到该基线（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；rebase 后功能提交 `797a8d4`；PR 后续仅有交接/状态回填提交，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
 - 关键源码：[`DocxDocumentReader.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxDocumentReader.kt)、[`DocxModel.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxModel.kt)、[`DocxStyles.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxStyles.kt)、[`DocxNumbering.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxNumbering.kt)、[`DocxXml.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxXml.kt)、[`DocxLayout.kt`](../../app/src/main/kotlin/com/tanuki/ui/DocxLayout.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)。
 
 ## 本次改动
@@ -49,12 +49,13 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` | BUILD SUCCESSFUL（JDK17、SDK36、共享 worktree 缓存） | 编译覆盖新增存储层与 Compose 接线；不代表设备渲染正确。 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` | BUILD SUCCESSFUL；65 tests / 0 failures / 0 errors / 0 skipped（Reader 25、Security 22、Paginator 8、LayoutPolicy 10） | 合成 ZIP/XML；kxml2 仅测试实现。 |
-| `./gradlew :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；260 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`，不提交。 |
-| 独立 `/tmp` clone（`main=2f3fac9`）`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；260 tests / 0 failures / 0 errors / 0 skipped | 干净 clone 复跑，不使用共享 worktree 的 `.git` 写操作；构建缓存来自项目既有环境。 |
+| `./gradlew :app:testModernDebugUnitTest`（rebase 前） | BUILD SUCCESSFUL；260 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；测试 XML 在 `app/build/test-results/testModernDebugUnitTest/`，不提交。 |
+| `git rebase origin/main`（`f5debf5`）后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；288 tests / 0 failures / 0 errors / 0 skipped | 解决 `WorkspaceFileViewer` 冲突（保留 DOCX + XLSX 分支）与 `AGENT-STATE`/印章冲突；未强推，rebase 后重新运行。 |
+| 独立 `/tmp` clone（rebase 后 `main=f5debf5`）`./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` | BUILD SUCCESSFUL；288 tests / 0 failures / 0 errors / 0 skipped | 干净 clone 复跑并解决冲突，不使用共享 worktree 的 `.git` 写操作；构建缓存来自项目既有环境。 |
 | 关键失败与修复 | 1）XML 本地名被整体小写，导致 `pPr/sectPr/gridCol` 等全部失配，样式/表格/页面/图片测试失败；改为保留 OOXML 大小写后 65 项全过。2）分页 gap 测试期望错误；修正为分页起点丢弃 gap。3）`DocxParagraph`/`DocxTable` 误当顶层类型；实际是 `DocxBlock` 嵌套类型，已修正。 | 均为本轮新跑记录，不掩盖失败。 |
 | 未执行 | lint、assemble、Android 仪器、真实设备、真实 Word 样本、大文档性能 | 不能写成设备验收或完整 Word 兼容。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：260 JVM、compile 与独立 `/tmp` clone 复跑均为本轮新跑；历史 DSH/后台更新/视频/F1 数字不混入本轮。
+- 哪些是前一轮结果，哪些是本次新验证：rebase 后的 288 JVM、compile 与独立 `/tmp` clone 复跑均为本轮新跑；rebase 前 260 JVM 保留为历史步骤；XLSX 的 233 项属 main 既有记录，不混入 DOCX 新增数。
 - 未测试、超时、失败和暂未复现的情况：真实 Word 复杂排版、双指与横向滚动交互、深色主题、图片解码 OOM 边界、超大表格/文档滚动性能未验证；lint/assemble/仪器未跑。
 
 ## 未完成与暂停项
@@ -65,7 +66,7 @@
 
 ## 下一步
 
-1. PR [#28](https://github.com/leezzou/tanuki/pull/28) 已从独立 `/tmp` clone 创建，目标 `main`；正文含摘要、支持/不支持清单、测试与未验证项，不合并、不触发 AO Review。
+1. PR [#28](https://github.com/leezzou/tanuki/pull/28) 已 rebase 到 `main=f5debf5` 并解决与 XLSX 预览的冲突；目标 `main`，正文含摘要、支持/不支持清单、测试与未验证项，不合并、不触发 AO Review。
 2. 由 Orchestrator/用户安排当前 head 的独立 Codex High Review 与设备 QA；设备至少覆盖图片/表格/列表/真实复杂 DOCX、双指缩放与横向滚动、超大文档。
 3. 若 Review 要求修改，先在本分支修复、重跑 compile/JVM 并更新交接，再推送；不得以 JVM 结果替代设备验收。
 

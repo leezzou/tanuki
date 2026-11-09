@@ -108,7 +108,7 @@ bash scripts/verify-workspace.sh \
 | DSH网页/认证/紧凑/导出 | `app/src/main/kotlin/com/tanuki/web/DshWebView.kt`、`DshViewport.kt`、`OriginPolicy.kt`、`BlobDownloads.kt` |
 | 独立浏览器/工具RPC | `app/src/main/kotlin/com/tanuki/browser/AgentBrowserController.kt`、`BrowserIntegration.kt`、`BrowserLibrary.kt` |
 | 系统悬浮窗/后台 | `app/src/main/kotlin/com/tanuki/browser/BrowserService.kt`、`BrowserOverlayWindow.kt`、`BrowserOverlayGeometry.kt` |
-| 文件/存储权限/阅读器 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`、`storage/docx/`（DOCX 原生解析，见 [DOCX-PREVIEW](DOCX-PREVIEW.md)）、`PhoneStorageAccess.kt`、`TextFileReader.kt`、`WorkspaceStorage.kt`、`L2sStore.kt`；界面见 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt`、`WorkspaceFileViewer.kt`、`WorkspacePdfPreview.kt`、`WorkspaceDocxPreview.kt`、`ZoomableContent.kt` |
+| 文件/存储权限/阅读器 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`、`storage/docx/`（DOCX 原生解析，见 [DOCX-PREVIEW](DOCX-PREVIEW.md)）、`XlsxWorkbook.kt`、`XlsxValueFormatter.kt`、`PhoneStorageAccess.kt`、`TextFileReader.kt`、`WorkspaceStorage.kt`、`L2sStore.kt`；界面见 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt`、`WorkspaceFileViewer.kt`、`WorkspacePdfPreview.kt`、`WorkspaceDocxPreview.kt`、`WorkspaceXlsxPreview.kt`、`XlsxPreviewPolicy.kt`、`ZoomableContent.kt` |
 | DSH手机文件工具/权限 | `app/src/main/kotlin/com/tanuki/storage/PhoneFileAccess.kt`、`PhoneFileService.kt`、`PhoneFileIntegration.kt`；客户端/Skill见 `app/src/main/assets/phone/` |
 | 视频封面/播放控制 | `app/src/main/kotlin/com/tanuki/ui/WorkspaceVideoPlayer.kt`、`VideoPlaybackPolicy.kt`；全屏外壳见 `TanukiUi.kt` |
 | 快照/安全解包/DSH 更新 | `app/src/main/kotlin/com/tanuki/storage/DataSnapshots.kt`、`SafeTar.kt`、`update/UpdateManager.kt` |
