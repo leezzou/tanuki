@@ -1,5 +1,6 @@
 package com.tanuki.runtime
 
+import kotlinx.coroutines.CancellationException
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -14,17 +15,20 @@ import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.util.Base64
 
-/** 缓存绑定实际 Node/npm 与解析策略；不把其他环境的安装计划当作当前结果。 */
-internal data class NpmLockIdentity(val version: String, val integrity: String, val nodeVersion: String, val npmVersion: String) {
+/**
+ * 缓存只绑定发布版本、SRI 与目标平台；Node/npm 升级不再让已保存的锁失效。
+ * 锁是否仍适用于当前运行时由每次安装的依赖图检查决定，而不是缓存键猜测。
+ */
+internal data class NpmLockIdentity(val version: String, val integrity: String) {
     init {
-        require(VERSION.matches(version) && VERSION.matches(nodeVersion) && VERSION.matches(npmVersion)) { "依赖锁版本身份无效" }
+        require(VERSION.matches(version)) { "依赖锁版本身份无效" }
         require(SRI.matches(integrity) && Base64.getDecoder().decode(integrity.removePrefix("sha512-")).size == 64 &&
             "sha512-" + Base64.getEncoder().encodeToString(Base64.getDecoder().decode(integrity.removePrefix("sha512-"))) == integrity) {
             "依赖锁必须绑定规范的 SHA-512 校验"
         }
     }
-    val key: String = npmLockSha256(listOf("tanuki-npm-lock-v1", "https://registry.npmjs.org", "linux-arm64-glibc",
-        version, integrity, nodeVersion, npmVersion).joinToString("\n").toByteArray(Charsets.UTF_8))
+    val key: String = npmLockSha256(listOf("tanuki-npm-lock-v2", NpmArchiveMapping.OFFICIAL_REGISTRY, "linux-arm64-glibc",
+        version, integrity).joinToString("\n").toByteArray(Charsets.UTF_8))
 
     companion object {
         private val VERSION = Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
@@ -53,9 +57,9 @@ internal class NpmLockCache(private val base: File) {
 
     fun load(identity: NpmLockIdentity): ByteArray? {
         val target = file(identity)
-        owned(target)
-        if (!Files.isRegularFile(target.toPath(), NOFOLLOW_LINKS) || target.length() !in 1..MAX_LOCK_BYTES + 1024L) return null
         return try {
+            owned(target)
+            if (!Files.isRegularFile(target.toPath(), NOFOLLOW_LINKS) || target.length() !in 1..MAX_LOCK_BYTES + 1024L) return null
             DataInputStream(FileInputStream(target)).use { input ->
                 require(input.readUTF() == MAGIC && input.readUTF() == identity.key)
                 val length = input.readInt()
@@ -66,6 +70,8 @@ internal class NpmLockCache(private val base: File) {
             }
         } catch (_: IOException) { null }
         catch (_: IllegalArgumentException) { null }
+        // 缓存路径被符号链接重定向时只放弃该缓存，绝不回退到跟随链接读取。
+        catch (_: IllegalStateException) { null }
     }
 
     fun store(identity: NpmLockIdentity, bytes: ByteArray) {
@@ -103,21 +109,46 @@ internal data class NpmLockCandidate(val bytes: ByteArray, val origin: NpmLockOr
 
 /** 下载开始前提交已验证的锁，后续失败或重建候选目录都不会丢失解析成果。 */
 internal class NpmDependencyLocks(private val cache: NpmLockCache) {
-    suspend fun prepare(identity: NpmLockIdentity, reuse: suspend () -> NpmLockCandidate?,
+    /**
+     * 快速路径：saved/installed/bundled 任一锁通过依赖图校验就直接安装，不请求官方元数据。
+     * 候选锁损坏或与当前平台不兼容时继续尝试下一份；全部不可用才解析元数据。
+     */
+    suspend fun prepare(identity: NpmLockIdentity, reuse: suspend () -> List<NpmLockCandidate>,
                         resolveOfficial: suspend () -> ByteArray, verify: suspend (ByteArray) -> Unit,
-                        onOrigin: (NpmLockOrigin) -> Unit = {}, onCacheError: (IOException) -> Unit = {}): NpmLockOrigin {
-        val candidate = cache.load(identity)?.let { NpmLockCandidate(it, NpmLockOrigin.SAVED) } ?: reuse()
-        val origin = candidate?.origin ?: NpmLockOrigin.OFFICIAL
-        onOrigin(origin)
-        val bytes = candidate?.bytes ?: resolveOfficial()
-        require(bytes.size in 1..NpmLockCache.MAX_LOCK_BYTES) { "依赖锁大小无效" }
-        // 命中缓存也重新检查根依赖、平台、引擎和完整依赖图，不能绕过安装校验。
-        verify(bytes)
-        if (origin != NpmLockOrigin.SAVED) {
-            try { cache.store(identity, bytes) }
-            catch (error: IOException) { onCacheError(error) }
+                        onOrigin: (NpmLockOrigin) -> Unit = {}, onCacheError: (IOException) -> Unit = {},
+                        onRejected: (NpmLockOrigin, Exception) -> Unit = { _, _ -> }): NpmLockOrigin {
+        val candidates = ArrayList<NpmLockCandidate>(4)
+        cache.load(identity)?.let { candidates += NpmLockCandidate(it, NpmLockOrigin.SAVED) }
+        candidates += reuse()
+        val seen = HashSet<String>()
+        for (candidate in candidates) {
+            if (!seen.add(npmLockSha256(candidate.bytes))) continue
+            try {
+                require(candidate.bytes.size in 1..NpmLockCache.MAX_LOCK_BYTES) { "依赖锁大小无效" }
+                // 命中任何锁都重新检查根依赖、平台、引擎和完整依赖图，不能绕过安装校验。
+                verify(candidate.bytes)
+                onOrigin(candidate.origin)
+                if (candidate.origin != NpmLockOrigin.SAVED) {
+                    try { cache.store(identity, candidate.bytes) }
+                    catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        onCacheError(IOException("依赖锁缓存写入失败", error))
+                    }
+                }
+                return candidate.origin
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { onRejected(candidate.origin, error) }
         }
-        return origin
+        onOrigin(NpmLockOrigin.OFFICIAL)
+        val bytes = resolveOfficial()
+        require(bytes.size in 1..NpmLockCache.MAX_LOCK_BYTES) { "依赖锁大小无效" }
+        verify(bytes)
+        try { cache.store(identity, bytes) }
+        catch (error: Exception) {
+            if (error is CancellationException) throw error
+            onCacheError(IOException("依赖锁缓存写入失败", error))
+        }
+        return NpmLockOrigin.OFFICIAL
     }
 }
 

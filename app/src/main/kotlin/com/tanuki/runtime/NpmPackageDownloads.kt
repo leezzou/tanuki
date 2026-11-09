@@ -2,10 +2,12 @@ package com.tanuki.runtime
 
 import com.tanuki.download.Downloader
 import com.tanuki.download.DownloadHttpException
+import com.tanuki.download.DownloadRetryPolicy
 import com.tanuki.download.DownloadLimitException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -13,7 +15,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.net.URI
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.security.MessageDigest
@@ -36,7 +37,8 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 }
                 File(isolated, "home/.tanuki-global-npmrc").writeText("")
                 val guest = "/opt/engines/$version"
-                suspend fun run(label: String, args: List<String>, progressKind: String? = null, resolving: Boolean = false) {
+                suspend fun run(label: String, args: List<String>, progressKind: String? = null,
+                                resolving: Boolean = false, timeoutMs: Long = 1200000L) {
                     var responses = 0
                     val result = try { manager.launcher.run(
                         root = manager.paths.root,
@@ -44,11 +46,10 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                             "/usr/bin/env",
                             "npm_config_userconfig=/dev/null",
                             "npm_config_globalconfig=/home/tanuki/.tanuki-global-npmrc",
-                            "npm_config_registry=$REGISTRY",
                             "npm_config_cache=/home/tanuki/.npm",
                             "XDG_CONFIG_HOME=/home/tanuki/.config",
                         ) + args,
-                        timeoutMs = 1200000,
+                        timeoutMs = timeoutMs,
                         home = File(isolated, "home"),
                         dshHome = File(isolated, "dsh"),
                         workspace = File(isolated, "workspace"),
@@ -56,7 +57,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                         onLine = { line ->
                             if (resolving && METADATA_RESPONSE.containsMatchIn(line)) {
                                 responses++
-                                manager.state.update { it.copy(stage = "解析 DSH 依赖（官方元数据响应 $responses 次，缓存优先）") }
+                                manager.state.update { it.copy(stage = "解析 DSH 依赖（元数据响应 $responses 次，缓存优先）") }
                             }
                             if (progressKind != null) installProgress(line, progressKind)?.let { (done, total) ->
                                 val title = "写入已验证的 npm 缓存"
@@ -65,7 +66,8 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                         },
                     ) } catch (error: CommandTimeoutException) {
                         val suggestion = if (resolving) "请检查网络后重试" else "请检查当前阶段与设备存储后重试"
-                        throw IOException("$label：命令超过 20 分钟；不会清除已有公开缓存，$suggestion", error)
+                        val minutes = (timeoutMs / 60000L).coerceAtLeast(1L)
+                        throw IOException("$label：命令超过 $minutes 分钟；不会清除已有公开缓存，$suggestion", error)
                     }
                     check(result.exitCode == 0) {
                         "$label：退出码 ${result.exitCode}；" +
@@ -73,7 +75,8 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                             if (resolving) "；公开元数据缓存已保留，请根据错误检查网络或 Node 兼容性后重试" else ""
                     }
                 }
-                val npmFlags = listOf("--engine-strict", "--no-audit", "--no-fund", "--loglevel=http", "--registry=$REGISTRY", "--prefix", guest)
+                fun npmFlags(registry: String = REGISTRY) =
+                    listOf("--engine-strict", "--no-audit", "--no-fund", "--loglevel=http", "--registry=$registry", "--prefix", guest)
                 val lock = File(stage, "package-lock.json")
                 // 总是生成无脚本的入口清单，缓存只携带公开依赖锁，不复用任意 package.json。
                 File(stage, "package.json").writeText(JSONObject().put("name", "tanuki-dsh-runtime").put("version", "1.0.0")
@@ -84,20 +87,42 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                     args = listOf("/opt/node/bin/node", "-e", "console.log(JSON.stringify({node:process.versions.node,npm:require('/opt/node/lib/node_modules/npm/package.json').version}))"),
                     home = File(isolated, "home"), dshHome = File(isolated, "dsh"), workspace = File(isolated, "workspace"), engineHome = container)
                 check(environment.exitCode == 0) { "无法检查 DSH 安装使用的 Node/npm：${Redact.text(environment.stderr).takeLast(600)}" }
-                val actual = JSONObject(environment.stdout.trim())
-                val identity = NpmLockIdentity(version, expectedIntegrity, actual.getString("node"), actual.getString("npm"))
+                val identity = NpmLockIdentity(version, expectedIntegrity)
+
+                suspend fun resolveMetadata(): ByteArray {
+                    var last: Exception? = null
+                    for (source in NpmMetadataPolicy.SOURCES) {
+                        try {
+                            lock.delete()
+                            manager.event("使用 ${source.title} 解析 DSH 依赖元数据（单请求 ${NpmMetadataPolicy.FETCH_TIMEOUT_MS / 1000} 秒超时）")
+                            run("依赖解析失败（${source.title}）",
+                                listOf("/opt/node/bin/npm", "install", "--package-lock-only", "--ignore-scripts", "--save-exact",
+                                    "--prefer-offline", "--fetch-timeout=${NpmMetadataPolicy.FETCH_TIMEOUT_MS}", "--fetch-retries=0") +
+                                    npmFlags(source.registry) + "@deepseek-ai/dsh@$version",
+                                resolving = true, timeoutMs = NpmMetadataPolicy.COMMAND_TIMEOUT_MS)
+                            check(lock.isFile && lock.length() in 1..MAX_JSON_BYTES) { "依赖锁缺失或过大" }
+                            // 镜像只负责元数据；锁里的 resolved 必须回归官方路径，SRI 不变。
+                            val normalized = NpmLockNormalizer.normalize(lock.readBytes())
+                            lock.writeBytes(normalized)
+                            return normalized
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            last = error
+                            manager.event("${source.title} 元数据解析失败，尝试下一来源：" + Redact.text(error.message ?: "未知错误").take(200))
+                        }
+                    }
+                    throw last ?: IOException("没有可用的 npm 元数据来源，请检查网络后重试")
+                }
+
                 NpmDependencyLocks(NpmLockCache(manager.paths.base)).prepare(identity,
                     reuse = {
-                        installedLock(version, expectedIntegrity)?.let { NpmLockCandidate(it, NpmLockOrigin.INSTALLED) }
-                            ?: BundledDshLock.load(version, expectedIntegrity) { manager.context.assets.open(BundledDshLock.ASSET).use { it.readBytes() } }
-                                ?.let { NpmLockCandidate(it, NpmLockOrigin.BUNDLED) }
+                        listOfNotNull(
+                            installedLock(version, expectedIntegrity)?.let { NpmLockCandidate(it, NpmLockOrigin.INSTALLED) },
+                            BundledDshLock.load(version, expectedIntegrity) { manager.context.assets.open(BundledDshLock.ASSET).use { it.readBytes() } }
+                                ?.let { NpmLockCandidate(it, NpmLockOrigin.BUNDLED) },
+                        )
                     },
-                    resolveOfficial = {
-                        run("依赖解析失败", listOf("/opt/node/bin/npm", "install", "--package-lock-only", "--ignore-scripts", "--save-exact", "--prefer-offline") +
-                            npmFlags + "@deepseek-ai/dsh@$version", resolving = true)
-                        check(lock.isFile && lock.length() in 1..MAX_JSON_BYTES) { "官方依赖锁缺失或过大" }
-                        lock.readBytes()
-                    },
+                    resolveOfficial = { resolveMetadata() },
                     verify = { bytes ->
                         lock.writeBytes(bytes)
                         verifyTop(lock, version, expectedIntegrity)
@@ -110,10 +135,19 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                             NpmLockOrigin.SAVED -> "复用已验证的 DSH 依赖锁"
                             NpmLockOrigin.INSTALLED -> "复用已安装 DSH 的依赖锁"
                             NpmLockOrigin.BUNDLED -> "使用 APK 预置 DSH 依赖锁"
-                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（官方元数据，缓存优先）"
+                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（国内镜像优先，官方兜底）"
                         }, EnvironmentState.INSTALLING)
                     },
-                    onCacheError = { manager.event("DSH 依赖锁缓存未能保存，本次继续安装；下次可能需要重新解析") })
+                    onCacheError = { manager.event("DSH 依赖锁缓存未能保存，本次继续安装；下次可能需要重新解析") },
+                    onRejected = { origin, error ->
+                        val title = when (origin) {
+                            NpmLockOrigin.SAVED -> "已保存依赖锁"
+                            NpmLockOrigin.INSTALLED -> "已安装依赖锁"
+                            NpmLockOrigin.BUNDLED -> "APK 预置依赖锁"
+                            NpmLockOrigin.OFFICIAL -> "官方解析依赖锁"
+                        }
+                        manager.event("$title 未通过当前环境校验，尝试下一份锁：" + Redact.text(error.message ?: "未知错误").take(160))
+                    })
                 val lockHash = Downloader.hash(lock)
                 val planned = readJson(File(stage, ".dsh-plan.json")).getJSONArray("archives")
                 check(planned.length() in 1..MAX_ARCHIVES) { "依赖下载清单不完整" }
@@ -137,8 +171,9 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 }
                 val sourceOrder = manager.npmSources.orderedForInstall(version)
                 manager.phase("下载 DSH 依赖", EnvironmentState.DOWNLOADING)
-                manager.event("依赖共 ${entries.size} 个；直接下载并逐包校验，总大小未知时显示已传输量，不等待大小预测")
+                manager.event("依赖共 ${entries.size} 个；默认 8 路并发，单源最多 8 路，逐包 SHA-512 校验")
                 download(entries, sourceOrder)
+                manager.phase("校验 DSH 依赖归档", EnvironmentState.VERIFYING)
 
                 // Only successful fetchIntegrity results are admitted to this manifest. Unknown
                 // HTTP lengths become exact here, after the bytes and SHA-512 have been checked.
@@ -165,7 +200,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 run("依赖缓存写入失败", listOf("/opt/node/bin/node", "$guest/.dsh-seed.cjs", "$guest/.dsh-plan.json", "$guest/.dsh-downloaded.json"), "seed")
                 check(Downloader.hash(lock) == lockHash) { "依赖锁在下载期间发生变化" }
                 manager.phase("离线安装 DSH 依赖", EnvironmentState.INSTALLING)
-                run("依赖离线安装失败", listOf("/opt/node/bin/npm", "ci", "--offline") + npmFlags)
+                run("依赖离线安装失败", listOf("/opt/node/bin/npm", "ci", "--offline") + npmFlags())
                 check(Downloader.hash(lock) == lockHash) { "离线安装修改了依赖锁" }
                 verifyTop(lock, version, expectedIntegrity)
                 // npm may silently omit failing optional packages; verify the selected graph too.
@@ -181,10 +216,14 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
 
     private suspend fun download(entries: List<Archive>, sources: List<NpmArchiveSource>) = coroutineScope {
         val progress = NpmDownloadProgress(entries.size, MAX_BYTES)
+        val policy = NpmConcurrencyPolicy()
+        val hosts = NpmHostLimiter()
         val usedSources = arrayOfNulls<String>(entries.size)
         val failedSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val failures = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
         val missingPackageReported = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val workers = AtomicInteger()
+        val completed = AtomicInteger()
         val mutex = Any()
         var networkUsed = false
         var sampleTime = System.nanoTime()
@@ -222,47 +261,99 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
             }
         }
         publish(-1, 0L)
-        val next = AtomicInteger()
-        repeat(minOf(4, entries.size)) {
-            launch(Dispatchers.IO) {
-                while (true) {
-                    val index = next.getAndIncrement()
-                    if (index >= entries.size) break
-                    val entry = entries[index]
-                    var completed = false
-                    var lastError: Exception? = null
-                    for (source in sources) {
-                        if (source.id in failedSources && source.id != "official") continue
-                        try {
-                            synchronized(mutex) { usedSources[index] = source.title }
-                            publish(index, 0)
-                            var transferred = false
-                            Downloader { received, length ->
-                                transferred = true
-                                publish(index, received, length, network = true)
-                            }.fetchIntegrity(source.urlFor(entry.url), entry.file, entry.integrity, maxBytes = MAX_BYTES)
-                            if (!transferred) synchronized(mutex) { usedSources[index] = "已校验缓存" }
-                            completed = true
-                            break
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (tooLarge: DownloadLimitException) { throw tooLarge }
-                        catch (error: Exception) {
-                            lastError = error
-                            if (manager.paths.base.usableSpace <= 64L * 1024 * 1024) throw error
-                            val packageMissing = error is DownloadHttpException && error.status in setOf(400,403,404,410)
-                            if(packageMissing) {
-                                if(missingPackageReported.add(source.id))manager.event("${source.title} 有依赖尚未同步，缺失包改用其他源")
-                            } else if(failures.computeIfAbsent(source.id) { AtomicInteger() }.incrementAndGet()>=2 && failedSources.add(source.id)) {
-                                manager.event("DSH 下载源 ${source.title} 连续失败，本次改用其他源：" +
+
+        suspend fun fetch(index: Int) {
+            val entry = entries[index]
+            var done = false
+            var lastError: Exception? = null
+            for (source in sources) {
+                if (source.id in failedSources && source.id != "official") continue
+                try {
+                    synchronized(mutex) { usedSources[index] = source.title }
+                    publish(index, 0)
+                    var transferred = false
+                    // 自适应并发只放大总窗口；同一 host 始终不超过 8 路。
+                    hosts.withPermit(source.host) {
+                        Downloader { received, length ->
+                            transferred = true
+                            publish(index, received, length, network = true)
+                        }.fetchIntegrity(source.urlFor(entry.url), entry.file, entry.integrity, maxBytes = MAX_BYTES)
+                    }
+                    if (!transferred) synchronized(mutex) { usedSources[index] = "已校验缓存" }
+                    done = true
+                    break
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (tooLarge: DownloadLimitException) { throw tooLarge }
+                catch (error: Exception) {
+                    lastError = error
+                    if (manager.paths.base.usableSpace <= 64L * 1024 * 1024) throw error
+                    val status = (error as? DownloadHttpException)?.status
+                    when {
+                        status != null && DownloadRetryPolicy.missing(status) -> {
+                            if (missingPackageReported.add(source.id)) manager.event(
+                                "${source.title} 有依赖未同步（HTTP $status），立即切换其他源")
+                        }
+                        status != null && DownloadRetryPolicy.permanent(status) -> {
+                            if (missingPackageReported.add(source.id)) manager.event(
+                                "${source.title} 拒绝访问（HTTP $status），切换其他源")
+                        }
+                        else -> {
+                            policy.recordFailure()
+                            if (failures.computeIfAbsent(source.id) { AtomicInteger() }.incrementAndGet() >= 2 &&
+                                failedSources.add(source.id)) {
+                                val why = when {
+                                    status == 429 -> "触发限流（HTTP 429），已指数退避"
+                                    status != null && status in 500..599 -> "服务异常（HTTP $status），已指数退避"
+                                    else -> "连续失败"
+                                }
+                                manager.event("DSH 下载源 ${source.title} $why，本次改用其他源：" +
                                     Redact.text(error.message ?: "下载失败").take(160))
                             }
                         }
                     }
-                    if (!completed) throw lastError ?: IOException("没有可用的 DSH 依赖下载源")
-                    // A verified cache hit does not invoke Downloader's callback.
-                    publish(index, entry.file.length(), complete = true)
                 }
             }
+            if (!done) {
+                policy.recordFailure()
+                throw IOException("依赖下载失败：${downloadFailure(lastError)}；已校验缓存保留，请检查网络或切换下载源后重试")
+            }
+            completed.incrementAndGet()
+            policy.recordSuccess()
+            // A verified cache hit does not invoke Downloader's callback.
+            publish(index, entry.file.length(), complete = true)
+        }
+
+        val nextIndex = AtomicInteger()
+        fun launchWorker() {
+            workers.incrementAndGet()
+            launch(Dispatchers.IO) {
+                try {
+                    while (true) {
+                        val index = nextIndex.getAndIncrement()
+                        if (index >= entries.size) break
+                        fetch(index)
+                    }
+                } finally { workers.decrementAndGet() }
+            }
+        }
+
+        repeat(minOf(policy.current(), entries.size)) { launchWorker() }
+        launch {
+            while (completed.get() < entries.size) {
+                delay(300)
+                while (workers.get() < policy.current() && nextIndex.get() < entries.size) launchWorker()
+            }
+        }
+    }
+
+    private fun downloadFailure(error: Exception?): String {
+        val detail = Redact.text(error?.message ?: "没有可用的 DSH 依赖下载源").take(400)
+        val status = (error as? DownloadHttpException)?.status
+        return when {
+            status != null && DownloadRetryPolicy.missing(status) -> "依赖在下载源未同步（HTTP $status）：$detail"
+            status == 429 -> "下载源限流（HTTP 429，已指数退避）：$detail"
+            status != null && status in 500..599 -> "下载源服务异常（HTTP $status，已指数退避）：$detail"
+            else -> detail
         }
     }
 
@@ -297,10 +388,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
     }
 
     private fun validateUrl(raw: String) {
-        val uri = URI(raw)
-        check(uri.scheme == "https" && uri.host == "registry.npmjs.org" && uri.port == -1 &&
-            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
-            uri.rawPath.startsWith("/") && uri.rawPath.endsWith(".tgz")) { "依赖归档必须来自 npm 官方 HTTPS 地址" }
+        NpmArchiveMapping.officialPath(raw)
     }
 
     private fun validateIntegrity(value: String) {

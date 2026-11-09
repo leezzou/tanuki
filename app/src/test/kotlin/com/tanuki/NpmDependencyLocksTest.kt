@@ -17,7 +17,7 @@ import java.util.Base64
 
 class NpmDependencyLocksTest {
     private val integrity = "sha512-" + Base64.getEncoder().encodeToString(ByteArray(64) { 7 })
-    private val identity get() = NpmLockIdentity("1.2.3", integrity, "24.22.2", "11.19.1")
+    private val identity get() = NpmLockIdentity("1.2.3", integrity)
     private val lock = "public official dependency lock".toByteArray()
     private fun fixture(block: (File) -> Unit) {
         val base = Files.createTempDirectory("tanuki-npm-lock").toFile()
@@ -30,12 +30,11 @@ class NpmDependencyLocksTest {
         assertArrayEquals(lock, NpmLockCache(base).load(identity))
     }
 
-    @Test fun releaseIntegrityNodeAndNpmAreAllPartOfIdentity() = fixture { base ->
+    @Test fun releaseAndIntegrityAreTheOnlyCacheIdentityInputs() = fixture { base ->
         val cache = NpmLockCache(base)
         cache.store(identity, lock)
         listOf(identity.copy(version = "1.2.4"),
-            identity.copy(integrity = "sha512-" + Base64.getEncoder().encodeToString(ByteArray(64) { 8 })),
-            identity.copy(nodeVersion = "26.13.0"), identity.copy(npmVersion = "11.20.0")).forEach {
+            identity.copy(integrity = "sha512-" + Base64.getEncoder().encodeToString(ByteArray(64) { 8 }))).forEach {
             assertNull(cache.load(it))
             assertNotEquals(identity.key, it.key)
         }
@@ -91,8 +90,8 @@ class NpmDependencyLocksTest {
             NpmLockCache(base).store(identity, lock)
             entry(base).delete()
             Files.createSymbolicLink(entry(base).toPath(), sentinel.toPath())
-            try { NpmLockCache(base).load(identity); fail("redirected cache accepted") }
-            catch (_: IllegalStateException) { }
+            // 重定向的缓存记录被安全拒绝并返回 null，不跟随链接读取，也不影响回退到其他锁。
+            assertNull(NpmLockCache(base).load(identity))
             assertEquals("unchanged", sentinel.readText())
         } finally { outside.deleteRecursively() }
     }
@@ -101,7 +100,7 @@ class NpmDependencyLocksTest {
         var requests = 0
         var checks = 0
         suspend fun prepare(): NpmLockOrigin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity,
-            reuse = { null }, resolveOfficial = { requests++; lock }, verify = { checks++; assertArrayEquals(lock, it) })
+            reuse = { emptyList() }, resolveOfficial = { requests++; lock }, verify = { checks++; assertArrayEquals(lock, it) })
         assertEquals(NpmLockOrigin.OFFICIAL, prepare())
         // 解析与校验完成后的网络故障，不应使下一次候选安装重新请求元数据。
         try { throw IOException("synthetic archive download failure") } catch (_: IOException) { }
@@ -113,7 +112,7 @@ class NpmDependencyLocksTest {
     @Test fun reusablePinnedLockAvoidsOfficialResolutionButStillRunsGraphValidation() = fixture { base -> runBlocking {
         var checked = false
         val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity,
-            reuse = { NpmLockCandidate(lock, NpmLockOrigin.BUNDLED) },
+            reuse = { listOf(NpmLockCandidate(lock, NpmLockOrigin.BUNDLED)) },
             resolveOfficial = { error("pinned lock must not resolve over the network") },
             verify = { checked = true; assertArrayEquals(lock, it) })
         assertEquals(NpmLockOrigin.BUNDLED, origin)
@@ -124,7 +123,7 @@ class NpmDependencyLocksTest {
     @Test fun failedGraphValidationIsNeverPublished() = fixture { base -> runBlocking {
         val failure = IOException("invalid dependency graph")
         try {
-            NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { null },
+            NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { emptyList() },
                 resolveOfficial = { lock }, verify = { throw failure })
             fail("invalid graph accepted")
         } catch (error: IOException) { assertSame(failure, error) }
@@ -135,7 +134,7 @@ class NpmDependencyLocksTest {
         val cancelled = CancellationException("synthetic cancellation")
         try {
             NpmDependencyLocks(NpmLockCache(base)).prepare(identity,
-                reuse = { NpmLockCandidate(lock, NpmLockOrigin.INSTALLED) },
+                reuse = { listOf(NpmLockCandidate(lock, NpmLockOrigin.INSTALLED)) },
                 resolveOfficial = { error("cancel must not fall back to the network") }, verify = { throw cancelled })
             fail("cancellation swallowed")
         } catch (error: CancellationException) { assertSame(cancelled, error) }
@@ -146,16 +145,29 @@ class NpmDependencyLocksTest {
         NpmLockCache(base).store(identity, lock)
         entry(base).writeText("incomplete")
         var calls = 0
-        val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { null },
+        val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { emptyList() },
             resolveOfficial = { calls++; lock }, verify = { assertArrayEquals(lock, it) })
         assertEquals(NpmLockOrigin.OFFICIAL, origin)
         assertEquals(1, calls)
     } }
 
+    @Test fun incompatibleSavedLockFallsBackToInstalledCandidateWithoutMetadata() = fixture { base -> runBlocking {
+        val saved = "saved but incompatible with this node".toByteArray()
+        NpmLockCache(base).store(identity, saved)
+        var resolved = false
+        val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity,
+            reuse = { listOf(NpmLockCandidate(lock, NpmLockOrigin.INSTALLED)) },
+            resolveOfficial = { resolved = true; lock },
+            verify = { bytes -> if (bytes.contentEquals(saved)) throw IOException("node engine mismatch") })
+        assertEquals(NpmLockOrigin.INSTALLED, origin)
+        assertFalse(resolved)
+        assertArrayEquals(lock, NpmLockCache(base).load(identity))
+    } }
+
     @Test fun cacheWriteFailureDoesNotInvalidateAnOtherwiseVerifiedInstall() = fixture { base -> runBlocking {
         File(base, "downloads").writeText("synthetic unavailable cache directory")
         var warned = false
-        val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { null },
+        val origin = NpmDependencyLocks(NpmLockCache(base)).prepare(identity, reuse = { emptyList() },
             resolveOfficial = { lock }, verify = { }, onCacheError = { warned = true })
         assertEquals(NpmLockOrigin.OFFICIAL, origin)
         assertTrue(warned)
@@ -172,8 +184,7 @@ class NpmDependencyLocksTest {
     }
 
     @Test fun invalidIdentityCannotEscapeCacheOrDisableSha512() {
-        listOf({ identity.copy(version = "../outside") }, { identity.copy(integrity = "sha1-unsafe") },
-            { identity.copy(nodeVersion = "../node") }, { identity.copy(npmVersion = "") }).forEach { make ->
+        listOf({ identity.copy(version = "../outside") }, { identity.copy(integrity = "sha1-unsafe") }).forEach { make ->
             try { make(); fail("invalid identity accepted") } catch (_: IllegalArgumentException) { }
         }
     }

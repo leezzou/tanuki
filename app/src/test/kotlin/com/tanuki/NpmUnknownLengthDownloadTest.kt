@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
@@ -78,7 +79,7 @@ class NpmUnknownLengthDownloadTest {
     @Test fun knownTruncatedResponseStillFailsInsteadOfSkippingLengthValidation() = fixture { target ->
         val downloader = Downloader({ Response(it, payload, payload.size.toLong() + 1) }) { _, _ -> }
         try { runBlocking { downloader.fetchIntegrity(url, target, sri(payload), maxBytes = 100_000) }; fail("truncation accepted") }
-        catch (_: IllegalStateException) { }
+        catch (_: IOException) { }
         assertFalse(target.exists())
     }
     @Test fun cancellationIsNotConvertedIntoAnInstallFallback() = fixture { target ->

@@ -10,14 +10,9 @@ import java.net.URI
 /** Mirrors carry archives only; the official registry still supplies the version, lock and SRI. */
 data class NpmSourceSelection(val version: String = RuntimeManager.DSH, val id: String = "official", val automatic: Boolean = true)
 data class NpmArchiveSource(val id: String, val title: String, val registry: String) {
-    fun urlFor(officialUrl: String): String {
-        val uri = URI(officialUrl)
-        require(uri.scheme == "https" && uri.host == "registry.npmjs.org" && uri.port == -1 &&
-            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
-            uri.rawPath.startsWith("/") && uri.rawPath.endsWith(".tgz") &&
-            uri.path.split('/').none { it == "." || it == ".." }) { "npm 归档地址必须来自官方锁文件" }
-        return registry + uri.rawPath
-    }
+    val host: String get() = URI(registry).host
+
+    fun urlFor(officialUrl: String): String = NpmArchiveMapping.urlFor(registry, officialUrl)
 }
 
 class NpmSources(private val manager: RuntimeManager) {
@@ -72,11 +67,19 @@ class NpmSources(private val manager: RuntimeManager) {
         }
         val preference = state.value
         val sample = speed.state.value.takeIf { fresh() }
-        val best = sample?.bestSourceId?.takeIf { preference.automatic }
-        val head = ARCHIVES.firstOrNull { it.id == (best ?: preference.id) } ?: ARCHIVES.first()
+        val official = ARCHIVES.first { it.id == "official" }
+        val domestic = ARCHIVES.filter { it.id != "official" }
         val successful = sample?.results?.values.orEmpty().filter { it.status == SourceProbeStatus.SUCCESS }
-            .sortedByDescending { it.bytesPerSecond }.mapNotNull { result -> ARCHIVES.firstOrNull { it.id == result.sourceId } }
-        return (listOf(head) + successful + ARCHIVES).distinctBy { it.id }
+            .sortedByDescending { it.bytesPerSecond }
+            .mapNotNull { result -> domestic.firstOrNull { it.id == result.sourceId } }
+        // 手动选择保留用户来源优先；自动模式始终先试国内镜像，官方只做最后兜底。
+        if (!preference.automatic) {
+            val head = ARCHIVES.firstOrNull { it.id == preference.id } ?: domestic.first()
+            return (listOf(head) + successful + domestic + official).distinctBy { it.id }
+        }
+        val bestDomestic = sample?.bestSourceId?.let { id -> domestic.firstOrNull { it.id == id } }
+        val head = bestDomestic ?: domestic.first()
+        return (listOf(head) + successful + domestic + official).distinctBy { it.id }
     }
 
     @Synchronized private fun useVersion(version: String) {
