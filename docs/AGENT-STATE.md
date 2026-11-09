@@ -1,6 +1,16 @@
 # Tanuki 当前状态
 
-当前交接：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（android_agent-31，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审）。并行记录：[远程主机直连 SSH 切片](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34，基线 `2f3fac9`，PR [#29](https://github.com/leezzou/tanuki/pull/29) 待审）、[设备温控与省电策略](handoffs/20261109-1802-device-condition-policy.md)（PR #21 已合并 `f5f3bf3`）、[原生界面切换](handoffs/20261109-1829-native-ui-switch.md)（PR #26 已合并 `d9b4aa2`）、[PDF 原生阅读](handoffs/20261109-1819-pdf-native-reading.md)（PR #24 已合并 `0ba11da`）、[DSH 聊天通知](handoffs/20261109-1742-dsh-chat-notifications.md)（PR #22）、[DSH 冷启动优化](handoffs/20261109-1700-dsh-cold-start.md)（PR #27 已合并 `b9eeb75`）、[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（PR #25 已合并 `5fd1ab4`）、[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（PR #23 已合并 `f5debf5`）。保留记录：DSH 已安装版本管理、后台更新检查、DSH 安装提速、视频全屏、F1 文件预览、研发治理门禁与 Android QA 核查。本轮 android_agent-31 实现 DOCX 原生预览；android_agent-34 仅将远程主机作为并行记录；均不改 AO 配置、既有安全/暂停项或 0.1.8 附件。
+当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
+
+## 0.1.10 Pre-release（最终发布准备，本地候选）
+
+- 版本 `versionName=0.1.10`、`versionCode=12`、`channel=workspacecheck`（开发证书、non-debuggable、ARM64、minSdk26/targetSdk34）；最终基线 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95`，分支 `ao/xlsx-preview/release-0.1.10`。
+- 本版包含 9 个已合并 PR：PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
+- 0.1.9 已发布 Pre-release：tag `v0.1.9`=`5c680b9`（code11），APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；0.1.9 附件不回写。
+- 最终验证（本轮）：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，**535 tests / 0 failures / 0 errors / 0 skipped**。
+- 正式候选 APK（本地）：`artifacts/releases/0.1.10/Tanuki-0.1.10-workspacecheck-arm64-release.apk`，SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`、`11,485,978` 字节、证书 `371dc301...`；`app-update.json`、源码 ZIP、原生对应源码与校验在 `artifacts/releases/0.1.10/`。
+- 发布动作：本地单提交后 push `main`，再创建 `v0.1.10` tag 与 GitHub **Pre-release**，上传完整 6 附件；不覆盖 0.1.9 及更早附件。
+
 - `artifacts/releases/0.1.8/` 六附件齐全。W1 只读复核 APK：`com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
