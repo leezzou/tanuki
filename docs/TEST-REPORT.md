@@ -8,7 +8,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（改造后增量 3m08s）。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` → BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + `ZoomPolicyTest` 6）。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=b9eeb75`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=0ba11da`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
 - 新增回归 59 项：`PdfPageCacheTest` 8（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 14（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记、discard 预算移除与延迟回收）；`PdfPreloadPolicyTest` 10（当前页优先、边界、半径、大文档小窗口、非法半径；可见页 >3 时全部进入渲染计划、首尾预加载、去重/边界、计划大小有界）；`PdfMemoryPolicyTest` 6（堆比例预算上下限、单页像素上限、驻留页数联动上限、位图字节记账、512 MiB 文件限制、渲染计划 + 在途页联合预算）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 10（适应宽度/整页、缩放范围、平移边界、缩放锚点、非 1× 连续放大/缩小补偿、1–5× 首尾可达、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
 - 复审修复（Codex 3 条 P2）：
   - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。补偿延迟到下一帧（新留白完成测量后）执行，避免旧滚动边界截断。
@@ -107,19 +107,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 新增回归：`ChatNotificationPolicyTest` 10 项（首次 false 基线、true→false、重复 false、同/异会话前台抑制、后台、版本/会话/事件去重、旧通知未清除时新事件仍提醒、权限/渠道/用户开关、Android<33、非法 id、状态文案）；`ChatNotificationRoutingTest` 4 项（同会话跨进程稳定 tag/id、不同会话 Identity、子通知可再次提醒/摘要静默、非法 id）；`DshChatProtocolTest` 4 项（四类事件、running 补种、非法载荷、脚本只读边界与打开会话函数）。
 - Review 修复回归：`node scripts/test-chat-session-open.mjs` → `CHAT_SESSION_OPEN_TEST_OK`，覆盖侧栏初始收起、保留非空搜索且当前为其他会话、通过官方清除入口解除搜索过滤、只展开一次、异步选中前不谎报成功、已选中目标与非法 id；Host CI 已新增该步骤。假 DOM 只有在搜索清除且分组展开后才为目标 id 返回会话行。
 - PR #22 GitHub Actions `verify`：Host checks 与 Android build+JVM+lint 均 pass。首轮 Android 唯一失败为既有 `NpmAdaptiveWorkerPoolTest` 并发时序（非本轮代码），重跑通过；Review 修复提交 `21cc811` 与搜索过滤修复提交 `462d266` 的 Host/Android 两 job 均全绿，未修改该并发测试。
-- rebase 到 `main=b9eeb75`（含安全模式 PR #25 与 XLSX PR #23）后，在 `/tmp/tanuki-chat-notify` 复跑 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` → BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
+- rebase 到 `main=0ba11da`（含安全模式 PR #25 与 XLSX PR #23）后，在 `/tmp/tanuki-chat-notify` 复跑 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` → BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
 - 未执行：assemble、Android 仪器/真实设备、Android 13 权限弹窗与通知展示、group/summary/渠道设置、点击通知切会话、同会话新事件再次提醒的设备声音/振动、真实 DSH WebSocket、后台/息屏送达、MIUI/其他 ROM、DSH 升级后事件表/页面属性复核。编译/JVM/lint 不能替代设备与 ROM 验收。
 
 ## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
 
-- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `main=b9eeb75`（含 XLSX 预览 PR #23、运行时安全模式 PR #25 与聊天通知 PR #22），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `main=0ba11da`（含 XLSX 预览 PR #23、运行时安全模式 PR #25 与聊天通知 PR #22），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，79 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 24）。
   - `./gradlew :app:testModernDebugUnitTest`（rebase 前）→ BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped。
-  - rebase 到 `main=b9eeb75` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，375 tests / 0 failures / 0 errors / 0 skipped（main 306 - 旧 DOCX 文本测试 10 + 新增 79；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
+  - rebase 到 `main=0ba11da` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，434 tests / 0 failures / 0 errors / 0 skipped（main 365 - 旧 DOCX 文本测试 10 + 新增 79；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
 - 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算、单元格预算/分段、超高表格行限制。
-- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；早期对文本切片使用 `wrapContentHeight(unbounded = true)`，现已由“复用 `TextLayoutResult` + 按页合并绘制”替代，避免每行重新排版整段；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并合并 runtime 安全模式、聊天通知与冷启动文档，重新生成交接印章。Review P1/P2 修复：Bitmap 清理捕获 effect 快照；文本切片改为复用已测量布局并逐页合并、长段落按 8,000 字有界分段；表格列宽用 Long 求和并限制正文宽度；页首 gap 清零；渲染预算在行循环内生效并反馈截断；单元格段落共享原子预算并按 8,000 字分段，单元格内容高度限制在页面内容高度内，表格行高在创建 Compose 尺寸约束前 clamp；宽屏居中留白移到纸张宽度约束之外，页面按完整测量宽度绘制；超高单元格按已测量行边界保留可见文本前缀。
+- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；早期对文本切片使用 `wrapContentHeight(unbounded = true)`，现已由“复用 `TextLayoutResult` + 按页合并绘制”替代，避免每行重新排版整段；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并合并 runtime 安全模式、聊天通知、冷启动与 PDF 文档，重新生成交接印章。Review P1/P2 修复：Bitmap 清理捕获 effect 快照；文本切片改为复用已测量布局并逐页合并、长段落按 8,000 字有界分段；表格列宽用 Long 求和并限制正文宽度；页首 gap 清零；渲染预算在行循环内生效并反馈截断；单元格段落共享原子预算并按 8,000 字分段，单元格内容高度限制在页面内容高度内，表格行高在创建 Compose 尺寸约束前 clamp；宽屏居中留白移到纸张宽度约束之外，页面按完整测量宽度绘制；超高单元格按已测量行边界保留可见文本前缀。
 - 未执行：assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。lint 与 JVM/编译不能替代设备与真实样本验收。
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
