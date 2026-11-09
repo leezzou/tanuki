@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-28
 - 时间：2026-11-09 18:12 CST
-- 状态：部分完成（实现与 JVM 已验证；PR、独立 Review、设备/真机未完成）
+- 状态：部分完成（实现与 JVM 已验证；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已创建，独立 Review、设备/真机未完成）
 - 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)
 
 ## 用户目标与范围
@@ -17,7 +17,7 @@
 - 已实现：六类失败分类；normal 下连续两次 `STARTUP_FAILED`/`CRASHED_EARLY` 自动进入安全模式；`rescue` 最小启动参数与独立 `safe-home`/`safe-dsh`；安全模式不删除用户数据；显式“尝试恢复正常模式”进入 `PROBATION`，2 分钟内失败回安全模式；自动重启最多 3 次、2s/4s/8s 退避、killed/noSpace 不自动重启；`state/failure-state.json` 持久化与进程重启恢复；UI 失败类型/安全模式/退出试用入口；前台服务在自动重启等待期间保持。
 - 已验证：`/tmp` 独立 clone 中 `compileModernDebugKotlin` 与完整 `testModernDebugUnitTest` 通过；完整 JVM 230 tests / 0 failures / 0 errors / 0 skipped，新增 `RuntimeFailurePolicyTest` 25/25。
 - 待验证：真机崩溃/低内存、真实磁盘满、PRoot 内 rescue、真实插件配置隔离、UI 视觉/大字体/深色、lint/assemble/仪器；PR、CI、独立 Review、合并未完成。
-- 当前目标包名：未构建 APK；分支 `ao/runtime-safe-mode/root`，基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp/tanuki-safe-mode` clone 验证，未使用共享 worktree 的 `.git` 写操作。
+- 当前目标包名：未构建 APK；PR [#25](https://github.com/leezzou/tanuki/pull/25)，分支 `ao/runtime-safe-mode/root`，功能提交 `b4a6ef5ffe0c573bb44de2b7604dc43d91f79bf9`，基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp/tanuki-safe-mode` clone 验证，未使用共享 worktree 的 `.git` 写操作。
 - 关键事实与可定位源码：`app/src/main/kotlin/com/tanuki/runtime/RuntimeFailurePolicy.kt`、`RuntimeManager.kt`、`RuntimeService.kt`、`State.kt`、`ui/SetupScreens.kt`、`ui/TanukiUi.kt`、`ui/Labels.kt`、`MainActivity.kt`；契约见 [INTERFACES](../INTERFACES.md) 1.1.1。
 
 ## 本次改动
@@ -56,13 +56,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建/推送后的 CI、独立 Codex High Review、设备/真机验证、lint/assemble/仪器。
+- 未完成：PR #25 的 CI、独立 Codex High Review、设备/真机验证、lint/assemble/仪器。
 - 外部阻塞：当前环境 Maven Central DNS 不稳定，已用临时镜像绕过，未改仓库；若 CI 网络正常则不受影响。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续暂停；未在本轮恢复。
 
 ## 下一步
 
-1. 推送 `ao/runtime-safe-mode/root` 并从 `/tmp` clone 创建 PR；不合并、不触发 AO Review，等待用户/编排器决定。
+1. PR [#25](https://github.com/leezzou/tanuki/pull/25) 已创建并绑定 `ao/runtime-safe-mode/root`；不合并、不触发 AO Review，等待用户/编排器决定。
 2. 由独立 Android QA 在明确无真实任务的设备上验证：安全模式 rescue 启动、连续失败进入安全模式、2 分钟 probation 回退、killed/noSpace 不自动重启、进程重启后状态恢复、UI 入口与大字体/深色。
 3. 修复审查意见后重新跑 compile + 完整 JVM；新增设备证据必须绑定当前 head SHA、AVD/serial 与 APK 哈希。
 
@@ -75,6 +75,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP 及校验文件：本轮未构建 APK；`package-source.py` 生成的源码 ZIP 与 `SOURCE-SHA256SUMS` 仅作工作材料，不提交、不作为发布附件。
-- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名发布、未创建 tag/Release、未合并。
+- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名发布、未创建 tag/Release、未合并；PR [#25](https://github.com/leezzou/tanuki/pull/25) 仅创建，未触发 Review。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：本轮未删除既有交接；`20261109-1539-dsh-installed-version-manager.md`、`20261109-1535-background-update-check.md`、`20261109-1539-dsh-install-resilience.md` 仍对应待审 PR/未完成验证，其余历史记录仍被 AGENT-STATE 引用，保留以避免丢失验证依据。本轮新增记录为唯一当前交接。
 - 文档或脚本变化后仍需刷新交接印章、重新生成源码 ZIP；不要把源码 ZIP 自身哈希写回归档内形成循环。
