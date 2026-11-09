@@ -13,8 +13,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import com.tanuki.TanukiApp
 import com.tanuki.runtime.RuntimeManager
 import com.tanuki.runtime.WebState
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 
 class DshWebView(private val activity: ComponentActivity, private val manager: RuntimeManager,
@@ -29,6 +31,10 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     private var mainFrameAuthFailure = false
     private lateinit var authObserver: Job
     private val compatibility = LegacyWebCompatibility(activity)
+    // DSH 官方 $events 流的只读旁路；不向页面暴露原生方法。
+    private val chatBridge = DshChatBridge { signal ->
+        (activity.application as TanukiApp).chatNotifications.onSignal(signal)
+    }
     private val compactViewport = DshViewport { url -> OriginPolicy.sameOrigin(url, manager.origin) }
     private var destroyed = false
     val needsRecreation:Boolean get()=destroyed
@@ -263,8 +269,10 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
         }
         if (attachedOrigin != manager.origin || attachedAuthUrl != url || force || view.url == null) {
             try {
-                compatibility.install(view, manager.origin ?: return, manager.state.value.dsh)
-                blobs.bind(manager.origin ?: return)
+                val origin = manager.origin ?: return
+                compatibility.install(view, origin, manager.state.value.dsh)
+                chatBridge.install(view, origin)
+                blobs.bind(origin)
                 attachedOrigin = manager.origin;attachedAuthUrl=url;retriedAuthUrl=null;authRetryPending=false;mainFrameAuthFailure=false
                 manager.web(WebState.AUTHENTICATING)
                 val saved=pendingRestore;pendingRestore=null
@@ -288,9 +296,21 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
         if (OriginPolicy.browserPage(url, manager.origin)) openPage(url)
         else Toast.makeText(activity, "无法在浏览器中打开此链接；DSH 管理页面与文件链接保持隔离", Toast.LENGTH_LONG).show()
     }
+    /** 通知点击后尝试切到指定 DSH 会话；页面是否已渲染由调用方按 WebState 判断。 */
+    fun openSession(sessionId: String, onResult: ((Boolean) -> Unit)? = null) {
+        if (destroyed || sessionId.isBlank() || sessionId.length > 128 ||
+            !sessionId.all { it.code in 0x21..0x7e }) {
+            onResult?.invoke(false)
+            return
+        }
+        val quoted = JSONObject.quote(sessionId)
+        view.evaluateJavascript(
+            "(function(){try{return window.__tanukiOpenSession?window.__tanukiOpenSession($quoted):false}catch(e){return false}})()",
+        ) { result -> onResult?.invoke(result == "true") }
+    }
     fun destroy() {
         cancelFileSelection()
-        ++probeId; authObserver.cancel(); compatibility.dispose(); blobs.dispose()
+        ++probeId; authObserver.cancel(); compatibility.dispose(); chatBridge.detach(view); chatBridge.dispose(); blobs.dispose()
         popups.toList().forEach { it.destroy() }; popups.clear()
         if (!destroyed) view.destroy(); destroyed = true
     }
