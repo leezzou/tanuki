@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：上述策略与接入点；中文注释；开关/阈值；状态持久化。
-- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 21 项、`DeviceConditionRefreshQueueTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 229 tests / 0 failures / 0 errors / 0 skipped。
+- 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 21 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 231 tests / 0 failures / 0 errors / 0 skipped。
 - 待验证：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、设置页 UI、PDF 降级实际像素、独立 Review。
 - 当前分支：`ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，未合并、未触发 Review。
 - 没有运行中的设备安装或真实 DSH 任务；本轮未启动/停止模拟器，未安装 APK。
@@ -29,6 +29,7 @@
 | `app/src/main/kotlin/com/tanuki/power/DeviceConditionPolicy.kt` | 新增纯策略：状态枚举、热/电/内存信号、迟滞、工作矩阵、具体检查登记/恢复结果；不依赖 Android |
 | `app/src/main/kotlin/com/tanuki/power/DeviceConditionMonitor.kt` | 新增 Android 采样：PowerManager thermal status、电池/充电广播、ActivityManager 低内存；后台串行持久化；入队确认后清除待办；进程重启恢复 |
 | `app/src/main/kotlin/com/tanuki/power/DeviceConditionRefreshQueue.kt` | 合并主线程/广播刷新请求，`request()` 不内联采样或写盘 |
+| `app/src/main/kotlin/com/tanuki/power/DeviceConditionInitialization.kt` | 一次性初始化屏障，Worker/设置等待 restore 完成后再评估和写盘 |
 | `app/src/main/kotlin/com/tanuki/TanukiApp.kt` | 创建并启动监控；绑定恢复回调到 WorkManager 补跑 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt` | 周期 Worker 在热/低电时只登记自己并成功返回；恢复时只按实际登记项补跑 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmDownloadPolicy.kt` | `NpmConcurrencyPolicy` 增加外部 `capProvider`，`current()` 取自适应目标与设备额度较小值 |
@@ -41,6 +42,7 @@
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 订阅设备状态，接入模型/设置回调/PDF 上限 |
 | `app/src/test/kotlin/com/tanuki/DeviceConditionPolicyTest.kt` | 新增 21 项纯策略回归，含待办确认/重试 |
 | `app/src/test/kotlin/com/tanuki/DeviceConditionRefreshQueueTest.kt` | 新增 2 项后台刷新队列回归 |
+| `app/src/test/kotlin/com/tanuki/DeviceConditionInitializationTest.kt` | 新增 2 项初始化并发回归：暂停 restore 时提前启动 Worker、初始化只跑一次且失败释放等待者 |
 | `app/src/test/kotlin/com/tanuki/NpmDownloadPolicyTest.kt` | 新增外部并发上限与恢复回归 |
 | `docs/DEVICE-CONDITION-POLICY.md` | 新增状态表、工作矩阵、接入点、恢复和未验证边界 |
 | `docs/AGENT-STATE.md`、`docs/TEST-REPORT.md`、本记录 | 记录本轮状态和证据 |
@@ -50,22 +52,23 @@
 1. 只为实际跳过的到期检查登记补跑：策略不再自动登记；`DeviceWork` 拆为 `APK_UPDATE_CHECK`/`DSH_UPDATE_CHECK`，被阻塞的 Worker 调用 `beginBackgroundWork(check)` 只登记自己；`resumeDeferred(checks)` 只入队实际登记项，空集合直接返回。新增无 Worker 跳过、只恢复实际跳过项、登记幂等回归。
 2. 监控采样和持久化移出主线程：`refresh()` 只向 `DeviceConditionRefreshQueue` 投递合并请求，后台 collector 串行采样/评估/写盘；设置也走后台写盘；持久化比较排除 `updatedAtMillis`，常规采样不重复写盘。新增 `DeviceConditionRefreshQueueTest` 2 项，覆盖 `request()` 不内联执行写盘 worker 和突发请求合并。
 3. 确认补跑持久入队后再清除待办：`evaluate()` 保留 `deferredChecks`，`resumeDeferred()` 返回确认入队的检查集合，监控调用 `acknowledgeChecks()` 后才清除；WorkManager `Operation` 结果确认失败/超时则保留待办，后续采样重试。新增入队失败保留重试、部分确认只清除已确认项、进程重启窗口保留待办回归。
+4. 恢复完成前阻止 Worker 评估/写盘：新增 `DeviceConditionInitialization` 一次性屏障，`beginBackgroundWork()` 与设置入口等待 `restore()` 完成；新增并发回归模拟暂停 restore 后提前启动 Worker，确认 Worker 不会先用默认状态覆盖磁盘待办；初始化失败也释放等待者，避免 Worker 永久挂起。
 
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` | JDK17/SDK36，`/tmp/tanuki-thermal-30`，BUILD SUCCESSFUL（5m29s，19 tasks） | 编译通过；只有既有弃用警告 |
-| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | BUILD SUCCESSFUL；21/2/7/2 tests，0 failures/errors/skipped | 目标回归通过；不是完整套件 |
-| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | BUILD SUCCESSFUL；229 tests / 0 failures / 0 errors / 0 skipped | 完整 JVM 套件；不代表设备测试 |
-| `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL（4m23s，29 tasks）；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
+| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | BUILD SUCCESSFUL；21/2/2/7/2 tests，0 failures/errors/skipped | 目标回归通过；不是完整套件 |
+| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` | BUILD SUCCESSFUL（5m11s，35 tasks）；231 tests / 0 failures / 0 errors / 0 skipped；lint 0 Error | 完整 JVM+lint；不代表设备测试 |
+| `./gradlew :app:lintModernDebug` | 与上一行组合执行；0 个 lint Error | 本地 lint 通过；不替代 assemble/仪器/真机 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本记录中的编译与目标回归均为本轮在 `/tmp` clone 新跑；前轮 205 tests 等历史数字未复用。
 - 未测试、超时、失败和暂未复现的情况：真实温控/电池/低内存、WorkManager 调度/重启恢复、通知、设置页交互、PDF 降级像素、assemble/仪器、独立 Review 均未执行；lint 已在本轮通过。
 
 ### 最终结果
 
-- 完整 JVM：`./gradlew :app:testModernDebugUnitTest --rerun-tasks` → BUILD SUCCESSFUL（2m07s，28 tasks executed）；38 个结果文件，229 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（5m11s，35 tasks executed）；39 个结果文件，231 tests / 0 failures / 0 errors / 0 skipped。
 
 ## 未完成与暂停项
 

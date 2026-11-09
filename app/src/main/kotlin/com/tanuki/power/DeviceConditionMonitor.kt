@@ -61,6 +61,9 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     /** 主线程/热回调只投递请求，采样与写盘统一在后台 collector 中串行完成。 */
     private val refreshQueue = DeviceConditionRefreshQueue(scope) { refreshNow(null) }
 
+    /** restore/config 完成前，Worker 与设置入口都必须等待同一屏障。 */
+    private val initialization = DeviceConditionInitialization { initializeState() }
+
     private var started = false
     private var receiver: BroadcastReceiver? = null
     private var thermalListener: Any? = null
@@ -75,20 +78,7 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
         }
         registerBatteryReceiver()
         registerThermalListener()
-        scope.launch {
-            // 设置和已有状态也在后台读取，避免 Application.onCreate 主线程做磁盘 I/O。
-            // 若用户在加载完成前已修改设置，以内存中的新值为准，避免被旧文件覆盖。
-            synchronized(lock) {
-                if (!configLoaded) {
-                    config = loadConfig()
-                    configLoaded = true
-                }
-            }
-            val restored = restore()
-            synchronized(lock) { mutable.value = restored }
-            refreshNow(null)
-            refreshQueue.start()
-        }
+        initialization.start(scope)
         scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MILLIS)
@@ -118,8 +108,11 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
      * 允许时返回 true；不允许时只登记当前 Worker 这一项待办，不会代替其他检查登记。
      * 当前 Worker 马上会执行的检查不会再次排入补跑队列，避免同一周期重复请求。
      */
-    fun beginBackgroundWork(check: DeviceWork): Boolean {
+    suspend fun beginBackgroundWork(check: DeviceWork): Boolean {
         require(check in DeviceConditionPolicy.UPDATE_CHECK_WORK) { "只有后台更新检查可以使用此入口" }
+        // 冷启动时 Worker 可能先于 restore 被唤醒；等初始化完成后再评估和写入。
+        startIfNeeded()
+        initialization.awaitReady()
         // Worker 本身运行在 WorkManager 后台线程，这里可以同步完成评估与写盘。
         refreshNow(check)
         return state.value.backgroundChecksAllowed
@@ -130,7 +123,9 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
             configLoaded = true
             config = config.copy(enabled = enabled)
         }
+        startIfNeeded()
         scope.launch {
+            initialization.awaitReady()
             persistConfigNow()
             refreshNow(null)
         }
@@ -146,7 +141,9 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
                 lowBatteryExitPercent = (enter + 5).coerceAtMost(100),
             )
         }
+        startIfNeeded()
         scope.launch {
+            initialization.awaitReady()
             persistConfigNow()
             refreshNow(null)
         }
@@ -156,6 +153,29 @@ class DeviceConditionMonitor(context: Context, private val paths: Paths) {
     fun refresh() {
         if (!started) return
         refreshQueue.request()
+    }
+
+    private fun startIfNeeded() {
+        if (!started) start()
+    }
+
+    /** 后台一次性初始化：加载设置、恢复待办，再启动合并刷新 collector。 */
+    private fun initializeState() {
+        try {
+            // 设置和已有状态也在后台读取，避免 Application.onCreate 主线程做磁盘 I/O。
+            // 若用户在加载完成前已修改设置，以内存中的新值为准，避免被旧文件覆盖。
+            synchronized(lock) {
+                if (!configLoaded) {
+                    config = loadConfig()
+                    configLoaded = true
+                }
+            }
+            val restored = restore()
+            synchronized(lock) { mutable.value = restored }
+            refreshNow(null)
+        } finally {
+            refreshQueue.start()
+        }
     }
 
     /**
