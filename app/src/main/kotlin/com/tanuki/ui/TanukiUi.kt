@@ -90,7 +90,8 @@ data class TanukiUiModel(
     val appInstallAllowed: Boolean = false,
     val apkUpdateCheck: ApkUpdateCheckState = ApkUpdateCheckState(),
     val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
-    val fileFullscreen: Boolean = false
+    val fileFullscreen: Boolean = false,
+    val earlyStart: Boolean = true
 )
 
 data class TanukiUiCallbacks(
@@ -102,6 +103,7 @@ data class TanukiUiCallbacks(
     val measureStorage: () -> Unit,
     val toggleLegacy: (Boolean) -> Unit,
     val toggleBlob: (Boolean) -> Unit,
+    val toggleEarlyStart: (Boolean) -> Unit = {},
     val showNotices: () -> Unit,
     val updateWebView: () -> Unit,
     val webViewSettings: () -> Unit,
@@ -625,9 +627,12 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     if (section == "运行与后台") SettingsGroup("运行与后台") {
         ActionRow("通知权限", "显示运行状态与停止入口", onClick = c.notifications)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ToggleRow("启动应用时自动运行 DSH", model.earlyStart, c.toggleEarlyStart)
+        Caption("只自动运行上次正常停止的实例；启动中、运行中、安装中或上次任务中断时不会自动启动，仍可手动运行。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
         TanukiDetails("后台运行说明") {
-            Caption("服务由你主动启动；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
+            Caption("关闭自动运行后，服务只在你主动点击“启动 DSH”时运行；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
         }
     }
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {

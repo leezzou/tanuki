@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-1539-dsh-install-resilience.md",
-  "recordSha256": "b5a5687803246b04e336d802c87ae3c37f43ba16761ccbca97708f17d1bbc5c6",
-  "sourceFingerprint": "1f55657f4ca6411449b29b91b2cad2d831a5dd7ea4d2403f0c021a0d50346050",
-  "fileCount": 481
+  "record": "docs/handoffs/20261109-1700-dsh-cold-start.md",
+  "recordSha256": "3f5380c8d2ce72f8239de3315530b8d29d783dc5d14ab48db54a73c6dcaf9bb4",
+  "sourceFingerprint": "0df13d7725d230d4c06ecfc4400f5483f51241f291a2e7318d96ae9ddf3666cd",
+  "fileCount": 487
 }

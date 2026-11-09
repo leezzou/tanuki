@@ -14,6 +14,15 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## DSH 冷启动优化验证（2026-11-09，android_agent-27，非设备）
+
+- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
+- 实际执行：
+  - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、216 tests / 0 failures / 0 errors / 0 skipped；新增 `EarlyRuntimeStartTest` 11 项。
+  - `node scripts/test-dsh-path-cache.mjs` → PASS，9 个场景：缓存命中、符号链接/缺失链接、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+- 未执行：assemble、lint、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
+
 ## 后台更新检查验证（2026-11-09，android_agent-24，非设备）
 
 - 范围：Tanuki APK 每 30 分钟检查 GitHub `app-update.json`；DSH 每 24 小时检查 npmmirror（失败回退官方 npm）；两份状态独立持久化；同版本通知去重；前台徽标与手动检查保留。未改 DSH 下载/安装逻辑。

@@ -81,6 +81,7 @@ class RuntimeService : Service() {
             "INIT" -> manager.initialize()
             "BASE" -> manager.initialize(true)
             "START" -> manager.start()
+            "START_EARLY" -> manager.start(early = true)
             "HEALTH" -> manager.healthCheck()
             "TOOLS" -> manager.installRequiredTools()
             "BACKGROUND" -> manager.backgroundProbe()

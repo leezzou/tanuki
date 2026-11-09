@@ -1,6 +1,7 @@
 package com.tanuki.runtime
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Process
@@ -47,6 +48,7 @@ class RuntimeManager(val context: Context) {
     private var serverJob: Job? = null
     private var workspaceMonitor: Job? = null
     private var workspaceRefresh: Job? = null
+    private val earlyStartGate = EarlyStartGate()
     @Volatile private var stopping = false
     private var runtimeGeneration = 0L
     @Volatile private var child: Child? = null
@@ -534,8 +536,40 @@ class RuntimeManager(val context: Context) {
         event("项目容量预算已保存；现有文件保留")
         refreshWorkspaceStorage()
     }
-    fun start() {
+    /**
+     * 首帧前提前拉起已安装且空闲的运行时。
+     *
+     * 只发起既有前台服务 START 动作，安装/密钥/用户数据仍走 [start] 的原有流程；
+     * 条件不满足、重复调用或系统拒绝时返回 false，不改变当前状态。
+     */
+    fun requestEarlyStart(enabled: Boolean): Boolean {
+        return earlyStartGate.request(earlyConditions(enabled)) {
+            try {
+                context.startForegroundService(Intent(context, RuntimeService::class.java).setAction("START_EARLY"))
+                event("启动优化：已请求在首帧前提前拉起已就绪的 DSH")
+            } catch (error: Throwable) {
+                event("提前启动未能发起，仍可手动启动：${Redact.text(error.message ?: error.javaClass.simpleName)}")
+                throw error
+            }
+        }
+    }
+    private fun earlyConditions(enabled: Boolean): EarlyRuntimeStart.Conditions {
+        val snapshot = state.value
+        return EarlyRuntimeStart.Conditions(
+            enabled = enabled,
+            environment = snapshot.environment,
+            service = snapshot.service,
+            update = snapshot.update,
+            // 安装/下载等互斥操作由 job 表示；mutation 可能被启动时的短暂恢复占用，不据此跳过。
+            operationActive = job?.isActive == true || serverJob?.isActive == true,
+            liveChild = child != null,
+            stopping = stopping,
+        )
+    }
+    fun start(early: Boolean = false) {
         synchronized(this) {
+            // 服务端收到 START_EARLY 时重新校验，避免请求后环境变化或已被安装/手动启动占用。
+            if (early && !EarlyRuntimeStart.shouldStart(earlyConditions(true))) return
             if(stopping || state.value.service==ServiceState.STOPPING){event("服务正在停止，请稍后启动");return}
             if (serverJob?.isActive == true || child != null) return
             runtimeGeneration++
@@ -555,7 +589,9 @@ class RuntimeManager(val context: Context) {
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
                         // 只给客体受控客户端，不直接绑定真实手机卷，写权限默认关闭。
                         phoneFiles.start()
-                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true)
+                        // 启动期只读路径缓存只覆盖官方 web 启动；准备失败时按原生方式启动。
+                        val startupTools = DshStartup.prepare(context, paths)
+                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true, startupTools = startupTools)
                         child = c
                         monitorWorkspace(c)
                         // Collection lives independently of the Activity and of the environment mutex.

@@ -19,7 +19,7 @@ minSdk 26：使用 Android 8 的前台服务、NIO 文件操作、WebView render
 
 WebView provider、Chromium 版本和 CSS 能力独立于运行环境状态。App 在离线页实际测量 subgrid / light-dark()，未通过 Chromium 123+ 要求时显示升级页面，保持 Linux 与后端状态。更新 AndroidX WebKit 只提供宿主 API，不能升级引擎；本工程不通过修改 CSS.supports 结果宣称支持。
 
-用户启动前台服务，Activity 只连接它；页面切换不会停止 DSH，不自动刷新运行中的网页。Activity 重建保存 WebView 状态，不能保证官方网页未持久化的输入草稿。启动端口由 `--port 0` 交给系统选择，只有官方就绪日志中精确的 127.0.0.1 URL 可以成为 WebView origin。
+用户可设置启动应用时自动运行上次正常停止的前台服务（默认开启，可关闭）；Activity 只连接它，页面切换不会停止 DSH，不自动刷新运行中的网页。Activity 重建保存 WebView 状态，不能保证官方网页未持久化的输入草稿。启动端口由 `--port 0` 交给系统选择，只有官方就绪日志中精确的 127.0.0.1 URL 可以成为 WebView origin。DSH `web` 启动期可预加载只读路径缓存，官方就绪行或超时后卸载；该缓存只加速启动，不改变文件系统边界。
 
 目录（均在应用私有 files 目录）：
 
