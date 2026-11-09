@@ -45,7 +45,7 @@ class WorkspaceFileManager(
 ) {
     data class Entry(val path: String, val name: String, val directory: Boolean, val bytes: Long, val linked: Boolean, val modified: Long = 0)
     data class Preview(val text: String? = null, val image: Bitmap? = null, val revision: String? = null)
-    enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, PDF, DOCX, DOC, OTHER }
+    enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, PDF, DOCX, DOC, XLSX, OTHER }
     data class FileInfo(val name: String, val mimeType: String, val bytes: Long, val kind: FileKind)
     data class TextPage(val text: String, val offset: Long, val nextOffset: Long, val totalBytes: Long,
                         val encoding: String, val hasMore: Boolean, val revision: String? = null)
@@ -73,6 +73,7 @@ class WorkspaceFileManager(
                 extension == "pdf" -> FileKind.PDF
                 extension == "docx" -> FileKind.DOCX
                 extension == "doc" -> FileKind.DOC
+                extension == "xlsx" -> FileKind.XLSX
                 type?.startsWith("image/") == true -> FileKind.IMAGE
                 type?.startsWith("audio/") == true -> FileKind.AUDIO
                 type?.startsWith("video/") == true -> FileKind.VIDEO
@@ -305,6 +306,17 @@ class WorkspaceFileManager(
         }
     }
 
+    /** XLSX 只读解析在 IO 锁内完成有界解压；不向界面暴露文件路径。 */
+    internal suspend fun readXlsx(relative: String): XlsxWorkbook = io(writing = false) {
+        val file = payload(resolve(relative, true))
+        XlsxWorkbookParser.parse(file.toFile()) { input ->
+            Xml.newPullParser().apply {
+                setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                setInput(input, null)
+            }
+        }
+    }
+
     suspend fun readTextPage(relative: String, offset: Long = 0, encoding: String = "自动"): TextPage = io(writing = false) {
         val file = payload(resolve(relative, true))
         val before = Files.readAttributes(file, BasicFileAttributes::class.java, noFollow)
@@ -402,6 +414,7 @@ class WorkspaceFileManager(
             "pdf" -> "application/pdf"
             "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             "doc" -> "application/msword"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
         }
     }
