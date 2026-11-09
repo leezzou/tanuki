@@ -155,6 +155,24 @@ HTTP 200..399 或 401 → 存活
 
 `ServiceState`、`EnvironmentState`、`HealthState` 与 `WebState` 相互独立；不能把网页未连接写成 DSH 未运行，也不能把 401 写成进程失败。
 
+### 1.6 DSH 页面事件旁路（聊天通知）
+
+不新增 RPC。聊天通知只旁路 DSH 官方 `/api/remote.mux` WebSocket 的 `$events` 转发流，事件白名单来自官方 `dsh-api-remotes`：
+
+- `api-session/status(sessionId, running)`：观察到 `true → false` 才算一次“回合完成”；首次/重复 `false` 不提醒。
+- `api-session/error(sessionId, message)`：只取会话 id，通知不显示 `message`。
+- `approval/request` / `user-questions/request`：取官方 `eventId`、`agentId`（即会话 id）；不读取 `request` 内的工具名、问题或参数。
+
+实现边界：
+
+- 注入：`WebViewCompat.addDocumentStartJavaScript` + `addWebMessageListener`，只允许当前精确 `origin` 和主框架；脚本包装 `WebSocket.prototype.addEventListener` 旁路现有 `$events` 消息，不替换 WebSocket 构造器、不读取 Cookie/token、不向页面暴露原生方法。
+- 原生消息只含 `kind`、`sessionId`、`running`、`eventId`、`pageId`、`seq`、`visibleSession`；单条上限 4096 字节，所有 id 只允许可打印 ASCII 且 ≤128 字符。
+- 去重键：`DSH 版本 + sessionId + 事件类型 + eventId`。`approval/question` 使用官方 `eventId`；`status/error` 没有官方事件 id，使用页面 `pageId + seq`，回合完成另由原生 `ChatTurnState` 保证同一回合只提醒一次。
+- 抑制：Activity 在前台、DSH 标签可见，且页面 `[data-conversation-session]` 等于事件会话时，不投递通知；退到后台、切到其他标签或打开其他会话后恢复。
+- 点击：通知携带会话 id；`MainActivity` 切到 DSH 页后调用 `window.__tanukiOpenSession(id)`。脚本先展开收起的侧栏（按官方展开按钮的 `aria-label`，内部 `_toggle` 仅作兜底），再清除非空搜索过滤（官方“清除搜索”按钮优先，搜索输入框原生 setter + `input` 事件兜底），展开折叠的工作区分组，点击 `[data-row-key="session:<id>"]`；只有下一次调用确认 `[data-conversation-session]` 等于目标才返回成功。`MainActivity` 最多重试 15 次，失败时 Toast 并停留在 DSH 页，不谎报成功。归档或搜索过滤导致目标行始终不存在时也无法定位。
+- 通知身份与正文：通知使用会话 tag + 固定通知 id，跨进程更新同一会话而不覆盖其他会话；PendingIntent 的 action/data 绑定会话。每个通过策略去重的新事件都再次提醒，摘要静默。正文仅使用 `ChatNotificationCopy` 的四类固定最小文案；应用内总开关、系统权限/渠道设置可关闭或调整。
+- 限制：需要 WebView 支持 `DOCUMENT_START_SCRIPT`/`WEB_MESSAGE_LISTENER`（当前最低 WebView 123 覆盖）；DSH 升级若调整转发事件表或侧栏 `data-*` 属性，必须先更新本节和回归；页面在回合已运行时才加载，靠会话行 `[data-state="ongoing"]` 补种一次 running；错误以官方 `api-session/error` 为准，若某类失败只写入 `turn/end` 而不触发该事件，只能按回合完成提示；WebView 后台节流和 ROM 后台限制可能延迟事件。
+
 ## 2. 工具面：Browser RPC
 
 ### 2.1 传输与认证

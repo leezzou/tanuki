@@ -45,6 +45,8 @@ jobs:
         run: node scripts/test-phone-client.mjs
       - name: Test DSH startup path cache
         run: node scripts/test-dsh-path-cache.mjs
+      - name: Test chat session opener
+        run: node scripts/test-chat-session-open.mjs
       # 交接门禁放在最后：W1 的恢复记录未合并前它必然失败，
       # 但独立协议/客户端回归仍应完整执行并留下结果；该步骤不会被跳过。
       - name: Check handoff consistency
