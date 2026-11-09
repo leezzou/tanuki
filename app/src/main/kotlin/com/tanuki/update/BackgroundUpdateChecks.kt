@@ -182,6 +182,49 @@ object BackgroundUpdateChecks {
         lastError = error.take(160)
     )
 
+    /**
+     * 合并手动检查结果。
+     *
+     * [startedAt] 是手动检查的开始时间；如果它早于最近一次后台检查完成时间，
+     * 说明这是 Activity 重建回放的旧结果或较慢的旧请求，必须保留较新的后台快照。
+     */
+    fun applyManualApk(
+        candidateVersion: String?,
+        candidateCode: Long?,
+        startedAt: Long,
+        previous: ApkUpdateCheckState,
+        installedVersion: String,
+        installedCode: Long
+    ): ApkUpdateCheckState {
+        if (startedAt < previous.lastCheckedAt) return previous
+        if (candidateVersion != null && candidateCode != null &&
+            isValidVersion(candidateVersion) && candidateCode > installedCode
+        ) {
+            return previous.copy(
+                status = UpdateCheckStatus.SUCCEEDED,
+                installedVersion = installedVersion,
+                installedCode = installedCode,
+                latestVersion = candidateVersion,
+                latestCode = candidateCode,
+                available = true,
+                lastCheckedAt = startedAt,
+                lastErrorAt = 0L,
+                lastError = ""
+            )
+        }
+        return previous.copy(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = installedVersion,
+            installedCode = installedCode,
+            latestVersion = installedVersion,
+            latestCode = installedCode,
+            available = false,
+            lastCheckedAt = startedAt,
+            lastErrorAt = 0L,
+            lastError = ""
+        )
+    }
+
     /** 解析 npm 的 dist-tags.latest，并要求它真实出现在 versions 中。 */
     fun latestFromMetadata(raw: String): String? = runCatching {
         val metadata = JSONObject(raw)
@@ -233,6 +276,28 @@ object BackgroundUpdateChecks {
 
     fun shouldNotifyApk(state: ApkUpdateCheckState): Boolean =
         state.available && state.latestVersion.isNotBlank() && state.notifiedVersion != state.latestVersion
+
+    /**
+     * 合并手动刷新得到的官方 latest；与 APK 一样，开始时间早于现有后台结果时拒绝覆盖。
+     */
+    fun applyManualDsh(
+        latest: String,
+        startedAt: Long,
+        previous: DshUpdateCheckState,
+        installedVersion: String
+    ): DshUpdateCheckState {
+        if (!isValidVersion(latest) || startedAt < previous.lastCheckedAt) return previous
+        return previous.copy(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = installedVersion,
+            latestVersion = latest,
+            available = isUpdateAvailable(installedVersion, latest),
+            lastCheckedAt = startedAt,
+            lastErrorAt = 0L,
+            lastError = "",
+            source = DshRegistry.OFFICIAL.label
+        )
+    }
 
     fun shouldNotifyDsh(state: DshUpdateCheckState): Boolean =
         state.available && state.latestVersion.isNotBlank() && state.notifiedVersion != state.latestVersion

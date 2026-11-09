@@ -30,7 +30,11 @@ data class AppUpdateState(val phase: AppUpdatePhase = AppUpdatePhase.IDLE,
     val busy: Boolean get() = phase in setOf(AppUpdatePhase.CHECKING, AppUpdatePhase.DOWNLOADING, AppUpdatePhase.VERIFYING)
 }
 
-class ApplicationUpdateManager(private val app: TanukiApp) {
+class ApplicationUpdateManager(
+    private val app: TanukiApp,
+    /** 手动检查成功时通知后台快照；附带检查开始时间，避免旧结果覆盖较新的后台结果。 */
+    private val onCheckCompleted: suspend (AppUpdateAsset?, Long) -> Unit = { _, _ -> }
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutable = MutableStateFlow(AppUpdateState())
     val state = mutable.asStateFlow()
@@ -40,6 +44,7 @@ class ApplicationUpdateManager(private val app: TanukiApp) {
     private val directory get() = AppUpdateFiles.directory(app.cacheDir)
 
     fun check() = operation(AppUpdateState(AppUpdatePhase.CHECKING, "正在检查 GitHub 发布列表")) {
+        val startedAt = System.currentTimeMillis()
         ApkInstallAccess.revoke(app)
         readyFile = null
         val installed = installedIdentity()
@@ -62,12 +67,18 @@ class ApplicationUpdateManager(private val app: TanukiApp) {
             supportedManifest = true
             if (candidate != null && (best == null || candidate.versionCode > best.versionCode)) best = candidate
         }
-        mutable.value = when {
+        val result = when {
             best != null -> AppUpdateState(AppUpdatePhase.AVAILABLE, "发现可覆盖当前应用的更新", best)
             invalidManifest -> AppUpdateState(AppUpdatePhase.FAILED, "发布清单不完整或没有同包、同签名的兼容 APK；现有环境未改动")
             supportedManifest -> AppUpdateState(AppUpdatePhase.CURRENT, "本次检查的公开发布中没有更高版本的兼容更新")
             else -> AppUpdateState(AppUpdatePhase.NO_RELEASE, "暂无可用于应用内更新的 Release；发布时需附带 app-update.json")
         }
+        if (result.phase == AppUpdatePhase.AVAILABLE || result.phase == AppUpdatePhase.CURRENT) {
+            try { onCheckCompleted(result.candidate, startedAt) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Throwable) { }
+        }
+        mutable.value = result
     }
 
     fun download() {

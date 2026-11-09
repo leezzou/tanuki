@@ -120,6 +120,76 @@ class BackgroundUpdateChecksTest {
         assertEquals("上次后台检查未成功", result.statusText())
     }
 
+    @Test fun staleManualApkReplayCannotClearNewerBackgroundSnapshot() {
+        val background = ApkUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.1.7",
+            installedCode = 9L,
+            latestVersion = "0.1.9",
+            latestCode = 11L,
+            available = true,
+            lastCheckedAt = 2_000L
+        )
+        // 模拟 Activity 重建：回放一个开始于后台结果之前的“手动无更新”结果。
+        val replayed = BackgroundUpdateChecks.applyManualApk(
+            candidateVersion = null,
+            candidateCode = null,
+            startedAt = 1_000L,
+            previous = background,
+            installedVersion = "0.1.7",
+            installedCode = 9L
+        )
+        assertEquals(background, replayed)
+        assertEquals("0.1.9", replayed.latestVersion)
+        assertEquals(2_000L, replayed.lastCheckedAt)
+        assertTrue(replayed.available)
+
+        // 真正开始于后台结果之后的手动结果仍可更新快照。
+        val newer = BackgroundUpdateChecks.applyManualApk(
+            candidateVersion = "0.1.10",
+            candidateCode = 12L,
+            startedAt = 3_000L,
+            previous = background,
+            installedVersion = "0.1.7",
+            installedCode = 9L
+        )
+        assertTrue(newer.available)
+        assertEquals("0.1.10", newer.latestVersion)
+        assertEquals(3_000L, newer.lastCheckedAt)
+    }
+
+    @Test fun staleManualDshReplayCannotClearNewerBackgroundSnapshot() {
+        val background = DshUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.2.1",
+            latestVersion = "0.2.3",
+            available = true,
+            lastCheckedAt = 2_000L,
+            source = DshRegistry.MIRROR.label
+        )
+        // 模拟 Activity 重建：旧手动候选不能把较新的后台结果降级。
+        val replayed = BackgroundUpdateChecks.applyManualDsh(
+            latest = "0.2.2",
+            startedAt = 1_000L,
+            previous = background,
+            installedVersion = "0.2.1"
+        )
+        assertEquals(background, replayed)
+        assertEquals("0.2.3", replayed.latestVersion)
+        assertEquals(2_000L, replayed.lastCheckedAt)
+        assertTrue(replayed.available)
+
+        val newer = BackgroundUpdateChecks.applyManualDsh(
+            latest = "0.2.4",
+            startedAt = 3_000L,
+            previous = background,
+            installedVersion = "0.2.1"
+        )
+        assertTrue(newer.available)
+        assertEquals("0.2.4", newer.latestVersion)
+        assertEquals(3_000L, newer.lastCheckedAt)
+    }
+
     @Test fun apkAndDshPersistedStatesAreNotInterchangeable() {
         val apk = ApkUpdateCheckState(
             status = UpdateCheckStatus.SUCCEEDED,

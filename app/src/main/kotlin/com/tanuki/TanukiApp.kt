@@ -6,8 +6,16 @@ import com.tanuki.runtime.RuntimeManager
 class TanukiApp : Application() {
     lateinit var runtime: RuntimeManager
         private set
-    val updates by lazy { com.tanuki.update.UpdateManager(runtime) }
-    val appUpdates by lazy { com.tanuki.update.ApplicationUpdateManager(this) }
+    val updates by lazy {
+        com.tanuki.update.UpdateManager(runtime) { latest, startedAt ->
+            dshUpdateChecks.recordManualLatest(latest, startedAt)
+        }
+    }
+    val appUpdates by lazy {
+        com.tanuki.update.ApplicationUpdateManager(this) { candidate, startedAt ->
+            apkUpdateChecks.recordManual(candidate, startedAt)
+        }
+    }
     /** Tanuki APK 的后台检查状态，独立于 ApplicationUpdateManager 的下载/安装流程。 */
     val apkUpdateChecks by lazy { com.tanuki.update.ApkUpdateCheckRepository(this, runtime.paths) }
     /** DSH 引擎的后台检查状态，独立于 UpdateManager 的版本列表与安装事务。 */

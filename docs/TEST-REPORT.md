@@ -19,15 +19,17 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：Tanuki APK 每 30 分钟检查 GitHub `app-update.json`；DSH 每 24 小时检查 npmmirror（失败回退官方 npm）；两份状态独立持久化；同版本通知去重；前台徽标与手动检查保留。未改 DSH 下载/安装逻辑。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（3m36s，19 tasks）。
-  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.BackgroundUpdateChecksTest'` → BUILD SUCCESSFUL，16 tests / 0 failures。
-  - `./gradlew :app:testModernDebugUnitTest --stacktrace` → BUILD SUCCESSFUL，148 tests / 0 failures / 0 errors / 0 skipped（27 个结果文件）。
-- 新增回归：`BackgroundUpdateChecksTest` 覆盖 30 分钟/24 小时间隔与唯一任务名、12 秒超时范围、APK 版本选择与同/低版本不误报、APK/DSH 状态不可串读、镜像成功不访问官方、镜像损坏/网络失败回退、双源失败保留最近结果并记录错误、成功清除错误、SemVer 预发布比较、同版本只通知一次、最小查询间隔、CHECKING 不持久化、损坏状态回退。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.BackgroundUpdateChecksTest'` → BUILD SUCCESSFUL，18 tests / 0 failures。
+  - `./gradlew :app:testModernDebugUnitTest --stacktrace` → BUILD SUCCESSFUL，150 tests / 0 failures / 0 errors / 0 skipped（27 个结果文件）。
+- 新增回归：`BackgroundUpdateChecksTest` 18 项，覆盖 30 分钟/24 小时间隔与唯一任务名、12 秒超时范围、APK 版本选择与同/低版本不误报、APK/DSH 状态不可串读、镜像成功不访问官方、镜像损坏/网络失败回退、双源失败保留最近结果并记录错误、成功清除错误、SemVer 预发布比较、同版本只通知一次、最小查询间隔、CHECKING 不持久化、损坏状态回退、手动旧结果不覆盖较新后台快照（APK/DSH 两条链路）。
+- P2 复审修复：手动检查同步从 Activity `LaunchedEffect` 移到检查完成事件（`ApplicationUpdateManager`/`UpdateManager` 回调），并携带检查开始时间；`applyManualApk`/`applyManualDsh` 拒绝早于后台 `lastCheckedAt` 的旧结果。新增“手动旧结果 → 后台新结果 → Activity 重建”APK/DSH 两条链路回归。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实 GitHub/npmmirror/npm 请求、WorkManager 实际触发/重启恢复、Android 13 通知权限与展示、深色/大字体 UI。编译与 JVM 不能替代设备与真实网络验收。
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
 - 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
 - 实际执行：`source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，126 tests、0 failures、0 errors、0 skipped。新增 `WorkspaceFileKindTest` 2 项、`ZoomPolicyTest` 6 项、`DocxTextExtractorTest` 10 项、`PdfRenderPolicyTest` 4 项；DOCX 测试用合成 zip 覆盖多段/空段/换行/制表/标准实体/数字字符引用/CDATA、DOCTYPE 拒绝、未定义实体拒绝、文本截断、单条目与总解压超限、缺正文、损坏 zip 和坏 XML。PR #16 两轮 P2 将读取改为 `nextToken()`，使 `DOCDECL` 可被观察并拒绝，并让 replacement text 为 null 的 `ENTITY_REF` 返回中文格式错误；两项回归均通过。
+- P2 复审修复：手动检查同步从 Activity `LaunchedEffect` 移到检查完成事件（`ApplicationUpdateManager`/`UpdateManager` 回调），并携带检查开始时间；`applyManualApk`/`applyManualDsh` 拒绝早于后台 `lastCheckedAt` 的旧结果。新增“手动旧结果 → 后台新结果 → Activity 重建”APK/DSH 两条链路回归。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实加密或损坏 PDF、真实复杂 DOCX、深色主题与手势实机验证。编译通过和 JVM 策略测试不能替代设备验收。
 
 ## 本轮研发治理验证（2026-11-06，W7，非产品测试）

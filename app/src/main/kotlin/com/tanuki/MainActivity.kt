@@ -297,22 +297,6 @@ class MainActivity : ComponentActivity() {
                         isAppearanceLightNavigationBars = !dark
                     }
                 }
-                // 手动检查已有结果时同步独立后台快照，避免同一入口出现相反结论；不重复联网。
-                LaunchedEffect(appUpdate.phase, appUpdate.candidate?.versionName) {
-                    withContext(Dispatchers.IO) {
-                        when (appUpdate.phase) {
-                            com.tanuki.update.AppUpdatePhase.AVAILABLE ->
-                                appUpdate.candidate?.let { apkUpdateChecks.recordManual(it) }
-                            com.tanuki.update.AppUpdatePhase.CURRENT -> apkUpdateChecks.recordManual(null)
-                            else -> Unit
-                        }
-                    }
-                }
-                LaunchedEffect(s.candidate, s.dsh) {
-                    if (s.candidate.isNotBlank() && com.tanuki.update.BackgroundUpdateChecks.isValidVersion(s.dsh)) {
-                        withContext(Dispatchers.IO) { dshUpdateChecks.recordManualLatest(s.candidate) }
-                    }
-                }
                 TanukiUi(
                     model = TanukiUiModel(s, webSupport, versions, emptyList(), storageUsage, deviceInfo,
                         backgroundResult, legacyShim, blobExport, BuildConfig.VERSION_NAME, freeBytes,liveLogs=manager.log.recent,

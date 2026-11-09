@@ -140,37 +140,19 @@ class ApkUpdateCheckRepository(private val context: Context, private val paths: 
 
     /**
      * 手动检查已经拿到候选时同步后台快照，避免同一张卡片出现两套相反结论。
-     * 这里只记录结果，不发起第二次网络请求。
+     * 只接受不早于现有后台快照的检查；开始时间更早的旧结果（Activity 回放或慢请求）被丢弃。
      */
-    suspend fun recordManual(candidate: AppUpdateAsset?) = gate.withLock {
+    suspend fun recordManual(candidate: AppUpdateAsset?, startedAt: Long) = gate.withLock {
         val installedVersion = BuildConfig.VERSION_NAME
         val installedCode = BuildConfig.VERSION_CODE.toLong()
-        val now = System.currentTimeMillis()
-        val updated = if (candidate != null && candidate.versionCode > installedCode) {
-            mutable.value.copy(
-                status = UpdateCheckStatus.SUCCEEDED,
-                installedVersion = installedVersion,
-                installedCode = installedCode,
-                latestVersion = candidate.versionName,
-                latestCode = candidate.versionCode,
-                available = true,
-                lastCheckedAt = now,
-                lastErrorAt = 0L,
-                lastError = ""
-            )
-        } else {
-            mutable.value.copy(
-                status = UpdateCheckStatus.SUCCEEDED,
-                installedVersion = installedVersion,
-                installedCode = installedCode,
-                latestVersion = installedVersion,
-                latestCode = installedCode,
-                available = false,
-                lastCheckedAt = now,
-                lastErrorAt = 0L,
-                lastError = ""
-            )
-        }
+        val updated = BackgroundUpdateChecks.applyManualApk(
+            candidateVersion = candidate?.versionName,
+            candidateCode = candidate?.versionCode,
+            startedAt = startedAt,
+            previous = mutable.value,
+            installedVersion = installedVersion,
+            installedCode = installedCode
+        )
         mutable.value = updated
         persist(updated)
     }
@@ -250,20 +232,14 @@ class DshUpdateCheckRepository(private val paths: Paths) {
         result
     }
 
-    /** 手动刷新官方版本列表后同步后台快照；不发起额外请求。 */
-    suspend fun recordManualLatest(latest: String) {
-        if (!BackgroundUpdateChecks.isValidVersion(latest)) return
+    /** 手动刷新官方版本列表后同步后台快照；不发起额外请求，旧开始时间不覆盖新后台结果。 */
+    suspend fun recordManualLatest(latest: String, startedAt: Long) {
         gate.withLock {
-            val installedVersion = installedVersion()
-            val updated = mutable.value.copy(
-                status = UpdateCheckStatus.SUCCEEDED,
-                installedVersion = installedVersion,
-                latestVersion = latest,
-                available = BackgroundUpdateChecks.isUpdateAvailable(installedVersion, latest),
-                lastCheckedAt = System.currentTimeMillis(),
-                lastErrorAt = 0L,
-                lastError = "",
-                source = DshRegistry.OFFICIAL.label
+            val updated = BackgroundUpdateChecks.applyManualDsh(
+                latest = latest,
+                startedAt = startedAt,
+                previous = mutable.value,
+                installedVersion = installedVersion()
             )
             mutable.value = updated
             persist(updated)
