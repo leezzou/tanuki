@@ -181,6 +181,26 @@ class XlsxWorkbookParserTest {
     }
 
     @Test
+    fun preservesResolvedEntitiesInSharedInlineAndCachedStrings() {
+        val shared = """$workbookHeader<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">""" +
+            """<si><t>共&amp;享&#65;</t></si></sst>"""
+        val sheet = """<sheetData><row r="1">""" +
+            """<c r="A1" t="s"><v>0</v></c>""" +
+            """<c r="B1" t="inlineStr"><is><t>内&amp;联&#66;</t></is></c>""" +
+            """<c r="C1" t="str"><f>CONCAT(A1,B1)</f><v>缓&amp;存&#67;</v></c>""" +
+            """</row></sheetData>"""
+        val file = build(listOf("实体" to sheet), sharedStringsXml = shared)
+        try {
+            val cells = parse(file).sheets.single().rows.single().cells
+            assertEquals("共&享A", cells[0].text)
+            assertEquals("内&联B", cells[1].text)
+            assertEquals("缓&存C", cells[2].text)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun appliesBaseFontFillBorderAndAlignmentStyles() {
         val styles = """$workbookHeader<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">""" +
             """<fonts count="2"><font><sz val="11"/></font>""" +

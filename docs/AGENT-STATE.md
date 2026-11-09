@@ -87,13 +87,13 @@
 - 分支 `ao/xlsx-preview/xlsx-native-preview`（从 `ao/xlsx-preview/root` 创建），基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp` clone 提交/推送，PR [#23](https://github.com/leezzou/tanuki/pull/23) 已创建，未触发 AO Review。
 - 新增 `XlsxWorkbookParser`：`ZipFile` + `XmlPullParser` 只读 workbook/rels/sharedStrings/styles/sheet，不依赖 LibreOffice/外部 App；支持多 sheet、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、数字/百分比/日期/时间/布尔/错误值与公式缓存值、`date1904`。
 - 新增 Compose 表格 `XlsxTablePreview`：sheet 切换、LazyColumn 行虚拟化、共享水平滚动、0.5–2.0x 按钮缩放、截断与保真提示；`WorkspaceFileManager.FileKind` 增加 `XLSX` 并接入 `WorkspaceFileViewer`。
-- 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB 且按实际解压字节复核；sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096；合并生成的起点/占位单元格与普通单元格共享单表/全簿预算；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接，损坏包给中文错误。
+- 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB 且按实际解压字节复核；sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096；合并生成的起点/占位单元格与普通单元格共享单表/全簿预算；标准实体/数字引用保留，冻结区按视口与缩放收缩，单元格字号按样式显示；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接，损坏包给中文错误。
 - 明确不支持：图表、宏、透视表、外部链接、图片、复杂条件格式、隐藏行列、主题色、富文本多字体与公式重算；不宣称完整 Excel。
-- 本轮验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，230 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析/格式化/策略回归与 `.xlsx` 分类回归。未跑 lint、assemble、仪器与真机；真机大表滚动/缩放待验证。
+- 本轮验证：`compileModernDebugKotlin` 与 `lintModernDebug` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析/格式化/策略回归与 `.xlsx` 分类回归。未跑 assemble、仪器与真机；真机大表滚动/缩放待验证。
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，230 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 17 项、格式化 4 项、缩放策略 3 项与 `.xlsx` 分类 1 项。未跑 lint/assemble/设备/仪器。
+- 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 18 项、格式化 4 项、缩放策略 5 项与 `.xlsx` 分类 1 项；`lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/设备/仪器。
 - 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（本轮 android_agent-23 新跑）：基线 `5c680b9` 上 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `:app:testModernDebugUnitTest` 155 tests / 0 failures / 0 errors / 0 skipped；Npm/Download/OperationProgress 目标回归 61 项通过。`cff09a3`/`41609cb` 基线上的 110/132 项与旧 CI 属历史结果，不是本轮复跑。

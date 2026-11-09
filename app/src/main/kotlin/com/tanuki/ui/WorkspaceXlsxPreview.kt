@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -42,13 +43,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.ScrollState
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.storage.XlsxCell
 import com.tanuki.storage.XlsxHorizontalAlign
+import com.tanuki.storage.XlsxVerticalAlign
 import com.tanuki.storage.XlsxRow
 import com.tanuki.storage.XlsxSheet
 import com.tanuki.storage.XlsxWorkbook
@@ -180,59 +181,71 @@ internal fun XlsxTablePreview(files: WorkspaceFileManager, path: String, modifie
 @Composable
 private fun XlsxSheetTable(sheet: XlsxSheet, scale: Float, modifier: Modifier) {
     val horizontal = rememberScrollState()
-    val widths = remember(sheet.name, sheet.columnWidths, scale) {
-        List(sheet.columnCount) { (XlsxPreviewPolicy.columnWidthDp(sheet.columnWidths.getOrNull(it)) * scale).dp }
+    val widthValues = remember(sheet.name, sheet.columnWidths, scale) {
+        List(sheet.columnCount) { (XlsxPreviewPolicy.columnWidthDp(sheet.columnWidths.getOrNull(it)) * scale) }
     }
+    val widths = remember(widthValues) { widthValues.map { it.dp } }
     val headerHeight = (28f * scale).coerceIn(22f, 48f).dp
     val gutterWidth = (44f * scale).coerceIn(32f, 80f).dp
-    val textSize = (12f * scale).coerceIn(9f, 22f).sp
+    val rowHeightValues = remember(sheet.name, scale) {
+        sheet.rows.map { XlsxPreviewPolicy.rowHeightDp(it.heightPoints) * scale }
+    }
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val headerColor = MaterialTheme.colorScheme.surfaceVariant
-    // 冻结区在手机宽度内最多展示 8 行 / 3 列，避免冻结窗格占满视口；其余仍可滚动查看。
-    val frozenRows = sheet.frozenRows.coerceIn(0, minOf(sheet.rows.size, 8))
-    val frozenColumns = sheet.frozenColumns.coerceIn(0, minOf(sheet.columnCount, 3))
-    val body = remember(frozenRows) { sheet.rows.drop(frozenRows) }
-    Column(modifier) {
-        // 列表头固定，与表体共用水平滚动状态。
-        Row(Modifier.fillMaxWidth().height(headerHeight)) {
-            XlsxHeaderBox(gutterWidth, headerHeight, "#", headerColor, gridColor)
-            if (frozenColumns > 0) {
-                Row {
-                    for (column in 0 until frozenColumns) {
+    BoxWithConstraints(modifier) {
+        // 按真实视口和缩放后的累计尺寸收缩冻结区，保证表体始终保留可滚动、可点击的区域。
+        val availableWidth = maxWidth.value.takeIf { it.isFinite() } ?: Float.MAX_VALUE
+        val availableHeight = maxHeight.value.takeIf { it.isFinite() } ?: Float.MAX_VALUE
+        val frozenColumns = XlsxPreviewPolicy.visibleFrozenColumns(
+            sheet.frozenColumns, widthValues, gutterWidth.value, availableWidth,
+        )
+        val frozenRows = XlsxPreviewPolicy.visibleFrozenRows(
+            sheet.frozenRows, rowHeightValues, headerHeight.value, availableHeight,
+        )
+        val body = remember(sheet.name, frozenRows) { sheet.rows.drop(frozenRows) }
+        Column(Modifier.fillMaxSize()) {
+            // 列表头固定，与表体共用水平滚动状态。
+            Row(Modifier.fillMaxWidth().height(headerHeight)) {
+                XlsxHeaderBox(gutterWidth, headerHeight, "#", headerColor, gridColor)
+                if (frozenColumns > 0) {
+                    Row {
+                        for (column in 0 until frozenColumns) {
+                            XlsxHeaderBox(widths[column], headerHeight, XlsxPreviewPolicy.columnName(column), headerColor, gridColor)
+                        }
+                    }
+                    Box(Modifier.width(1.dp).height(headerHeight).background(gridColor))
+                }
+                Row(Modifier.horizontalScroll(horizontal)) {
+                    for (column in frozenColumns until sheet.columnCount) {
                         XlsxHeaderBox(widths[column], headerHeight, XlsxPreviewPolicy.columnName(column), headerColor, gridColor)
                     }
                 }
-                Box(Modifier.width(1.dp).height(headerHeight).background(gridColor))
             }
-            Row(Modifier.horizontalScroll(horizontal)) {
-                for (column in frozenColumns until sheet.columnCount) {
-                    XlsxHeaderBox(widths[column], headerHeight, XlsxPreviewPolicy.columnName(column), headerColor, gridColor)
+            HorizontalDivider(thickness = 1.dp, color = gridColor)
+            // 冻结行不随表体纵向滚动，但仍随表体水平滚动。
+            if (frozenRows > 0) {
+                Column {
+                    for (index in 0 until frozenRows) {
+                        val row = sheet.rows[index]
+                        XlsxGridRow(
+                            row, widths, rowHeightValues[index].dp,
+                            frozenColumns, gutterWidth, gridColor, headerColor, scale, horizontal,
+                        )
+                    }
                 }
+                HorizontalDivider(thickness = 1.dp, color = gridColor)
             }
-        }
-        HorizontalDivider(thickness = 1.dp, color = gridColor)
-        // 冻结行不随表体纵向滚动，但仍随表体水平滚动。
-        if (frozenRows > 0) {
-            Column {
-                for (row in sheet.rows.subList(0, frozenRows)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(body, key = { it.index }) { row ->
                     XlsxGridRow(
-                        row, widths, (XlsxPreviewPolicy.rowHeightDp(row.heightPoints) * scale).dp,
-                        frozenColumns, gutterWidth, gridColor, headerColor, textSize, horizontal,
+                        row, widths, rowHeightValues[row.index].dp,
+                        frozenColumns, gutterWidth, gridColor, headerColor, scale, horizontal,
                     )
                 }
             }
-            HorizontalDivider(thickness = 1.dp, color = gridColor)
-        }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(body, key = { it.index }) { row ->
-                XlsxGridRow(
-                    row, widths, (XlsxPreviewPolicy.rowHeightDp(row.heightPoints) * scale).dp,
-                    frozenColumns, gutterWidth, gridColor, headerColor, textSize, horizontal,
-                )
+            if (sheet.rows.isEmpty()) {
+                Text("此工作表没有单元格数据。", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
             }
-        }
-        if (sheet.rows.isEmpty()) {
-            Text("此工作表没有单元格数据。", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -256,7 +269,7 @@ private fun XlsxGridRow(
     gutterWidth: Dp,
     gridColor: Color,
     headerColor: Color,
-    textSize: TextUnit,
+    scale: Float,
     horizontal: ScrollState,
 ) {
     Row(Modifier.fillMaxWidth().height(height)) {
@@ -273,37 +286,55 @@ private fun XlsxGridRow(
         if (frozenColumns > 0) {
             Row {
                 for (placed in layoutCells(row, widths, 0, frozenColumns)) {
-                    XlsxCellBox(placed, height, textSize, gridColor)
+                    XlsxCellBox(placed, height, scale, gridColor)
                 }
             }
             Box(Modifier.width(1.dp).height(height).background(gridColor))
         }
         Row(Modifier.horizontalScroll(horizontal)) {
             for (placed in layoutCells(row, widths, frozenColumns, widths.size)) {
-                XlsxCellBox(placed, height, textSize, gridColor)
+                XlsxCellBox(placed, height, scale, gridColor)
             }
         }
     }
 }
 
 @Composable
-private fun XlsxCellBox(placed: PlacedCell, height: Dp, textSize: TextUnit, gridColor: Color) {
+private fun XlsxCellBox(placed: PlacedCell, height: Dp, scale: Float, gridColor: Color) {
     val cell = placed.cell
     val style = cell?.style
     val fill = style?.fillColor?.let { Color(it) }
     val borderColor = style?.border?.color?.let { Color(it) }
         ?: if (style?.border?.visible == true) MaterialTheme.colorScheme.outline else gridColor
-    val alignment = when (style?.horizontal) {
-        XlsxHorizontalAlign.CENTER -> Alignment.Center
-        XlsxHorizontalAlign.RIGHT -> Alignment.CenterEnd
-        XlsxHorizontalAlign.LEFT -> Alignment.CenterStart
-        else -> if (cell?.numeric == true) Alignment.CenterEnd else Alignment.CenterStart
+    val horizontal = when (style?.horizontal) {
+        XlsxHorizontalAlign.LEFT -> 0
+        XlsxHorizontalAlign.CENTER -> 1
+        XlsxHorizontalAlign.RIGHT -> 2
+        else -> if (cell?.numeric == true) 2 else 0
     }
-    val textAlign = when (alignment) {
-        Alignment.Center -> TextAlign.Center
-        Alignment.CenterEnd -> TextAlign.End
-        else -> TextAlign.Start
+    val alignment = when (style?.vertical) {
+        XlsxVerticalAlign.TOP -> when (horizontal) {
+            0 -> Alignment.TopStart
+            1 -> Alignment.TopCenter
+            else -> Alignment.TopEnd
+        }
+        XlsxVerticalAlign.CENTER -> when (horizontal) {
+            0 -> Alignment.CenterStart
+            1 -> Alignment.Center
+            else -> Alignment.CenterEnd
+        }
+        else -> when (horizontal) {
+            0 -> Alignment.BottomStart
+            1 -> Alignment.BottomCenter
+            else -> Alignment.BottomEnd
+        }
     }
+    val textAlign = when (horizontal) {
+        0 -> TextAlign.Start
+        1 -> TextAlign.Center
+        else -> TextAlign.End
+    }
+    val fontSize = XlsxPreviewPolicy.cellFontSizeSp(style?.fontSize, scale).sp
     Box(
         Modifier.width(placed.width).height(height)
             .then(if (fill != null) Modifier.background(fill) else Modifier)
@@ -314,7 +345,7 @@ private fun XlsxCellBox(placed: PlacedCell, height: Dp, textSize: TextUnit, grid
             Text(
                 cell.text,
                 Modifier.padding(horizontal = 3.dp),
-                fontSize = textSize,
+                fontSize = fontSize,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = textAlign,

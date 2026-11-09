@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：XLSX 只读解析与原生表格预览已接入 `WorkspaceFileViewer`；支持多 sheet、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、水平/垂直对齐、数字/百分比/日期/时间/布尔/错误值、公式缓存值与 `date1904`。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，230 tests / 0 failures / 0 errors / 0 skipped；新增 3 个测试类共 24 项（解析 17、格式化 4、缩放策略 3），并在 `WorkspaceFileKindTest` 增补 1 项，合计 25 项。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 3 个测试类共 27 项（解析 18、格式化 4、缩放策略 5），并在 `WorkspaceFileKindTest` 增补 1 项，合计 28 项。
 - 待验证：真机/模拟器上的双向滚动、冻结区手势、缩放可读性、大表滚动性能、深色主题与 CJK 字体；真实 Excel/WPS 生成文件（含主题色、隐藏行列、复杂格式）；lint、assemble、仪器测试。
 - 当前分支：`ao/xlsx-preview/xlsx-native-preview`（从会话分支 `ao/xlsx-preview/root` 创建），基于 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp` clone 提交/推送，PR [#23](https://github.com/leezzou/tanuki/pull/23) 已创建，未触发 AO Review。
 - 关键事实与源码：解析与上限在 `app/src/main/kotlin/com/tanuki/storage/XlsxWorkbook.kt`；格式化在 `XlsxValueFormatter.kt`；表格 UI 在 `app/src/main/kotlin/com/tanuki/ui/WorkspaceXlsxPreview.kt`；缩放/尺寸策略在 `XlsxPreviewPolicy.kt`；入口接线在 `WorkspaceFileManager.readXlsx` 与 `WorkspaceFileViewer`。
@@ -26,11 +26,11 @@
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/storage/XlsxWorkbook.kt` | 新增 OOXML XLSX 只读解析器与模型：workbook/rels/sharedStrings/styles/sheet、合并单元格、冻结窗格、列宽行高、公式缓存值；zip 条目/总量/单条目、XML 深度/DTD/实体、sheet/行/列/单元格/共享字符串/合并区域/文本预算上限；合并生成的起点与 covered 占位同样计入共享单元格预算；路径穿越与外部链接拒绝；中文错误。 |
+| `app/src/main/kotlin/com/tanuki/storage/XlsxWorkbook.kt` | 新增 OOXML XLSX 只读解析器与模型：workbook/rels/sharedStrings/styles/sheet、合并单元格、冻结窗格、列宽行高、公式缓存值；zip 条目/总量/单条目、XML 深度/DTD/实体、sheet/行/列/单元格/共享字符串/合并区域/文本预算上限；合并生成的起点与 covered 占位同样计入共享单元格预算；标准实体/数字字符引用按已解析文本保留；路径穿越与外部链接拒绝；中文错误。 |
 | `app/src/main/kotlin/com/tanuki/storage/XlsxValueFormatter.kt` | 新增数字/百分比/日期/时间/布尔格式的纯函数；处理 1900 闰年偏差、1904 日期系统与最小小数位。 |
 | `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt` | `FileKind` 增加 `XLSX`；`.xlsx` 分类与 MIME；新增 `readXlsx`（IO 锁内有界解析，不暴露路径）。 |
-| `app/src/main/kotlin/com/tanuki/ui/WorkspaceXlsxPreview.kt` | 新增 Compose 原生表格：sheet 选择、行/列表头、冻结行/列、合并单元格按跨度占位、样式映射、LazyColumn 行虚拟化、共享水平滚动、按钮缩放、保真边界提示与截断提示。 |
-| `app/src/main/kotlin/com/tanuki/ui/XlsxPreviewPolicy.kt` | 新增列字母、0.5–2.0x 缩放步进/clamp、列宽/行高 dp 换算等纯策略。 |
+| `app/src/main/kotlin/com/tanuki/ui/WorkspaceXlsxPreview.kt` | 新增 Compose 原生表格：sheet 选择、行/列表头、按视口收缩的冻结行/列、合并单元格按跨度占位、样式映射（含单元格字号与垂直对齐）、LazyColumn 行虚拟化、共享水平滚动、按钮缩放、保真边界提示与截断提示。 |
+| `app/src/main/kotlin/com/tanuki/ui/XlsxPreviewPolicy.kt` | 新增列字母、0.5–2.0x 缩放步进/clamp、列宽/行高 dp 换算、按视口收缩冻结区与单元格字号换算等纯策略。 |
 | `app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt` | 增加 `XLSX` 分支与全宽布局；未改 PDF/DOCX/图片/视频逻辑。 |
 | `app/src/test/kotlin/com/tanuki/XlsxWorkbookParserTest.kt` | 合成 XLSX fixture 回归：多 sheet、类型/公式缓存、样式、合并/冻结、列宽行高、超限、损坏包/缺 workbook/坏 XML、zip 条目与总量/单条目、谎报解压大小的 bomb、共享字符串上限、路径穿越/外部链接、绝对包内路径、DOCTYPE/深层 XML/未定义实体、1904 日期、空表。 |
 | `app/src/test/kotlin/com/tanuki/XlsxValueFormatterTest.kt` | 数字/千分位/百分比/日期时间/1900 闰年/1904/布尔回归。 |
@@ -44,8 +44,9 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` | BUILD SUCCESSFUL（本轮执行） | 仅编译 modernDebug，未 assemble/安装。 |
-| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Xlsx*' --tests 'com.tanuki.WorkspaceFileKindTest'` | BUILD SUCCESSFUL，27 tests / 0 failures（本轮执行） | 目标回归，含 17 解析 + 4 格式化 + 3 策略 + 3 文件分类（含原有 2 项）。 |
-| `./gradlew :app:testModernDebugUnitTest --console=plain` | BUILD SUCCESSFUL，230 tests / 0 failures / 0 errors / 0 skipped（本轮最终复跑） | 全量 JVM；结果目录 `app/build/test-results/testModernDebugUnitTest/`。时间格式回归补 `mm:ss` 的分钟/秒语义。 |
+| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Xlsx*' --tests 'com.tanuki.WorkspaceFileKindTest'` | BUILD SUCCESSFUL，30 tests / 0 failures（本轮执行） | 目标回归，含 18 解析 + 4 格式化 + 5 策略 + 3 文件分类（含原有 2 项）。 |
+| `./gradlew :app:testModernDebugUnitTest --console=plain` | BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped（本轮最终复跑） | 全量 JVM；结果目录 `app/build/test-results/testModernDebugUnitTest/`。时间格式回归补 `mm:ss` 的分钟/秒语义。 |
+| `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL（本轮执行） | 未跑 assemble/仪器/真机。 |
 | 本记录与状态文档检查 | `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` 结果见“产物与校验” | 文档/脚本变化不影响产品行为。 |
 
 - 前一轮结果：不适用；本轮未复用旧 XLSX 测试（此前没有 XLSX 实现）。
@@ -53,7 +54,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR [#23](https://github.com/leezzou/tanuki/pull/23) 的 P1 复审意见（合并占位未计入预算）已修复并补多表预算回归；仍需独立 Codex High Review 与用户明确合并授权。
+- 未完成：PR [#23](https://github.com/leezzou/tanuki/pull/23) 的 P1（合并占位预算）与 P2（实体字符、冻结区视口、单元格字号）复审意见均已修复并补回归；仍需独立 Codex High Review 与用户明确合并授权。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续暂停；本轮未触碰。
 - 真机大表（上万行、宽表、合并跨冻结区）滚动与缩放性能未验证，不能据此宣称完整 Excel 兼容。

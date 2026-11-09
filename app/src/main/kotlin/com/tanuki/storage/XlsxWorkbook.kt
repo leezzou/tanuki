@@ -281,7 +281,8 @@ internal object XlsxWorkbookParser {
                         "rPh" -> phoneticDepth++
                         "t" -> inText = true
                     }
-                    XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.IGNORABLE_WHITESPACE -> {
+                    XmlPullParser.TEXT, XmlPullParser.CDSECT,
+                    XmlPullParser.IGNORABLE_WHITESPACE, XmlPullParser.ENTITY_REF -> {
                         val text = cursor.text()
                         if (inText && phoneticDepth == 0 && text.isNotEmpty()) {
                             val builder = current ?: StringBuilder()
@@ -745,7 +746,8 @@ internal object XlsxWorkbookParser {
                             }
                         }
                     }
-                    XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.IGNORABLE_WHITESPACE -> {
+                    XmlPullParser.TEXT, XmlPullParser.CDSECT,
+                    XmlPullParser.IGNORABLE_WHITESPACE, XmlPullParser.ENTITY_REF -> {
                         if (inValue) appendLimited(value, cursor.text())
                         if (inInlineText && inPhonetic == 0) appendLimited(inline, cursor.text())
                     }
