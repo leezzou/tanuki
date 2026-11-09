@@ -1,5 +1,8 @@
 package com.tanuki.ui
 
+import com.tanuki.power.DeviceCondition
+import com.tanuki.power.DeviceConditionState
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -74,6 +77,7 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         }
         if(step==3 && comp.dshInstalled)SandboxGuidance(s)
     }
+    DeviceConditionBanner(model.deviceCondition)
     OperationCard(s,c)
     RecoveryGuidance(s,c)
 }
@@ -186,7 +190,27 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         TextButton(onClick={showPermissions=!showPermissions},modifier=Modifier.heightIn(min=48.dp)) { Text("文件与命令权限说明") }
         AnimatedVisibility(visible=showPermissions) { SandboxGuidance(s) }
     }
+    DeviceConditionBanner(model.deviceCondition)
     OperationCard(s,c)
+}
+
+/**
+ * 设备降级状态卡片。只在非正常状态出现，明确说明原因、降级额度和恢复方式，
+ * 避免用户把后台更新延后误解为任务被中止。
+ */
+@Composable
+private fun DeviceConditionBanner(state: DeviceConditionState) {
+    if (!state.enabled || (state.condition == DeviceCondition.NORMAL && state.reasons.isEmpty())) return
+    SetupPanel {
+        Text("设备状态 · ${state.condition.label}", style = MaterialTheme.typography.titleMedium)
+        SetupCaption(state.reasonText())
+        SetupCaption("${state.statusText()} · 下载并发 ${state.workerCap} 路 · 日志 ${state.logLineLimit} 行 · 预览上限 ${state.previewMaxDimension} 像素")
+        if (state.deferredChecks.isNotEmpty()) {
+            SetupCaption("后台更新检查已延后，状态恢复后自动补跑；正在运行的 DSH 任务和用户下载不会被暂停或取消。")
+        } else {
+            SetupCaption("DSH 任务和前台操作不受影响；可在“设置 · 运行与后台”中调整开关与低电阈值。")
+        }
+    }
 }
 
 @Composable

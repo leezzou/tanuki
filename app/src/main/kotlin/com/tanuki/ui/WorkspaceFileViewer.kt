@@ -57,6 +57,8 @@ internal fun WorkspaceFileViewer(
     onEdit: () -> Unit,
     fullscreen: Boolean = false,
     onFullscreen: (Boolean) -> Unit = {},
+    previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
+    previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -165,7 +167,11 @@ internal fun WorkspaceFileViewer(
                                 Image(bitmap.asImageBitmap(), entry.name, content, contentScale = ContentScale.Fit)
                             }
                         }
-                        WorkspaceFileManager.FileKind.PDF -> PdfPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.PDF -> PdfPreview(
+                            files, entry.path, Modifier.fillMaxSize(),
+                            maxDimension = previewMaxDimension,
+                            maxPixels = previewMaxPixels,
+                        )
                         WorkspaceFileManager.FileKind.DOCX -> DocxTextPreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.DOC -> Column(

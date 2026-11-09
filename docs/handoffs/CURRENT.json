@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-1829-native-ui-switch.md",
-  "recordSha256": "ce76823910ffda68e9bf5a9f590d56fb273509b38b3f9fb4d23ad5ab33c1ffea",
-  "sourceFingerprint": "8db936e78edcff95b1e37d5782fa03b94e953f0366d05f500ba979d21c740a52",
-  "fileCount": 535
+  "record": "docs/handoffs/20261109-1802-device-condition-policy.md",
+  "recordSha256": "0d18a7f1f668e17e847a6a3324ce0eb83ef283233df15bfeab6c6dadd49f23b4",
+  "sourceFingerprint": "b4ec1f83aff654ca353bd9c761a24da5a7fec9e8084b4677b69bd3a945e4510c",
+  "fileCount": 546
 }

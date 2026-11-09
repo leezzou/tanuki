@@ -2,6 +2,16 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
+
+- 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=0ba11da` 解决冲突，在 `/tmp/tanuki-thermal-30` 独立 clone 验证；未使用共享 worktree 的 `.git` 写操作。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（5m29s，19 tasks）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DeviceConditionPolicyTest' --tests 'com.tanuki.DeviceConditionRefreshQueueTest' --tests 'com.tanuki.DeviceConditionInitializationTest' --tests 'com.tanuki.DeviceConditionConfigWriterTest' --tests 'com.tanuki.NpmDownloadPolicyTest' --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` → BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 25 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`DeviceConditionConfigWriterTest` 1 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项，0 failures / 0 errors / 0 skipped。
+- 新增回归覆盖：正常态全额、热等级即时升级、CRITICAL 降级用更低退出边界并持续 30 秒、低电 20%/25% 进入退出迟滞与充电覆盖、未知电量不误报、低内存 60 秒解除迟滞、过热+低电原因并存且取更严格额度、后台检查按具体 Worker 登记与恢复、无 Worker 跳过时恢复不发请求、只恢复实际跳过的一项、登记幂等、待办确认入队后才清除、入队失败保留重试、部分确认只清除已确认项、主线程刷新不内联写盘、突发刷新合并、DSH/前台任务始终 RUN、关闭策略恢复并补跑、进程重启保留延后直至迟滞结束、各状态额度单调下降、`sinceMillis` 仅在主状态变化时更新、非法阈值拒绝、用户单路下载不降并发、依赖下载外部上限恢复。
+- 完整 JVM 与 lint：`./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --rerun-tasks` → BUILD SUCCESSFUL（2m17s，35 tasks executed）；59 个结果文件，424 tests / 0 failures / 0 errors / 0 skipped（合并 main 的原生界面/PDF/冷启动/聊天通知/XLSX/安全模式回归后 + 新增 25 策略 + 1 配置写入 + 2 刷新队列 + 2 初始化 + 1 下载上限）；lint 0 个 Error。
+- 未执行：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、Android 13+ 通知、设置页 UI、PDF 降级实际像素、assemble/仪器测试。编译、JVM 与 lint 不能替代设备验收。
 ## PDF 原生阅读体验打磨验证（2026-11-09，android_agent-35，非设备）
 
 - 范围：`WorkspacePdfPreview` 从单页重开改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；当前页前后各预加载 1 页；按字节 LRU 缓存与位图回收；适应宽度/适应页面；双指 1–5x、双击 1x/2.5x、放大后横向平移；页码/总页数、快速跳页；加密/损坏/超大/内存不足中文提示。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/pdf-reading/native-reading`。

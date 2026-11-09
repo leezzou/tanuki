@@ -1,6 +1,7 @@
 package com.tanuki
 
 import android.app.Application
+import com.tanuki.power.DeviceConditionMonitor
 import com.tanuki.runtime.RuntimeManager
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -9,6 +10,8 @@ import kotlinx.coroutines.launch
 class TanukiApp : Application() {
     lateinit var runtime: RuntimeManager
         private set
+    /** 设备温控/省电状态；应用启动时开始采样，进程重启后先恢复上次状态。 */
+    val deviceConditions by lazy { DeviceConditionMonitor(this, runtime.paths) }
     val updates by lazy {
         com.tanuki.update.UpdateManager(runtime) { latest, startedAt ->
             dshUpdateChecks.recordManualLatest(latest, startedAt)
@@ -65,6 +68,11 @@ class TanukiApp : Application() {
         android.webkit.WebView.enableSlowWholeDocumentDraw()
         cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("tanuki-blob-") }?.forEach { it.delete() }
         runtime = RuntimeManager(this)
+        // 先绑定恢复回调再开始采样：进程重启后若设备已恢复，会立即补跑被延后的后台检查。
+        deviceConditions.onBackgroundWorkResumed = { checks ->
+            com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this, checks)
+        }
+        deviceConditions.start()
         // 独立更新/恢复任务有自己的 job 与状态；提前启动必须把它们计入忙碌判定。
         runtime.registerBusySignal { updates.hasActiveOperation || appUpdates.hasActiveOperation }
         // 先在系统设置中建立渠道，用户才能在权限/渠道被关闭时找到入口。
