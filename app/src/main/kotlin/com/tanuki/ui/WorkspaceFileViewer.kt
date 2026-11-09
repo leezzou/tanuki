@@ -166,7 +166,7 @@ internal fun WorkspaceFileViewer(
                             }
                         }
                         WorkspaceFileManager.FileKind.PDF -> PdfPreview(files, entry.path, Modifier.fillMaxSize())
-                        WorkspaceFileManager.FileKind.DOCX -> DocxTextPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.DOCX -> DocxPreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.DOC -> Column(
                             Modifier.padding(24.dp),

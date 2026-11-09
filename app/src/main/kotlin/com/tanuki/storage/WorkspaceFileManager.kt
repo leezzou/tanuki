@@ -10,6 +10,8 @@ import android.util.Xml
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import com.tanuki.runtime.Paths
+import com.tanuki.storage.docx.DocxDocument
+import com.tanuki.storage.docx.DocxDocumentReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -295,15 +297,10 @@ class WorkspaceFileManager(
         ParcelFileDescriptor.open(file.toFile(), ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
-    /** DOCX 文本预览在 IO 锁内完成有界解压，不向界面暴露文件路径。 */
-    suspend fun extractDocxText(relative: String): DocxTextExtractor.Result = io(writing = false) {
+    /** DOCX 原生预览在 IO 锁内完成有界解压与解析，只向界面返回受控模型。 */
+    suspend fun readDocx(relative: String): DocxDocument = io(writing = false) {
         val file = payload(resolve(relative, true))
-        DocxTextExtractor.extract(file.toFile()) { input ->
-            Xml.newPullParser().apply {
-                setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
-                setInput(input, null)
-            }
-        }
+        DocxDocumentReader.read(file.toFile()) { Xml.newPullParser() }
     }
 
     /** XLSX 只读解析在 IO 锁内完成有界解压；不向界面暴露文件路径。 */

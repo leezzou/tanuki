@@ -95,20 +95,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：rebase 后 `:app:compileModernDebugKotlin` 与完整 `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，205 tests / 0 failures / 0 errors / 0 skipped。`NpmAdaptiveWorkerPoolTest` 升降档 2/2；目标 Npm/Download 回归 61 项通过。
 - 未执行：真实 Android/PRoot DSH 首次安装、弱网/镜像 404/429 注入、4000 包端到端吞吐、lint/assemble/仪器/真机；独立 Review 未触发。
 
-## DSH 聊天通知验证（2026-11-09，android_agent-29，非设备）
+## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
 
-- 范围：官方 `/api/remote.mux` `$events` 旁路（`api-session/status`、`api-session/error`、`approval/request`、`user-questions/request`）；回合完成/等待确认/错误/权限请求分类；session + DSH 版本 + event 去重；前台且对应会话可见时抑制；Android 13 权限、`dsh-chat` 渠道、group/summary、设置入口、点击打开会话；通知正文固定最小文案。基线 `main=2f3fac9`。
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/docx-preview/root`，PR 待创建；不改官方 DSH UI、不引入运行时文档库。
 - 实际执行：
-  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（首次约 4m29s）。
-  - `:app:testModernDebugUnitTest --tests 'com.tanuki.ChatNotificationPolicyTest' --tests 'com.tanuki.ChatNotificationRoutingTest' --tests 'com.tanuki.DshChatProtocolTest'` → BUILD SUCCESSFUL，18 tests / 0 failures。
-  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，223 tests / 0 failures / 0 errors / 0 skipped（39 个 XML 结果文件；既有 205 + 新增 18）。
-  - `:app:lintModernDebug` → BUILD SUCCESSFUL（约 4m44s）。
-  - 抽取注入脚本后 `node --check` → OK；用合成 Fake WebSocket 发送 status true/false、error、approval、question 五帧 → `JS_BRIDGE_TEST_OK 5`，原生消息未包含合成的 `secret` 工具名/错误文本/消息内容，脚本未读取 `innerText`/`textContent`/localStorage。
-- 新增回归：`ChatNotificationPolicyTest` 10 项（首次 false 基线、true→false、重复 false、同/异会话前台抑制、后台、版本/会话/事件去重、旧通知未清除时新事件仍提醒、权限/渠道/用户开关、Android<33、非法 id、状态文案）；`ChatNotificationRoutingTest` 4 项（同会话跨进程稳定 tag/id、不同会话 Identity、子通知可再次提醒/摘要静默、非法 id）；`DshChatProtocolTest` 4 项（四类事件、running 补种、非法载荷、脚本只读边界与打开会话函数）。
-- Review 修复回归：`node scripts/test-chat-session-open.mjs` → `CHAT_SESSION_OPEN_TEST_OK`，覆盖侧栏初始收起、保留非空搜索且当前为其他会话、通过官方清除入口解除搜索过滤、只展开一次、异步选中前不谎报成功、已选中目标与非法 id；Host CI 已新增该步骤。假 DOM 只有在搜索清除且分组展开后才为目标 id 返回会话行。
-- PR #22 GitHub Actions `verify`：Host checks 与 Android build+JVM+lint 均 pass。首轮 Android 唯一失败为既有 `NpmAdaptiveWorkerPoolTest` 并发时序（非本轮代码），重跑通过；Review 修复提交 `21cc811` 与搜索过滤修复提交 `462d266` 的 Host/Android 两 job 均全绿，未修改该并发测试。
-- rebase 到 `main=5fd1ab4`（含安全模式 PR #25 与 XLSX PR #23）后，在 `/tmp/tanuki-chat-notify` 复跑 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` → BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
-- 未执行：assemble、Android 仪器/真实设备、Android 13 权限弹窗与通知展示、group/summary/渠道设置、点击通知切会话、同会话新事件再次提醒的设备声音/振动、真实 DSH WebSocket、后台/息屏送达、MIUI/其他 ROM、DSH 升级后事件表/页面属性复核。编译/JVM/lint 不能替代设备与 ROM 验收。
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，65 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 10）。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped（完整 JVM 套件；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）。
+- 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算。
+- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；Compose 文本切片增加 `wrapContentHeight(unbounded = true)` 后再裁剪，避免后续行被测量约束截断；表格单元格渲染 padding 与测量宽度统一。
+- 未执行：lint、assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。编译与 JVM 不能替代设备与真实样本验收。
 
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
