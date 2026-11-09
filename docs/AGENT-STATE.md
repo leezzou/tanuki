@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（android_agent-32，只读原生表格；PR 待独立 Review）。上一记录 [DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。更早记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-32 实现 XLSX 只读 OOXML 解析与 Compose 原生表格预览，不改协议、AO 配置、既有安全/暂停项或 0.1.8 附件。android_agent-25 的已安装 DSH 版本管理、android_agent-23 的 DSH 安装提速与国内镜像仍按各自记录待 Review。
+当前交接：[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（android_agent-32，只读原生表格；PR [#23](https://github.com/leezzou/tanuki/pull/23) 待独立 Review）。上一记录 [DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。更早记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-32 实现 XLSX 只读 OOXML 解析与 Compose 原生表格预览，不改协议、AO 配置、既有安全/暂停项或 0.1.8 附件。android_agent-25 的已安装 DSH 版本管理、android_agent-23 的 DSH 安装提速与国内镜像仍按各自记录待 Review。
 
 ## 0.1.8 交付与仓库基线
 
@@ -82,9 +82,9 @@
 - 新对话框 `DshVersionManagerDialog` 列出当前/备用、占用、安装时间、总占用；非当前版本可确认卸载（保留用户数据），当前版本禁用卸载；旧版切换按钮禁用并显示快照说明；TanukiUi/MainActivity 只加入口、回调与 `DSH_SWITCH` 前台服务动作。
 - 本轮验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` BUILD SUCCESSFUL；151 JVM / 0 失败/错误/跳过，新增 `DshVersionsTest` 7 项与 `DshSwitchTest` 12 项；`:app:lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/仪器/设备；PR #18、CI、独立 Review 待办。
 
-### XLSX 应用内原生预览（android_agent-32，PR 待开）
+### XLSX 应用内原生预览（android_agent-32，PR #23 待 Review）
 
-- 分支 `ao/xlsx-preview/xlsx-native-preview`（从 `ao/xlsx-preview/root` 创建），基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp` clone 提交/推送，PR 待创建、未触发 AO Review。
+- 分支 `ao/xlsx-preview/xlsx-native-preview`（从 `ao/xlsx-preview/root` 创建），基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp` clone 提交/推送，PR [#23](https://github.com/leezzou/tanuki/pull/23) 已创建，未触发 AO Review。
 - 新增 `XlsxWorkbookParser`：`ZipFile` + `XmlPullParser` 只读 workbook/rels/sharedStrings/styles/sheet，不依赖 LibreOffice/外部 App；支持多 sheet、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、数字/百分比/日期/时间/布尔/错误值与公式缓存值、`date1904`。
 - 新增 Compose 表格 `XlsxTablePreview`：sheet 切换、LazyColumn 行虚拟化、共享水平滚动、0.5–2.0x 按钮缩放、截断与保真提示；`WorkspaceFileManager.FileKind` 增加 `XLSX` 并接入 `WorkspaceFileViewer`。
 - 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB 且按实际解压字节复核；sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接，损坏包给中文错误。
@@ -117,7 +117,7 @@
 
 ## 下一步
 
-1. XLSX 预览 PR：创建后由 Orchestrator/用户决定是否触发当前完整 SHA 的独立 Codex High Review；真机大表/手势 QA 另行授权。
+1. XLSX 预览 PR [#23](https://github.com/leezzou/tanuki/pull/23)：由 Orchestrator/用户决定是否触发当前完整 SHA 的独立 Codex High Review；真机大表/手势 QA 另行授权。
 2. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
 3. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
 4. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
