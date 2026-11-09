@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -238,6 +239,8 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
     val scope = rememberCoroutineScope()
     val zoom = remember(path) { mutableFloatStateOf(ZoomPolicy.MIN_SCALE) }
     val panX = remember(path) { mutableFloatStateOf(0f) }
+    // 留白扩大后新的滚动范围要等下一次测量才生效，补偿先累积、随后统一应用。
+    val pendingScroll = remember(path) { floatArrayOf(0f) }
 
     // 缓存预算按应用堆计算；单页像素上限保证预算内至少容纳 3 页。
     val cacheBudget = remember { PdfMemoryPolicy.cacheBudgetBytes(Runtime.getRuntime().maxMemory()) }
@@ -337,8 +340,17 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                     viewport = viewport,
                     zoom = zoom,
                     panX = panX,
-                    onScrollCompensation = { delta -> listState.dispatchRawDelta(delta) },
+                    onScrollCompensation = { delta -> pendingScroll[0] += delta },
                 )
+
+            // 缩放先改变留白，旧滚动范围会截断立即执行的补偿；等下一帧完成测量后再滚动。
+            LaunchedEffect(zoom.floatValue) {
+                if (pendingScroll[0] == 0f) return@LaunchedEffect
+                withFrameNanos { }
+                val delta = pendingScroll[0]
+                pendingScroll[0] = 0f
+                if (delta != 0f) listState.dispatchRawDelta(delta)
+            }
 
             // 只记录可见页索引的变化，避免滚动过程中每一帧都触发重新组合。
             LaunchedEffect(listState, pageCount) {

@@ -11,7 +11,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，254 tests / 0 failures / 0 errors / 0 skipped；`./gradlew :app:lintModernDebug` 通过。
 - 新增回归 49 项：`PdfPageCacheTest` 7（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 7（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记）；`PdfPreloadPolicyTest` 10（当前页优先、边界、半径、大文档小窗口、非法半径；可见页 >3 时全部进入渲染计划、首尾预加载、去重/边界、计划大小有界）；`PdfMemoryPolicyTest` 4（堆比例预算上下限、单页像素上限、位图字节记账、512 MiB 文件限制）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 10（适应宽度/整页、缩放范围、平移边界、缩放锚点、非 1× 连续放大/缩小补偿、1–5× 首尾可达、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
 - 复审修复（Codex 3 条 P2）：
-  - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。
+  - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。补偿延迟到下一帧（新留白完成测量后）执行，避免旧滚动边界截断。
   - 纵向补偿改为 `(centroidY−H/2)×(1/oldScale−1/newScale)`；新增 2×→4× 与 4×→2× 回归，避免非 1× 起点捏合持续偏移。
   - 渲染集合改为「全部可见页 + 可见范围外首尾各 1 页预加载」；同屏 >3 页时不再长期停留在“正在渲染”。
   - 复审修复后目标测试 59 tests / 0 failures；完整 JVM 254 / 0 与 lint 通过。
