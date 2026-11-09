@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-31（DSH Worker）
 - 时间：2026-11-09 18:36 CST
-- 状态：进行中（实现与 JVM 验证完成；PR 创建后回填编号，等待独立 Review 与设备 QA）
+- 状态：进行中（实现与 JVM 验证完成；PR [#28](https://github.com/leezzou/tanuki/pull/28) 已创建，等待独立 Review 与设备 QA）
 - 前一记录：[DSH 安装提速与国内镜像](20261109-1539-dsh-install-resilience.md)
 
 ## 用户目标与范围
@@ -17,7 +17,7 @@
 - 已实现安全边界：归档/条目/总解压/单条目/正文/辅助 XML/图片大小与数量、XML 元素与深度、文字量、块数/单元格数上限；拒绝路径穿越、重复条目、DOCTYPE、未定义实体与不安全关系目标；外部关系不联网；图片解码采样与总像素预算；损坏/加密/超限返回中文错误。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped，其中新增 DOCX 回归 65 项。
 - 待验证：真实设备上的双指缩放/横向滚动/深色主题/超大文档性能、真实 Word 复杂样本、低 API/真机；lint、assemble、Android 仪器未跑。
-- 当前基线：`main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/docx-preview/root`（独立 `/tmp` clone 提交/验证）；PR 编号在创建后回填，不合并、不触发 Review。
+- 当前基线：`main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/docx-preview/root`（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；功能提交 `e2db04f1a24ad49754a5edb0821fda7f04087b02`，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
 - 关键源码：[`DocxDocumentReader.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxDocumentReader.kt)、[`DocxModel.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxModel.kt)、[`DocxStyles.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxStyles.kt)、[`DocxNumbering.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxNumbering.kt)、[`DocxXml.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxXml.kt)、[`DocxLayout.kt`](../../app/src/main/kotlin/com/tanuki/ui/DocxLayout.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)。
 
 ## 本次改动
@@ -59,13 +59,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建与编号回填；真实设备 QA；独立 Codex High Review（由 Orchestrator/用户按项目规则推进）。
+- 未完成：PR #28 的独立 Codex High Review 与真实设备 QA（由 Orchestrator/用户按项目规则推进）。
 - 外部阻塞：无。
 - 用户暂停（沿用）：API Key 保存、真实模型/账号验收、真机验收；本轮未触碰。
 
 ## 下一步
 
-1. 在独立 `/tmp` clone 复跑 compile 与完整 JVM，提交并推送 `ao/docx-preview/root`，向 `main` 开 PR；在 PR 正文写摘要、支持/不支持清单、测试与未验证项，不合并、不触发 AO Review。
+1. PR [#28](https://github.com/leezzou/tanuki/pull/28) 已从独立 `/tmp` clone 创建，目标 `main`；正文含摘要、支持/不支持清单、测试与未验证项，不合并、不触发 AO Review。
 2. 由 Orchestrator/用户安排当前 head 的独立 Codex High Review 与设备 QA；设备至少覆盖图片/表格/列表/真实复杂 DOCX、双指缩放与横向滚动、超大文档。
 3. 若 Review 要求修改，先在本分支修复、重跑 compile/JVM 并更新交接，再推送；不得以 JVM 结果替代设备验收。
 
@@ -79,6 +79,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP：本轮不生成 APK、不发布；源码 ZIP 仅在提交前按 `scripts/package-source.py` 刷新并核对 `artifacts/SOURCE-SHA256SUMS`，属于工作材料。
-- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布；PR 只交付可审查候选，不合并。
+- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布；PR [#28](https://github.com/leezzou/tanuki/pull/28) 只交付可审查候选，不合并。
 - 提交/推送前清理的过期记录：未删除历史交接；DSH 已安装版本管理、DSH 安装提速、后台更新检查等记录仍与当前 `AGENT-STATE` 和未完成 PR 相关，保留。本记录为当前唯一交接。
 - 仍需保留的验证/未完成记录：本记录、`docs/handoffs/CURRENT.json` 印章与 `docs/DOCX-PREVIEW.md`；真实设备与独立 Review 缺口待 QA/Orchestrator。
