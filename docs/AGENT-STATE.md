@@ -29,9 +29,9 @@
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；rebase 后完整 `testModernDebugUnitTest` 205 tests / 0 failures / 0 errors / 0 skipped；目标 Npm/Download 回归 61 项通过，`NpmAdaptiveWorkerPoolTest` 升降档 2/2。
 - 待验证：真实 Android 设备/PRoot 首次 DSH 安装、弱网与镜像 404/429 注入、4000 包端到端吞吐；未跑 lint/assemble/仪器/真机。
 
-### 设备温控与省电策略（android_agent-30，待 PR）
+### 设备温控与省电策略（android_agent-30，PR #21 待审）
 
-- 分支 `ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`，在 `/tmp` 独立 clone 验证/提交；未使用共享 worktree 的 `.git` 写操作。
+- 分支 `ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`，在 `/tmp` 独立 clone 验证/提交；未使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，head 以 PR 页面为准；未合并、未触发 Review。
 - 新增纯策略 `DeviceConditionPolicy` 与 Android 采样/持久化 `DeviceConditionMonitor`：状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`，来源为 `PowerManager` thermal status、电池电量/充电和系统低内存；热状态按进入阈值升级、按更低退出边界并持续 30 秒降级，低电用进入/退出阈值（默认 20%/25%）迟滞，低内存有 60 秒解除迟滞。
 - 降级：后台更新检查在 HOT/CRITICAL/LOW_BATTERY 延后，恢复后由唯一一次性 WorkManager 任务补跑；DSH 依赖下载并发按 16/8/4/2/4 降档，自适应池只让多出的 worker 在完成当前归档后退休；日志展示 80/60/40/20/40 行；PDF 预览长边 2048/1600/1280/1024/1280、像素 4M/2.5M/1.6M/1M/1.6M。DSH 任务和前台交互始终 `RUN`，策略不调用取消。
 - 兼容：保留原两个唯一周期任务、联网约束、前台服务与唤醒锁；设置入口 `设置 · 运行与后台` 提供总开关与 10/15/20/25/30% 低电阈值；状态与延后工作写 `files/state/device-condition.json`，设置写 `device-condition-settings.json`，进程重启先恢复再校正。

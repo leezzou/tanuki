@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-30（DSH Worker）
 - 时间：2026-11-09 18:02 CST
-- 状态：已完成（待独立 Review 与真机 QA）
+- 状态：已完成（PR #21 待独立 Review 与真机 QA）
 - 前一记录：[DSH 已安装版本管理](20261109-1539-dsh-installed-version-manager.md)
 
 > 本记录只描述本轮设备温控/省电策略；不覆盖并行 PR 的结论。真机温控、低电/低内存注入与 WorkManager 实际调度尚未验证。
@@ -19,7 +19,7 @@
 - 已实现：上述策略与接入点；中文注释；开关/阈值；状态持久化。
 - 已验证：`compileModernDebugKotlin` 成功；`DeviceConditionPolicyTest` 16 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项通过；完整 JVM 套件 222 tests / 0 failures / 0 errors / 0 skipped。
 - 待验证：真机/模拟器温控回调、电池广播、系统低内存、WorkManager 真实调度与重启恢复、设置页 UI、PDF 降级实际像素、独立 Review。
-- 当前分支：`ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。
+- 当前分支：`ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，未合并、未触发 Review。
 - 没有运行中的设备安装或真实 DSH 任务；本轮未启动/停止模拟器，未安装 APK。
 
 ## 本次改动
@@ -61,13 +61,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建后等待独立 Codex High Review；真机/模拟器温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素、assemble/仪器测试。
+- 未完成：PR #21 等待独立 Codex High Review；真机/模拟器温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素、assemble/仪器测试。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号、真机验收继续暂停；合并/发布/触发 Review 未获授权。
 
 ## 下一步
 
-1. 在 `/tmp/tanuki-thermal-30` 提交并推送 `ao/thermal-policy/device-condition-policy`，创建 PR（base `main`），只附实现与验证摘要，不合并、不触发 Review。
+1. PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建并推送；等待独立 Review，不合并、不触发 Review。
 2. 由 Orchestrator/独立 QA 在无真实任务的设备上验证：加热触发 thermal status、充电/低电注入、低内存、WorkManager 周期与恢复、设置页开关/阈值、PDF 预览降级。
 3. Review 意见逐条修复并重跑适用的 compile/JVM；通过且用户明确授权后才合并。
 
@@ -80,7 +80,7 @@
 
 ## 产物与校验
 
-- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建/发布 APK，未刷新源码 ZIP；提交前只做源码与文档检查。
+- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建/发布 APK；提交前运行 `package-source.py` 仅核对 487 个公开源文件，工作材料不提交。
 - 是否覆盖安装/签名范围/未发布事项：未安装、未签名、未发布。
 - 提交/推送前清理的过期记录：未删除任何旧交接；它们仍被 `AGENT-STATE` 或并行任务引用。新增本记录并更新当前状态。
 - 文档或脚本变化后仍需：运行 `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1802-device-condition-policy.md`、`python3 scripts/check-handoff.py`；如需源码包再运行 `python3 scripts/package-source.py`。
