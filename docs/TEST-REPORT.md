@@ -39,7 +39,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
 - 实际执行：
   - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
-  - 合并 `origin/main=c2f1b44` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
+  - 合并 `origin/main=0ba11da` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
   - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
   - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
 - 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
@@ -60,6 +60,20 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - CI：PR #25 的 push run 42602010730 与 PR run 42602805776 均 success（Host scripts + handoff；Android assemble/JVM/lint）。Android CI 使用 `-x buildNativeRuntime`，其 APK 无原生 `.so`，不能用于设备验收。
 - 未执行：assemble、Android 仪器/真实设备、PRoot 内实际 rescue 启动、真实 DSH 崩溃/低内存/磁盘满注入、UI 视觉与大字体/深色验证；rebase 后 `lintModernDebug` BUILD SUCCESSFUL。JVM 策略测试不能替代真机运行与恢复验收。
 - 未验证项：真机崩溃与低内存、真实磁盘满、真实插件配置导致启动失败、安全模式与用户数据的实际隔离效果。PR/独立 Review/合并未授权或未完成。
+
+## 原生界面切换验证（2026-11-09，android_agent-33，非设备）
+
+- 范围：新增“官方界面 / 原生界面”开关；默认官方；原生只读页通过官方 DSH `session/list`、`session/projections`、`session/page` 读取会话与文本消息；仅显示 append-origin（`surfaceOp=append`）且 `source.kind=user` 的文本；列表接口失败自动回退官方界面并保留用户偏好；切换不重启 DSH、不重建 WebView、不修改官方数据。
+- 分支/基线：`ao/ui-switch/native-ui`，已 rebase 到 `main=0ba11da`（PR #24 PDF、PR #27 cold-start、PR #23 XLSX、PR #25 runtime-safe-mode、PR #22 chat-notify 合并后）；rebase 后为单一提交，代码无冲突，文档保留 PDF/cold-start/XLSX 记录。
+- 实际执行（rebase 后，`/tmp` clone；跳过 `buildNativeRuntime`）：
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime` → BUILD SUCCESSFUL，393 tests / 0 failures / 0 errors / 0 skipped。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - 新增 `DshUiSwitchTest` 10 项：默认官方、原生需运行、回退不改偏好、`/connect` 同 token、拒绝非 loopback/坏 method、官方信封、端点脱敏。
+  - 新增 `DshNativeControllerTest` 6 项：原生通知目标冷启动、已加载页面替换选择、目标不在列表仍可见、原生列表失败保留目标给官方回退、当前会话通知强制重读历史、通知决策+分发集成。
+  - 新增 `DshNativeApiTest` 12 项：会话标题/切点、projection 仅 sequenced、只取 append-origin 文本/过滤 replace 与注入上下文、业务错误不回显、Cookie 提取、`rpcId` 关联、本地合成服务器验证端点顺序与 Cookie 只发 `/api`、404 错误不含 token、延迟认证期间 reset 不阻塞且旧 Cookie 不发布、reset 后旧 401 不复活、延迟 401 期间新请求不被旧请求清 Cookie。
+- 通知点击：原生偏好下目标交给 `DshNativeController.openSession()`，不依赖 WebView 是否连接；官方模式仍走现有 WebView 路由。
+- P1/P2 修复：认证网络 I/O 移出 monitor，`reset()` 只短暂持锁并按代次拒绝旧 Cookie 发布；401 重试必须属于当前代次；消息按官方 append-origin 语义过滤。
+- 未执行：assemble、仪器测试、真实设备、真实 PRoot 内 DSH 与 WebSocket/审批/发送。最终 head CI 与独立 Pi Review 以 PR 页面为准。
 
 ## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
 
@@ -112,12 +126,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
 
-- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `main=0ba11da`（含 XLSX 预览 PR #23、运行时安全模式 PR #25、聊天通知 PR #22、冷启动 PR #27 与 PDF 阅读 PR #24），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 merge 到 `main=d9b4aa2`（含 XLSX 预览 PR #23、运行时安全模式 PR #25、聊天通知 PR #22、冷启动 PR #27、PDF 阅读 PR #24 与原生界面 PR #26），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，80 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 25）。
   - `./gradlew :app:testModernDebugUnitTest`（rebase 前）→ BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped。
-  - rebase 到 `main=0ba11da` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，435 tests / 0 failures / 0 errors / 0 skipped（main 365 - 旧 DOCX 文本测试 10 + 新增 80；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
+  - merge `main=d9b4aa2` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，463 tests / 0 failures / 0 errors / 0 skipped（main 393 - 旧 DOCX 文本测试 10 + 新增 80；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
 - 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算、单元格预算/分段、超高表格行限制。
 - 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；早期对文本切片使用 `wrapContentHeight(unbounded = true)`，现已由“复用 `TextLayoutResult` + 按页合并绘制”替代，避免每行重新排版整段；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并合并 runtime 安全模式、聊天通知、冷启动与 PDF 文档，重新生成交接印章。Review P1/P2 修复：Bitmap 清理捕获 effect 快照；文本切片改为复用已测量布局并逐页合并、长段落按 8,000 字有界分段；表格列宽用 Long 求和并限制正文宽度；页首 gap 清零；渲染预算在行循环内生效并反馈截断；单元格段落共享原子预算并按 8,000 字分段，单元格内容高度限制在页面内容高度内，表格行高在创建 Compose 尺寸约束前 clamp；宽屏居中留白移到纸张宽度约束之外，页面按完整测量宽度绘制；超高单元格按已测量行边界保留可见文本前缀；极小视口框架至少容纳最小纸张宽度。
 - 未执行：assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。lint 与 JVM/编译不能替代设备与真实样本验收。

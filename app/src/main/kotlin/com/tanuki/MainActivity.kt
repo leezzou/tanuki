@@ -36,6 +36,8 @@ import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
+import com.tanuki.ui.DshNativeController
+import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.WorkspaceFilesPage
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
@@ -44,6 +46,13 @@ import com.tanuki.ui.TanukiUiModel
 import com.tanuki.notify.ChatNotificationPreferences
 import com.tanuki.notify.ChatNotifier
 import com.tanuki.update.Release
+import com.tanuki.web.ChatNotificationDecision
+import com.tanuki.web.ChatNotificationRoute
+import com.tanuki.web.ChatNotificationRoutePolicy
+import com.tanuki.web.ChatNotificationTargetPolicy
+import com.tanuki.web.DshEndpoint
+import com.tanuki.web.DshNativeClient
+import com.tanuki.web.DshUiMode
 import com.tanuki.web.DshWebView
 import com.tanuki.web.DshFileChooser
 import com.tanuki.web.OriginPolicy
@@ -284,6 +293,45 @@ class MainActivity : ComponentActivity() {
                 var legacyShim by remember { mutableStateOf(getSharedPreferences("web", MODE_PRIVATE).getBoolean("legacyPromise", true)) }
                 var blobExport by remember { mutableStateOf(getSharedPreferences("web", MODE_PRIVATE).getBoolean("blobExport", true)) }
                 var earlyStart by remember { mutableStateOf(getSharedPreferences("runtime", MODE_PRIVATE).getBoolean(EarlyRuntimeStart.PREFERENCE, true)) }
+                var nativeUiMode by remember {
+                    mutableStateOf(
+                        DshUiMode.parse(
+                            getSharedPreferences(DshUiMode.PREFERENCE_FILE, MODE_PRIVATE)
+                                .getString(DshUiMode.PREFERENCE_KEY, DshUiMode.OFFICIAL.storageValue)
+                        )
+                    )
+                }
+                var nativeFallback by remember { mutableStateOf<String?>(null) }
+                var nativeChatRequest by remember { mutableStateOf<String?>(null) }
+                val nativeController = remember {
+                    DshNativeController(
+                        DshNativeClient {
+                            val origin = manager.origin
+                            val launchUrl = manager.authenticatedUrl
+                            if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
+                        },
+                        lifecycleScope
+                    )
+                }
+                val nativeState by nativeController.state.collectAsState()
+                DisposableEffect(Unit) { onDispose { nativeController.close() } }
+                LaunchedEffect(s.service, nativeUiMode) {
+                    nativeFallback = null
+                    when {
+                        nativeUiMode.isNative && s.service == ServiceState.RUNNING -> nativeController.refresh()
+                        s.service == ServiceState.RUNNING -> nativeController.clear()
+                        else -> nativeController.close()
+                    }
+                }
+                fun setNativePreference(enabled: Boolean) {
+                    val mode = if (enabled) DshUiMode.NATIVE else DshUiMode.OFFICIAL
+                    nativeUiMode = mode
+                    nativeFallback = null
+                    getSharedPreferences(DshUiMode.PREFERENCE_FILE, MODE_PRIVATE).edit()
+                        .putString(DshUiMode.PREFERENCE_KEY, mode.storageValue).apply()
+                    if (mode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()
+                    else nativeController.clear()
+                }
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
                 var confirmation by remember { mutableStateOf<String?>(null) }
@@ -336,7 +384,8 @@ class MainActivity : ComponentActivity() {
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
                         appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
-                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,chatNotifications=chatStatus),
+                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,chatNotifications=chatStatus,
+                        nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -426,9 +475,22 @@ class MainActivity : ComponentActivity() {
                         toggleChatNotifications = { enabled ->
                             ChatNotificationPreferences.setEnabled(this@MainActivity, enabled)
                             (application as TanukiApp).chatNotifications.refresh()
+                        },
+                        toggleNativeDsh = ::setNativePreference,
+                        retryNativeDsh = {
+                            nativeFallback = null
+                            if (nativeUiMode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()
                         }
                     ),
                     browserView = browser.view,
+                    nativeDshPage = { modifier ->
+                        DshNativePage(
+                            controller = nativeController,
+                            modifier = modifier,
+                            onFallback = { reason -> nativeFallback = Redact.text(reason) },
+                            onSwitchOfficial = { setNativePreference(false) }
+                        )
+                    },
                     browserOpenRequest = browserOpenRequest,
                     dshOpenRequest = dshOpenRequest,
                     browserControl = browserControl,
@@ -464,7 +526,47 @@ class MainActivity : ComponentActivity() {
                             }
                     }
                 )
-                LaunchedEffect(s.web, pendingChatSession) { consumeChatSessionWhenReady(s.web) }
+                val chatNotificationRoute = ChatNotificationRoutePolicy.route(
+                    nativeUiMode,
+                    s.service == ServiceState.RUNNING,
+                    nativeFallback,
+                    s.web == WebState.CONNECTED
+                )
+                val chatTarget = pendingChatSession
+                val chatDecision = chatTarget?.let { target ->
+                    ChatNotificationTargetPolicy.decide(
+                        target = target,
+                        route = chatNotificationRoute,
+                        nativeSelectedId = nativeState.selectedId,
+                        nativeLoading = nativeState.loading,
+                        nativeUnavailable = nativeState.unavailableReason != null,
+                        nativeRequestIssued = nativeChatRequest == target
+                    )
+                }
+                LaunchedEffect(chatTarget, chatDecision, chatNotificationRoute, nativeState.selectedId,
+                    nativeState.loading, nativeState.unavailableReason, s.web) {
+                    val target = chatTarget ?: run { nativeChatRequest = null; return@LaunchedEffect }
+                    when (chatDecision) {
+                        ChatNotificationDecision.REQUEST_NATIVE -> {
+                            // 原生目标未确认前保留 pending；列表失败回退官方时仍可转交。
+                            if (nativeChatRequest != target) {
+                                nativeChatRequest = target
+                                nativeController.openSession(target)
+                            }
+                        }
+                        ChatNotificationDecision.CONSUMED -> {
+                            pendingChatSession = null
+                            nativeChatRequest = null
+                        }
+                        ChatNotificationDecision.WAIT_FOR_FALLBACK,
+                        ChatNotificationDecision.WAIT_FOR_WEB -> Unit
+                        ChatNotificationDecision.OPEN_OFFICIAL -> {
+                            nativeChatRequest = null
+                            consumeChatSessionWhenReady(s.web)
+                        }
+                        null -> Unit
+                    }
+                }
                 if (chatNotifyDialog) AlertDialog(onDismissRequest = { chatNotifyDialog = false },
                     title = { Text("DSH 聊天通知") },
                     text = {
