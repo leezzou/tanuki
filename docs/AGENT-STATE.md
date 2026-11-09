@@ -33,8 +33,8 @@
 
 - 分支 `ao/cold-start/root`，基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，独立 worktree。
 - 启动期只读路径缓存：宿主把 `assets/dsh-startup/path-cache.cjs` 复制到应用私有目录并绑定 `/opt/tanuki-startup`，仅在绑定成功时给 DSH `web` 的 node 注入 `--require`；只缓存 `/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录的 `realpathSync`/`realpathSync.native`/`existsSync` 和只读 `package.json`；缺失路径/非只读目录不缓存；官方 `dsh web:` 地址行或默认 30 秒超时后卸载，之后直通 `node:fs`；`TANUKI_DSH_PATH_CACHE=0|false|off|no` 关闭；缓存异常逐调用回退原生。
-- 首帧前提前启动：`MainActivity.onCreate()` 在 `setContent` 前请求，复用既有前台服务与 `RuntimeManager.start()`；仅 `READY + STOPPED + 无 job/child + 非 stopping + 无 RECOVERY_REQUIRED`，每进程一次；服务端 `START_EARLY` 再校验；设置 → 运行与后台新增“启动应用时自动运行 DSH”（默认开启，可关闭）。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` 与 `compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；完整 JVM 216 tests / 0 failures / 0 errors / 0 skipped（新增 `EarlyRuntimeStartTest` 11 项）；`lintModernDebug` BUILD SUCCESSFUL；`node scripts/test-dsh-path-cache.mjs` 9/9 场景 PASS。
+- 首帧前提前启动：`MainActivity.onCreate()` 在 `setContent` 前请求，复用既有前台服务与 `RuntimeManager.start()`；仅 `READY + STOPPED + 无 job/child + 非 stopping + 无 RECOVERY_REQUIRED` 且为 Launcher `MAIN + LAUNCHER` 冷启动，每进程一次；服务端 `START_EARLY` 再校验；设置 → 运行与后台新增“启动应用时自动运行 DSH”（默认开启，可关闭）。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` 与 `compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；完整 JVM 217 tests / 0 failures / 0 errors / 0 skipped（新增 `EarlyRuntimeStartTest` 12 项）；`lintModernDebug` BUILD SUCCESSFUL；`node scripts/test-dsh-path-cache.mjs` 9/9 场景 PASS。
 - 待验证：真实 Android/PRoot 内 DSH 启动与冷启动计时、首帧提前启动时序、设置开关 UI、assemble、真机；PR、CI 与独立 Review 待办。
 
 ## Phase 2 交付状态
@@ -92,7 +92,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-27 新跑）：`compileModernDebugKotlin` 与 `compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 216 tests / 0 failures / 0 errors / 0 skipped（新增 `EarlyRuntimeStartTest` 11 项）；`lintModernDebug` BUILD SUCCESSFUL；`node scripts/test-dsh-path-cache.mjs` 9/9 场景 PASS。未跑 assemble/设备/真实 PRoot DSH 启动。
+- 已验证（本轮 android_agent-27 新跑）：`compileModernDebugKotlin` 与 `compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 217 tests / 0 failures / 0 errors / 0 skipped（新增 `EarlyRuntimeStartTest` 12 项）；`lintModernDebug` BUILD SUCCESSFUL；`node scripts/test-dsh-path-cache.mjs` 9/9 场景 PASS。未跑 assemble/设备/真实 PRoot DSH 启动。
 - 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（本轮 android_agent-23 新跑）：基线 `5c680b9` 上 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `:app:testModernDebugUnitTest` 155 tests / 0 failures / 0 errors / 0 skipped；Npm/Download/OperationProgress 目标回归 61 项通过。`cff09a3`/`41609cb` 基线上的 110/132 项与旧 CI 属历史结果，不是本轮复跑。

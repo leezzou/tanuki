@@ -70,6 +70,14 @@ class EarlyRuntimeStartTest {
         assertFalse(EarlyRuntimeStart.shouldStart(conditions(update = UpdateState.RECOVERY_REQUIRED)))
     }
 
+    @Test fun onlyLauncherMainIntentQualifies() {
+        assertTrue(EarlyRuntimeStart.launchedFromLauncher("android.intent.action.MAIN", true))
+        // 仪器测试/通知/内部显式 Component 启动通常没有 MAIN+LAUNCHER，不能意外拉起服务。
+        assertFalse(EarlyRuntimeStart.launchedFromLauncher("android.intent.action.MAIN", false))
+        assertFalse(EarlyRuntimeStart.launchedFromLauncher(null, true))
+        assertFalse(EarlyRuntimeStart.launchedFromLauncher("com.tanuki.OPEN_BROWSER", true))
+    }
+
     @Test fun gateStartsAtMostOncePerProcess() {
         val gate = EarlyStartGate()
         var starts = 0

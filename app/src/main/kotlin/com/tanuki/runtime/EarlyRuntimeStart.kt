@@ -34,6 +34,15 @@ object EarlyRuntimeStart {
             !conditions.operationActive &&
             !conditions.liveChild &&
             !conditions.stopping
+
+    /**
+     * 只对 Launcher 冷启动提前拉起。
+     *
+     * 仪器测试、通知和内部显式 Component 启动通常没有 MAIN/LAUNCHER，
+     * 不应因为测试环境已安装 DSH 而意外启动服务。
+     */
+    fun launchedFromLauncher(action: String?, hasLauncherCategory: Boolean): Boolean =
+        action == "android.intent.action.MAIN" && hasLauncherCategory
 }
 
 /**

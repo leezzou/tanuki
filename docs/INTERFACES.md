@@ -52,6 +52,7 @@ libsupervisor.so
 `MainActivity.onCreate()` 在 `setContent` 前调用 `RuntimeManager.requestEarlyStart()`，与首帧并行；只复用既有前台服务 `START` 链路和 `RuntimeManager.start()`，不另建进程或第二套密钥/用户数据流程。
 
 - 仅当环境 `READY`、服务为干净的 `STOPPED`、无安装/下载等互斥操作、无存活子进程、未在停止且无 `RECOVERY_REQUIRED` 时才发起；`STARTING/RUNNING/STOPPING/FAILED/INTERRUPTED` 都不自动启动。
+- 仅 Launcher `ACTION_MAIN + CATEGORY_LAUNCHER` 冷启动触发；仪器测试、通知和内部显式 Component 启动不自动拉起，避免在已安装环境上干扰测试。
 - 用户设置“启动应用时自动运行 DSH”默认开启，可在设置中关闭。每个应用进程最多自动发起一次；Activity 重建不会重复拉起。
 - 前台服务收到独立的 `START_EARLY` 动作后会再次校验条件；条件已变化则静默返回，不把状态误置为 `FAILED`。自动发起失败时仍可手动启动。
 

@@ -207,9 +207,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 首帧前提前拉起：只走既有前台服务 START 链路，条件和幂等由 RuntimeManager 判定。
+        // 仅 Launcher 冷启动触发；仪器测试/通知/内部显式启动不会意外拉起。
         manager.requestEarlyStart(
             getSharedPreferences("runtime", MODE_PRIVATE)
-                .getBoolean(EarlyRuntimeStart.PREFERENCE, true)
+                .getBoolean(EarlyRuntimeStart.PREFERENCE, true) &&
+                EarlyRuntimeStart.launchedFromLauncher(
+                    intent?.action,
+                    intent?.categories?.contains(Intent.CATEGORY_LAUNCHER) == true,
+                )
         )
         // 系统栏占位始终交给Compose，避免全屏往返后窗口与页面重复避让。
         WindowCompat.setDecorFitsSystemWindows(window, false)
