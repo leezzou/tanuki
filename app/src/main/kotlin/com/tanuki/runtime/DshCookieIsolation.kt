@@ -1,5 +1,6 @@
 package com.tanuki.runtime
 
+import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
 import java.util.concurrent.CountDownLatch
@@ -48,6 +49,7 @@ class DshCookieIsolation(
     private val scopeStore: KeyValueStore? = null
 ) {
     private val jar = DshCookieJar()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var activeScope: String = scopeStore?.getString(KEY_SCOPE) ?: LOCAL_SCOPE
 
     @Synchronized
@@ -86,15 +88,19 @@ class DshCookieIsolation(
     }
 
     private fun clearAll(): Boolean {
+        // removeAllCookies 的回调绑定调用线程的 Looper；IO 线程没有 Looper 会直接抛异常。
+        // 固定从主线程发起删除，IO 调用方等待回调后再 flush，主线程本身不阻塞。
         val latch = CountDownLatch(1)
-        var succeeded = false
-        cookieManager.removeAllCookies {
-            succeeded = true
-            latch.countDown()
+        var completed = false
+        mainHandler.post {
+            cookieManager.removeAllCookies {
+                completed = true
+                latch.countDown()
+            }
         }
         if (!latch.await(3, TimeUnit.SECONDS)) return false
         cookieManager.flush()
-        return succeeded
+        return completed
     }
 
     companion object {

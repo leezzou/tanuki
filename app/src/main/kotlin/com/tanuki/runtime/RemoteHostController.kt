@@ -80,8 +80,14 @@ class RemoteHostController(
     }
 
     fun cancelHostKey() {
+        val value = pending
         pending = null
         mutableUi.update { it.copy(pendingFingerprint = null, pendingHost = "") }
+        if (value != null && !value.keepTunnel && machine.remoteActive) {
+            // 测试连接不改变活动端点；取消测试必须保留原来的远程 A。
+            publish(machine.status, message = "已取消连接测试，继续使用当前远程连接")
+            return
+        }
         machine.remoteDisconnected("已取消首次主机密钥确认，继续使用本地运行时")
         publish(machine.status, message = machine.status.message)
     }
@@ -149,6 +155,11 @@ class RemoteHostController(
             it.copy(busy = true, error = "", message = "正在连接 ${config.user}@$host:${config.sshPort}…", pendingFingerprint = null)
         }
         if (keepTunnel) {
+            // 先切到本地 Cookie 作用域，再撤销旧远程端点；失败时保留原连接。
+            val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
+            if (cookieError != null) {
+                return fail(cookieError, keepTunnel = false)
+            }
             closeTunnel()
             machine.remoteConnecting(config.host.trim())
             onStatus(machine.status)

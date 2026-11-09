@@ -359,6 +359,64 @@ class RemoteHostTest {
     }
 
     @Test
+    fun switchingRemoteHostSwitchesCookiesBeforePublishingLocalFallback() = runBlocking {
+        val fixture = Fixture()
+        val transport = FakeTransport(fingerprint = "SHA256:new")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        machine.remoteConnected(RemoteEndpoint.loopback(42000, "a")!!, "a.example.test", 42000, "SHA256:a", "remote:a")
+        val cookieScopes = mutableListOf<String>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(fixture.storage, transport, scope, machine, activateScope = { cookieScopes += it })
+        val result = controller.attempt(config(host = "b.example.test"), keepTunnel = true)
+        assertTrue(result is RemoteAttemptResult.HostKeyConfirmation)
+        assertEquals(listOf("local"), cookieScopes)
+        assertEquals(RemotePhase.CONNECTING, machine.status.phase)
+        assertEquals("local", machine.status.cookieScope)
+        assertEquals("http://127.0.0.1:41000", machine.origin)
+    }
+
+    @Test
+    fun cancellingTestConnectionKeepsActiveRemoteHost() = runBlocking {
+        val fixture = Fixture()
+        val transport = FakeTransport(fingerprint = "SHA256:new")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        machine.remoteConnected(RemoteEndpoint.loopback(42000, "a")!!, "a.example.test", 42000, "SHA256:a", "remote:a")
+        val (controller, _) = controller(fixture, transport, machine)
+        assertTrue(controller.attempt(config(host = "b.example.test"), keepTunnel = false) is RemoteAttemptResult.HostKeyConfirmation)
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+        controller.cancelHostKey()
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+        assertEquals("http://127.0.0.1:42000", machine.origin)
+        assertEquals("remote:a", machine.status.cookieScope)
+    }
+
+    @Test
+    fun cookieScopeFailureKeepsActiveRemoteAndNeverPublishesLocalEndpoint() = runBlocking {
+        val fixture = Fixture()
+        val transport = FakeTransport(fingerprint = "SHA256:new")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        machine.remoteConnected(RemoteEndpoint.loopback(42000, "a")!!, "a.example.test", 42000, "SHA256:a", "remote:a")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            fixture.storage,
+            transport,
+            scope,
+            machine,
+            activateScope = { throw IllegalStateException("synthetic cookie switch failure") }
+        )
+        val result = controller.attempt(config(host = "b.example.test"), keepTunnel = true)
+        assertTrue(result is RemoteAttemptResult.Failure)
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+        assertEquals("http://127.0.0.1:42000", machine.origin)
+        assertEquals("remote:a", machine.status.cookieScope)
+    }
+
+    @Test
     fun connectionFailureFallsBackToLocalWithChineseErrorAndNoLeak() = runBlocking {
         val fixture = Fixture()
         fixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:confirmed")

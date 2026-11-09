@@ -99,6 +99,7 @@ data class TanukiUiModel(
     val remoteError: String = "",
     val remotePendingFingerprint: String? = null,
     val remotePendingHost: String = "",
+    val cookieReady: Boolean = true,
     val earlyStart: Boolean = true
 )
 
@@ -185,8 +186,8 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     LaunchedEffect(tab) { callbacks.dshVisible(tab == 1) }
     DisposableEffect(Unit) { onDispose { callbacks.dshVisible(false) } }
     val s = model.snapshot
-    LaunchedEffect(tab, s.service, s.remote.phase, s.remote.localPort) {
-        if (tab == 1 && (s.service == ServiceState.RUNNING || s.remote.connected)) callbacks.connectDsh()
+    LaunchedEffect(tab, s.service, s.remote.phase, s.remote.localPort, model.cookieReady) {
+        if (tab == 1 && (s.service == ServiceState.RUNNING || s.remote.connected) && model.cookieReady) callbacks.connectDsh()
     }
     LaunchedEffect(activeFullscreen) { callbacks.setFullscreen(activeFullscreen) }
     DisposableEffect(Unit) { onDispose { callbacks.setFullscreen(false) } }
@@ -718,7 +719,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
     var headerPixels by remember { mutableIntStateOf(with(density) { 60.dp.roundToPx() }) }
     val topInset = if (fullscreen) 0.dp else with(density) { headerPixels.toDp() }
     val remoteActive = s.remote.connected
-    val showBrowser = (s.service == ServiceState.RUNNING || remoteActive) && model.support.state == WebViewSupportState.SUPPORTED && s.web != WebState.RENDER_ERROR
+    val showBrowser = (s.service == ServiceState.RUNNING || remoteActive) && model.support.state == WebViewSupportState.SUPPORTED && s.web != WebState.RENDER_ERROR && model.cookieReady
     val originalLayer = remember(browser) { browser.layerType }
     DisposableEffect(browser, fullscreen) {
         // On some WebView/GPU combinations the direct draw path goes blank when system

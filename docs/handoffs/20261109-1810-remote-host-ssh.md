@@ -15,7 +15,7 @@
 ## 当前状态
 
 - 已实现：直连 SSH + 端口转发 + local/remote origin 切换 + 设置页 + 失败回退 + 加密凭据/主机密钥校验 + JVM 回归。
-- 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、远程分支完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件；合入 `main=5fd1ab4`（安全模式 + XLSX）后完整 JVM 289/0/0/0（41 结果文件）、lint 0 errors/81 warnings/1 hint；review 修复并合入冷启动后完整 JVM 334/0/0/0（47 结果文件）、lint 0 errors/94 warnings，androidTest 编译通过。
+- 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、远程分支完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件；合入 `main=5fd1ab4`（安全模式 + XLSX）后完整 JVM 289/0/0/0（41 结果文件）、lint 0 errors/81 warnings/1 hint；review 修复并合入冷启动后完整 JVM 337/0/0/0（47 结果文件）、lint 0 errors/94 warnings，androidTest 编译通过。
 - 待验证：真实 Android 设备到真实 sshd、真实 Android Keystore、真实远程 DSH token 登录、弱网/断线、UI 手势、Ed25519、Android 仪器测试、真机。
 - 状态顺序：按串行合并候选要求，`AGENT-STATE` 将已合并的冷启动作为当前交接，远程主机作为并行记录；`CURRENT.json` 仍绑定本记录以便交接指纹校验。
 - 主线同步：最终合入 `main=b9eeb75`（PR #27 DSH 冷启动，含 PR #22 聊天通知、PR #25 安全模式与 PR #23 XLSX）；同步包含 `.github/workflows/verify.yml`、`scripts/test-chat-session-open.mjs` 与冷启动的 `scripts/test-dsh-path-cache.mjs`，交接指纹已按合并树刷新。`RuntimeManager`/`State.kt`/`TanukiUi.kt` 与安全模式有代码冲突，已保留远程 origin 与安全模式恢复策略：本地端点单独清理、远程连接时本地失败不强制断开网页；文档保留远程、XLSX、安全模式三节。
@@ -55,7 +55,7 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 首次构建含缓存准备约 7m34s；仅编译 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteHostTest'` | BUILD SUCCESSFUL，24 tests / 0 failures / 0 errors / 0 skipped | 新增类；JVM mock SSH |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL，D8 打包 JSch | 未重新构建/验证原生 `.so`；APK 不用于设备验收 |
-| `./gradlew :app:testModernDebugUnitTest` | 远程分支 BUILD SUCCESSFUL，37 结果文件，229/0/0/0；合并 `main=5fd1ab4` 后 41 结果文件，289/0/0/0；review 修复后 42 结果文件，293/0/0/0；合入冷启动后 47 结果文件，334/0/0/0 | 合并后包含安全模式 32 项 + XLSX 28 项 + 远程 24 项 + Cookie 隔离 4 项及既有 205 |
+| `./gradlew :app:testModernDebugUnitTest` | 远程分支 BUILD SUCCESSFUL，37 结果文件，229/0/0/0；合并 `main=5fd1ab4` 后 41 结果文件，289/0/0/0；review 修复后 42 结果文件，293/0/0/0；合入冷启动后 47 结果文件，334/0/0/0；第二轮 P1 修复后 337/0/0/0 | 合并后包含安全模式 32 项 + XLSX 28 项 + 远程 24 项 + Cookie 隔离 4 项及既有 205 |
 | `./gradlew -PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` | BUILD SUCCESSFUL | 新增 Cookie 隔离/Keystore 设备回归仅编译，未运行 |
 | `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL，0 errors / 80 warnings / 1 hint | 新增文件无告警；既有告警未处理 |
 | `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` + `python3 scripts/collect-component-licenses.py` | 91 runtime artifacts，5 个仍无 POM 许可声明 | JSch 为 Revised BSD / JZlib Revised BSD / jBCrypt ISC；清单位于 `licenses/` |
@@ -82,6 +82,7 @@
 
 - 数据/设备/权限边界：未安装/启动 App，未操作设备，未读取真实凭据/日志；所有测试使用合成主机、合成 key/token 和内存存储。
 - 关键决策及理由：选 JSch 2.28.8（纯 Java、无传递依赖、约 700KB、Revised BSD）；选 AES-GCM + AndroidKeyStore 而不是明文/普通 SharedPreferences；远程 origin 仍走 loopback，避免放宽 `OriginPolicy`；首次 known_hosts 确认前不发送认证信息；本切片明确 RSA/ECDSA，Ed25519 留后续。
+- 第二轮 P1 复审修复：管理页 Cookie 删除固定从主 Looper 发起、IO 等待回调后再 flush；连接远程 B 前先切到本地 Cookie 作用域，成功后才撤销 A 端点，测试连接取消保留 A；新增 `cookieReady` 门禁，WebView 加载/认证重试/HTTP 下载/本地端点发布在 Cookie 作用域不一致时拒绝，本地启动失败快速中止。
 - 失败尝试与避免重复踩坑：最初 JVM 测试使用 `com.sun.net.httpserver`，Android 单元测试 bootclasspath 不提供，改为 `ServerSocket` 合成 HTTP；`RemoteHostController` 在配置校验失败时曾会误关活跃远程隧道，已改为不触发回退并加回归；`SharedPreferences` 显式 `commit()` 需要检查返回值，保留同步写入并豁免 UseKtx 风格告警；清除配置失败时保留已保存状态并报错，不谎称已清除；SSH 算法协商失败（Ed25519 等）给出明确中文提示；私钥解析失败与连接失败共用会话清理路径。
 
 ## 产物与校验

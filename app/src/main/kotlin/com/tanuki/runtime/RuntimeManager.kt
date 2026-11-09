@@ -66,6 +66,7 @@ class RuntimeManager(val context: Context) {
     private val recoveryState = MutableStateFlow(RuntimeRecoveryState())
     private var autoRestartJob: Job? = null
     private var stabilityJob: Job? = null
+    @Volatile private var cookieIsolationFailed = false
     val fileTransfers = FileTransfers { android.os.SystemClock.elapsedRealtime() }
     val phoneFiles = com.tanuki.storage.PhoneFileService(context, paths, fileTransfers)
     val mutation = Mutex()
@@ -769,7 +770,11 @@ class RuntimeManager(val context: Context) {
                         }
                         completion = comp
                         withTimeout(180000) {
-                            while (attempt.readyAtMillis == 0L) { check(c.process.isAlive) { "DSH 在就绪前退出" }; delay(200) }
+                            while (attempt.readyAtMillis == 0L) {
+                                check(!cookieIsolationFailed) { "管理页 Cookie 隔离失败，已停止加载；请重启应用" }
+                                check(c.process.isAlive) { "DSH 在就绪前退出" }
+                                delay(200)
+                            }
                             while (!httpReady(remoteMachine.localOrigin)) { check(c.process.isAlive) { "DSH 在就绪后退出" }; delay(300) }
                         }
                         val readyNow = System.currentTimeMillis()
@@ -844,6 +849,8 @@ class RuntimeManager(val context: Context) {
             }
         }
     }
+    /** 管理页端点只有在 Cookie 作用域与状态机一致时才允许加载/认证/下载。 */
+    fun cookieReady(): Boolean = cookieIsolation.currentScope() == remoteMachine.status.cookieScope
     /** 仅设备测试使用：注入本地端点，避免反射访问已移除的字段。 */
     internal fun attachLocalEndpointForTesting(origin: String, authenticatedUrl: String = "$origin/") {
         remoteMachine.localConnected(origin, authenticatedUrl)
@@ -859,11 +866,18 @@ class RuntimeManager(val context: Context) {
         val candidate = Regex("http://127\\.0\\.0\\.1:\\d+/[^\\s\\u001B]*").find(line)?.value ?: return
         val uri = runCatching { URI(candidate) }.getOrNull() ?: return
         if (uri.host == "127.0.0.1" && uri.port in 1..65535 && uri.userInfo == null && uri.rawQuery != null) {
-            remoteMachine.localConnected("http://127.0.0.1:${uri.port}", candidate)
             if (!remoteMachine.remoteActive) {
-                runCatching { cookieIsolation.switchTo(DshCookieIsolation.LOCAL_SCOPE) }
-                    .onFailure { event("管理页 Cookie 隔离失败，请重启应用后重新连接") }
+                // 先确认 Cookie 已切回本地，再发布可加载的本地端点；失败则不暴露 origin。
+                val switched = runCatching { cookieIsolation.switchTo(DshCookieIsolation.LOCAL_SCOPE) }.isSuccess
+                cookieIsolationFailed = !switched
+                if (!switched) {
+                    cookieIsolationFailed = true
+                    event("管理页 Cookie 隔离失败，已拒绝加载本地端点；请重启应用")
+                    state.update { it.copy(web = WebState.RENDER_ERROR, error = "管理页 Cookie 隔离失败，请重启应用") }
+                    return
+                }
             }
+            remoteMachine.localConnected("http://127.0.0.1:${uri.port}", candidate)
             state.update { it.copy(remote = remoteMachine.status) }
         }
     }
@@ -951,6 +965,7 @@ class RuntimeManager(val context: Context) {
         }
     }
     fun verifyBrowserCookie(cookie: String?) {
+        if (!cookieReady()) return
         val expected = origin ?: return
         val generation=browserGeneration.incrementAndGet()
         scope.launch {

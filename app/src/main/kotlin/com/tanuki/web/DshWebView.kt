@@ -217,7 +217,7 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     /** One retry per in-memory launch URL; a rejected token must never produce a reload loop. */
     private fun retryAuthentication(): Boolean {
         authTrace("retryRequested")
-        if(destroyed || support.value.state!=WebViewSupportState.SUPPORTED)return false
+        if(destroyed || support.value.state!=WebViewSupportState.SUPPORTED || !manager.cookieReady())return false
         val url=manager.authenticatedUrl ?: return false
         val origin=manager.origin ?: return false
         if(!OriginPolicy.sameOrigin(url,origin) || retriedAuthUrl==url ||
@@ -260,6 +260,11 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     }
     fun connect(force: Boolean = false) {
         if(destroyed)return
+        if(!manager.cookieReady()) {
+            manager.web(WebState.RENDER_ERROR)
+            manager.event("管理页 Cookie 隔离未就绪，已拒绝加载；请重启应用")
+            return
+        }
         if(force || support.value.state==WebViewSupportState.UNCHECKED){checkSupport(connectAfter=true);return}
         if(support.value.state!=WebViewSupportState.SUPPORTED){if(support.value.state==WebViewSupportState.CHECKING)connectAfterProbe=true;else manager.web(WebState.INCOMPATIBLE);return}
         val url = manager.authenticatedUrl ?: run {

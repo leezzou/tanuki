@@ -185,11 +185,15 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (t: Exception) { manager.fail(t) } finally { blob.delete() }
         } else if (url != null) {
-            val cookie = CookieManager.getInstance().getCookie(url)
-            lifecycleScope.launch(Dispatchers.IO) {
-                try { saveDownload(url, uri, cookie) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { manager.fail(error) }
+            if (!manager.cookieReady()) {
+                manager.event("管理页 Cookie 隔离未就绪，已取消下载；请重启应用")
+            } else {
+                val cookie = CookieManager.getInstance().getCookie(url)
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try { saveDownload(url, uri, cookie) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { manager.fail(error) }
+                }
             }
         } else {
             manager.fail(IllegalStateException("下载因页面或 Activity 重建而中断，请重新保存文件"))
@@ -342,6 +346,7 @@ class MainActivity : ComponentActivity() {
                         remoteMessage=remoteHost.message,remoteError=remoteHost.error,
                         remotePendingFingerprint=remoteHost.pendingFingerprint,
                         remotePendingHost=remoteHost.pendingHost,
+                        cookieReady=manager.cookieReady(),
                         chatNotifications=chatStatus),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
