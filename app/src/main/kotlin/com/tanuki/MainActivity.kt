@@ -198,7 +198,7 @@ class MainActivity : ComponentActivity() {
     }
 
     fun action(name: String, version: String? = null) {
-        if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM", "RECOVERY_TRIAL", "RECOVERY_SAFE") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         startForegroundService(Intent(this, RuntimeService::class.java).setAction(name).apply { version?.let { putExtra("version",it) } })
@@ -323,7 +323,8 @@ class MainActivity : ComponentActivity() {
                                 "START", "HEALTH", "BACKGROUND" -> action(command)
                                 "CANCEL" -> { manager.cancel(); updates.cancel() }
                                 "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL",
-                                "INIT", "BASE", "STOP", "RESTART", "SLIM", "WEBVIEW_CHECK", "RECONNECT", "EXPORT", "BACKUP", "RESTORE", "RESUME_UPDATE", "CACHE" -> confirmation = command
+                                "INIT", "BASE", "STOP", "RESTART", "SLIM", "WEBVIEW_CHECK", "RECONNECT", "EXPORT", "BACKUP", "RESTORE", "RESUME_UPDATE", "CACHE",
+                                "RECOVERY_TRIAL", "RECOVERY_SAFE" -> confirmation = command
                             }
                         },
                         install = { release -> selected = release; confirmation = "UPDATE" },
@@ -465,6 +466,7 @@ class MainActivity : ComponentActivity() {
                                         catch (cancelled: CancellationException) { throw cancelled }
                                         catch (error: Throwable) { manager.fail(error) }
                                     }
+                                    "RECOVERY_TRIAL", "RECOVERY_SAFE" -> action(command)
                                     "RECONNECT" -> if (browser.needsRecreation || s.web == WebState.RENDER_ERROR) recreate() else browser.connect(true)
                                     "WEBVIEW_CHECK" -> if (browser.needsRecreation) recreate() else browser.checkSupport(true)
                                     "UPDATE" -> selected?.let(updates::install)
@@ -518,6 +520,8 @@ class MainActivity : ComponentActivity() {
         "INIT", "BASE" -> "准备精简运行环境"
         "STOP" -> "停止服务"
         "RESTART" -> "重启服务"
+        "RECOVERY_TRIAL" -> "尝试恢复正常模式"
+        "RECOVERY_SAFE" -> "退出试用并回到安全模式"
         "UPDATE" -> "安装所选 DSH 版本"
         "DSH_UNINSTALL" -> "卸载 DSH 程序"
         "DSH_REINSTALL" -> "重新安装当前 DSH"
@@ -550,6 +554,8 @@ class MainActivity : ComponentActivity() {
         "DSH_REINSTALL" -> "移除并重新安装当前 DSH ${release?.version ?: ""} 的官方程序与依赖。配置、会话、插件和项目保留；若下载失败，引擎会保持待安装，可重试。请先停止服务。"
         "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。运行中可以导出；发现文件在读取期间变化时会提示重试。整个工作区不是同一时刻的快照，仍需检查源文件中的敏感内容。"
         "CACHE" -> "只删除下载压缩包和未完成下载，不删除环境或项目。"
+        "RECOVERY_TRIAL" -> "将停止当前服务并通过你的插件与配置启动正常模式；2 分钟内再次失败会自动回到安全模式。不会删除项目、会话、程序或配置。"
+        "RECOVERY_SAFE" -> "将退出正常模式试用并重新用最小救援配置启动；不加载你的插件与配置，项目、会话、程序和配置均保留。"
         "UPDATE" -> "安装官方 DSH ${release?.version ?: "所选版本"}，先进行候选启动检查、备份，再切换。请先停止服务。检查不使用正式模型凭据，正式服务保留官方调度设置。"
         "BACKUP" -> "请先停止服务。快照包含私有凭据与会话，仅保存在 App 内；卸载会丢失，不能作为跨设备备份。"
         "RESTORE" -> "请先停止服务。恢复会覆盖快照之后的会话与配置；项目代码不回滚。"

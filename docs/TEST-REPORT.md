@@ -19,11 +19,40 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
 - 实际执行：
   - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，38 个结果文件、228 tests / 0 failures / 0 errors / 0 skipped；新增 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项。
-  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL（2m8s）。
+  - 合并 `origin/main=5fd1ab4` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（6m47s）；42 个结果文件、288 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/XLSX 回归。
+  - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
   - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
-- PR #27 head `2d3005e` 的 Host scripts 与 Android build/JVM/lint CI 均通过（Android 5m1s）。
+- 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
 - 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
+## DSH 运行失败分类与安全模式验证（2026-11-09，android_agent-28，非设备）
+
+- 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`（rebase 后 `dc0494b`）；范围：新增纯 Kotlin `RuntimeFailurePolicy`，覆盖 `LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类、连续两次 startup/early 进入安全模式、安全模式 rescue 启动参数、probation 2 分钟窗口、自动重启上限/退避、noSpace/killed 不自动重启，以及 `state/failure-state.json` 跨进程恢复。RuntimeManager/RuntimeService 接入安全模式与前端入口。
+- 验证环境：`/tmp/tanuki-safe-mode` 独立 clone，基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；JDK17、Android SDK36/Build Tools 35；仅构建时通过临时 `/tmp/mirror.init.gradle` 使用可用 Maven 镜像，未提交、未改仓库构建配置。
+- 实际执行：
+  - `./gradlew -I /tmp/mirror.init.gradle :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（7m 9s，19 tasks）。
+  - `./gradlew -I /tmp/mirror.init.gradle :app:testModernDebugUnitTest --stacktrace` → rebase 前 BUILD SUCCESSFUL（1m）；37 个结果文件合计 **237 tests / 0 failures / 0 errors / 0 skipped**。
+  - `./gradlew -I /tmp/mirror.init.gradle :app:testModernDebugUnitTest --tests 'com.tanuki.RuntimeFailurePolicyTest'` → BUILD SUCCESSFUL，新增策略回归 **32/32**。
+- P1 复审修复：`FailureEvidence.timedOut` 在 noSpace/launch 之后、killed 之前直接返回 `STARTUP_FAILED`；就绪行已打印但 HTTP 未可用而超时也保持 `STARTUP_FAILED`；`RuntimeManager` 在超时清理时不把 143/137 当作原始退出码。新增 143/137、“Killed”、ready 行后 HTTP 超时与 ENOSPC 优先级回归。
+- P2 复审修复：`PROBATION` 且上次服务活动时，进程重启一律回 `SAFE`，不再用重开 App 的墙钟时间把 `PROBATION` 提升为 `NORMAL`；服务未活动时保留试用，下次手动启动重新计时。安全模式成功不提交 `RESTORED_PENDING_CHECK`，只有 normal/probation 实际加载恢复 userdata 的启动成功后才写 verified/SUCCESS。新增长间隔重开、非活动服务、过期手动启动与 SAFE 恢复提交边界回归。
+- P2 时间基准修复：日志就绪时刻用于区分早/晚崩溃，HTTP 就绪后才启动 probation 计时；`CRASHED_LATE` 现在先检查实际 probation 窗口，窗口内（如日志 t=1s、HTTP t=11s、t=126s 崩溃）回 `SAFE`，不再直接 `onStable` 转 `NORMAL`。新增延迟 HTTP 就绪回归。
+- rebase 到 `origin/main=f5debf5`（含 XLSX PR #23）后复跑：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，40 个结果文件合计 **265 tests / 0 failures / 0 errors / 0 skipped**；`RuntimeFailurePolicyTest` 32/32。
+- 新增回归覆盖：六类分类与 2 分钟早/晚崩溃边界、ENOSPC/低磁盘优先、signal/OOM 判为 killed、无致命输出退出判为 killed、连续两次 startup/early 进入安全模式、killed/noSpace/launchFailed 打断连续计数、restart 2s/4s/8s 与上限 3 次、probation 内 startup/early/killed/noSpace 回安全模式、probation 晚崩溃转 normal、人工启动重置计数、过期 probation 提升、进程重启恢复安全模式（含未就绪试用超过 2 分钟）、JSON round-trip/非法数据回退、normal/rescue 启动参数与版本注入拒绝。
+- CI：PR #25 的 push run 42602010730 与 PR run 42602805776 均 success（Host scripts + handoff；Android assemble/JVM/lint）。Android CI 使用 `-x buildNativeRuntime`，其 APK 无原生 `.so`，不能用于设备验收。
+- 未执行：assemble、Android 仪器/真实设备、PRoot 内实际 rescue 启动、真实 DSH 崩溃/低内存/磁盘满注入、UI 视觉与大字体/深色验证；rebase 后 `lintModernDebug` BUILD SUCCESSFUL。JVM 策略测试不能替代真机运行与恢复验收。
+- 未验证项：真机崩溃与低内存、真实磁盘满、真实插件配置导致启动失败、安全模式与用户数据的实际隔离效果。PR/独立 Review/合并未授权或未完成。
+
+## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
+
+- 范围：新增 `XlsxWorkbookParser` 只读 OOXML 解析（workbook/rels/sharedStrings/styles/sheet）、`XlsxValueFormatter` 显示格式、Compose 原生表格 `XlsxTablePreview`、`FileKind.XLSX` 分类/入口与 `WorkspaceFileViewer` 接线。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/xlsx-preview/xlsx-native-preview`，未引入第三方 XLSX 库，不依赖 LibreOffice/外部 App。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Xlsx*' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL，30 tests / 0 failures。
+  - `./gradlew :app:testModernDebugUnitTest --console=plain` → BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped。
+  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL。
+- 新增回归（28 项）：`XlsxWorkbookParserTest` 18 项（多 sheet 顺序；共享/内联/布尔/错误/数字/公式缓存值；字体/填充/边框/对齐；列宽/行高/合并/冻结；行列与单元格预算截断；非 zip、缺 workbook、坏 XML 中文错误；条目数/总解压/单条目上限；谎报解压大小的 zip bomb 实际读取上限；共享字符串数量与总文本预算；路径穿越与外部链接拒绝；包内绝对路径；DOCTYPE/深层 XML/未定义实体；1904 日期与默认样式索引；空表；多表合并区域共享单元格预算；共享/内联/公式缓存字符串中的标准实体与数字引用）；`XlsxValueFormatterTest` 4 项（通用数字、千分位/小数/百分比、1900 闰年与 1904 日期时间、布尔）；`XlsxPreviewPolicyTest` 5 项（列字母、缩放 clamp/步进、列宽行高边界、按视口/缩放收缩冻结区、单元格字号换算）；`WorkspaceFileKindTest` 增补 `.xlsx` 与 `.xls`/`.xlsm` 边界。
+- 保真边界：支持多工作表、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、水平/垂直对齐、数字/百分比/日期/时间/布尔/错误值与公式缓存值、1904 日期系统。明确不支持图表、宏、透视表、外部链接、图片、复杂条件格式、隐藏行列、主题色、富文本多字体和公式重算；长文本单行省略；跨冻结列的合并按边界裁剪，跨行边框为近似。不宣称完整 Excel 兼容。
+- 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB（并按实际解压字节复核）、sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096，合并生成的起点/covered 占位也计入单表/全簿单元格预算；标准实体/数字引用保留；冻结区按实际视口与缩放收缩，无法容纳的冻结行列回到滚动体；单元格字号按样式磅值与缩放显示；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接。
+- 未执行：lint、assemble、Android 仪器/真实设备、真实 Excel/WPS 文件、真机大表滚动/冻结/缩放与深色主题、性能与内存实测。编译与 JVM 不能替代设备验收。
 
 ## 后台更新检查验证（2026-11-09，android_agent-24，非设备）
 

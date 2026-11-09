@@ -15,6 +15,13 @@ class WorkspaceFileKindTest {
         assertEquals(FileKind.DOC, WorkspaceFileManager.classifyFileKind("旧版.DOC", null))
     }
 
+    @Test fun mapsXlsxWithoutTreatingLegacyXlsAsSupported() {
+        assertEquals(FileKind.XLSX, WorkspaceFileManager.classifyFileKind("报表.XLSX", null))
+        assertEquals(FileKind.XLSX, WorkspaceFileManager.classifyFileKind("报表.xlsx", "application/octet-stream"))
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind("旧版.xls", "application/vnd.ms-excel"))
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind("宏.xlsm", null))
+    }
+
     @Test fun keepsExistingImageAudioVideoTextAndOtherKinds() {
         assertEquals(FileKind.IMAGE, WorkspaceFileManager.classifyFileKind("照片.png", "image/png"))
         assertEquals(FileKind.AUDIO, WorkspaceFileManager.classifyFileKind("录音.mp3", "audio/mpeg"))
