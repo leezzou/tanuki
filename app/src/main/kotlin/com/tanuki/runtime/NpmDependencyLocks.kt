@@ -17,6 +17,7 @@ import java.util.Base64
 
 /**
  * 缓存只绑定发布版本、SRI 与目标平台；Node/npm 升级不再让已保存的锁失效。
+ * v3 只接纳经官方元数据核验的锁；旧缓存没有可信来源标记，不能继续快速复用。
  * 锁是否仍适用于当前运行时由每次安装的依赖图检查决定，而不是缓存键猜测。
  */
 internal data class NpmLockIdentity(val version: String, val integrity: String) {
@@ -27,7 +28,7 @@ internal data class NpmLockIdentity(val version: String, val integrity: String) 
             "依赖锁必须绑定规范的 SHA-512 校验"
         }
     }
-    val key: String = npmLockSha256(listOf("tanuki-npm-lock-v2", NpmArchiveMapping.OFFICIAL_REGISTRY, "linux-arm64-glibc",
+    val key: String = npmLockSha256(listOf("tanuki-npm-lock-v3", NpmArchiveMapping.OFFICIAL_REGISTRY, "linux-arm64-glibc",
         version, integrity).joinToString("\n").toByteArray(Charsets.UTF_8))
 
     companion object {
@@ -100,7 +101,7 @@ internal class NpmLockCache(private val base: File) {
 
     companion object {
         const val MAX_LOCK_BYTES = 16 * 1024 * 1024
-        private const val MAGIC = "Tanuki official npm dependency lock v1"
+        private const val MAGIC = "Tanuki official npm dependency lock v2"
     }
 }
 

@@ -44,7 +44,7 @@ internal class NpmHostLimiter(val perHostLimit: Int = 8) {
         permits.computeIfAbsent(host.lowercase()) { Semaphore(perHostLimit) }.withPermit { block() }
 }
 
-/** 无锁时才解析元数据：国内镜像优先，官方兜底；等待锁的一侧不启动 npm 网络请求。 */
+/** 无锁时国内镜像只生成候选；官方元数据必须逐项核验传递依赖版本、路径与 SRI。 */
 internal object NpmMetadataPolicy {
     const val FETCH_TIMEOUT_MS = 15_000L
     const val COMMAND_TIMEOUT_MS = 180_000L

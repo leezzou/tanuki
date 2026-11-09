@@ -89,29 +89,54 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 check(environment.exitCode == 0) { "无法检查 DSH 安装使用的 Node/npm：${Redact.text(environment.stderr).takeLast(600)}" }
                 val identity = NpmLockIdentity(version, expectedIntegrity)
 
+                suspend fun resolveFrom(source: NpmArchiveSource): ByteArray {
+                    lock.delete()
+                    manager.event("使用 ${source.title} 解析 DSH 依赖元数据（单请求 ${NpmMetadataPolicy.FETCH_TIMEOUT_MS / 1000} 秒超时）")
+                    run("依赖解析失败（${source.title}）",
+                        listOf("/opt/node/bin/npm", "install", "--package-lock-only", "--ignore-scripts", "--save-exact",
+                            "--prefer-offline", "--fetch-timeout=${NpmMetadataPolicy.FETCH_TIMEOUT_MS}", "--fetch-retries=0") +
+                            npmFlags(source.registry) + "@deepseek-ai/dsh@$version",
+                        resolving = true, timeoutMs = NpmMetadataPolicy.COMMAND_TIMEOUT_MS)
+                    check(lock.isFile && lock.length() in 1..MAX_JSON_BYTES) { "依赖锁缺失或过大" }
+                    // 锁里的 resolved 必须回归官方路径；SRI 只作为待核验内容，不因归一化而获得信任。
+                    val normalized = NpmLockNormalizer.normalize(lock.readBytes())
+                    lock.writeBytes(normalized)
+                    return normalized
+                }
+
                 suspend fun resolveMetadata(): ByteArray {
-                    var last: Exception? = null
-                    for (source in NpmMetadataPolicy.SOURCES) {
+                    val mirror = NpmMetadataPolicy.SOURCES.first { it.id == "npmmirror" }
+                    val official = NpmMetadataPolicy.SOURCES.first { it.id == "official" }
+                    val candidate = try {
+                        resolveFrom(mirror)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        manager.event("npmmirror 元数据解析失败，改用官方元数据：" +
+                            Redact.text(error.message ?: "未知错误").take(200))
+                        null
+                    }
+                    // 镜像元数据只能生成候选；传递依赖的版本、官方路径与 SRI 必须由官方元数据独立确认。
+                    val trusted = try {
+                        resolveFrom(official)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        if (candidate != null) {
+                            throw IOException("无法用官方元数据核验镜像锁的传递依赖 SRI，已拒绝镜像锁；" +
+                                "请检查 npm 官方 registry 网络后重试", error)
+                        }
+                        throw error
+                    }
+                    if (candidate != null) {
                         try {
-                            lock.delete()
-                            manager.event("使用 ${source.title} 解析 DSH 依赖元数据（单请求 ${NpmMetadataPolicy.FETCH_TIMEOUT_MS / 1000} 秒超时）")
-                            run("依赖解析失败（${source.title}）",
-                                listOf("/opt/node/bin/npm", "install", "--package-lock-only", "--ignore-scripts", "--save-exact",
-                                    "--prefer-offline", "--fetch-timeout=${NpmMetadataPolicy.FETCH_TIMEOUT_MS}", "--fetch-retries=0") +
-                                    npmFlags(source.registry) + "@deepseek-ai/dsh@$version",
-                                resolving = true, timeoutMs = NpmMetadataPolicy.COMMAND_TIMEOUT_MS)
-                            check(lock.isFile && lock.length() in 1..MAX_JSON_BYTES) { "依赖锁缺失或过大" }
-                            // 镜像只负责元数据；锁里的 resolved 必须回归官方路径，SRI 不变。
-                            val normalized = NpmLockNormalizer.normalize(lock.readBytes())
-                            lock.writeBytes(normalized)
-                            return normalized
+                            NpmLockTrust.requireSameArchives(trusted, candidate)
+                            manager.event("镜像锁的传递依赖版本、官方归档路径与 SRI 已与官方元数据逐项一致")
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) {
-                            last = error
-                            manager.event("${source.title} 元数据解析失败，尝试下一来源：" + Redact.text(error.message ?: "未知错误").take(200))
+                            manager.event("镜像锁的传递依赖与官方元数据不一致，已拒绝镜像锁并使用官方锁：" +
+                                Redact.text(error.message ?: "未知差异").take(240))
                         }
                     }
-                    throw last ?: IOException("没有可用的 npm 元数据来源，请检查网络后重试")
+                    return trusted
                 }
 
                 NpmDependencyLocks(NpmLockCache(manager.paths.base)).prepare(identity,
@@ -135,7 +160,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                             NpmLockOrigin.SAVED -> "复用已验证的 DSH 依赖锁"
                             NpmLockOrigin.INSTALLED -> "复用已安装 DSH 的依赖锁"
                             NpmLockOrigin.BUNDLED -> "使用 APK 预置 DSH 依赖锁"
-                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（国内镜像优先，官方兜底）"
+                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（官方元数据核验镜像锁）"
                         }, EnvironmentState.INSTALLING)
                     },
                     onCacheError = { manager.event("DSH 依赖锁缓存未能保存，本次继续安装；下次可能需要重新解析") },
@@ -205,6 +230,8 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                 verifyTop(lock, version, expectedIntegrity)
                 // npm may silently omit failing optional packages; verify the selected graph too.
                 run("安装结果校验失败", listOf("/opt/node/bin/node", "$guest/.dsh-plan.cjs", guest, version, expectedIntegrity, "verify"))
+                // 只有完整安装并校验成功的锁才带可信标记，后续 installed 快速路径才允许复用。
+                File(stage, ".lock-trusted").writeText(lockHash)
                 manager.phase("DSH 依赖安装完成", EnvironmentState.INSTALLING)
                 stage
             } catch (cancelled: CancellationException) {
@@ -361,12 +388,16 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
         val engine = File(manager.paths.engines, version)
         val lock = File(engine, "package-lock.json")
         val marker = File(engine, ".installed")
+        val trusted = File(engine, ".lock-trusted")
         if (Files.isSymbolicLink(manager.paths.engines.toPath()) || Files.isSymbolicLink(engine.toPath()) ||
             !Files.isRegularFile(lock.toPath(), NOFOLLOW_LINKS) || !Files.isRegularFile(marker.toPath(), NOFOLLOW_LINKS) ||
-            lock.length() !in 1..MAX_JSON_BYTES || marker.length() != 64L) return null
+            !Files.isRegularFile(trusted.toPath(), NOFOLLOW_LINKS) ||
+            lock.length() !in 1..MAX_JSON_BYTES || marker.length() != 64L || trusted.length() != 64L) return null
         return try {
             val bytes = lock.readBytes()
-            if (npmLockSha256(bytes) != marker.readText()) return null
+            val hash = npmLockSha256(bytes)
+            // 旧安装没有可信来源标记，宁可回退 bundled/官方解析，也不把历史镜像锁当作官方锁。
+            if (hash != marker.readText() || hash != trusted.readText()) return null
             verifyTop(lock, version, integrity)
             bytes
         } catch (cancelled: CancellationException) { throw cancelled }

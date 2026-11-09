@@ -10,17 +10,17 @@
 ## 用户目标与范围
 
 - 用户本次实际要求：解决 DSH 安装慢/易失败，接近 Ubuntu/Node 的“丝滑”，国内网络可用。
-- 本次包含：锁快速路径；无锁时 npmmirror 优先、官方兜底的元数据解析；传递依赖走国内镜像并保持 SHA-512/SRI；镜像白名单与路径映射；404/410 快速换源、429/5xx 退避；自适应并发 8–16、单 host ≤8；30s 单请求超时、2 次指数退避、Range/206 续传、临时文件校验后原子提交；真实进度与中文错误；离线 JVM 回归。
+- 本次包含：锁快速路径；无锁时 npmmirror 生成候选锁、官方元数据逐项核验传递依赖版本/路径/SRI 后才接纳；传递依赖走国内镜像并保持 SHA-512；镜像白名单与路径映射；404/410 快速换源、429/5xx 退避；自适应并发 8–16、单 host ≤8；30s 单请求超时、2 次指数退避、Range/206 续传、临时文件校验后原子提交；真实进度与中文错误；离线 JVM 回归。
 - 本次不包含：Ubuntu/Node 运行时改造、协议或 RPC 变更、真实设备/Android 仪器验证、合并、发布、AO Review 触发。
 - 用户改变或暂停的要求：无。保持既有 API Key 保存、真机验收暂停项。
 
 ## 当前状态
 
-- 已实现：上述 DSH 依赖解析、镜像映射、下载重试/续传、并发与进度改动。
-- 已验证：`compileModernDebugKotlin` 通过；完整 JVM 套件 155 tests / 0 failures / 0 errors / 0 skipped；目标 Npm/Download/OperationProgress 回归 61 项通过；`test-dsh-lock.py` 通过。
-- 待验证：真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换；真实 4000 包规模吞吐对比；独立 Review 与 CI。
+- 已实现：上述 DSH 依赖解析、镜像映射、下载重试/续传、并发与进度改动；P1 复审后补官方元数据逐项核验、v3 锁缓存与 `.lock-trusted` 安装标记。
+- 已验证：`compileModernDebugKotlin` 通过；完整 JVM 套件 161 tests / 0 failures / 0 errors / 0 skipped（含 `NpmLockTrustTest` 6 项）；目标 Npm/Download 回归 60 项通过；`test-dsh-lock.py` 通过。
+- 待验证：P1 修复后新 head 的 CI；真实 Android 设备上的 DSH 首次安装/断网重试/镜像切换；真实 4000 包规模吞吐对比；独立 Review。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：AO 会话 worktree（android_agent-23），分支 `ao/dsh-install-2/root`，基线 `5c680b99075b87953a74cf22cfaee89608d058c1`；PR [#20](https://github.com/leezzou/tanuki/pull/20)，源分支 `ao/dsh-install-2/install-resilience`，head 以 PR 页面为准。
-- 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
+- 关键事实与可定位源码/公共文档：`app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt`、`NpmDependencyLocks.kt`、`NpmSources.kt`、`NpmArchiveMapping.kt`、`NpmDownloadPolicy.kt`、`NpmLockNormalizer.kt`、`NpmLockTrust.kt`、`app/src/main/kotlin/com/tanuki/download/Downloader.kt`、`DownloadRetryPolicy.kt`。
 
 ## 本次改动
 
@@ -29,13 +29,15 @@
 | `app/src/main/kotlin/com/tanuki/runtime/NpmArchiveMapping.kt`（新增） | 唯一的官方锁路径→镜像白名单映射；拒绝任意 host/端口/参数/编码穿越；反向把华为/腾讯 registry 前缀还原为官方路径。 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmDownloadPolicy.kt`（新增） | 8→16 自适应并发策略；每 host 8 路信号量；无锁元数据源顺序与 15s 单请求/180s 命令超时。 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmLockNormalizer.kt`（新增） | 镜像解析出的 `resolved` 恢复为官方地址，SRI/版本不变；未知 host 直接拒绝。 |
+| `app/src/main/kotlin/com/tanuki/runtime/NpmLockTrust.kt`（新增） | P1：镜像锁只作候选；逐包对比官方锁的版本、官方归档路径、SHA-512；缺包/多包/篡改均拒绝。 |
 | `app/src/main/kotlin/com/tanuki/download/DownloadRetryPolicy.kt`（新增） | 3 次尝试（2 次重试）、500/1000ms 指数退避、404/410 缺失、429/5xx 可重试分类。 |
 | `app/src/main/kotlin/com/tanuki/download/Downloader.kt` | 429/5xx 分类退避；404/410 立即上抛；临时文件哈希通过后 `ATOMIC_MOVE` 提交；Range 解析改为可测试函数；保留 30s connect/read 与部分文件续传。 |
-| `app/src/main/kotlin/com/tanuki/runtime/NpmDependencyLocks.kt` | 锁身份改为 version+integrity+platform（Node/npm 升级不再强制重新解析）；saved→installed→bundled 候选逐个校验，全部不可用才解析；重定向缓存返回 null；缓存写失败不阻断已验证安装。 |
+| `app/src/main/kotlin/com/tanuki/runtime/NpmDependencyLocks.kt` | 锁身份改为 version+integrity+platform（Node/npm 升级不再强制重新解析）；v3 只接纳官方核验后的锁；saved→installed→bundled 候选逐个校验，全部不可用才解析；重定向缓存返回 null。 |
 | `app/src/main/kotlin/com/tanuki/runtime/NpmSources.kt` | 自动模式国内镜像优先、官方最后；手动选择仍优先用户来源；暴露 host 供单 host 限流。 |
-| `app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt` | 元数据 npmmirror 优先、官方兜底并归一化锁；并发 8 起步按成功增长到 16；单 host ≤8；404/410 快速换源、429/5xx 退避降级；阶段拆分与中文可操作错误。 |
+| `app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt` | 镜像元数据只生成候选，官方锁逐项核验后才使用；官方核验不可用时 fail-closed；安装成功写 `.lock-trusted`；并发 8→16、单 host≤8、404/410 快速换源、429/5xx 退避降级。 |
 | `app/src/test/kotlin/com/tanuki/NpmArchiveMappingTest.kt`（新增） | 映射/非法 host/端口/参数/穿越/白名单回归。 |
 | `app/src/test/kotlin/com/tanuki/NpmLockNormalizerTest.kt`（新增） | 镜像锁归一化、SRI/版本保持、未知 host/非 HTTPS 拒绝。 |
+| `app/src/test/kotlin/com/tanuki/NpmLockTrustTest.kt`（新增） | P1 回归：镜像 URL 等价接受；传递依赖 SRI/版本/路径篡改、缺包/多包、入口 SRI 篡改、非 SHA-512 均拒绝。 |
 | `app/src/test/kotlin/com/tanuki/NpmDownloadPolicyTest.kt`（新增） | 退避值、状态分类、元数据源顺序/超时、并发 8–16、单 host 8。 |
 | `app/src/test/kotlin/com/tanuki/DownloaderRetryTest.kt`（新增） | 429/503 重试与退避、404/410 不重试、重试耗尽、断点续传 Range。 |
 | `app/src/test/kotlin/com/tanuki/DownloadRangeTest.kt`（新增） | Content-Range 合法/非法解析、坏 206 整包重下。 |
@@ -49,7 +51,7 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` | 通过（BUILD SUCCESSFUL） | 首次编译暴露注释嵌套/构造器重载问题，修复后通过；未跑 lint/assemble。 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Npm*' --tests 'com.tanuki.Download*' --tests 'com.tanuki.OperationProgressTest'` | 通过（目标回归 61 tests，0 failed） | 覆盖映射、归一化、锁快速路径、退避、Range、并发、缓存命中；不联网、不装设备。 |
-| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL，28 tasks executed） | 31 个测试类，155 tests / 0 failures / 0 errors / 0 skipped；强制重跑，不联网、不装设备。并发用例改用 IO dispatcher，避免 2 核 CI 上 `Dispatchers.Default` 并行度不足导致抖动。 |
+| `./gradlew :app:testModernDebugUnitTest --rerun-tasks` | 通过（BUILD SUCCESSFUL） | 32 个测试类，161 tests / 0 failures / 0 errors / 0 skipped；含 P1 `NpmLockTrustTest` 6 项；不联网、不装设备。 |
 | `python3 scripts/test-dsh-lock.py` | 通过（PASS） | 模拟 linux/arm64/glibc 三个 Node 版本，560 archives；官方 HTTPS/SHA-512 条目 686，3 个负例；不下载、不装设备。 |
 | `python3 scripts/check-handoff.py --record ...` / `check-handoff.py` | 通过 | 记录印章刷新；当前交接检查 468 public files。 |
 | `python3 scripts/package-source.py` | 通过 | 提交前生成源码包与校验清单（469 public files）；本记录不写包自身哈希，工作材料不提交。 |
@@ -72,7 +74,7 @@
 ## 约束与风险
 
 - 数据/设备/权限边界：未读取密钥/Cookie/用户数据；未启动/安装/清空设备；未改 Ubuntu/Node/协议；未合并/发布。
-- 关键决策及理由：锁身份去掉 Node/npm 以避免升级触发元数据重解析，改由每次依赖图校验兜底；自动模式官方最后，手动选择保留用户意图；镜像只映射路径不改 SRI。
+- 关键决策及理由：锁身份去掉 Node/npm 以避免升级触发元数据重解析，改由每次依赖图校验兜底；自动模式官方最后，手动选择保留用户意图；镜像只映射路径；P1 后镜像生成的传递 SRI 不再可信，必须由官方元数据逐项确认，官方不可用时拒绝而非回退信任镜像。
 - 失败尝试与避免重复踩坑的结论：`Downloader` 第三个函数参数会改变既有尾随 lambda 绑定，必须保留 2 参重载；Kotlin 块注释可嵌套，注释中不要写未转义的 `/*`；华为/腾讯 registry 带路径前缀，反向归一化必须剥离。
 
 ## 产物与校验
