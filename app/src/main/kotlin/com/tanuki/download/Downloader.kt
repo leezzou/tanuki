@@ -1,6 +1,7 @@
 package com.tanuki.download
 
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.io.IOException
@@ -8,12 +9,14 @@ import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.MalformedURLException
 import java.net.URL
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.util.Base64
 
 private const val MAX_REDIRECTS = 5
-private const val MAX_ATTEMPTS = 3
 private const val BUFFER_SIZE = 65536
 private const val DISK_RESERVE = 64L * 1024 * 1024
 private const val HTTP_RANGE_NOT_SATISFIABLE = 416
@@ -29,7 +32,15 @@ private val ALLOWED_HOSTS = setOf(
     "mirrors.bfsu.edu.cn", "mirrors.aliyun.com", "mirrors.cloud.tencent.com", "mirrors.sjtug.sjtu.edu.cn"
 )
 
-class DownloadHttpException(val status: Int, host: String) : IllegalStateException("下载失败 HTTP $status: $host")
+class DownloadHttpException(val status: Int, host: String) : IllegalStateException(
+    when {
+        status == 404 || status == 410 -> "下载失败 HTTP $status: $host（文件未同步或已删除）"
+        status == 429 -> "下载失败 HTTP 429: $host（请求过于频繁，已指数退避）"
+        status in 500..599 -> "下载失败 HTTP $status: $host（服务端暂时不可用，已指数退避）"
+        status == 403 -> "下载失败 HTTP 403: $host（源拒绝访问）"
+        else -> "下载失败 HTTP $status: $host"
+    }
+)
 class DownloadLimitException : IllegalStateException("下载内容超过安全大小限制")
 
 /**
@@ -42,10 +53,16 @@ class Downloader private constructor(
     private val connection: (URL) -> HttpURLConnection,
     private val progress: (Long, Long) -> Unit,
     private val allowedHosts: Set<String>,
+    private val retryDelay: suspend (Int) -> Unit,
 ) {
     internal constructor(connection: (URL) -> HttpURLConnection, progress: (Long, Long) -> Unit) :
-        this(connection, progress, ALLOWED_HOSTS)
-    constructor(progress: (Long, Long) -> Unit) : this({ it.openConnection() as HttpURLConnection }, progress, ALLOWED_HOSTS)
+        this(connection, progress, ALLOWED_HOSTS, { delay(DownloadRetryPolicy.delayMillis(it)) })
+    internal constructor(connection: (URL) -> HttpURLConnection, progress: (Long, Long) -> Unit,
+                         retryDelay: suspend (Int) -> Unit) :
+        this(connection, progress, ALLOWED_HOSTS, retryDelay)
+    constructor(progress: (Long, Long) -> Unit) :
+        this({ it.openConnection() as HttpURLConnection }, progress, ALLOWED_HOSTS,
+            { delay(DownloadRetryPolicy.delayMillis(it)) })
 
     suspend fun fetch(url: String, target: File, sha256: String, expectedBytes: Long = -1): File {
         require(SHA256_HEX.matches(sha256)) { "SHA-256 校验值格式无效" }
@@ -90,13 +107,24 @@ class Downloader private constructor(
                 throw cancelled
             } catch (tooLarge: DownloadLimitException) {
                 part.delete(); validator.delete(); throw tooLarge
-            } catch (_: IOException) {
+            } catch (http: DownloadHttpException) {
+                // 404/410 立即交给上层换源；429/5xx 在本层先做两次指数退避。
+                if (attempt < DownloadRetryPolicy.MAX_ATTEMPTS && DownloadRetryPolicy.retryable(http.status)) {
+                    retryDelay(attempt)
+                    continue
+                }
+                throw http
+            } catch (error: IOException) {
                 // Keep the partial file plus ETag so the next attempt can resume.
-                if (attempt >= MAX_ATTEMPTS) throw IllegalStateException("下载中断，请重试")
+                if (attempt >= DownloadRetryPolicy.MAX_ATTEMPTS) {
+                    throw IOException("下载中断（已重试 ${DownloadRetryPolicy.MAX_ATTEMPTS - 1} 次）：" +
+                        "${error.message ?: "网络错误"}，请检查网络或切换下载源", error)
+                }
+                retryDelay(attempt)
                 continue
             }
             if (outcome is Outcome.Restart) {
-                if (attempt >= MAX_ATTEMPTS) throw IllegalStateException("续传失败，请重试")
+                if (attempt >= DownloadRetryPolicy.MAX_ATTEMPTS) throw IllegalStateException("续传失败，请重试")
                 continue
             }
             val written = (outcome as Outcome.Written).length
@@ -104,7 +132,9 @@ class Downloader private constructor(
             if (part.length() != written) { part.delete(); validator.delete(); throw IllegalStateException("下载内容长度不一致") }
             if (expected != null && written != expected) { part.delete(); validator.delete(); throw IllegalStateException("下载内容长度与声明不一致") }
             if (!check.verify(part)) { part.delete(); validator.delete(); throw IllegalStateException("${check.label} 校验失败") }
-            if (!part.renameTo(target)) throw IllegalStateException("无法提交下载")
+            // 哈希通过后才把临时文件原子提交为目标；失败不会留下半个“已下载”文件。
+            try { Files.move(part.toPath(), target.toPath(), ATOMIC_MOVE, REPLACE_EXISTING) }
+            catch (_: AtomicMoveNotSupportedException) { Files.move(part.toPath(), target.toPath(), REPLACE_EXISTING) }
             validator.delete(); source.delete()
             progress(written, written)
             return target
@@ -126,7 +156,7 @@ class Downloader private constructor(
                     total = conn.contentLengthLong.takeIf { it >= 0 } ?: expected ?: -1L
                 }
                 HttpURLConnection.HTTP_PARTIAL -> {
-                    val range = contentRange(conn.getHeaderField("Content-Range"))
+                    val range = parseContentRange(conn.getHeaderField("Content-Range"))
                     if (resume.offset <= 0L || resume.validator == null || range == null ||
                         range.start != resume.offset || range.total == null || range.end + 1 != range.total) {
                         // A partial response we cannot attribute exactly is discarded, never trusted.
@@ -232,7 +262,9 @@ class Downloader private constructor(
         // 应用 APK 的来源与 Ubuntu/Node/npm 完全分离，不扩大既有运行环境下载边界。
         internal fun applicationUpdates(connection: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
                                         progress: (Long, Long) -> Unit): Downloader =
-            Downloader(connection, progress, setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"))
+            Downloader(connection, progress,
+                setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"),
+                { delay(DownloadRetryPolicy.delayMillis(it)) })
         fun hash(file: File): String = digest(file, "SHA-256").joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 }
@@ -262,9 +294,10 @@ private fun sha512Integrity(integrity: String): ByteArray {
     return decoded
 }
 
-private data class ContentRange(val start: Long, val end: Long, val total: Long?)
+internal data class ContentRange(val start: Long, val end: Long, val total: Long?)
 
-private fun contentRange(raw: String?): ContentRange? {
+/** 只接受 `bytes start-end/total` 或 `bytes start-end/(star)`；边界不合法时返回 null 触发整包重下。 */
+internal fun parseContentRange(raw: String?): ContentRange? {
     val match = CONTENT_RANGE.find(raw?.trim() ?: return null) ?: return null
     val start = match.groupValues[1].toLongOrNull() ?: return null
     val end = match.groupValues[2].toLongOrNull() ?: return null

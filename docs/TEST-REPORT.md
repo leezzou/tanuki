@@ -29,6 +29,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - Rebase：2026-11-09 rebase 到 `origin/main=9b32051`（PR #18 DSH 已安装版本管理），解决 `AGENT-STATE`/`CURRENT.json` 冲突；rebase 后 `compileModernDebugKotlin` 与完整 JVM 复跑通过，174 tests / 0 failures（既有 151 + 新增 23）。
 - 未执行：lint、assemble、Android 仪器/真实设备、真实 GitHub/npmmirror/npm 请求、WorkManager 实际触发/重启恢复、Android 13 通知权限与展示、深色/大字体 UI。编译与 JVM 不能替代设备与真实网络验收。
 
+## DSH 安装提速与国内镜像验证（2026-11-09，android_agent-25 收尾，非设备）
+
+- 范围：PR #20 的 DSH 锁快速路径、npmmirror 优先生成/官方核验锁、镜像归档映射、404/429/5xx 换源与退避、Range/206 续传、8–16 自适应并发、降目标后 worker 退休；rebase 到 `main=6136451`，同时保留 #19 后台更新检查。
+- 实际执行：rebase 后 `:app:compileModernDebugKotlin` 与完整 `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，205 tests / 0 failures / 0 errors / 0 skipped。`NpmAdaptiveWorkerPoolTest` 升降档 2/2；目标 Npm/Download 回归 61 项通过。
+- 未执行：真实 Android/PRoot DSH 首次安装、弱网/镜像 404/429 注入、4000 包端到端吞吐、lint/assemble/仪器/真机；独立 Review 未触发。
+
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
 - 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。

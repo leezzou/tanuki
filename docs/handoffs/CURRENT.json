@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-1535-background-update-check.md",
-  "recordSha256": "5410f0d8b4bfd3c61846e000b890053bb410135b696b9e59e59bb502713c5233",
-  "sourceFingerprint": "127f146ec8d0079df5beffb0def0ddecd690dcea0f3e4724511ec00d4144997f",
-  "fileCount": 467
+  "record": "docs/handoffs/20261109-1539-dsh-install-resilience.md",
+  "recordSha256": "b5a5687803246b04e336d802c87ae3c37f43ba16761ccbca97708f17d1bbc5c6",
+  "sourceFingerprint": "1f55657f4ca6411449b29b91b2cad2d831a5dd7ea4d2403f0c021a0d50346050",
+  "fileCount": 481
 }
