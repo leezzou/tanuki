@@ -15,7 +15,7 @@
 ## 当前状态
 
 - 已实现：直连 SSH + 端口转发 + local/remote origin 切换 + 设置页 + 失败回退 + 加密凭据/主机密钥校验 + JVM 回归。
-- 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、远程分支完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件；合入 `main=5fd1ab4`（安全模式 + XLSX）后完整 JVM 289/0/0/0（41 结果文件）、lint 0 errors/81 warnings/1 hint。
+- 已验证（本轮实际执行）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`（D8）、远程分支完整 `testModernDebugUnitTest` 229/0/0/0、`lintModernDebug` 0 errors/80 warnings/1 hint、依赖清单 91 构件并刷新许可文件；合入 `main=5fd1ab4`（安全模式 + XLSX）后完整 JVM 289/0/0/0（41 结果文件）、lint 0 errors/81 warnings/1 hint；review 修复后完整 JVM 293/0/0/0（42 结果文件）、lint 0 errors/82 warnings，androidTest 编译通过。
 - 待验证：真实 Android 设备到真实 sshd、真实 Android Keystore、真实远程 DSH token 登录、弱网/断线、UI 手势、Ed25519、Android 仪器测试、真机。
 - 主线同步：已合入 `main=5fd1ab4`（PR #25 安全模式，含 PR #23 XLSX）。`RuntimeManager`/`State.kt`/`TanukiUi.kt` 与安全模式有代码冲突，已保留远程 origin 与安全模式恢复策略：本地端点单独清理、远程连接时本地失败不强制断开网页；文档保留远程、XLSX、安全模式三节。
 - 当前目标包名/分支：仅 JVM/APK 构建，未安装设备；分支 `ao/remote-host/remote-ssh` 已从基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48` 创建，PR [#29](https://github.com/leezzou/tanuki/pull/29) 已创建，base `main`，未触发 Review；head 以 PR 页面为准。无运行中任务。
@@ -34,8 +34,15 @@
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置入口、DSH 页远程状态/切换/回退提示、WebView 连接条件 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` | 新增远程主机设置页、连接测试/保存/断开/清除、首次主机密钥确认对话框 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 接线远程控制器状态与回调 |
+| `app/src/main/kotlin/com/tanuki/runtime/DshCookieIsolation.kt` | Review P1：管理页 Cookie 按逻辑主机分区，切换前清空/恢复，失败时页面不可用 |
+| `app/src/main/kotlin/com/tanuki/web/DshConnectionPolicy.kt` | Review P2：认证校验/token 重试绑定活动端点，不再要求本地 ServiceState.RUNNING |
 | `app/src/test/kotlin/com/tanuki/RemoteHostTest.kt` | 新增 24 项 JVM 回归 |
+| `app/src/test/kotlin/com/tanuki/DshRemoteIsolationTest.kt` | 新增 Cookie 分区与活动端点认证 4 项 |
+| `app/src/androidTest/kotlin/com/tanuki/DshCookieIsolationTest.kt` | 真实 CookieManager 两合成主机隔离回归（仅编译） |
+| `app/src/androidTest/kotlin/com/tanuki/RemoteHostKeystoreTest.kt` | Android Keystore provider 生成 IV 的回归（仅编译） |
 | `app/build.gradle.kts` | 新增 `com.github.mwiede:jsch:2.28.8` |
+| `app/src/androidTest/kotlin/com/tanuki/{BrowserStateTest,DshFileUploadTest,WebAuthenticationTest}.kt` | Review P2：夹具改用 `attachLocalEndpointForTesting`，移除 origin/authenticatedUrl 反射 |
+| `docs/REMOTE-HOST.md`、`docs/INTERFACES.md`、`docs/SECURITY.md` | 补充 Cookie 隔离、provider 生成 IV 与活动端点认证说明 |
 | `THIRD_PARTY_NOTICES`、`licenses/JSch-*`、`licenses/ANDROID-DEPENDENCIES.md`、`licenses/android-runtime-dependencies.json`、`licenses/android-runtime-notices/*` | JSch 与当前 91 个运行时依赖的许可记录 |
 | `scripts/collect-component-licenses.py` | 允许从 AO worktree 的 `GRADLE_USER_HOME` 读取 POM，避免误报“POM 未声明” |
 | `docs/INTERFACES.md`、`docs/SECURITY.md`、`docs/REMOTE-HOST.md`、`docs/TEST-REPORT.md` | 远程主机契约、安全边界、使用说明与验证记录 |
@@ -47,7 +54,8 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 首次构建含缓存准备约 7m34s；仅编译 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteHostTest'` | BUILD SUCCESSFUL，24 tests / 0 failures / 0 errors / 0 skipped | 新增类；JVM mock SSH |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL，D8 打包 JSch | 未重新构建/验证原生 `.so`；APK 不用于设备验收 |
-| `./gradlew :app:testModernDebugUnitTest` | 远程分支 BUILD SUCCESSFUL，37 结果文件，229/0/0/0；合并 `main=5fd1ab4` 后 41 结果文件，289/0/0/0 | 合并后包含安全模式 32 项 + XLSX 28 项 + 远程 24 项及既有 205 |
+| `./gradlew :app:testModernDebugUnitTest` | 远程分支 BUILD SUCCESSFUL，37 结果文件，229/0/0/0；合并 `main=5fd1ab4` 后 41 结果文件，289/0/0/0；review 修复后 42 结果文件，293/0/0/0 | 合并后包含安全模式 32 项 + XLSX 28 项 + 远程 24 项 + Cookie 隔离 4 项及既有 205 |
+| `./gradlew -PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` | BUILD SUCCESSFUL | 新增 Cookie 隔离/Keystore 设备回归仅编译，未运行 |
 | `./gradlew :app:lintModernDebug` | BUILD SUCCESSFUL，0 errors / 80 warnings / 1 hint | 新增文件无告警；既有告警未处理 |
 | `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` + `python3 scripts/collect-component-licenses.py` | 91 runtime artifacts，5 个仍无 POM 许可声明 | JSch 为 Revised BSD / JZlib Revised BSD / jBCrypt ISC；清单位于 `licenses/` |
 | PR [#29](https://github.com/leezzou/tanuki/pull/29) CI（head `9dbaacc`） | Host scripts 与 Android build/JVM/lint 均 success | 公开 Actions；不替代独立 Review 或设备验收 |
@@ -57,7 +65,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：独立 Codex High Review、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
+- 未完成：review 修复后的独立复审、合并与发布授权；真实设备/主机验收；Ed25519；中继/WebRTC；远程 DSH 启停/多主机；自动重连。
 - 外部阻塞：无（缺少真实 SSH 主机/设备，属于未验证而非代码阻塞）。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续按既有要求等待授权/恢复。
 - 不代合、不触发 AO Review、不创建 tag/Release。

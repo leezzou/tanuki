@@ -31,7 +31,8 @@
 
 ## 4. 安全边界
 
-- 凭据存储：密码、私钥、口令和 token 只经 Android Keystore 的 AES-256-GCM 密钥加密后写入应用私有 SharedPreferences；Keystore 失败时拒绝保存，不回退明文。
+- 凭据存储：密码、私钥、口令和 token 只经 Android Keystore 的 AES-256-GCM 密钥加密后写入应用私有 SharedPreferences；加密 IV 由 Keystore provider 生成并随密文保存，Keystore 失败时拒绝保存，不回退明文。
+- Cookie 隔离：本地 DSH 与每台远程 DSH 分别保存管理页 Cookie header；切换前清空 CookieManager 并恢复目标主机，Cookie 端口不参与作用域，不能只靠 origin 检查。切换失败时页面置 `RENDER_ERROR`，不把上一台主机的认证 Cookie 交给新端点。Cookie 快照按 loopback 根路径读取，恢复为 `Path=/; HttpOnly; SameSite=Strict`。
 - 不导出：远程配置不进入项目 ZIP；应用私有快照只包含 DSH userdata，不包含这些 SharedPreferences。`RemoteHostConfig`/`RemoteEndpoint` 的日志字符串固定脱敏。
 - 主机密钥：首次确认 + 后续比对；拒绝变化的主机密钥。
 - 传输：SSH 加密；管理 WebView 仍只接受精确 `http://127.0.0.1:<本地端口>`，TLS 错误、文件访问和混合内容策略未放宽。
@@ -43,17 +44,19 @@
 |---|---|
 | 配置校验、token 隧道 URL、主机指纹、origin 状态机 | `app/src/main/kotlin/com/tanuki/runtime/RemoteHost.kt` |
 | Keystore 加密存储、known_hosts 指纹 | `app/src/main/kotlin/com/tanuki/runtime/RemoteHostStorage.kt` |
+| 管理页 Cookie 逻辑主机隔离 | `app/src/main/kotlin/com/tanuki/runtime/DshCookieIsolation.kt` |
 | JSch SSH 隧道与 HTTP 探测 | `app/src/main/kotlin/com/tanuki/runtime/SshTransport.kt` |
 | 连接流程、首次确认、失败回退 | `app/src/main/kotlin/com/tanuki/runtime/RemoteHostController.kt` |
 | RuntimeManager origin 接线 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt` |
 | 设置页与对话框 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` |
-| JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteHostTest.kt` |
+| JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteHostTest.kt`、`DshRemoteIsolationTest.kt` |
+| 设备回归（仅编译，未运行） | `app/src/androidTest/kotlin/com/tanuki/DshCookieIsolationTest.kt`、`RemoteHostKeystoreTest.kt` |
 
 ## 6. 验证与未验证
 
-已执行（JVM）：配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、测试连接不切换 origin、HTTP 探测 200/302/401/500 与连接拒绝、错误信息不包含密码。
+已执行（JVM）：配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、测试连接不切换 origin、HTTP 探测 200/302/401/500 与连接拒绝、错误信息不包含密码、Cookie 分区（本地/两台远程互不串读）、活动端点认证/重试策略。合入安全模式与 XLSX 后完整 JVM 293/0/0/0。
 
-未验证：真实 Android 设备到真实 sshd 的 SSH 认证、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。设备/真实主机验收需要独立 QA 会话和明确目标。
+未验证：真实 Android 设备到真实 sshd 的 SSH 认证、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。新增 Cookie 隔离/Keystore 设备回归仅编译，未运行；设备/真实主机验收需要独立 QA 会话和明确目标。
 
 ## 7. 后续切片
 

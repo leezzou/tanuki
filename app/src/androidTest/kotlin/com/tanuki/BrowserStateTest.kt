@@ -35,7 +35,7 @@ class BrowserStateTest {
                 }
             }
             try {
-                RuntimeManager::class.java.getDeclaredField("origin").apply{isAccessible=true}.set(manager,"http://127.0.0.1:${server.localPort}")
+                manager.attachLocalEndpointForTesting("http://127.0.0.1:${server.localPort}")
                 manager.state.value=manager.state.value.copy(service=ServiceState.RUNNING)
                 manager.web(WebState.AUTHENTICATING)
                 manager.verifyBrowserCookie(null)

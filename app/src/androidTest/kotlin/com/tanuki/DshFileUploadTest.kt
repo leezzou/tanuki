@@ -89,8 +89,7 @@ class DshFileUploadTest {
         var disposed = false
         init {
             check(context.packageName.endsWith(".workspacecheck"))
-            RuntimeManager::class.java.getDeclaredField("origin").apply { isAccessible = true }.set(manager, server.origin)
-            RuntimeManager::class.java.getDeclaredField("authenticatedUrl").apply { isAccessible = true }.set(manager, server.origin)
+            manager.attachLocalEndpointForTesting(server.origin, server.origin)
             manager.state.value = manager.state.value.copy(service = ServiceState.RUNNING)
             ui {
                 (activity.application as TanukiApp).hideBrowserOverlay()

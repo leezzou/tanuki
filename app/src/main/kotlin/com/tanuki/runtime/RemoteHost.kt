@@ -24,6 +24,9 @@ data class RemoteHostConfig(
     val remoteDshPort: Int = 3080,
     val token: String = ""
 ) {
+    /** 管理页 Cookie 的逻辑主机身份；同一 SSH/DSH 端口的不同用户也不共享认证 Cookie。 */
+    fun cookieScope(): String = "remote:${normalizedHost() ?: host.trim()}:$sshPort:$user:$remoteDshPort"
+
     /**
      * 规范化主机名：IPv4/域名返回小写形式，方括号 IPv6 去掉方括号。
      * 不允许协议、路径、端口或 userinfo，防止配置被拼成另一个 URL/主机。
@@ -129,7 +132,8 @@ data class RemoteHostStatus(
     val localPort: Int? = null,
     val fingerprint: String = "",
     val message: String = "",
-    val error: String = ""
+    val error: String = "",
+    val cookieScope: String = DshCookieIsolation.LOCAL_SCOPE
 ) {
     val connected: Boolean get() = phase == RemotePhase.REMOTE
 }
@@ -172,7 +176,8 @@ class RemoteHostMachine {
                 localPort = null,
                 fingerprint = "",
                 message = "本地运行时",
-                error = ""
+                error = "",
+                cookieScope = DshCookieIsolation.LOCAL_SCOPE
             )
         }
     }
@@ -188,7 +193,8 @@ class RemoteHostMachine {
                 localPort = null,
                 fingerprint = "",
                 message = "本地运行时未启动",
-                error = ""
+                error = "",
+                cookieScope = DshCookieIsolation.LOCAL_SCOPE
             )
         }
     }
@@ -203,12 +209,19 @@ class RemoteHostMachine {
             localPort = null,
             fingerprint = "",
             message = "正在建立 SSH 隧道并检测远程 DSH…",
-            error = ""
+            error = "",
+            cookieScope = DshCookieIsolation.LOCAL_SCOPE
         )
     }
 
     @Synchronized
-    fun remoteConnected(endpoint: RemoteEndpoint, host: String, localPort: Int, fingerprint: String) {
+    fun remoteConnected(
+        endpoint: RemoteEndpoint,
+        host: String,
+        localPort: Int,
+        fingerprint: String,
+        cookieScope: String = "remote:$host"
+    ) {
         remoteEndpoint = endpoint
         current = current.copy(
             phase = RemotePhase.REMOTE,
@@ -216,7 +229,8 @@ class RemoteHostMachine {
             localPort = localPort,
             fingerprint = fingerprint,
             message = "已通过 SSH 隧道连接远程主机 $host",
-            error = ""
+            error = "",
+            cookieScope = cookieScope
         )
     }
 
@@ -228,7 +242,8 @@ class RemoteHostMachine {
             phase = RemotePhase.FALLBACK,
             localPort = null,
             message = "已回退本地运行时：$message",
-            error = message
+            error = message,
+            cookieScope = DshCookieIsolation.LOCAL_SCOPE
         )
     }
 
@@ -241,7 +256,8 @@ class RemoteHostMachine {
             localPort = null,
             fingerprint = "",
             message = message,
-            error = ""
+            error = "",
+            cookieScope = DshCookieIsolation.LOCAL_SCOPE
         )
     }
 }

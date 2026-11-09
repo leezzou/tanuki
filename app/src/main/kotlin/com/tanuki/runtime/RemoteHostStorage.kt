@@ -6,7 +6,6 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -52,9 +51,12 @@ internal object SecretCipher {
     private const val TAG_BITS = 128
 
     fun encrypt(key: SecretKey, plaintext: String): String {
-        val iv = ByteArray(IV_BYTES).also { SecureRandom().nextBytes(it) }
+        // Android Keystore 的 setRandomizedEncryptionRequired(true) 要求由 provider 生成 IV；
+        // 调用方显式传 GCMParameterSpec 会抛异常，因此加密后读取 cipher.iv 一并保存。
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        val iv = cipher.iv
+        if (iv.size != IV_BYTES) throw IllegalStateException("AES-GCM IV 长度异常")
         val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         val encoder = Base64.getEncoder().withoutPadding()
         return encoder.encodeToString(iv) + "." + encoder.encodeToString(ciphertext)

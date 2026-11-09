@@ -40,12 +40,26 @@ class RuntimeManager(val context: Context) {
     val launcher = Launcher(context, paths, log)
     val state = MutableStateFlow(Snapshot())
     private val remoteMachine = RemoteHostMachine()
+    private val cookieIsolation = DshCookieIsolation(
+        scopeStore = SharedPreferencesKeyValueStore(
+            context.getSharedPreferences("remote-host-cookie-scope", Context.MODE_PRIVATE)
+        )
+    )
     val remoteHost = RemoteHostController(
         storage = androidRemoteHostStorage(context),
         transport = JschSshTransport(),
         scope = scope,
         machine = remoteMachine,
-        onStatus = { status -> state.update { it.copy(remote = status) } }
+        onStatus = { status ->
+            state.update {
+                it.copy(
+                    remote = status,
+                    // Cookie 切换失败时保持页面不可用，不能把上一台主机的认证 Cookie 交给新端点。
+                    web = if (status.error.contains("Cookie 隔离失败")) WebState.RENDER_ERROR else it.web
+                )
+            }
+        },
+        activateScope = { scopeName -> cookieIsolation.switchTo(scopeName) }
     )
     val failurePolicy = RuntimeFailurePolicy()
     private val recoveryState = MutableStateFlow(RuntimeRecoveryState())
@@ -786,6 +800,11 @@ class RuntimeManager(val context: Context) {
             }
         }
     }
+    /** 仅设备测试使用：注入本地端点，避免反射访问已移除的字段。 */
+    internal fun attachLocalEndpointForTesting(origin: String, authenticatedUrl: String = "$origin/") {
+        remoteMachine.localConnected(origin, authenticatedUrl)
+        state.update { it.copy(remote = remoteMachine.status) }
+    }
     /** 只清理本地 DSH 端点；远程隧道仍在时保持远程 origin。 */
     private fun clearLocalEndpoint() {
         remoteMachine.localCleared()
@@ -797,6 +816,10 @@ class RuntimeManager(val context: Context) {
         val uri = runCatching { URI(candidate) }.getOrNull() ?: return
         if (uri.host == "127.0.0.1" && uri.port in 1..65535 && uri.userInfo == null && uri.rawQuery != null) {
             remoteMachine.localConnected("http://127.0.0.1:${uri.port}", candidate)
+            if (!remoteMachine.remoteActive) {
+                runCatching { cookieIsolation.switchTo(DshCookieIsolation.LOCAL_SCOPE) }
+                    .onFailure { event("管理页 Cookie 隔离失败，请重启应用后重新连接") }
+            }
             state.update { it.copy(remote = remoteMachine.status) }
         }
     }
@@ -894,7 +917,9 @@ class RuntimeManager(val context: Context) {
                 try { c.responseCode } finally { c.disconnect() }
             }.getOrNull()
             state.update { current ->
-                if(origin==expected && browserGeneration.get()==generation && current.service==ServiceState.RUNNING && current.web==WebState.AUTHENTICATING)
+                if(origin==expected && browserGeneration.get()==generation &&
+                    current.web==WebState.AUTHENTICATING &&
+                    com.tanuki.web.DshConnectionPolicy.canVerifyCookie(origin, expected))
                     current.copy(web=when(result){200->WebState.CONNECTED;401,403->WebState.AUTH_EXPIRED;else->WebState.DISCONNECTED})
                 else current
             }

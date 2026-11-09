@@ -85,8 +85,7 @@ class WebAuthenticationTest {
         val server = Server()
         val public = BrowserFixtureServer()
         server.page = """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><script>window.epoch=performance.timeOrigin;</script><a id=link href="${public.base}/ordinary?code=public-oauth" style="display:block;padding:24px">Open login</a><button id=popup onclick="window.open('${public.base}/popup?code=public-oauth','_blank')">Login popup</button></body></html>"""
-        RuntimeManager::class.java.getDeclaredField("origin").apply { isAccessible = true }.set(manager, server.origin)
-        RuntimeManager::class.java.getDeclaredField("authenticatedUrl").apply { isAccessible = true }.set(manager, "${server.origin}/?token=${server.token.get()}")
+        manager.attachLocalEndpointForTesting(server.origin, "${server.origin}/?token=${server.token.get()}")
         manager.state.value = manager.state.value.copy(environment = EnvironmentState.READY, service = ServiceState.RUNNING)
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         lateinit var browser: DshWebView
@@ -269,9 +268,7 @@ class WebAuthenticationTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var browser: DshWebView? = null
         fun setTarget() {
-            RuntimeManager::class.java.getDeclaredField("origin").apply { isAccessible = true }.set(manager, server.origin)
-            RuntimeManager::class.java.getDeclaredField("authenticatedUrl").apply { isAccessible = true }
-                .set(manager, "${server.origin}/?token=${server.token.get()}")
+            manager.attachLocalEndpointForTesting(server.origin, "${server.origin}/?token=${server.token.get()}")
         }
         suspend fun await(message: String, predicate: () -> Boolean) {
             try { withTimeout(15000) { while (!predicate()) delay(25) } }

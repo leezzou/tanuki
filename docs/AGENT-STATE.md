@@ -16,8 +16,9 @@
 - 新增 `RemoteHostConfig`/`RemoteHostMachine`：host（IPv4/IPv6/域名）、SSH 端口、用户、密码或 OpenSSH/PEM 私钥（可带口令）、远程 DSH 端口、可选 token；校验不通过给出中文错误。远程 origin 固定 `http://127.0.0.1:<SSH 本地转发端口>`，本地/远程端点分别保存，远程优先、断开/失败自动回退本地；本地 DSH 停止不清除仍存活的远程端点。
 - SSH：`com.github.mwiede:jsch:2.28.8`（纯 Java、无传递依赖、Revised BSD），只做直连认证与 `direct-tcpip` 本地转发；本切片 RSA/ECDSA，Ed25519 需后续 BouncyCastle。首次连接先展示 `SHA256:` 主机指纹，确认前不发送认证信息；之后指纹不一致直接拒绝。
 - 安全：密码/私钥/口令/token 只经 AndroidKeyStore AES-256-GCM 加密后写入应用私有 SharedPreferences；Keystore 失败不降级明文；`toString()`/错误信息不含凭据；远程 token 只拼到 loopback 启动 URL 经隧道发送，不写日志、不导出。
-- UI：设置 → 远程主机支持测试连接、保存并连接、断开/清除、首次指纹确认；DSH 页显示远程主机/隧道/指纹，失败显示中文错误并回退。远程连接期间本地运行时保持原状；中继/WebRTC、远程 DSH 启停、多主机、自动重连未实现并标注后续。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`assembleModernDebug -x buildNativeRuntime` BUILD SUCCESSFUL（D8 正常打包 JSch）；远程分支完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped（新增 `RemoteHostTest` 24 项）；合入 `main=5fd1ab4`（含安全模式与 XLSX）后完整 JVM 289/0/0/0；`lintModernDebug` 0 errors / 81 warnings / 1 hint；依赖清单 91 构件并刷新 JSch 许可。
+- UI：设置 → 远程主机支持测试连接、保存并连接、断开/清除、首次指纹确认；测试连接的确认对话框显示实际 SHA256 指纹；DSH 页显示远程主机/隧道/指纹，失败显示中文错误并回退。远程连接期间本地运行时保持原状；中继/WebRTC、远程 DSH 启停、多主机、自动重连未实现并标注后续。
+- Review 修复：Keystore 加密由 provider 生成 IV；管理页 Cookie 按逻辑主机隔离（本地/各远程分别保存，切换前清空并恢复，失败时页面置 RENDER_ERROR）；认证校验与 token 重试只绑定活动端点；设备测试夹具移除 origin/authenticatedUrl 反射。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`assembleModernDebug -x buildNativeRuntime` BUILD SUCCESSFUL（D8 正常打包 JSch）；远程分支完整 `testModernDebugUnitTest` 229 tests / 0 failures / 0 errors / 0 skipped（新增 `RemoteHostTest` 24 项）；合入 `main=5fd1ab4`（含安全模式与 XLSX）后完整 JVM 289/0/0/0；review 修复后完整 JVM 293/0/0/0；`lintModernDebug` 0 errors / 82 warnings / 1 hint；依赖清单 91 构件并刷新 JSch 许可。
 - 待验证：真实 Android 设备到真实 sshd、真实 Keystore/远程 DSH token、弱网/断线、设备 UI、Ed25519、Android 仪器/真机；未安装设备、未更新 0.1.8 附件。
 
 ### 后台更新检查（android_agent-24，PR #19 待审）
@@ -111,7 +112,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）、`lintModernDebug` 0 errors/81 warnings；新增 `RemoteHostTest` 24 项。未跑设备/真实 SSH/仪器。
+- 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；review 修复后完整 JVM 293/0/0/0（42 结果文件）、`lintModernDebug` 0 errors/82 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 18 项、格式化 4 项、缩放策略 5 项与 `.xlsx` 分类 1 项；`lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/设备/仪器。
 - 已验证（本轮 android_agent-28 新跑）：`/tmp` 独立 clone 中 `compileModernDebugKotlin` 与rebase 到 `origin/main=f5debf5` 后完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，265 tests / 0 failures / 0 errors / 0 skipped；新增 `RuntimeFailurePolicyTest` 32/32。未跑 lint/assemble/设备/仪器。
 - 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。

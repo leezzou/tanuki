@@ -255,6 +255,21 @@ private fun RemoteHostDialog(model: TanukiUiModel, c: TanukiUiCallbacks, onDismi
                 )
                 if (model.remotePendingFingerprint != null) {
                     Text("等待主机密钥确认；确认后才会发送 SSH 认证信息。", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "远程主机：${model.remotePendingHost.ifBlank { host }}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    SelectionContainer {
+                        Text(
+                            model.remotePendingFingerprint,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Text(
+                        "请与远程主机上 ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub 的输出核对；不一致时不要确认。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = c.confirmRemoteHostKey, enabled = !busy) { Text("信任并继续") }
                         TextButton(onClick = c.cancelRemoteHostKey, enabled = !busy) { Text("取消") }

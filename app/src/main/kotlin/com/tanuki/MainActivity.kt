@@ -308,7 +308,8 @@ class MainActivity : ComponentActivity() {
                         apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,
                         remoteHost=remoteHost.saved,remote=remoteHost.status,remoteBusy=remoteHost.busy,
                         remoteMessage=remoteHost.message,remoteError=remoteHost.error,
-                        remotePendingFingerprint=remoteHost.pendingFingerprint),
+                        remotePendingFingerprint=remoteHost.pendingFingerprint,
+                        remotePendingHost=remoteHost.pendingHost),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {

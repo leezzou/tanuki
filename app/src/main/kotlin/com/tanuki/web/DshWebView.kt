@@ -211,17 +211,16 @@ class DshWebView(private val activity: ComponentActivity, private val manager: R
     /** One retry per in-memory launch URL; a rejected token must never produce a reload loop. */
     private fun retryAuthentication(): Boolean {
         authTrace("retryRequested")
-        if(destroyed || support.value.state!=WebViewSupportState.SUPPORTED ||
-            manager.state.value.service!=com.tanuki.runtime.ServiceState.RUNNING)return false
+        if(destroyed || support.value.state!=WebViewSupportState.SUPPORTED)return false
         val url=manager.authenticatedUrl ?: return false
         val origin=manager.origin ?: return false
-        if(!OriginPolicy.sameOrigin(url,origin) || retriedAuthUrl==url)return false
+        if(!OriginPolicy.sameOrigin(url,origin) || retriedAuthUrl==url ||
+            !DshConnectionPolicy.canRetryAuthentication(manager.origin,manager.authenticatedUrl,origin,url))return false
         retriedAuthUrl=url;attachedAuthUrl=url;authRetryPending=true
         manager.web(WebState.AUTHENTICATING)
         view.post {
             if(!destroyed && support.value.state==WebViewSupportState.SUPPORTED &&
-                manager.state.value.service==com.tanuki.runtime.ServiceState.RUNNING &&
-                manager.origin==origin && manager.authenticatedUrl==url) {
+                DshConnectionPolicy.canRetryAuthentication(manager.origin,manager.authenticatedUrl,origin,url)) {
                 authTrace("retryNavigation samePage=${view.url==url}")
                 view.loadUrl(url)
             } else authRetryPending=false

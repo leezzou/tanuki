@@ -96,7 +96,8 @@ data class TanukiUiModel(
     val remoteBusy: Boolean = false,
     val remoteMessage: String = "",
     val remoteError: String = "",
-    val remotePendingFingerprint: String? = null
+    val remotePendingFingerprint: String? = null,
+    val remotePendingHost: String = ""
 )
 
 data class TanukiUiCallbacks(

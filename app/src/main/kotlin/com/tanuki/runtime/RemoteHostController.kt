@@ -20,7 +20,8 @@ data class RemoteHostUiState(
     val busy: Boolean = false,
     val message: String = "",
     val error: String = "",
-    val pendingFingerprint: String? = null
+    val pendingFingerprint: String? = null,
+    val pendingHost: String = ""
 )
 
 sealed interface RemoteAttemptResult {
@@ -40,7 +41,9 @@ class RemoteHostController(
     private val scope: CoroutineScope,
     private val machine: RemoteHostMachine,
     private val onStatus: (RemoteHostStatus) -> Unit = {},
-    private val httpProbe: (Int) -> Boolean = { RemoteHttpProbe.probe(it) }
+    private val httpProbe: (Int) -> Boolean = { RemoteHttpProbe.probe(it) },
+    /** 在切换管理页端点前交换 Cookie 容器；失败时拒绝远程连接/回退。 */
+    private val activateScope: (String) -> Unit = {}
 ) {
     private val mutex = Mutex()
     private val mutableUi = MutableStateFlow(RemoteHostUiState(status = machine.status))
@@ -72,12 +75,13 @@ class RemoteHostController(
     internal suspend fun confirmHostKeyNow(): RemoteAttemptResult {
         val value = pending ?: return RemoteAttemptResult.Failure("没有待确认的主机密钥")
         pending = null
-        mutableUi.update { it.copy(pendingFingerprint = null) }
+        mutableUi.update { it.copy(pendingFingerprint = null, pendingHost = "") }
         return attempt(value.config, value.keepTunnel, value.fingerprint)
     }
 
     fun cancelHostKey() {
         pending = null
+        mutableUi.update { it.copy(pendingFingerprint = null, pendingHost = "") }
         machine.remoteDisconnected("已取消首次主机密钥确认，继续使用本地运行时")
         publish(machine.status, message = machine.status.message)
     }
@@ -88,8 +92,13 @@ class RemoteHostController(
 
     internal suspend fun disconnectNow() = mutex.withLock {
         closeTunnel()
+        val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
         machine.remoteDisconnected("已断开远程主机，WebView 已切回本地运行时")
-        publish(machine.status, message = machine.status.message)
+        publish(
+            machine.status.copy(error = cookieError.orEmpty()),
+            message = machine.status.message,
+            error = cookieError.orEmpty()
+        )
     }
 
     fun forget() {
@@ -98,16 +107,17 @@ class RemoteHostController(
 
     internal suspend fun forgetNow() = mutex.withLock {
         closeTunnel()
+        val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
         val cleared = runCatching { storage.clear() }.isSuccess
         machine.remoteDisconnected(
             if (cleared) "已清除远程主机配置，WebView 已切回本地运行时"
             else "已断开远程主机，但清除本机配置失败；请重试"
         )
         publish(
-            machine.status,
+            machine.status.copy(error = cookieError.orEmpty()),
             message = machine.status.message,
             saved = if (cleared) null else mutableUi.value.saved,
-            error = if (cleared) "" else "远程主机配置清除失败，请重试"
+            error = cookieError ?: if (cleared) "" else "远程主机配置清除失败，请重试"
         )
     }
 
@@ -120,7 +130,7 @@ class RemoteHostController(
 
     private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean) {
         if (mutableUi.value.busy) return
-        mutableUi.update { it.copy(busy = true, error = "", message = "正在校验远程主机配置…", pendingFingerprint = null) }
+        mutableUi.update { it.copy(busy = true, error = "", message = "正在校验远程主机配置…", pendingFingerprint = null, pendingHost = "") }
         scope.launch { attempt(config, keepTunnel) }
     }
 
@@ -152,6 +162,7 @@ class RemoteHostController(
                     it.copy(
                         busy = false,
                         pendingFingerprint = probe.fingerprint,
+                        pendingHost = host,
                         message = "首次连接 $host，请核对主机密钥指纹后确认"
                     )
                 }
@@ -193,11 +204,20 @@ class RemoteHostController(
             }
             val endpoint = config.endpointFor(candidate.localPort)
                 ?: throw RemoteHostFailure("本机 SSH 隧道端口无效")
+            if (keepTunnel && switchScope(config.cookieScope()) != null) {
+                throw RemoteHostFailure("无法隔离管理网页 Cookie，已取消远程连接")
+            }
             val established = candidate
             closeTunnel()
             tunnel = established
             candidate = null
-            machine.remoteConnected(endpoint, config.host.trim(), established.localPort, fingerprint)
+            machine.remoteConnected(
+                endpoint,
+                config.host.trim(),
+                established.localPort,
+                fingerprint,
+                config.cookieScope()
+            )
             publish(
                 machine.status,
                 message = machine.status.message,
@@ -222,7 +242,10 @@ class RemoteHostController(
                     mutex.withLock {
                         if (tunnel === value) {
                             closeTunnel()
-                            machine.remoteFailed("SSH 隧道已断开")
+                            val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
+                            machine.remoteFailed(
+                                if (cookieError == null) "SSH 隧道已断开" else "SSH 隧道已断开；$cookieError"
+                            )
                             publish(machine.status, message = machine.status.message, error = machine.status.error)
                         }
                     }
@@ -236,8 +259,13 @@ class RemoteHostController(
         val wasConnecting = machine.status.phase == RemotePhase.CONNECTING || machine.remoteActive
         if (keepTunnel && wasConnecting) {
             closeTunnel()
-            machine.remoteFailed(message)
-            publish(machine.status, message = machine.status.message, error = message)
+            val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
+            machine.remoteFailed(if (cookieError == null) message else "$message；$cookieError")
+            publish(
+                machine.status,
+                message = machine.status.message,
+                error = machine.status.error
+            )
         } else {
             mutableUi.update { it.copy(busy = false, error = message, message = "") }
         }
@@ -250,6 +278,9 @@ class RemoteHostController(
         }
         return RemoteAttemptResult.Failure(mutableUi.value.error.ifBlank { message })
     }
+
+    private fun switchScope(scope: String): String? =
+        runCatching { activateScope(scope) }.exceptionOrNull()?.let { "管理页 Cookie 隔离失败，请重启应用后重试" }
 
     private fun closeTunnel() {
         watchJob?.cancel()
@@ -271,7 +302,8 @@ class RemoteHostController(
                 busy = false,
                 message = message,
                 error = error,
-                pendingFingerprint = null
+                pendingFingerprint = null,
+                pendingHost = ""
             )
         }
         onStatus(status)
