@@ -139,7 +139,25 @@ HTTP 200..399 或 401 → 存活
 
 启动成功后写 `.web-verified` 标记，状态置 `ServiceState.RUNNING`、`webHealthy=true`，并每 10 秒复查一次；复查失败只把 `webHealthy=false`、`web=DISCONNECTED`，不等同于 DSH 进程退出。DSH 真正退出时状态进入 `STOPPED` 或 `INTERRUPTED`，并关闭 phone 连接。
 
-### 1.5 `WebState` 语义
+### 1.5 远程主机 SSH 隧道（直连切片）
+
+远程模式只把远程 DSH 的 loopback 端口经 SSH 本地转发到本机，不引入中继、WebRTC 或远程进程管理。
+
+| 项目 | 契约 |
+|---|---|
+| 配置 | `host`（IPv4/IPv6/域名）、`sshPort` 1..65535、`user`、密码或 OpenSSH/PEM 私钥（可带口令）、`remoteDshPort` 1..65535、可选 token |
+| SSH 实现 | `com.github.mwiede:jsch:2.28.8`，只使用公钥/密码认证与 `direct-tcpip` 本地转发；本切片支持 RSA/ECDSA，Ed25519 需后续引入 BouncyCastle |
+| 监听 | 本地转发绑定 `127.0.0.1` 的系统分配端口；不绑定 `0.0.0.0`，不开放局域网 |
+| 主机密钥 | 首次连接先读取主机公钥并展示 `SHA256:` 指纹，用户确认后才发送认证信息；之后按 `host:sshPort` 比对，不一致返回 `CHANGED` 并拒绝连接 |
+| origin | 远程模式 origin 固定为 `http://127.0.0.1:<本地转发端口>`；管理 WebView、`OriginPolicy`、Cookie 校验和 Blob 导出继续只认这个精确 origin |
+| 启动 URL | 有 token 时为 `http://127.0.0.1:<本地转发端口>/?token=<urlencode>`；token 只保存在内存/加密存储，只随隧道内请求发送，不写日志、不导出 |
+| 就绪探测 | 隧道建立后 `GET http://127.0.0.1:<本地转发端口>/`，2xx/3xx/401 视为远程 DSH 可达；失败关闭隧道并回退本地 |
+| 切换 | `RemoteHostMachine` 同时保存本地与远程端点，远程优先；远程断开/失败自动恢复本地端点，本地 DSH 停止不清除仍存活的远程端点 |
+| Cookie 隔离 | 本地与每台远程 DSH 使用独立逻辑 Cookie 集合；切换前清空 CookieManager 并恢复目标集合，失败时页面不可用；Cookie 端口不参与作用域 |
+| 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文错误并关闭隧道；不自动重试、不静默降级为明文 |
+| 未实现 | 中继/WebRTC、远程 DSH 启停、多远程主机、Ed25519 私钥/主机密钥；均标注为后续切片 |
+
+### 1.6 `WebState` 语义
 
 `WebState` 描述管理网页连接，不表示 DSH 进程或环境状态。定义见 `runtime/State.kt`，中文标签见 `ui/Labels.kt`。
 

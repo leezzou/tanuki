@@ -195,11 +195,15 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (t: Exception) { manager.fail(t) } finally { blob.delete() }
         } else if (url != null) {
-            val cookie = CookieManager.getInstance().getCookie(url)
-            lifecycleScope.launch(Dispatchers.IO) {
-                try { saveDownload(url, uri, cookie) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { manager.fail(error) }
+            if (!manager.cookieReady()) {
+                manager.event("管理页 Cookie 隔离未就绪，已取消下载；请重启应用")
+            } else {
+                val cookie = CookieManager.getInstance().getCookie(url)
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try { saveDownload(url, uri, cookie) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { manager.fail(error) }
+                }
             }
         } else {
             manager.fail(IllegalStateException("下载因页面或 Activity 重建而中断，请重新保存文件"))
@@ -286,6 +290,7 @@ class MainActivity : ComponentActivity() {
                 val appUpdate by appUpdates.state.collectAsState()
                 val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
                 val dshUpdateCheck by dshUpdateChecks.state.collectAsState()
+                val remoteHost by manager.remoteHost.ui.collectAsState()
                 val deviceCondition by deviceConditions.state.collectAsState()
                 val chatStatus by (application as TanukiApp).chatNotifications.status.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
@@ -386,8 +391,15 @@ class MainActivity : ComponentActivity() {
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
                         appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
-                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,chatNotifications=chatStatus,
-                        nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,deviceCondition=deviceCondition),
+                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,
+                        remoteHost=remoteHost.saved,remote=remoteHost.status,remoteBusy=remoteHost.busy,
+                        remoteMessage=remoteHost.message,remoteError=remoteHost.error,
+                        remotePendingFingerprint=remoteHost.pendingFingerprint,
+                        remotePendingHost=remoteHost.pendingHost,
+                        cookieReady=manager.cookieReady(),
+                        chatNotifications=chatStatus,
+                        nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,
+                        deviceCondition=deviceCondition),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -472,6 +484,12 @@ class MainActivity : ComponentActivity() {
                         downloadAppUpdate = appUpdates::download,
                         installAppUpdate = ::confirmApplicationUpdate,
                         cancelAppUpdate = appUpdates::cancel,
+                        testRemoteHost = manager.remoteHost::test,
+                        connectRemoteHost = manager.remoteHost::connect,
+                        confirmRemoteHostKey = manager.remoteHost::confirmHostKey,
+                        cancelRemoteHostKey = manager.remoteHost::cancelHostKey,
+                        disconnectRemoteHost = manager.remoteHost::disconnect,
+                        forgetRemoteHost = manager.remoteHost::forget,
                         setDeviceConditionEnabled = deviceConditions::setEnabled,
                         setLowBatteryThreshold = deviceConditions::setLowBatteryThreshold,
                         dshVisible = ::setDshTabVisible,

@@ -37,6 +37,7 @@ data class Snapshot(
     val phasePercent: Int? = null,
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
+    val remote: RemoteHostStatus = RemoteHostStatus(),
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState()
 )
 class Paths(context: Context) {

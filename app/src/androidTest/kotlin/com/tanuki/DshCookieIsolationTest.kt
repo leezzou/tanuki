@@ -1,0 +1,119 @@
+package com.tanuki
+
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.webkit.CookieManager
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.tanuki.runtime.DshCookieIsolation
+import com.tanuki.runtime.SharedPreferencesKeyValueStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.TimeUnit
+
+@RunWith(AndroidJUnit4::class)
+class DshCookieIsolationTest {
+    @Test
+    fun twoSyntheticHostsNeverReceiveEachOthersAuthCookie() = runBlocking(Dispatchers.IO) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".workspacecheck"))
+        val prefs = context.getSharedPreferences("dsh-cookie-isolation-${System.nanoTime()}", 0)
+        val isolation = DshCookieIsolation(CookieManager.getInstance(), SharedPreferencesKeyValueStore(prefs))
+        val manager = CookieManager.getInstance()
+        try {
+            isolation.switchTo("host-a")
+            manager.setCookie("http://127.0.0.1:41001/", "authA=synthetic-a; Path=/; HttpOnly")
+            manager.flush()
+
+            isolation.switchTo("host-b")
+            assertTrue(manager.getCookie("http://127.0.0.1:41002/").isNullOrEmpty())
+            manager.setCookie("http://127.0.0.1:41002/", "authB=synthetic-b; Path=/; HttpOnly")
+            manager.flush()
+
+            isolation.switchTo("host-a")
+            val a = manager.getCookie("http://127.0.0.1:41001/").orEmpty()
+            assertTrue(a.contains("authA=synthetic-a"))
+            assertFalse(a.contains("authB=synthetic-b"))
+
+            isolation.switchTo("host-b")
+            val b = manager.getCookie("http://127.0.0.1:41002/").orEmpty()
+            assertTrue(b.contains("authB=synthetic-b"))
+            assertFalse(b.contains("authA=synthetic-a"))
+            assertEquals("host-b", isolation.currentScope())
+        } finally {
+            clearCookies(manager)
+            prefs.edit().clear().commit()
+        }
+    }
+
+    @Test
+    fun mainThreadScopeReadsDoNotBlockCookieSwitch() = runBlocking(Dispatchers.IO) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".workspacecheck"))
+        val prefs = context.getSharedPreferences("dsh-cookie-lock-${System.nanoTime()}", 0)
+        val isolation = DshCookieIsolation(CookieManager.getInstance(), SharedPreferencesKeyValueStore(prefs))
+        val manager = CookieManager.getInstance()
+        try {
+            isolation.switchTo("host-a")
+            val reads = AtomicInteger()
+            val main = Handler(Looper.getMainLooper())
+            repeat(1_000) {
+                main.post {
+                    isolation.currentScope()
+                    reads.incrementAndGet()
+                }
+            }
+            val started = SystemClock.elapsedRealtime()
+            isolation.switchTo("host-b")
+            val elapsed = SystemClock.elapsedRealtime() - started
+            check(reads.get() > 0) { "主线程未能并发读取 Cookie 作用域" }
+            assertEquals("host-b", isolation.currentScope())
+            check(elapsed < 2_500) { "Cookie 切换等待过久：${'$'}elapsed ms" }
+        } finally {
+            clearCookies(manager)
+            prefs.edit().clear().commit()
+        }
+    }
+
+    @Test
+    fun switchIsRejectedWhenOldPageCannotBeStopped() = runBlocking(Dispatchers.IO) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("dsh-cookie-guard-${System.nanoTime()}", 0)
+        val isolation = DshCookieIsolation(
+            CookieManager.getInstance(),
+            SharedPreferencesKeyValueStore(prefs),
+            guardProvider = {
+                object : com.tanuki.runtime.DshCookieSwitchGuard {
+                    override fun beforeSwitch(): Boolean = false
+                    override fun afterSwitch() = Unit
+                }
+            }
+        )
+        try {
+            val failed = runCatching { isolation.switchTo("host-b") }.exceptionOrNull()
+            assertTrue(failed is IllegalStateException)
+            assertEquals("local", isolation.currentScope())
+        } finally {
+            clearCookies(CookieManager.getInstance())
+            prefs.edit().clear().commit()
+        }
+    }
+
+    /** 与生产实现一致：从主 Looper 发起删除，IO 测试线程等待回调。 */
+    private fun clearCookies(manager: CookieManager) {
+        val latch = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            manager.removeAllCookies { latch.countDown() }
+        }
+        check(latch.await(3, TimeUnit.SECONDS)) { "Cookie 清理回调超时" }
+        manager.flush()
+    }
+}

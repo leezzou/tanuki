@@ -31,7 +31,8 @@ licenses/ANDROID-DEPENDENCIES.md and licenses/android-runtime-dependencies.json)
 Apache-2.0 license text is included in licenses/Apache-2.0.txt.
 
 * AndroidX WebKit 1.10.0, Activity 1.9.0, Compose UI 1.10.3, Material3 1.4.0,
-  Lifecycle 2.9.4: Apache-2.0, https://android.googlesource.com/platform/frameworks/support/
+  Lifecycle 2.9.4, WorkManager 2.9.1, Room 2.5.0 and SQLite 2.3.0: Apache-2.0,
+  https://android.googlesource.com/platform/frameworks/support/
 * Backdrop 1.0.6: Apache-2.0, https://github.com/Kyant0/AndroidLiquidGlass
   Copyright 2025 Kyant. The published library is used without modification.
   Tanuki references the sampling/layout approach of the upstream LiquidBottomTabs
@@ -46,6 +47,12 @@ Apache-2.0 license text is included in licenses/Apache-2.0.txt.
 * JSpecify 1.0.0: Apache-2.0, https://github.com/jspecify/jspecify
 * Apache Commons Compress 1.27.1 and transitive Commons libraries: Apache-2.0,
   https://commons.apache.org/proper/commons-compress/
+* JSch 2.28.8 (mwiede fork): Revised BSD, JZlib Revised BSD and jBCrypt ISC,
+  https://github.com/mwiede/jsch
+  SHA-256 2afca1357d816028f2ac33f22407d2488a68406682973949cebb1b8ea6688a8b.
+  Pure Java SSH2 client used only for the direct SSH tunnel and host-key check;
+  see licenses/JSch-BSD.txt, licenses/JSch-JZlib.txt and
+  licenses/JSch-jBCrypt.txt.
 * Gradle Wrapper 8.13: Apache-2.0, https://github.com/gradle/gradle/tree/v8.13.0
   Wrapper JAR SHA-256 81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f
   Gradle distribution SHA-256 20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78
