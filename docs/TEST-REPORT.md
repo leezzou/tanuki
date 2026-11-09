@@ -22,6 +22,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，38 个结果文件、228 tests / 0 failures / 0 errors / 0 skipped；新增 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项。
   - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL（2m8s）。
   - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+- PR #27 head `2d3005e` 的 Host scripts 与 Android build/JVM/lint CI 均通过（Android 5m1s）。
 - 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
 
 ## 后台更新检查验证（2026-11-09，android_agent-24，非设备）
