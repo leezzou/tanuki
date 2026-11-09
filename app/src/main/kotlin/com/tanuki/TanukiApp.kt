@@ -8,6 +8,10 @@ class TanukiApp : Application() {
         private set
     val updates by lazy { com.tanuki.update.UpdateManager(runtime) }
     val appUpdates by lazy { com.tanuki.update.ApplicationUpdateManager(this) }
+    /** Tanuki APK 的后台检查状态，独立于 ApplicationUpdateManager 的下载/安装流程。 */
+    val apkUpdateChecks by lazy { com.tanuki.update.ApkUpdateCheckRepository(this, runtime.paths) }
+    /** DSH 引擎的后台检查状态，独立于 UpdateManager 的版本列表与安装事务。 */
+    val dshUpdateChecks by lazy { com.tanuki.update.DshUpdateCheckRepository(runtime.paths) }
     var browserController: com.tanuki.browser.AgentBrowserController? = null
         private set
     fun acquireBrowser(): com.tanuki.browser.AgentBrowserController {
@@ -46,6 +50,8 @@ class TanukiApp : Application() {
         android.webkit.WebView.enableSlowWholeDocumentDraw()
         cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("tanuki-blob-") }?.forEach { it.delete() }
         runtime = RuntimeManager(this)
+        // 两个唯一周期任务由 WorkManager 持久化；UPDATE 保证重复启动不会堆积同名任务。
+        com.tanuki.update.UpdateCheckScheduler.schedule(this)
         // 安装器可能跨进程预读APK；恢复有期限的只读授权，不恢复任何安装动作。
         com.tanuki.update.ApkInstallAccess.restore(this)
     }

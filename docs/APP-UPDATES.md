@@ -13,6 +13,22 @@
 
 实现：[`ApplicationUpdateManager.kt`](../app/src/main/kotlin/com/tanuki/update/ApplicationUpdateManager.kt)、[`AppReleaseManifest.kt`](../app/src/main/kotlin/com/tanuki/update/AppReleaseManifest.kt)、[`AppUpdatePolicy.kt`](../app/src/main/kotlin/com/tanuki/update/AppUpdatePolicy.kt)。
 
+## 后台周期检查（APK 与 DSH 独立）
+
+应用用 WorkManager 注册两个唯一周期任务，均要求联网；它们是系统尽力调度，省电模式或 OEM 后台限制可能推迟，不承诺精确到分钟，也不替代用户主动检查。
+
+- **Tanuki APK**：`tanuki-apk-update-check`，每 **30 分钟**。只读取稳定 Release 的 `https://github.com/leezzou/tanuki/releases/latest/download/app-update.json`，用当前安装的 `BuildConfig.VERSION_CODE` 与清单中同包名条目比较；发现更高版本只记录并提示，不下载、不安装。debug/预发布渠道的候选发现仍走“设置 → 应用更新 → 检查更新”的 Atom 流程。
+- **DSH 引擎**：`dsh-engine-update-check`，每 **24 小时**。先读 `https://registry.npmmirror.com/@deepseek-ai%2Fdsh`，网络失败或元数据不完整时回退 `https://registry.npmjs.org/@deepseek-ai%2Fdsh`；连接/读取超时各 12 秒。只比较 `dist-tags.latest` 与已安装 `installed.json` 的 `dsh` 版本，不触发下载、安装、快照或 `UpdateManager` 事务。
+
+两份状态独立持久化，不能互相覆盖：
+
+- `files/state/apk-update-check.json`：`lastCheckedAt`、`latestVersion/Code`、`available`、`lastError/At`、`notifiedVersion`。
+- `files/state/dsh-update-check.json`：`lastCheckedAt`、`latestVersion`、`available`、`source`、`lastError/At`、`notifiedVersion`。
+
+前台入口：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动“检查更新”仍可用，并同步独立后台快照而不重复联网。后台发现新版本且通知权限允许时，分别通过 `updates` 通知渠道提示一次；同一版本由持久化 `notifiedVersion` 去重，不重复骚扰，不自动下载/安装。Android 13+ 未授予 `POST_NOTIFICATIONS` 时静默跳过，手动检查入口会顺带申请权限。检查失败只记录时间和简短原因，不弹错误、不影响应用使用；最小查询间隔 60 秒避免重复请求。
+
+实现：[`BackgroundUpdateChecks.kt`](../app/src/main/kotlin/com/tanuki/update/BackgroundUpdateChecks.kt)、[`BackgroundUpdateRepositories.kt`](../app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt)、[`UpdateCheckWorkers.kt`](../app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt)、[`UpdateNotifier.kt`](../app/src/main/kotlin/com/tanuki/update/UpdateNotifier.kt)。
+
 ## 下载与安装
 
 1. 检查当前安装的实际包名/证书，仅接受同包名、同签名证书、适配当前 Android 且 `versionCode` 更高的候选。不跨 `com.tanuki.modern.workspacecheck` / `com.tanuki.modern` 迁移。

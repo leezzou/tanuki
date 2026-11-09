@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
     private val manager get() = (application as TanukiApp).runtime
     private val updates get() = (application as TanukiApp).updates
     private val appUpdates get() = (application as TanukiApp).appUpdates
+    private val apkUpdateChecks get() = (application as TanukiApp).apkUpdateChecks
+    private val dshUpdateChecks get() = (application as TanukiApp).dshUpdateChecks
     private lateinit var browser: DshWebView
     private val dshWindowMode by lazy { com.tanuki.ui.DshWindowMode(window) }
     private var agentBrowser: AgentBrowserController? = null
@@ -186,6 +188,15 @@ class MainActivity : ComponentActivity() {
         manager.event(if (granted) "通知权限已授予" else "通知权限未授予；可在系统设置开启")
     }
 
+    /** 手动触发更新检查时顺带申请通知权限；拒绝后后台检查仍静默运行。 */
+    private fun requestUpdateNotifications() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     fun action(name: String, version: String? = null) {
         if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -235,6 +246,8 @@ class MainActivity : ComponentActivity() {
                 val transfers by manager.fileTransfers.state.collectAsState()
                 val phoneWriteAllowed by manager.phoneFiles.writeAllowed.collectAsState()
                 val appUpdate by appUpdates.state.collectAsState()
+                val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
+                val dshUpdateCheck by dshUpdateChecks.state.collectAsState()
                 val nodeRequirement=remember(s.dsh,components.dshInstalled) { manager.components.dshNodeRequirement(s.dsh).orEmpty() }
                 val ubuntuSources=remember(components.selectedUbuntuVersion) { manager.components.sources(RuntimeComponent.UBUNTU) }
                 val nodeSources=remember(components.selectedNodeVersion) { manager.components.sources(RuntimeComponent.NODE) }
@@ -284,13 +297,30 @@ class MainActivity : ComponentActivity() {
                         isAppearanceLightNavigationBars = !dark
                     }
                 }
+                // 手动检查已有结果时同步独立后台快照，避免同一入口出现相反结论；不重复联网。
+                LaunchedEffect(appUpdate.phase, appUpdate.candidate?.versionName) {
+                    withContext(Dispatchers.IO) {
+                        when (appUpdate.phase) {
+                            com.tanuki.update.AppUpdatePhase.AVAILABLE ->
+                                appUpdate.candidate?.let { apkUpdateChecks.recordManual(it) }
+                            com.tanuki.update.AppUpdatePhase.CURRENT -> apkUpdateChecks.recordManual(null)
+                            else -> Unit
+                        }
+                    }
+                }
+                LaunchedEffect(s.candidate, s.dsh) {
+                    if (s.candidate.isNotBlank() && com.tanuki.update.BackgroundUpdateChecks.isValidVersion(s.dsh)) {
+                        withContext(Dispatchers.IO) { dshUpdateChecks.recordManualLatest(s.candidate) }
+                    }
+                }
                 TanukiUi(
                     model = TanukiUiModel(s, webSupport, versions, emptyList(), storageUsage, deviceInfo,
                         backgroundResult, legacyShim, blobExport, BuildConfig.VERSION_NAME, freeBytes,liveLogs=manager.log.recent,
                         components=components,ubuntuSources=ubuntuSources,nodeSources=nodeSources,
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
                         tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
-                        appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen),
+                        appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
+                        apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -302,6 +332,7 @@ class MainActivity : ComponentActivity() {
                         },
                         install = { release -> selected = release; confirmation = "UPDATE" },
                         checkUpdates = updates::check,
+                        checkDshUpdate = { requestUpdateNotifications(); dshUpdateChecks.startCheck(force = true) },
                         importFiles = { importFiles.launch(arrayOf("*/*")) },
                         measureStorage = {
                             storageUsage = "正在统计实际分配空间…"
@@ -364,7 +395,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         openBrowserOverlay = ::requestBrowserOverlay,
-                        checkAppUpdates = appUpdates::check,
+                        checkAppUpdates = { requestUpdateNotifications(); appUpdates.check() },
                         downloadAppUpdate = appUpdates::download,
                         installAppUpdate = ::confirmApplicationUpdate,
                         cancelAppUpdate = appUpdates::cancel

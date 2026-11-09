@@ -51,6 +51,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.tanuki.R
 import com.tanuki.runtime.*
 import com.tanuki.storage.WorkspaceStorageState
+import com.tanuki.update.ApkUpdateCheckState
+import com.tanuki.update.DshUpdateCheckState
 import com.tanuki.update.Release
 import com.tanuki.web.WebViewSupport
 import com.tanuki.web.WebViewSupportState
@@ -86,6 +88,8 @@ data class TanukiUiModel(
     val liveLogs: kotlinx.coroutines.flow.StateFlow<List<String>>? = null,
     val appUpdate: com.tanuki.update.AppUpdateState = com.tanuki.update.AppUpdateState(),
     val appInstallAllowed: Boolean = false,
+    val apkUpdateCheck: ApkUpdateCheckState = ApkUpdateCheckState(),
+    val dshUpdateCheck: DshUpdateCheckState = DshUpdateCheckState(),
     val fileFullscreen: Boolean = false
 )
 
@@ -93,6 +97,7 @@ data class TanukiUiCallbacks(
     val command: (String) -> Unit,
     val install: (Release) -> Unit,
     val checkUpdates: () -> Unit,
+    val checkDshUpdate: () -> Unit = {},
     val importFiles: () -> Unit,
     val measureStorage: () -> Unit,
     val toggleLegacy: (Boolean) -> Unit,
@@ -417,7 +422,11 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             probeKey=comps.selectedNodeVersion,onPrepare={c.prepareSources(RuntimeComponent.NODE)}) })
 
     if(!guided)HorizontalDivider(Modifier.padding(horizontal=16.dp),color=MaterialTheme.colorScheme.outlineVariant)
-    if(guideStep==null || guideStep==3)ComponentDisclosure("DSH",if(comps.dshInstalled)s.dsh else "官方开发引擎",comps.dshInstalled,dshSwitching,guided=guided) {
+    val dshSummary = buildString {
+        append(if (comps.dshInstalled) s.dsh else "官方开发引擎")
+        model.dshUpdateCheck.badgeText()?.let { append(" · $it") }
+    }
+    if(guideStep==null || guideStep==3)ComponentDisclosure("DSH",dshSummary,comps.dshInstalled,dshSwitching,guided=guided) {
         val dshProgress=download?.takeIf { it.component.equals("dsh",ignoreCase=true) }
         if(dshProgress!=null) {
             ComponentDownloadProgress(ComponentProgressModel(s.stage,dshProgress.source,dshProgress.received,dshProgress.total,dshProgress.bytesPerSecond,dshProgress.reused))
@@ -426,6 +435,7 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Caption("解析、校验与安装无法准确估算总量；上方显示耗时和当前进展。")
         }
+        DshUpdateStatus(model.dshUpdateCheck, c.checkDshUpdate)
         SourceSpeedControls("DSH 依赖",model.npmSources.map { ComponentSourceOption(it.id,it.title,it.detail) },model.npmSelection.id,
             model.npmSpeed,actionsEnabled,!s.tanukiBusy && !model.ubuntuSpeed.running && !model.nodeSpeed.running,
             {c.testNpmSources(selected?.version ?: RuntimeManager.DSH)},c.cancelNpmSourceTests,c.selectNpmSource,
@@ -437,7 +447,7 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
                 modifier=Modifier.weight(1f).heightIn(min=48.dp),shape=MaterialTheme.shapes.medium) {
                 Text(if(model.versions.isEmpty())"获取官方版本" else "选择版本安装")
             }
-            TextButton(onClick=c.checkUpdates,enabled=!s.tanukiBusy,modifier=Modifier.heightIn(min=48.dp)) { Text("刷新") }
+            TextButton(onClick=c.checkUpdates,enabled=!s.tanukiBusy,modifier=Modifier.heightIn(min=48.dp)) { Text("刷新版本列表") }
         }
         // 已安装清单与“官方发布列表”分开：前者管理本机程序，后者负责下载/安装。
         OutlinedButton(onClick={showInstalledDsh=true},enabled=!s.tanukiBusy,
@@ -586,7 +596,8 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     }
     if (section == "应用更新") {
         ApplicationUpdateCard(model.appUpdate, model.versionName, model.appInstallAllowed,
-            c.checkAppUpdates, c.downloadAppUpdate, c.installAppUpdate, c.cancelAppUpdate)
+            c.checkAppUpdates, c.downloadAppUpdate, c.installAppUpdate, c.cancelAppUpdate,
+            background = model.apkUpdateCheck)
         return
     }
     if (section == "组件维护与诊断") { EnvironmentSection(model, c); return }
@@ -741,6 +752,39 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                     TanukiIcon(TanukiGlyph.Contract, "退出全屏")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DshUpdateStatus(state: DshUpdateCheckState, onCheck: () -> Unit) {
+    val lastChecked = remember(state.lastCheckedAt) {
+        if (state.lastCheckedAt <= 0L) "尚未检查"
+        else runCatching { java.text.SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(java.util.Date(state.lastCheckedAt)) }
+            .getOrDefault("未知")
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("版本更新", style = MaterialTheme.typography.titleSmall)
+                state.badgeText()?.let { StatusPill(it, true) }
+            }
+            Text(when {
+                state.installedVersion.isBlank() -> "尚未安装 DSH；安装后可比较官方最新版本。"
+                state.available && state.latestVersion.isNotBlank() -> "已安装 ${state.installedVersion} · 最新 ${state.latestVersion}"
+                else -> "已安装 ${state.installedVersion} · 已是最新版本"
+            }, style = MaterialTheme.typography.bodySmall)
+            Caption(buildString {
+                append("后台每 24 小时检查一次（需联网）")
+                append(" · 上次 $lastChecked")
+                if (state.source.isNotBlank()) append(" · ${state.source}")
+                if (state.status == com.tanuki.update.UpdateCheckStatus.FAILED) append(" · 上次未成功，将按周期重试")
+            })
+        }
+        TextButton(onClick = onCheck, enabled = !state.checking,
+            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "检查 DSH 更新" }) {
+            Text(if (state.checking) "检查中…" else "检查更新")
         }
     }
 }

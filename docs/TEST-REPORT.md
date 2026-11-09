@@ -14,6 +14,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## 后台更新检查验证（2026-11-09，android_agent-24，非设备）
+
+- 范围：Tanuki APK 每 30 分钟检查 GitHub `app-update.json`；DSH 每 24 小时检查 npmmirror（失败回退官方 npm）；两份状态独立持久化；同版本通知去重；前台徽标与手动检查保留。未改 DSH 下载/安装逻辑。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（3m36s，19 tasks）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.BackgroundUpdateChecksTest'` → BUILD SUCCESSFUL，16 tests / 0 failures。
+  - `./gradlew :app:testModernDebugUnitTest --stacktrace` → BUILD SUCCESSFUL，148 tests / 0 failures / 0 errors / 0 skipped（27 个结果文件）。
+- 新增回归：`BackgroundUpdateChecksTest` 覆盖 30 分钟/24 小时间隔与唯一任务名、12 秒超时范围、APK 版本选择与同/低版本不误报、APK/DSH 状态不可串读、镜像成功不访问官方、镜像损坏/网络失败回退、双源失败保留最近结果并记录错误、成功清除错误、SemVer 预发布比较、同版本只通知一次、最小查询间隔、CHECKING 不持久化、损坏状态回退。
+- 未执行：lint、assemble、Android 仪器/真实设备、真实 GitHub/npmmirror/npm 请求、WorkManager 实际触发/重启恢复、Android 13 通知权限与展示、深色/大字体 UI。编译与 JVM 不能替代设备与真实网络验收。
+
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
 - 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
@@ -44,13 +54,13 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 - 修复 InputConnection 在输入法后台线程回调时直接触发 WebView 输入导致的主线程断言闪退；六种被拦截输入先同步转投主线程做授权判断，主线程直接调用不排队，后台最多等待 500ms，超时/中断拒绝本次输入并取消排队判断。
 - 历史记录：97 JVM 通过（0 失败/错误/跳过），lint 0 错误/71 警告/1 Hint；新增 6 项及 16 项关联设备用例通过，最终设备共 22 项（含 `AgentBrowserControlTest` 14 项与 `BrowserTabLifecycleTest` 2 项，70.441 秒），环境为 Pixel_7_API_34_arm64/emulator-5554、API34/ARM64/WebView159。
-- 上述均为历史记录，未在本轮复跑；0.1.8 合并了该修复，但没有随 0.1.8 的独立设备测试报告。详见 [历史交接](handoffs/20261105-1509-browser-input-thread.md)。
+- 上述均为历史记录，未在本轮复跑；0.1.8 合并了该修复，但没有随 0.1.8 的独立设备测试报告。实现边界见[浏览器工作区](BROWSER-WORKSPACE.md)。
 
 以下章节均为历史记录，未在 2026-11-06 本轮复跑。
 
 ## 历史：视频控制与DSH手机文件独立写许可（2026-11-05，当时debug）
 
-- 用户最终更正为“默认给读权限，写权限需要专门给”。实现与范围见[本轮交接](handoffs/20261105-1625-video-shared-storage.md)和[项目存储](WORKSPACE-STORAGE.md)：真实共享卷不直接绑定Ubuntu，DSH通过受管手机文件Skill/原生RPC默认读取；原生本次写许可可撤销，停止或重启恢复只读，旧请求及异步权限回调不能借用新运行期许可。官方DSH审批/沙箱设置未变。
+- 用户最终更正为“默认给读权限，写权限需要专门给”。实现与范围见[项目存储](WORKSPACE-STORAGE.md)：真实共享卷不直接绑定Ubuntu，DSH通过受管手机文件Skill/原生RPC默认读取；原生本次写许可可撤销，停止或重启恢复只读，旧请求及异步权限回调不能借用新运行期许可。官方DSH审批/沙箱设置未变。
 - 最终串行modern debug/app-test/JVM/lint构建1分53秒、86任务通过；**104 JVM，0失败/错误/跳过；lint0错误/79警告/1Hint**。另客户端13项宿主HTTP/CLI回归通过（1.041秒，零失败/取消/跳过），包含分块、版本冲突不重试覆盖、20/120秒有界超时及不输出能力凭据。
 - 最终验证APK为workspacecheck、debuggable=true、0.1.7/code9、min26/target34、ARM64，14,813,669字节，SHA256 `6d2a91ff4ae1e075446c07836a61790fe982b77d220fcc4ff5cf54417fe5bf3e`，沿用开发证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；配套test APK实际target独立核验后install-r。不把它当新release，已交付0.1.7六附件保持原样。
 - 按方法去重，**48个不同目标设备用例最终通过，无跳过**。复用Pixel_7_API_34_arm64/emulator-5572、ARM64/API34；最终47项授权组44过/3败（137.269秒），原样3项复查2过/1败（26.135秒），无权限单项通过（0.143秒）。仅修正视频测试的滑块动作节点等待/定位及不同目标选择，app-test/lint重建1分10秒通过，产品APK SHA保持不变；视频整类3项通过（12.688秒）。两项旧UI原样复查通过，首败原因未定位；不能称首组全绿。

@@ -1,6 +1,7 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；不改下载加速、更新检查周期、协议或 0.1.8 附件。
+当前交接：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR 待创建）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。F1 [文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（PR #16 已合并为 `41609cb`）、W5 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 继续保留。本轮由 android_agent-24 从 `origin/main=5c680b9` 创建 `ao/workmanager-updates/background-update-check`，实现独立后台更新检查；不改 DSH 下载/安装逻辑、视频全屏、文件预览、协议、AO 配置或 0.1.8 附件。
+当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md）保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；不改下载加速、更新检查周期、协议或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
@@ -9,6 +10,16 @@
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
 - main CI 以 PR #13 合并后的 Actions 结果为准；Android job 使用 `-x buildNativeRuntime` 且仓库不跟踪 `jniLibs`，CI APK 无原生 `.so`，不能用于设备验收。
+
+### 后台更新检查（android_agent-24，PR 待创建）
+
+- 分支 `ao/workmanager-updates/background-update-check`，基线 `origin/main=5c680b9`；独立 `/tmp` clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
+- WorkManager 依赖 `androidx.work:work-runtime-ktx:2.9.1`；两个唯一周期任务：APK `tanuki-apk-update-check` 每 30 分钟、DSH `dsh-engine-update-check` 每 24 小时，均要求联网。
+- APK 只读稳定 Release `app-update.json` 并与 `BuildConfig.VERSION_CODE` 比较；DSH 先读 npmmirror，失败/结构不完整回退官方 npm，连接与读取超时各 12 秒；均只提示，不自动下载/安装，不改 DSH 下载逻辑。
+- 状态分离：`apk-update-check.json` 与 `dsh-update-check.json` 各自保存 `lastCheckedAt/latest/available/lastError/notifiedVersion`；不复用 `AppUpdateState` 或 `RuntimeManager` 的 `UpdateState`。
+- 前台：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动检查保留并同步独立后台快照，不重复联网。后台：`updates` 通知渠道按版本去重；Android 13+ 检查 `POST_NOTIFICATIONS`，手动检查入口顺带申请；失败静默记录。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，148 tests / 0 failures / 0 errors / 0 skipped；新增 `BackgroundUpdateChecksTest` 16 项。
+- 待验证：真实 WorkManager 调度/重启恢复、通知权限与展示、真实 GitHub/npmmirror/npm 请求、设备 UI；lint/assemble/仪器未跑。独立 Codex High Review、合并与发布未授权/未完成。
 
 ## Phase 2 交付状态
 
@@ -65,26 +76,29 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-25 新跑）：`compileModernDebugKotlin`、`testModernDebugUnitTest` 与 `lintModernDebug` 通过，151 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 7/7、`DshSwitchTest` 12/12；`check-handoff.py` 当前。
+- 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，148 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 16 项全过。未跑 lint/assemble/设备/真实网络。
+当前交接：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）。并行记录：[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 待重审）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md）保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；不改下载加速、更新检查周期、协议或 0.1.8 附件。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（F1 本轮）：`compileModernDebugKotlin` 与 `testModernDebugUnitTest` BUILD SUCCESSFUL；126 JVM，0 失败/错误/跳过；新增分类、DOCX 合成 zip（多段/空段/DOCTYPE/未定义实体/数字引用/CDATA/超限/损坏）、缩放 clamp/边界/重置、PDF 渲染上限回归。真实命令与限制见 1647 交接。
 - 已验证（PR #14 rebase 后复跑，历史）：`check-handoff.py --record ...` 刷新印章；`check-handoff.py` 当前；`test-development-gates.py` 28 项离线通过（含 app 内 SKILL.md 必须 QA、根目录 Markdown 豁免、AO 查询阶段 head/状态变化拒绝）；`test-agent-workflow.py` 19 项与目标 device-lock 用例 10/10 通过；`check-publication.py --git` 0 findings；`package-source.py` 生成源码包与校验清单（工作材料，不提交）。真实输出见 1415 交接记录。
 - 已验证（#13/#15、W8 当时，历史）：宿主 mock/并发回归 19 tests OK（76.760s）；设备门禁脚本 `--help` 与 `bash -n` 通过；main/CI/设备 metadata 只读核对。
 - 已验证（W5 前轮，历史）：24 项门禁离线回归；真实 `gh`/`ao` 只读 CLI 格式核对。
 - 已验证（W2/W3/W1 前轮，历史）：worktree 构建引导、CI/RPC 契约、文档门禁恢复。
-- 待验证：视频全屏 PR #17 的独立 Codex High Review 与设备旋转/恢复验收（`d5b83fe` 的批准不绑定 rebase 后的新 head，需重审）；F1 的设备手势/PDF/DOCX 验收；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
+- 待验证：后台更新检查的真实 WorkManager 调度/重启恢复、Android 13 通知权限与展示、真实 GitHub/npmmirror/npm 网络、设备徽标 UI；视频全屏 PR #17 的独立 Codex High Review 与设备旋转/恢复验收（`d5b83fe` 的批准不绑定 rebase 后的新 head，需重审）；F1 的设备手势/PDF/DOCX 验收；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 ## 环境与阻塞
 
-- 当前分支：视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。视频轮在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
+- 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（基于 `origin/main=5c680b9`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
 - 无当前产品修复阻塞；PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. PR #17：由 Orchestrator 触发当前 head 的独立 Codex High Review（`d5b83fe` 已有批准，新 head 需重审）；设备旋转验收另行授权后执行。
-2. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-3. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
-4. F1 设备 QA 覆盖图片双指/双击/平移边界、PDF 翻页/缩放/加密/损坏/无页、DOCX 多段/超限/复杂格式提示与深色主题；设备须无真实任务并记录 AVD/serial。
-5. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+1. 后台更新检查：在独立 `/tmp` clone 提交并推送 `ao/workmanager-updates/background-update-check`，创建 PR；由 Orchestrator/用户决定当前 head 的独立 Codex High Review。
+2. 后台更新检查设备 QA（另行授权）：验证 30 分钟/24 小时周期、重启保留、Android 13 权限、同版本只通知一次、失败静默、APK/DSH 徽标独立。
+3. PR #17：由 Orchestrator 触发当前 head 的独立 Codex High Review（`d5b83fe` 已有批准，新 head 需重审）；设备旋转验收另行授权后执行。
+4. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
+5. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+6. F1 设备 QA 覆盖图片双指/双击/平移边界、PDF 翻页/缩放/加密/损坏/无页、DOCX 多段/超限/复杂格式提示与深色主题；设备须无真实任务并记录 AVD/serial。
+7. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
