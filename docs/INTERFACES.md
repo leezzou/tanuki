@@ -191,6 +191,17 @@ HTTP 200..399 或 401 → 存活
 - 通知身份与正文：通知使用会话 tag + 固定通知 id，跨进程更新同一会话而不覆盖其他会话；PendingIntent 的 action/data 绑定会话。每个通过策略去重的新事件都再次提醒，摘要静默。正文仅使用 `ChatNotificationCopy` 的四类固定最小文案；应用内总开关、系统权限/渠道设置可关闭或调整。
 - 限制：需要 WebView 支持 `DOCUMENT_START_SCRIPT`/`WEB_MESSAGE_LISTENER`（当前最低 WebView 123 覆盖）；DSH 升级若调整转发事件表或侧栏 `data-*` 属性，必须先更新本节和回归；页面在回合已运行时才加载，靠会话行 `[data-state="ongoing"]` 补种一次 running；错误以官方 `api-session/error` 为准，若某类失败只写入 `turn/end` 而不触发该事件，只能按回合完成提示；WebView 后台节流和 ROM 后台限制可能延迟事件。
 
+### 1.7 可选原生界面的官方 DSH 接口
+
+设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话，不另造协议：
+
+- 认证：同一启动 token 调 `GET /connect?token=...&interactions=none`，只取签名 API Cookie；不跟随 302。
+- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
+- 实时流/审批：官方 `session/follow`、`session/control` 与审批 waterfall 只经 `/api/remote.mux` WebSocket；原生最小切片未实现，列表失败时回退官方界面。
+- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebView 同源与 Cookie 策略不变。
+
+细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
+
 ## 2. 工具面：Browser RPC
 
 ### 2.1 传输与认证

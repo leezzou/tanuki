@@ -8,7 +8,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（改造后增量 3m08s）。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Pdf*' --tests 'com.tanuki.ZoomPolicyTest'` → BUILD SUCCESSFUL，52 tests / 0 failures（PDF 相关 46 + `ZoomPolicyTest` 6）。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=b9eeb75`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，365 tests / 0 failures / 0 errors / 0 skipped（rebase 到 `main=0ba11da`，含 main 既有 306 项）；`./gradlew :app:lintModernDebug` 通过。
 - 新增回归 59 项：`PdfPageCacheTest` 8（LRU、保护键、超大单页、替换记账、remove/clear、非法参数）；`PdfPageMemoryTest` 14（淘汰回收、显示中延迟回收、关闭全回收、同页替换延迟回收、touch、关闭后存入、显示标记、discard 预算移除与延迟回收）；`PdfPreloadPolicyTest` 10（当前页优先、边界、半径、大文档小窗口、非法半径；可见页 >3 时全部进入渲染计划、首尾预加载、去重/边界、计划大小有界）；`PdfMemoryPolicyTest` 6（堆比例预算上下限、单页像素上限、驻留页数联动上限、位图字节记账、512 MiB 文件限制、渲染计划 + 在途页联合预算）；`PdfJumpPolicyTest` 4（纯数字/`12/50`/`第12页` 解析、越界与非法输入、文案）；`PdfViewportPolicyTest` 10（适应宽度/整页、缩放范围、平移边界、缩放锚点、非 1× 连续放大/缩小补偿、1–5× 首尾可达、中心页判定、页间空隙）；`PdfViewportRenderPolicyTest` 7（A4 视口尺寸、未知视口回退、超大/窄/小页面、像素预算、超采样）。既有 `PdfRenderPolicyTest` 4 项与 `ZoomPolicyTest` 6 项不回归。
 - 复审修复（Codex 3 条 P2）：
   - 缩放后的首尾内容进入滚动范围：按 `H×(scale−1)/(2×scale)` 增加上下边缘留白，1× 为 0；单页与多页（1/3/20 页）在 1/1.5/2/2.5/4/5× 下首尾文字均可达。补偿延迟到下一帧（新留白完成测量后）执行，避免旧滚动边界截断。
@@ -41,7 +41,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，D8 正常打包 `com.github.mwiede:jsch:2.28.8`。
   - 远程分支 `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、**229 tests / 0 failures / 0 errors / 0 skipped**。
-  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，54 个结果文件、**396 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/94 warnings。
+  - 合入 `main=5fd1ab4`（安全模式 + XLSX 预览）后 `compileModernDebugKotlin` + `testModernDebugUnitTest` + `lintModernDebug` → BUILD SUCCESSFUL，57 个结果文件、**424 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors/95 warnings。
   - Review 修复后 `-PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；新增 Cookie 隔离与 Keystore 设备回归已编译，未运行。
   - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 80 warnings / 1 hint**；新增文件无 lint 告警。
   - `./gradlew -I scripts/dependency-inventory.init.gradle tanukiDependencyInventory` → 91 runtime artifacts；随后 `python3 scripts/collect-component-licenses.py` 刷新依赖许可清单。
@@ -54,7 +54,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
 - 实际执行：
   - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
-  - 合并 `origin/main=c2f1b44` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
+  - 合并 `origin/main=0ba11da` 后 `./gradlew -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m54s）；45 个结果文件、306 tests / 0 failures / 0 errors / 0 skipped，含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项及 main 的安全模式/聊天通知/XLSX 回归。
   - `./gradlew :app:lintModernDebug` → 合并后与 JVM 同次 BUILD SUCCESSFUL。
   - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
 - 合并冲突已解决；推送后以新 head 的 Host/Android CI 为准。
@@ -75,6 +75,20 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - CI：PR #25 的 push run 42602010730 与 PR run 42602805776 均 success（Host scripts + handoff；Android assemble/JVM/lint）。Android CI 使用 `-x buildNativeRuntime`，其 APK 无原生 `.so`，不能用于设备验收。
 - 未执行：assemble、Android 仪器/真实设备、PRoot 内实际 rescue 启动、真实 DSH 崩溃/低内存/磁盘满注入、UI 视觉与大字体/深色验证；rebase 后 `lintModernDebug` BUILD SUCCESSFUL。JVM 策略测试不能替代真机运行与恢复验收。
 - 未验证项：真机崩溃与低内存、真实磁盘满、真实插件配置导致启动失败、安全模式与用户数据的实际隔离效果。PR/独立 Review/合并未授权或未完成。
+
+## 原生界面切换验证（2026-11-09，android_agent-33，非设备）
+
+- 范围：新增“官方界面 / 原生界面”开关；默认官方；原生只读页通过官方 DSH `session/list`、`session/projections`、`session/page` 读取会话与文本消息；仅显示 append-origin（`surfaceOp=append`）且 `source.kind=user` 的文本；列表接口失败自动回退官方界面并保留用户偏好；切换不重启 DSH、不重建 WebView、不修改官方数据。
+- 分支/基线：`ao/ui-switch/native-ui`，已 rebase 到 `main=0ba11da`（PR #24 PDF、PR #27 cold-start、PR #23 XLSX、PR #25 runtime-safe-mode、PR #22 chat-notify 合并后）；rebase 后为单一提交，代码无冲突，文档保留 PDF/cold-start/XLSX 记录。
+- 实际执行（rebase 后，`/tmp` clone；跳过 `buildNativeRuntime`）：
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime` → BUILD SUCCESSFUL，393 tests / 0 failures / 0 errors / 0 skipped。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - 新增 `DshUiSwitchTest` 10 项：默认官方、原生需运行、回退不改偏好、`/connect` 同 token、拒绝非 loopback/坏 method、官方信封、端点脱敏。
+  - 新增 `DshNativeControllerTest` 6 项：原生通知目标冷启动、已加载页面替换选择、目标不在列表仍可见、原生列表失败保留目标给官方回退、当前会话通知强制重读历史、通知决策+分发集成。
+  - 新增 `DshNativeApiTest` 12 项：会话标题/切点、projection 仅 sequenced、只取 append-origin 文本/过滤 replace 与注入上下文、业务错误不回显、Cookie 提取、`rpcId` 关联、本地合成服务器验证端点顺序与 Cookie 只发 `/api`、404 错误不含 token、延迟认证期间 reset 不阻塞且旧 Cookie 不发布、reset 后旧 401 不复活、延迟 401 期间新请求不被旧请求清 Cookie。
+- 通知点击：原生偏好下目标交给 `DshNativeController.openSession()`，不依赖 WebView 是否连接；官方模式仍走现有 WebView 路由。
+- P1/P2 修复：认证网络 I/O 移出 monitor，`reset()` 只短暂持锁并按代次拒绝旧 Cookie 发布；401 重试必须属于当前代次；消息按官方 append-origin 语义过滤。
+- 未执行：assemble、仪器测试、真实设备、真实 PRoot 内 DSH 与 WebSocket/审批/发送。最终 head CI 与独立 Pi Review 以 PR 页面为准。
 
 ## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
 
