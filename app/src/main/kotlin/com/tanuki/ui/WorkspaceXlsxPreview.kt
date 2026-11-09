@@ -188,9 +188,9 @@ private fun XlsxSheetTable(sheet: XlsxSheet, scale: Float, modifier: Modifier) {
     val textSize = (12f * scale).coerceIn(9f, 22f).sp
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val headerColor = MaterialTheme.colorScheme.surfaceVariant
-    // 冻结区在手机宽度内最多展示 12 行 / 6 列，避免冻结窗格占满视口；其余仍可滚动查看。
-    val frozenRows = sheet.frozenRows.coerceIn(0, minOf(sheet.rows.size, 12))
-    val frozenColumns = sheet.frozenColumns.coerceIn(0, minOf(sheet.columnCount, 6))
+    // 冻结区在手机宽度内最多展示 8 行 / 3 列，避免冻结窗格占满视口；其余仍可滚动查看。
+    val frozenRows = sheet.frozenRows.coerceIn(0, minOf(sheet.rows.size, 8))
+    val frozenColumns = sheet.frozenColumns.coerceIn(0, minOf(sheet.columnCount, 3))
     val body = remember(frozenRows) { sheet.rows.drop(frozenRows) }
     Column(modifier) {
         // 列表头固定，与表体共用水平滚动状态。
