@@ -3,7 +3,11 @@ package com.tanuki
 import com.tanuki.storage.docx.DocxPageSetup
 import com.tanuki.ui.DocxImagePolicy
 import com.tanuki.ui.DocxImageSize
+import com.tanuki.ui.DocxBitmapLifetime
 import com.tanuki.ui.DocxPageGeometryPolicy
+import com.tanuki.ui.DocxRenderBudget
+import com.tanuki.ui.DocxTableWidths
+import com.tanuki.ui.DocxTextChunking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -111,6 +115,100 @@ class DocxLayoutPolicyTest {
         )
         assertEquals(DocxImageSize(size.widthDp, 200f), size)
         assertTrue(size.widthDp < 300f)
+    }
+
+    @Test
+    fun longParagraphChunksAreBoundedAndContiguous() {
+        val text = "词".repeat(DocxTextChunking.MAX_CHARS * 2 + 123)
+        val ranges = DocxTextChunking.ranges(text)
+        assertTrue(ranges.size >= 3)
+        assertEquals(0, ranges.first().first)
+        assertEquals(text.lastIndex, ranges.last().last)
+        ranges.zipWithNext().forEach { (left, right) -> assertEquals(left.last + 1, right.first) }
+        assertTrue(ranges.all { it.last - it.first + 1 <= DocxTextChunking.MAX_CHARS })
+    }
+
+    @Test
+    fun paragraphChunkingKeepsShortTextAndSkipsSurrogateSplit() {
+        assertEquals(listOf(0..2), DocxTextChunking.ranges("abc"))
+        val emoji = "a" + "\uD83D\uDE00".repeat(DocxTextChunking.MAX_CHARS)
+        val ranges = DocxTextChunking.ranges(emoji)
+        ranges.forEach { range ->
+            val last = emoji[range.last]
+            val first = emoji[range.first]
+            assertFalse(last.isHighSurrogate())
+            assertFalse(first.isLowSurrogate())
+        }
+    }
+
+    @Test
+    fun tableWidthsNormalizeHugeColumnsWithoutIntOverflow() {
+        val widths = DocxTableWidths.normalize(
+            listOf(Int.MAX_VALUE, Int.MAX_VALUE, 10_000),
+            columnCount = 3,
+            contentWidthDp = 300f,
+        )
+        assertEquals(3, widths.size)
+        assertTrue(widths.all { it.isFinite() && it >= 0f && it <= 300f })
+        assertTrue(widths.sum() <= 300.5f)
+        assertEquals(widths[0], widths[1], 0.01f)
+    }
+
+    @Test
+    fun tableWidthsFallBackToEqualColumnsForMismatchedGrid() {
+        val widths = DocxTableWidths.normalize(listOf(2000), columnCount = 4, contentWidthDp = 200f)
+        assertEquals(4, widths.size)
+        widths.forEach { assertEquals(50f, it, 0.01f) }
+    }
+
+    @Test
+    fun tableColumnCountIsCapped() {
+        val widths = DocxTableWidths.normalize(emptyList(), columnCount = 10_000, contentWidthDp = 300f)
+        assertEquals(DocxTableWidths.MAX_COLUMNS, widths.size)
+        assertTrue(widths.sum() <= 300.5f)
+    }
+
+    @Test
+    fun renderBudgetStopsExactlyAtLimits() {
+        val blocks = DocxRenderBudget(maxBlocks = 2, maxAtoms = 2)
+        assertTrue(blocks.takeBlock())
+        assertTrue(blocks.takeBlock())
+        assertFalse(blocks.takeBlock())
+        assertTrue(blocks.exceeded)
+        assertFalse(blocks.takeAtom())
+    }
+
+    @Test
+    fun renderBudgetReportsAtomOverflowInsideOneBlock() {
+        val atoms = DocxRenderBudget(maxBlocks = 100, maxAtoms = 3)
+        assertTrue(atoms.takeBlock())
+        assertTrue(atoms.takeAtom())
+        assertTrue(atoms.takeAtom())
+        assertTrue(atoms.takeAtom())
+        assertFalse(atoms.takeAtom())
+        assertTrue(atoms.exceeded)
+        assertEquals(1, atoms.blocks)
+    }
+
+    @Test
+    fun bitmapLifetimeReleasesOnlyCapturedSnapshot() {
+        val released = mutableListOf<String>()
+        val lifetime = DocxBitmapLifetime<String> { released += it }
+        val initial = lifetime.snapshot()
+        val first = mapOf("a" to "A")
+        val replaced = lifetime.publish(first)
+        assertEquals(initial, replaced)
+        lifetime.release(replaced)
+        assertTrue(released.isEmpty())
+        assertEquals(first, lifetime.snapshot())
+
+        val second = mapOf("b" to "B")
+        val old = lifetime.publish(second)
+        lifetime.release(old)
+        assertEquals(listOf("A"), released)
+        assertEquals(second, lifetime.snapshot())
+        lifetime.release(lifetime.snapshot())
+        assertEquals(listOf("A", "B"), released)
     }
 
     @Test

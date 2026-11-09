@@ -32,6 +32,9 @@ class DocxPaginatorTest {
         assertEquals(3, pages.size)
         assertEquals(40f, pages[1].usedHeight, 0.001f)
         assertEquals(70f, pages[2].usedHeight, 0.001f)
+        // 页首 gap 必须清零，否则渲染高度会超过分页器计算。
+        assertEquals(0f, pages[1].atoms.single().gapBefore, 0.001f)
+        assertEquals(0f, pages[2].atoms.single().gapBefore, 0.001f)
     }
 
     @Test

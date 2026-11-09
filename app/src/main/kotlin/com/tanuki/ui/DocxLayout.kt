@@ -94,13 +94,14 @@ object DocxPaginator {
             val gap = if (current.isEmpty()) 0f else atom.gapBefore.coerceAtLeast(0f)
             if (current.isNotEmpty() && used + gap + atom.height > height + EPSILON) flush()
             if (current.isEmpty() && atom.height > height + EPSILON) {
-                current += atom
+                current += atom.copy(gapBefore = 0f)
                 used = atom.height
                 flush(overflow = true)
                 continue
             }
             if (current.isNotEmpty()) used += atom.gapBefore.coerceAtLeast(0f)
-            current += atom
+            // 页首不绘制段前距：切片内保留清零后的 gap，保证分页计算与渲染一致。
+            current += if (current.isEmpty()) atom.copy(gapBefore = 0f) else atom
             used += atom.height
         }
         flush()
@@ -169,5 +170,113 @@ object DocxImagePolicy {
     fun withinBudget(usedPixels: Long, width: Int, height: Int): Boolean {
         if (width <= 0 || height <= 0) return false
         return usedPixels + width.toLong() * height <= MAX_TOTAL_PIXELS
+    }
+}
+
+
+/**
+ * 表格列宽归一化：宽度来自文件，必须用 Long 求和，避免 Int 溢出后把列宽放大到
+ * Compose Constraints 无法表示的范围；结果保证有限、非负且总和不超过正文宽度。
+ */
+object DocxTableWidths {
+    const val MAX_COLUMNS = 256
+
+    fun normalize(widthsTwips: List<Int>, columnCount: Int, contentWidthDp: Float): List<Float> {
+        val columns = columnCount.coerceIn(1, MAX_COLUMNS)
+        val safeWidth = contentWidthDp.coerceAtLeast(1f).toDouble()
+        val weights = LongArray(columns) { 1L }
+        if (widthsTwips.size == columns) {
+            for (index in 0 until columns) weights[index] = widthsTwips[index].coerceAtLeast(1).toLong()
+        }
+        val total = weights.sum().coerceAtLeast(1L)
+        var widths = weights.map { (safeWidth * it / total).toFloat().coerceIn(0f, safeWidth.toFloat()) }
+        val sum = widths.sumOf { it.toDouble() }
+        if (sum > safeWidth && sum > 0.0) {
+            widths = widths.map { (it * safeWidth / sum).toFloat().coerceIn(0f, safeWidth.toFloat()) }
+        }
+        return widths
+    }
+}
+
+/** 渲染预算；返回 false 时调用方必须停止继续测量并标记截断。 */
+class DocxRenderBudget(val maxBlocks: Int = 1_200, val maxAtoms: Int = 12_000) {
+    var blocks: Int = 0
+        private set
+    var atoms: Int = 0
+        private set
+    var exceeded: Boolean = false
+        private set
+
+    fun takeBlock(): Boolean {
+        if (exceeded) return false
+        if (blocks >= maxBlocks) {
+            exceeded = true
+            return false
+        }
+        blocks++
+        return true
+    }
+
+    fun takeAtom(): Boolean {
+        if (exceeded) return false
+        if (atoms >= maxAtoms) {
+            exceeded = true
+            return false
+        }
+        atoms++
+        return true
+    }
+}
+
+/**
+ * 解码图片的生命周期：只释放 effect 创建时捕获的快照，不能读取最新状态，
+ * 否则首次发布新 Bitmap 会触发旧 effect 清理并回收刚显示的图片。
+ */
+class DocxBitmapLifetime<T>(private val release: (T) -> Unit) {
+    private var active: Map<String, T> = emptyMap()
+
+    fun publish(next: Map<String, T>): Map<String, T> {
+        val previous = active
+        active = next
+        return previous
+    }
+
+    fun snapshot(): Map<String, T> = active
+
+    fun release(snapshot: Map<String, T>) {
+        snapshot.values.forEach(release)
+    }
+}
+
+
+/**
+ * 长段落按字符数有界分段：单次 TextMeasurer 只处理一个分段，避免 2M 字符段落
+ * 在 UI 线程一次性排版；分段边界尽量落在空白处且不拆开代理对。
+ */
+object DocxTextChunking {
+    const val MAX_CHARS = 8_000
+    private const val LOOKBACK = 240
+
+    fun ranges(text: CharSequence): List<IntRange> {
+        val length = text.length
+        if (length <= 0) return emptyList()
+        val output = mutableListOf<IntRange>()
+        var start = 0
+        while (start < length) {
+            var end = (start + MAX_CHARS - 1).coerceAtMost(length - 1)
+            if (end < length - 1) {
+                val floor = (start + MAX_CHARS - 1 - LOOKBACK).coerceAtLeast(start)
+                var probe = end
+                while (probe > floor && !text[probe].isWhitespace()) probe--
+                if (probe > floor) end = probe
+            }
+            // 边界不能落在代理对中间：回退到完整字符之前；若起点本身就是高代理，
+            // 至少把该代理对完整包含进当前分段。
+            while (end > start && (text[end].isHighSurrogate() || text[end].isLowSurrogate())) end--
+            if (end == start && text[end].isHighSurrogate() && start + 1 < length) end = start + 1
+            output += start..end
+            start = end + 1
+        }
+        return output
     }
 }

@@ -98,13 +98,13 @@
 - 新增 `ui/DocxLayout.kt` 纯 Kotlin 页面几何/分页/图片采样策略与 `ui/WorkspaceDocxPreview.kt` Compose 分页渲染；查看器 DOCX 分支改为 `DocxPreview`；`WorkspaceFileManager.readDocx()` 在既有 IO 锁内调用解析器；删除被替代的 `DocxTextExtractor`。
 - 安全：归档 64 MiB、条目 4096、声明总解压 256 MiB、单条目 32 MiB、正文实际解压 16 MiB、辅助 XML 8 MiB、单图 16 MiB/总量 48 MiB/256 张、XML 元素 300k/深度 200/文字 2M、块 6000/单元格 20k；拒绝路径穿越/重复条目/DOCTYPE/未定义实体/不安全关系目标，外部关系不联网；图片解码长边 4096、单图 4M 像素、总 12M 像素。
 - 保真边界：明确不支持复杂域、宏、嵌入对象、文本框/艺术字、页眉页脚、脚注尾注、批注修订、多栏、浮动图片精确位置、精确分页与跨页表头；为手机可读性正文按 1.9x 放大，分页为近似结果。详见 [DOCX-PREVIEW](DOCX-PREVIEW.md)。
-- 已验证（rebase 后本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，288 tests / 0 failures / 0 errors / 0 skipped（main 233 - 被替换的 DOCX 纯文本测试 10 + 新增 65），其中新增 DOCX 回归 65 项（Reader 25、Security 22、Paginator 8、LayoutPolicy 10）。rebase 冲突已解决：`WorkspaceFileViewer` 同时保留 DOCX 与 XLSX 分支，`AGENT-STATE`/印章重新合并。
+- 已验证（rebase 后本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，296 tests / 0 failures / 0 errors / 0 skipped（main 233 - 被替换的 DOCX 纯文本测试 10 + 新增 73），其中新增 DOCX 回归 73 项（Reader 25、Security 22、Paginator 8、LayoutPolicy 18）。rebase 冲突已解决：`WorkspaceFileViewer` 同时保留 DOCX 与 XLSX 分支，`AGENT-STATE`/印章重新合并；5 条 Review P1/P2 已修复（Bitmap 快照释放、复用段落布局与长段落有界分段、Long 列宽归一化、页首 gap、渲染预算截断提示）。
 - 待验证：真实设备双指缩放/横向滚动/深色主题/超大文档性能、真实复杂 Word 样本、低 API/真机；lint/assemble/Android 仪器未跑；PR 创建与独立 Codex High Review 待办，不合并、不触发 AO Review。
 
 
 ## 已实现、已验证与待验证
 
-- 已验证（rebase 后本轮 android_agent-31 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，288 tests / 0 failures / 0 errors / 0 skipped（含 XLSX 既有测试，移除旧 DOCX 文本测试 10 项、新增 65 项）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算。未跑 lint/assemble/仪器/真机。
+- 已验证（rebase 后本轮 android_agent-31 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，296 tests / 0 failures / 0 errors / 0 skipped（含 XLSX 既有测试，移除旧 DOCX 文本测试 10 项、新增 73 项）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 18 项、格式化 4 项、缩放策略 5 项与 `.xlsx` 分类 1 项；`lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/设备/仪器。
 - 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。

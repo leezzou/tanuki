@@ -2,6 +2,7 @@ package com.tanuki.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -45,8 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -57,6 +60,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -163,9 +167,10 @@ private fun DocxDocumentView(document: DocxDocument, modifier: Modifier = Modifi
                 DocxPageGeometryPolicy.compute(document.page, availableWidth.value)
             }
             val measurer = rememberTextMeasurer()
-            val atoms = remember(document, geometry, bitmaps, baseDensity.density) {
+            val measured = remember(document, geometry, bitmaps, baseDensity.density) {
                 DocxMeasurer(document, geometry, measurer, bitmaps, baseDensity.density).measure()
             }
+            val atoms = measured.atoms
             val renderByKey = remember(atoms) { atoms.associateBy { it.atom.key } }
             val pages = remember(atoms, geometry.contentHeightDp) {
                 DocxPaginator.paginate(atoms.map { it.atom }, geometry.contentHeightDp)
@@ -211,12 +216,24 @@ private fun DocxDocumentView(document: DocxDocument, modifier: Modifier = Modifi
                                     pageIndex = index,
                                     pageCount = pages.size,
                                     atoms = renderByKey,
+                                    zoom = zoom,
+                                    density = baseDensity.density,
                                 )
                                 Spacer(Modifier.height(14.dp))
                             }
                         }
                     }
                 }
+            }
+            if (measured.truncated) {
+                Text(
+                    "文档较长，预览仅显示前 ${measured.atoms.size} 个排版块；完整内容请用其他应用打开。",
+                    Modifier.align(Alignment.TopCenter)
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
         }
     }
@@ -248,9 +265,12 @@ private fun DocxPageCard(
     pageIndex: Int,
     pageCount: Int,
     atoms: Map<Int, DocxRenderAtom>,
+    zoom: Float,
+    density: Float,
 ) {
     val paddingEnd = (geometry.pageWidthDp - geometry.marginLeftDp - geometry.contentWidthDp).coerceAtLeast(0f)
     val paddingBottom = (geometry.pageHeightDp - geometry.marginTopDp - geometry.contentHeightDp).coerceAtLeast(0f)
+    val items = remember(page, atoms, density) { groupDocxPageItems(page, atoms, density) }
     Surface(
         modifier = Modifier.width(geometry.pageWidthDp.dp).height(geometry.pageHeightDp.dp),
         color = Color(0xFFFDFDFD),
@@ -265,9 +285,13 @@ private fun DocxPageCard(
                     bottom = paddingBottom.dp,
                 ),
             ) {
-                page.atoms.forEach { atom ->
-                    if (atom.gapBefore > 0f) Spacer(Modifier.height(atom.gapBefore.dp))
-                    atoms[atom.key]?.let { render -> DocxRenderAtomView(render, geometry) }
+                items.forEachIndexed { index, item ->
+                    // 页首 gap 已由分页器清零；这里再防御一次，保证分页高度与实际绘制一致。
+                    if (index > 0 && item.gapBefore > 0f) Spacer(Modifier.height(item.gapBefore.dp))
+                    when (item) {
+                        is DocxPageItem.TextGroup -> DocxTextGroupView(item, zoom)
+                        is DocxPageItem.Single -> DocxRenderAtomView(item.render, geometry)
+                    }
                 }
             }
             Text(
@@ -288,23 +312,81 @@ private fun DocxPageCard(
     }
 }
 
+private sealed interface DocxPageItem {
+    val gapBefore: Float
+
+    data class TextGroup(
+        val layout: TextLayoutResult,
+        val leftPx: Float,
+        val topPx: Float,
+        val heightDp: Float,
+        override val gapBefore: Float,
+    ) : DocxPageItem
+
+    data class Single(val render: DocxRenderAtom, override val gapBefore: Float) : DocxPageItem
+}
+
+/** 把同一段落在同一页的连续行合并成一次绘制，避免每行重新排版整段。 */
+private fun groupDocxPageItems(
+    page: DocxPageSlice,
+    atoms: Map<Int, DocxRenderAtom>,
+    density: Float,
+): List<DocxPageItem> {
+    val items = mutableListOf<DocxPageItem>()
+    var index = 0
+    while (index < page.atoms.size) {
+        val pageAtom = page.atoms[index]
+        val render = atoms[pageAtom.key]
+        if (render is DocxRenderAtom.TextLine) {
+            var last: DocxRenderAtom.TextLine = render
+            var nextIndex = index + 1
+            while (nextIndex < page.atoms.size) {
+                val nextAtom = page.atoms[nextIndex]
+                val next = atoms[nextAtom.key]
+                if (next is DocxRenderAtom.TextLine && next.layout === render.layout &&
+                    next.lineIndex == last.lineIndex + 1 && nextAtom.gapBefore <= 0f
+                ) {
+                    last = next
+                    nextIndex++
+                } else {
+                    break
+                }
+            }
+            val heightPx = (last.lineBottomPx - render.lineTopPx).coerceAtLeast(1f)
+            items += DocxPageItem.TextGroup(
+                layout = render.layout,
+                leftPx = render.leftPx,
+                topPx = render.lineTopPx,
+                heightDp = heightPx / density.coerceAtLeast(0.1f),
+                gapBefore = pageAtom.gapBefore,
+            )
+            index = nextIndex
+        } else {
+            if (render != null) items += DocxPageItem.Single(render, pageAtom.gapBefore)
+            index++
+        }
+    }
+    return items
+}
+
+@Composable
+private fun DocxTextGroupView(item: DocxPageItem.TextGroup, zoom: Float) {
+    Canvas(Modifier.fillMaxWidth().height(item.heightDp.dp).clipToBounds()) {
+        val visibleWidth = size.width / zoom.coerceAtLeast(0.1f)
+        val visibleHeight = size.height / zoom.coerceAtLeast(0.1f)
+        scale(zoom, zoom, Offset.Zero) {
+            clipRect(0f, 0f, visibleWidth, visibleHeight) {
+                drawText(item.layout, topLeft = Offset(item.leftPx, -item.topPx))
+            }
+        }
+    }
+}
+
 @Composable
 private fun DocxRenderAtomView(atom: DocxRenderAtom, geometry: DocxPageGeometry) {
     when (atom) {
-        is DocxRenderAtom.TextLine -> Box(
-            Modifier.fillMaxWidth().height(atom.atom.height.dp).clipToBounds(),
-        ) {
-            Text(
-                atom.text,
-                modifier = Modifier
-                    .offset(x = atom.leftDp.dp, y = (-atom.lineTopDp).dp)
-                    .width(atom.widthDp.dp)
-                    // 分页切片只显示整段布局的一部分，必须允许超出切片高度排版后再裁剪。
-                    .wrapContentHeight(unbounded = true),
-                style = atom.style,
-                softWrap = true,
-            )
-        }
+        // 文本切片由 DocxTextGroupView 直接绘制已测量的布局，不在这里重建 Text。
+        is DocxRenderAtom.TextLine -> Unit
         is DocxRenderAtom.ImageAtom -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
             val bitmap = atom.bitmap
             if (bitmap != null && !bitmap.isRecycled) {
@@ -375,11 +457,11 @@ private sealed interface DocxRenderAtom {
 
     data class TextLine(
         override val atom: DocxPageAtom,
-        val text: AnnotatedString,
-        val style: TextStyle,
-        val lineTopDp: Float,
-        val leftDp: Float,
-        val widthDp: Float,
+        val layout: TextLayoutResult,
+        val lineIndex: Int,
+        val lineTopPx: Float,
+        val lineBottomPx: Float,
+        val leftPx: Float,
     ) : DocxRenderAtom
 
     data class ImageAtom(
@@ -436,25 +518,28 @@ private class DocxMeasurer(
 ) {
     private val output = mutableListOf<DocxRenderAtom>()
     private var nextKey = 0
-    private var renderedBlocks = 0
+    private val budget = DocxRenderBudget()
 
-    fun measure(): List<DocxRenderAtom> {
+    fun measure(): DocxMeasureResult {
         var pending = 0f
         for (block in document.blocks) {
-            if (renderedBlocks++ >= MAX_RENDERED_BLOCKS || output.size >= MAX_RENDERED_ATOMS) break
+            if (!budget.takeBlock()) break
             pending = when (block) {
                 is DocxBlock.PageBreak -> {
-                    output += DocxRenderAtom.Placeholder(
-                        DocxPageAtom(nextKey++, 0f, pageBreakBefore = true),
-                        "",
-                    )
+                    if (budget.takeAtom()) {
+                        output += DocxRenderAtom.Placeholder(
+                            DocxPageAtom(nextKey++, 0f, pageBreakBefore = true),
+                            "",
+                        )
+                    }
                     0f
                 }
                 is DocxBlock.Paragraph -> measureParagraph(block, pending)
                 is DocxBlock.Table -> measureTable(block, pending)
             }
+            if (budget.exceeded) break
         }
-        return output
+        return DocxMeasureResult(output, budget.exceeded)
     }
 
     private fun measureParagraph(paragraph: DocxBlock.Paragraph, pendingGap: Float): Float {
@@ -466,24 +551,36 @@ private class DocxMeasurer(
         var first = true
         var pendingAfter = spaceAfter
         if (hasText || images.isEmpty()) {
-            val metrics = paragraphMetrics(paragraph, geometry.contentWidthDp)
-            val lineCount = metrics.layout.lineCount.coerceAtLeast(1)
-            for (line in 0 until lineCount) {
-                val top = metrics.layout.getLineTop(line) / density
-                val bottom = metrics.layout.getLineBottom(line) / density
-                val gap = if (first) pendingGap + spaceBefore else 0f
-                output += DocxRenderAtom.TextLine(
-                    atom = DocxPageAtom(nextKey++, (bottom - top).coerceAtLeast(1f), gap),
-                    text = metrics.annotated,
-                    style = metrics.style,
-                    lineTopDp = top,
-                    leftDp = metrics.leftDp,
-                    widthDp = metrics.widthDp,
-                )
-                first = false
+            val annotated = paragraphText(paragraph)
+            val chunks = DocxTextChunking.ranges(annotated.text)
+            val ranges = chunks.ifEmpty { listOf(0..0) }
+            for (range in ranges) {
+                if (budget.exceeded) break
+                val chunkText = if (ranges.size == 1) annotated else annotated.subSequence(range.first, range.last + 1)
+                val metrics = paragraphMetrics(paragraph, geometry.contentWidthDp, chunkText)
+                val lineCount = metrics.layout.lineCount.coerceAtLeast(1)
+                for (line in 0 until lineCount) {
+                    // 预算必须在行循环内执行，单个长段落也可能超过原子上限。
+                    if (!budget.takeAtom()) break
+                    val top = metrics.layout.getLineTop(line)
+                    val bottom = metrics.layout.getLineBottom(line)
+                    val gap = if (first) pendingGap + spaceBefore else 0f
+                    output += DocxRenderAtom.TextLine(
+                        atom = DocxPageAtom(nextKey++, ((bottom - top) / density).coerceAtLeast(1f), gap),
+                        layout = metrics.layout,
+                        lineIndex = line,
+                        lineTopPx = top,
+                        lineBottomPx = bottom,
+                        leftPx = metrics.leftDp * density,
+                    )
+                    first = false
+                }
+                if (budget.exceeded) break
             }
+            if (budget.exceeded) return 0f
         }
         for (image in images) {
+            if (!budget.takeAtom()) return 0f
             val bitmap = image.image.entryName?.let { bitmaps[it] }
             val size = if (bitmap != null) {
                 DocxImagePolicy.displaySize(
@@ -508,16 +605,12 @@ private class DocxMeasurer(
     }
 
     private fun measureTable(table: DocxBlock.Table, pendingGap: Float): Float {
-        val columnCount = table.rows.maxOfOrNull { row -> row.cells.sumOf { it.colSpan.coerceAtLeast(1) } }?.coerceAtLeast(1) ?: return pendingGap
-        val weights = if (table.columnWidthsTwips.size == columnCount) {
-            table.columnWidthsTwips.map { it.coerceAtLeast(1) }
-        } else {
-            List(columnCount) { 1 }
-        }
-        val totalWeight = weights.sum().coerceAtLeast(1)
-        val widths = weights.map { geometry.contentWidthDp * it / totalWeight }
+        val columnCount = table.rows.maxOfOrNull { row -> row.cells.sumOf { it.colSpan.coerceAtLeast(1) } }
+            ?.coerceIn(1, DocxTableWidths.MAX_COLUMNS) ?: return pendingGap
+        val widths = DocxTableWidths.normalize(table.columnWidthsTwips, columnCount, geometry.contentWidthDp)
         var pending = pendingGap
         table.rows.forEach { row ->
+            if (!budget.takeAtom()) return 0f
             var columnStart = 0
             val cells = mutableListOf<DocxCellRender>()
             for (cell in row.cells) {
@@ -589,13 +682,16 @@ private class DocxMeasurer(
         return output
     }
 
-    private fun paragraphMetrics(paragraph: DocxBlock.Paragraph, maxWidthDp: Float): ParagraphMetrics {
+    private fun paragraphMetrics(
+        paragraph: DocxBlock.Paragraph,
+        maxWidthDp: Float,
+        annotated: AnnotatedString = paragraphText(paragraph),
+    ): ParagraphMetrics {
         val props = paragraph.style
         val numberingIndent = paragraph.numbering?.indentLeftTwips ?: 0
         val leftTwips = max(props.indentLeftTwips, numberingIndent)
         val leftDp = geometry.textLengthDp(leftTwips).coerceIn(0f, maxWidthDp * 0.4f)
         val widthDp = (maxWidthDp - leftDp).coerceAtLeast(24f)
-        val annotated = paragraphText(paragraph)
         val style = paragraphStyle(paragraph, widthDp)
         val layout = measurer.measure(
             annotated,
@@ -675,10 +771,10 @@ private class DocxMeasurer(
 
     private companion object {
         const val CELL_HORIZONTAL_PADDING = 3f
-        const val MAX_RENDERED_BLOCKS = 1200
-        const val MAX_RENDERED_ATOMS = 12_000
     }
 }
+
+private data class DocxMeasureResult(val atoms: List<DocxRenderAtom>, val truncated: Boolean)
 
 private data class ParagraphMetrics(
     val annotated: AnnotatedString,
@@ -691,14 +787,22 @@ private data class ParagraphMetrics(
 @Composable
 private fun rememberDocxBitmaps(document: DocxDocument): Map<String, Bitmap?> {
     val media = document.media
+    val lifetime = remember(media) {
+        DocxBitmapLifetime<Bitmap?> { bitmap ->
+            if (bitmap != null && !bitmap.isRecycled) bitmap.recycle()
+        }
+    }
     var decoded by remember(media) { mutableStateOf<Map<String, Bitmap?>>(emptyMap()) }
     LaunchedEffect(media) {
-        decoded = withContext(Dispatchers.IO) { decodeDocxBitmaps(media) }
+        val next = withContext(Dispatchers.IO) { decodeDocxBitmaps(media) }
+        lifetime.publish(next)
+        decoded = next
     }
     DisposableEffect(decoded) {
-        onDispose {
-            decoded.values.forEach { bitmap -> if (bitmap != null && !bitmap.isRecycled) bitmap.recycle() }
-        }
+        // 必须捕获本 effect 创建时的快照；onDispose 重新读取 decoded 会拿到新 map，
+        // 在首次发布图片时就把刚交给界面的 Bitmap 回收掉。
+        val owned = decoded
+        onDispose { lifetime.release(owned) }
     }
     return decoded
 }
