@@ -11,7 +11,7 @@
 | 原生构建 | NDK `27.2.12479018`、Android26 Bionic工具链；源码与补丁固定来源 |
 | 初始客体 | Ubuntu Base24.04.5 ARM64、glibc2.39；不启动客体内核/systemd/桌面 |
 | 初始工具 | Node24.22.2、pnpm11.28.5、官方 `@deepseek-ai/dsh@0.2.1-rc.5`，可选清单见组件指南 |
-| DSH | `web --no-open --host 127.0.0.1 --port 0`；只采信官方就绪日志中的精确origin |
+| DSH | 正常 `web --no-open --host 127.0.0.1 --port 0`；安全模式 `rescue [--from-default-profile web]` + 独立最小 HOME/DSH_HOME；只采信官方就绪日志中的精确origin |
 | 认证 | 官方启动token→HTTP重定向→签名Cookie，不禁用认证或复制给独立浏览器 |
 
 当前已发布 0.1.8/code10（`v0.1.8` tag 为 `c196bbf`，远端 `main` 已前进到 `14d2884`，PR #13/#15 已合并）；**0.1.8 没有随版本记录设备测试**。构建和已测/未测以 [TEST-REPORT](TEST-REPORT.md) 为准，历史数字不当作 0.1.8 已通过。PRoot 依赖 ptrace 与宿主内核，Ubuntu 内模拟 root 不等于 Android Root。

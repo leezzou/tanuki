@@ -14,6 +14,23 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 独立 QA 会话 android_agent-10 在 `emulator-5572`（`Pixel_7_API_34_arm64`，API34/ARM64，WebView `159.0.8133.0`）完成：`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据，设备 base.apk 与发布件 SHA-256 一致）；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 本次只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 未验证，不能写成 0.1.8 已验收或完整设备测试。
 
+## DSH 运行失败分类与安全模式验证（2026-11-09，android_agent-28，非设备）
+
+- 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`；范围：新增纯 Kotlin `RuntimeFailurePolicy`，覆盖 `LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类、连续两次 startup/early 进入安全模式、安全模式 rescue 启动参数、probation 2 分钟窗口、自动重启上限/退避、noSpace/killed 不自动重启，以及 `state/failure-state.json` 跨进程恢复。RuntimeManager/RuntimeService 接入安全模式与前端入口。
+- 验证环境：`/tmp/tanuki-safe-mode` 独立 clone，基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；JDK17、Android SDK36/Build Tools 35；仅构建时通过临时 `/tmp/mirror.init.gradle` 使用可用 Maven 镜像，未提交、未改仓库构建配置。
+- 实际执行：
+  - `./gradlew -I /tmp/mirror.init.gradle :app:compileModernDebugKotlin --stacktrace` → BUILD SUCCESSFUL（7m 9s，19 tasks）。
+  - `./gradlew -I /tmp/mirror.init.gradle :app:testModernDebugUnitTest --stacktrace` → 合并前 BUILD SUCCESSFUL（1m）；37 个结果文件合计 **237 tests / 0 failures / 0 errors / 0 skipped**。
+  - `./gradlew -I /tmp/mirror.init.gradle :app:testModernDebugUnitTest --tests 'com.tanuki.RuntimeFailurePolicyTest'` → BUILD SUCCESSFUL，新增策略回归 **32/32**。
+- P1 复审修复：`FailureEvidence.timedOut` 在 noSpace/launch 之后、killed 之前直接返回 `STARTUP_FAILED`；就绪行已打印但 HTTP 未可用而超时也保持 `STARTUP_FAILED`；`RuntimeManager` 在超时清理时不把 143/137 当作原始退出码。新增 143/137、“Killed”、ready 行后 HTTP 超时与 ENOSPC 优先级回归。
+- P2 复审修复：`PROBATION` 且上次服务活动时，进程重启一律回 `SAFE`，不再用重开 App 的墙钟时间把 `PROBATION` 提升为 `NORMAL`；服务未活动时保留试用，下次手动启动重新计时。安全模式成功不提交 `RESTORED_PENDING_CHECK`，只有 normal/probation 实际加载恢复 userdata 的启动成功后才写 verified/SUCCESS。新增长间隔重开、非活动服务、过期手动启动与 SAFE 恢复提交边界回归。
+- P2 时间基准修复：日志就绪时刻用于区分早/晚崩溃，HTTP 就绪后才启动 probation 计时；`CRASHED_LATE` 现在先检查实际 probation 窗口，窗口内（如日志 t=1s、HTTP t=11s、t=126s 崩溃）回 `SAFE`，不再直接 `onStable` 转 `NORMAL`。新增延迟 HTTP 就绪回归。
+- 合并最新 `origin/main=f5debf5`（含 XLSX PR #23）后复跑：`compileModernDebugKotlin` 与完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，40 个结果文件合计 **265 tests / 0 failures / 0 errors / 0 skipped**；`RuntimeFailurePolicyTest` 32/32。
+- 新增回归覆盖：六类分类与 2 分钟早/晚崩溃边界、ENOSPC/低磁盘优先、signal/OOM 判为 killed、无致命输出退出判为 killed、连续两次 startup/early 进入安全模式、killed/noSpace/launchFailed 打断连续计数、restart 2s/4s/8s 与上限 3 次、probation 内 startup/early/killed/noSpace 回安全模式、probation 晚崩溃转 normal、人工启动重置计数、过期 probation 提升、进程重启恢复安全模式（含未就绪试用超过 2 分钟）、JSON round-trip/非法数据回退、normal/rescue 启动参数与版本注入拒绝。
+- CI：PR #25 的 push run 42602010730 与 PR run 42602805776 均 success（Host scripts + handoff；Android assemble/JVM/lint）。Android CI 使用 `-x buildNativeRuntime`，其 APK 无原生 `.so`，不能用于设备验收。
+- 未执行：本机 lint、assemble、Android 仪器/真实设备、PRoot 内实际 rescue 启动、真实 DSH 崩溃/低内存/磁盘满注入、UI 视觉与大字体/深色验证。JVM 策略测试不能替代真机运行与恢复验收。
+- 未验证项：真机崩溃与低内存、真实磁盘满、真实插件配置导致启动失败、安全模式与用户数据的实际隔离效果。PR/独立 Review/合并未授权或未完成。
+
 ## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
 
 - 范围：新增 `XlsxWorkbookParser` 只读 OOXML 解析（workbook/rels/sharedStrings/styles/sheet）、`XlsxValueFormatter` 显示格式、Compose 原生表格 `XlsxTablePreview`、`FileKind.XLSX` 分类/入口与 `WorkspaceFileViewer` 接线。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/xlsx-preview/xlsx-native-preview`，未引入第三方 XLSX 库，不依赖 LibreOffice/外部 App。
