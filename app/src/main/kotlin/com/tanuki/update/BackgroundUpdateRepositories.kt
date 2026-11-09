@@ -86,7 +86,13 @@ internal object UpdateCheckHttp {
 class ApkUpdateCheckRepository(private val context: Context, private val paths: Paths) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Mutex()
-    private val mutable = MutableStateFlow(BackgroundUpdateChecks.decodeApk(paths.read(FILE_NAME)))
+    private val mutable = MutableStateFlow(
+        BackgroundUpdateChecks.rebaseApkSnapshot(
+            saved = BackgroundUpdateChecks.decodeApk(paths.read(FILE_NAME)),
+            installedVersion = BuildConfig.VERSION_NAME,
+            installedCode = BuildConfig.VERSION_CODE.toLong()
+        )
+    )
     val state: StateFlow<ApkUpdateCheckState> = mutable.asStateFlow()
     private var job: Job? = null
 

@@ -17,7 +17,7 @@
 
 应用用 WorkManager 注册两个唯一周期任务，均要求联网；它们是系统尽力调度，省电模式或 OEM 后台限制可能推迟，不承诺精确到分钟，也不替代用户主动检查。
 
-- **Tanuki APK**：`tanuki-apk-update-check`，每 **30 分钟**。只读取稳定 Release 的 `https://github.com/leezzou/tanuki/releases/latest/download/app-update.json`，用当前安装的 `BuildConfig.VERSION_CODE` 与清单中同包名条目比较；发现更高版本只记录并提示，不下载、不安装。debug/预发布渠道的候选发现仍走“设置 → 应用更新 → 检查更新”的 Atom 流程。
+- **Tanuki APK**：`tanuki-apk-update-check`，每 **30 分钟**。只读取稳定 Release 的 `https://github.com/leezzou/tanuki/releases/latest/download/app-update.json`，用当前安装的 `BuildConfig.VERSION_CODE` 与清单中同包名条目比较；同 `versionName`、更高 code 也视为更新。恢复快照时按当前安装身份重算可用性，保留远端结果与通知去重。发现更高版本只记录并提示，不下载、不安装。debug/预发布渠道的候选发现仍走“设置 → 应用更新 → 检查更新”的 Atom 流程。
 - **DSH 引擎**：`dsh-engine-update-check`，每 **24 小时**。先读 `https://registry.npmmirror.com/@deepseek-ai%2Fdsh`，网络失败或元数据不完整时回退 `https://registry.npmjs.org/@deepseek-ai%2Fdsh`；连接/读取超时各 12 秒。只比较 `dist-tags.latest` 与已安装 `installed.json` 的 `dsh` 版本，不触发下载、安装、快照或 `UpdateManager` 事务。
 
 两份状态独立持久化，不能互相覆盖：

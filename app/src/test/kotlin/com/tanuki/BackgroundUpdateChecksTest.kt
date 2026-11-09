@@ -93,6 +93,79 @@ class BackgroundUpdateChecksTest {
         assertEquals(10L, lower.latestCode)
     }
 
+    @Test fun apkSameVersionNameHigherCodeIsAvailableAndSurvivesRoundTrip() {
+        val manifest = apkManifest(Entry("com.tanuki.modern", "0.1.8", 11L))
+        val evaluated = BackgroundUpdateChecks.evaluateApk(
+            manifest = manifest,
+            installedPackage = "com.tanuki.modern",
+            installedVersion = "0.1.8",
+            installedCode = 10L,
+            now = 1_000L
+        )
+        assertTrue(evaluated.available)
+        assertEquals("0.1.8", evaluated.latestVersion)
+        assertEquals(11L, evaluated.latestCode)
+
+        val decoded = BackgroundUpdateChecks.decodeApk(BackgroundUpdateChecks.encodeApk(evaluated))
+        assertTrue(decoded.available)
+        assertEquals("0.1.8", decoded.latestVersion)
+        assertEquals(11L, decoded.latestCode)
+        assertEquals(10L, decoded.installedCode)
+    }
+
+    @Test fun apkFailureKeepsSameVersionNameHigherCodeUpdate() {
+        val previous = ApkUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.1.8",
+            installedCode = 10L,
+            latestVersion = "0.1.8",
+            latestCode = 11L,
+            available = true,
+            lastCheckedAt = 1_000L
+        )
+        val failed = BackgroundUpdateChecks.apkFailure(
+            previous = previous,
+            installedVersion = "0.1.8",
+            installedCode = 10L,
+            now = 2_000L,
+            error = "offline"
+        )
+        assertEquals(UpdateCheckStatus.FAILED, failed.status)
+        assertTrue(failed.available)
+        assertEquals("0.1.8", failed.latestVersion)
+        assertEquals(11L, failed.latestCode)
+    }
+
+    @Test fun apkSnapshotRebasesAgainstCurrentInstallAfterOverwriteUpgrade() {
+        // 旧版本缓存了 0.1.9/code11；同包覆盖升级到 0.1.9/code11 后离线启动。
+        val saved = ApkUpdateCheckState(
+            status = UpdateCheckStatus.SUCCEEDED,
+            installedVersion = "0.1.8",
+            installedCode = 10L,
+            latestVersion = "0.1.9",
+            latestCode = 11L,
+            available = true,
+            lastCheckedAt = 1_000L,
+            notifiedVersion = "0.1.9"
+        )
+        val rebased = BackgroundUpdateChecks.rebaseApkSnapshot(saved, "0.1.9", 11L)
+        assertFalse(rebased.available)
+        assertEquals("0.1.9", rebased.installedVersion)
+        assertEquals(11L, rebased.installedCode)
+        assertEquals("0.1.9", rebased.latestVersion)
+        assertEquals(11L, rebased.latestCode)
+        assertEquals("0.1.9", rebased.notifiedVersion)
+        assertEquals(1_000L, rebased.lastCheckedAt)
+
+        // 若远端仍有更高 code，则继续保留可用徽标。
+        val stillNewer = BackgroundUpdateChecks.rebaseApkSnapshot(
+            saved.copy(latestVersion = "0.1.10", latestCode = 12L),
+            "0.1.9",
+            11L
+        )
+        assertTrue(stillNewer.available)
+    }
+
     @Test fun apkMalformedManifestRecordsFailureButKeepsKnownUpdate() {
         val previous = ApkUpdateCheckState(
             status = UpdateCheckStatus.SUCCEEDED,

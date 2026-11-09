@@ -175,11 +175,27 @@ object BackgroundUpdateChecks {
         status = UpdateCheckStatus.FAILED,
         installedVersion = installedVersion,
         installedCode = installedCode,
-        available = previous.latestCode > installedCode &&
-            isUpdateAvailable(installedVersion, previous.latestVersion),
+        // APK 覆盖更新只由 versionCode 决定；同 versionName、更高 code 仍是有效更新。
+        available = previous.latestCode > installedCode,
         lastCheckedAt = now,
         lastErrorAt = now,
         lastError = error.take(160)
+    )
+
+    /**
+     * 用当前安装身份重算 APK 可用性。
+     *
+     * 覆盖安装保留 state 目录，文件中的 installedVersion/installedCode 可能属于旧 APK；
+     * 恢复时保留远端 latest 与 notifiedVersion，只按当前 versionCode 重算 available。
+     */
+    fun rebaseApkSnapshot(
+        saved: ApkUpdateCheckState,
+        installedVersion: String,
+        installedCode: Long
+    ): ApkUpdateCheckState = saved.copy(
+        installedVersion = installedVersion,
+        installedCode = installedCode,
+        available = saved.latestCode > installedCode
     )
 
     /**
@@ -353,7 +369,8 @@ object BackgroundUpdateChecks {
                 installedCode = installedCode,
                 latestVersion = latestVersion,
                 latestCode = latestCode,
-                available = latestCode > installedCode && isUpdateAvailable(installedVersion, latestVersion),
+                // 与 evaluateApk 保持一致：APK 只用 versionCode 判定，不额外比较 SemVer。
+                available = latestCode > installedCode,
                 lastCheckedAt = json.optLong("lastCheckedAt", 0L).coerceAtLeast(0L),
                 lastErrorAt = json.optLong("lastErrorAt", 0L).coerceAtLeast(0L),
                 lastError = json.optString("lastError").take(160),
