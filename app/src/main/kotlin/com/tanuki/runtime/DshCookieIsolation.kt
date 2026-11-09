@@ -50,22 +50,25 @@ class DshCookieIsolation(
 ) {
     private val jar = DshCookieJar()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var activeScope: String = scopeStore?.getString(KEY_SCOPE) ?: LOCAL_SCOPE
+    // 写入用独立串行锁；UI 读取只读 volatile，不能等待主线程删除回调。
+    private val switchGate = Any()
+    @Volatile private var activeScope: String = scopeStore?.getString(KEY_SCOPE) ?: LOCAL_SCOPE
 
-    @Synchronized
     fun switchTo(scope: String) {
-        if (scope == activeScope) return
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            throw IllegalStateException("Cookie 隔离不能在主线程执行")
+        synchronized(switchGate) {
+            if (scope == activeScope) return
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                throw IllegalStateException("Cookie 隔离不能在主线程执行")
+            }
+            capture(activeScope)
+            if (!clearAll()) throw IllegalStateException("无法清理管理 WebView Cookie，已取消切换")
+            restore(scope)
+            activeScope = scope
+            scopeStore?.putString(KEY_SCOPE, scope)
         }
-        capture(activeScope)
-        if (!clearAll()) throw IllegalStateException("无法清理管理 WebView Cookie，已取消切换")
-        restore(scope)
-        activeScope = scope
-        scopeStore?.putString(KEY_SCOPE, scope)
     }
 
-    @Synchronized
+    /** 主线程每次重组都会读取；只读 volatile，不能拿写锁。 */
     fun currentScope(): String = activeScope
 
     private fun capture(scope: String) {

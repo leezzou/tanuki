@@ -1,5 +1,8 @@
 package com.tanuki
 
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.webkit.CookieManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -13,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
@@ -44,6 +48,38 @@ class DshCookieIsolationTest {
             assertTrue(b.contains("authB=synthetic-b"))
             assertFalse(b.contains("authA=synthetic-a"))
             assertEquals("host-b", isolation.currentScope())
+        } finally {
+            val latch = CountDownLatch(1)
+            manager.removeAllCookies { latch.countDown() }
+            latch.await(3, TimeUnit.SECONDS)
+            manager.flush()
+            prefs.edit().clear().commit()
+        }
+    }
+
+    @Test
+    fun mainThreadScopeReadsDoNotBlockCookieSwitch() = runBlocking(Dispatchers.IO) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        check(context.packageName.endsWith(".workspacecheck"))
+        val prefs = context.getSharedPreferences("dsh-cookie-lock-${System.nanoTime()}", 0)
+        val isolation = DshCookieIsolation(CookieManager.getInstance(), SharedPreferencesKeyValueStore(prefs))
+        val manager = CookieManager.getInstance()
+        try {
+            isolation.switchTo("host-a")
+            val reads = AtomicInteger()
+            val main = Handler(Looper.getMainLooper())
+            repeat(1_000) {
+                main.post {
+                    isolation.currentScope()
+                    reads.incrementAndGet()
+                }
+            }
+            val started = SystemClock.elapsedRealtime()
+            isolation.switchTo("host-b")
+            val elapsed = SystemClock.elapsedRealtime() - started
+            check(reads.get() > 0) { "主线程未能并发读取 Cookie 作用域" }
+            assertEquals("host-b", isolation.currentScope())
+            check(elapsed < 2_500) { "Cookie 切换等待过久：${'$'}elapsed ms" }
         } finally {
             val latch = CountDownLatch(1)
             manager.removeAllCookies { latch.countDown() }
