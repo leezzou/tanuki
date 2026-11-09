@@ -49,6 +49,8 @@ class RuntimeManager(val context: Context) {
     private var workspaceMonitor: Job? = null
     private var workspaceRefresh: Job? = null
     private val earlyStartGate = EarlyStartGate()
+    /** 独立更新管理器（DSH 安装/备用/恢复、APK 更新）的忙碌信号，由 TanukiApp 注入。 */
+    @Volatile private var externalBusy: () -> Boolean = { false }
     @Volatile private var stopping = false
     private var runtimeGeneration = 0L
     @Volatile private var child: Child? = null
@@ -553,15 +555,18 @@ class RuntimeManager(val context: Context) {
             }
         }
     }
+    /** 由 Application 注入独立更新/恢复任务的忙碌信号；默认不阻塞。 */
+    fun registerBusySignal(signal: () -> Boolean) {
+        externalBusy = signal
+    }
+    private fun externalBusyActive(): Boolean = runCatching { externalBusy() }.getOrDefault(false)
     private fun earlyConditions(enabled: Boolean): EarlyRuntimeStart.Conditions {
         val snapshot = state.value
-        return EarlyRuntimeStart.Conditions(
+        return EarlyRuntimeStart.conditionsFrom(
             enabled = enabled,
-            environment = snapshot.environment,
-            service = snapshot.service,
-            update = snapshot.update,
-            // 安装/下载等互斥操作由 job 表示；mutation 可能被启动时的短暂恢复占用，不据此跳过。
-            operationActive = job?.isActive == true || serverJob?.isActive == true,
+            snapshot = snapshot,
+            runtimeOperationActive = job?.isActive == true || serverJob?.isActive == true,
+            independentOperationActive = externalBusyActive(),
             liveChild = child != null,
             stopping = stopping,
         )
@@ -591,7 +596,8 @@ class RuntimeManager(val context: Context) {
                         phoneFiles.start()
                         // 启动期只读路径缓存只覆盖官方 web 启动；准备失败时按原生方式启动。
                         val startupTools = DshStartup.prepare(context, paths)
-                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true, startupTools = startupTools)
+                        val startupConfig = DshStartupConfig.fromEnvironment()
+                        val c = launcher.start(paths.root, listOf("/opt/node/bin/node", "/opt/engines/$v/node_modules/@deepseek-ai/dsh/lib/bin.js", "web", "--no-open", "--host", "127.0.0.1", "--port", "0"), phoneFiles = true, startupTools = startupTools, startupConfig = startupConfig)
                         child = c
                         monitorWorkspace(c)
                         // Collection lives independently of the Activity and of the environment mutex.

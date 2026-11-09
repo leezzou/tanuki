@@ -151,7 +151,7 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             } finally { if(interrupted)Thread.currentThread().interrupt() }
         }
     }
-    fun start(root: File, args: List<String>, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false, startupTools: File? = null): Child {
+    fun start(root: File, args: List<String>, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false, startupTools: File? = null, startupConfig: DshStartupConfig? = null): Child {
         val lib = context.applicationInfo.nativeLibraryDir
         val node = nodeHome ?: if (File(paths.node, "bin/node").isFile || !File(root, "opt/node/bin/node").isFile) paths.node else File(root, "opt/node")
         val pnpm = if (paths.pnpm.exists() || !File(root, "opt/pnpm").exists()) paths.pnpm else File(root, "opt/pnpm")
@@ -193,7 +193,8 @@ class Launcher(private val context: Context, private val paths: Paths, private v
                 log.append("DSH 启动路径缓存绑定失败，按原生方式启动：${it.message}")
             }.getOrElse { emptyList() }
         } else emptyList()
-        // 只有绑定成功才注入 --require；准备失败时保持原生 node 启动参数。
+        // 只有绑定成功才注入 --require 和受控配置；准备失败时保持原生 node 启动参数与环境边界。
+        val startupEnvironment = if (startupBinding.isNotEmpty()) startupConfig?.environment().orEmpty() else emptyList()
         val effectiveArgs = if (startupBinding.isNotEmpty() && args.firstOrNull()?.endsWith("/node") == true) {
             listOf(args.first(), "--require", "${DshStartup.GUEST_DIR}/${DshStartup.SCRIPT_NAME}") + args.drop(1)
         } else args
@@ -208,7 +209,7 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             "HOME=/home/tanuki", "DSH_HOME=/dsh-data", "PATH=/opt/pnpm/${RuntimeManager.PNPM}/bin:/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TMPDIR=/tmp", "LANG=C.UTF-8", "TERM=xterm-256color", "DEBIAN_FRONTEND=noninteractive",
             "DPKG_DEB_THREADS_MAX=1", "XZ_DEFAULTS=-T1", "ZSTD_NBTHREADS=1", "UV_THREADPOOL_SIZE=4", "NODE_COMPILE_CACHE=/opt/node-cache",
-            "npm_config_fetch_timeout=60000", "npm_config_fetch_retries=2", "npm_config_fetch_retry_mintimeout=2000", "npm_config_fetch_retry_maxtimeout=10000") + phoneEnvironment + effectiveArgs
+            "npm_config_fetch_timeout=60000", "npm_config_fetch_retries=2", "npm_config_fetch_retry_mintimeout=2000", "npm_config_fetch_retry_maxtimeout=10000") + phoneEnvironment + startupEnvironment + effectiveArgs
         val pb = ProcessBuilder(command).directory(paths.base)
         pb.environment().apply {
             clear(); put("PATH", "/system/bin"); put("PROOT_LOADER", "$lib/libproot-loader.so")
@@ -269,8 +270,8 @@ class Launcher(private val context: Context, private val paths: Paths, private v
             CommandResult(code, out.await(), err.await()).also { log.append("exit=$code") }
         } finally { if (child.process.isAlive) child.stop() }
     }
-    suspend fun run(root: File, args: List<String>, timeoutMs: Long = 120000, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false, startupTools: File? = null, onLine: (String) -> Unit = {}): CommandResult {
-        val child = start(root, args, home, dshHome, workspace, engineHome, nodeHome, phoneFiles, startupTools)
+    suspend fun run(root: File, args: List<String>, timeoutMs: Long = 120000, home: File = paths.home, dshHome: File = paths.dshData, workspace: File = paths.workspaces, engineHome: File = paths.engines, nodeHome: File? = null, phoneFiles: Boolean = false, startupTools: File? = null, startupConfig: DshStartupConfig? = null, onLine: (String) -> Unit = {}): CommandResult {
+        val child = start(root, args, home, dshHome, workspace, engineHome, nodeHome, phoneFiles, startupTools, startupConfig)
         return try { withCommandDeadline(timeoutMs) { collect(child,onLine) } } finally { if (child.process.isAlive) child.stop() }
     }
 }

@@ -16,12 +16,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## DSH 冷启动优化验证（2026-11-09，android_agent-27，非设备）
 
-- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
+- 范围：DSH `web` 启动期只读路径缓存（`/opt/node`、`/opt/engines`、`/opt/pnpm` 与受控支持目录）与首帧前提前启动（仅 Launcher `MAIN + LAUNCHER` 冷启动；仪器测试/内部显式启动跳过；真实 `Snapshot.operationActive` 与独立更新忙碌信号拦截 STAGING/TESTING/RESTORING）；未改 PRoot 边界、官方 npm 包、DSH UI/协议。
 - 实际执行：
   - `./gradlew :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（含原生运行时重建；既有弃用/平台告警保留）。
-  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，37 个结果文件、217 tests / 0 failures / 0 errors / 0 skipped；新增 `EarlyRuntimeStartTest` 12 项。
-  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL（7m37s）。
-  - `node scripts/test-dsh-path-cache.mjs` → PASS，9 个场景：缓存命中、符号链接/缺失链接、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
+  - `./gradlew :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，38 个结果文件、228 tests / 0 failures / 0 errors / 0 skipped；新增 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项。
+  - `./gradlew :app:lintModernDebug` → BUILD SUCCESSFUL（2m8s）。
+  - `node scripts/test-dsh-path-cache.mjs` → PASS，10 个场景：缓存命中、符号链接/缺失链接、符号链接+`..`交叉命中、缺失路径不缓存、非只读目录直通、异常编码回退、卸载、官方地址行卸载、超时卸载、环境变量关闭。
 - 未执行：assemble、Android 仪器/真实设备、真实 PRoot 内 DSH 启动、真机冷启动计时；Node 测试是宿主行为回归，不能替代 Android 设备与 PRoot 验证。
 
 ## 后台更新检查验证（2026-11-09，android_agent-24，非设备）

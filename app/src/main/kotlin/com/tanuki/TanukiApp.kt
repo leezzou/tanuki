@@ -61,6 +61,8 @@ class TanukiApp : Application() {
         android.webkit.WebView.enableSlowWholeDocumentDraw()
         cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("tanuki-blob-") }?.forEach { it.delete() }
         runtime = RuntimeManager(this)
+        // 独立更新/恢复任务有自己的 job 与状态；提前启动必须把它们计入忙碌判定。
+        runtime.registerBusySignal { updates.hasActiveOperation || appUpdates.hasActiveOperation }
         // 安装、切换或恢复 DSH 后只重算本地快照，不联网，也不覆盖已知远端 latest。
         runtime.scope.launch {
             runtime.state.map { it.dsh }.distinctUntilChanged().collect { version ->

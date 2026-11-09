@@ -17,7 +17,7 @@ const shim = join(here, '..', 'app', 'src', 'main', 'assets', 'dsh-startup', 'pa
 const self = fileURLToPath(import.meta.url);
 const require = createRequire(import.meta.url);
 
-const scenarios = ['cache', 'symlink', 'missing', 'nonReadonly', 'fallback', 'uninstall', 'address', 'timeout', 'disabled'];
+const scenarios = ['cache', 'symlink', 'symlinkDotDot', 'missing', 'nonReadonly', 'fallback', 'uninstall', 'address', 'timeout', 'disabled'];
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'tanuki-path-cache-'));
@@ -31,6 +31,14 @@ function fixture() {
   writeFileSync(join(writable, 'outside.txt'), 'outside\n');
   symlinkSync('target.txt', join(readonly, 'link.txt'));
   symlinkSync('not-there.txt', join(readonly, 'missing-link.txt'));
+  // 用于验证符号链接后的 `..`：a/link -> ../b/sub，因此 a/link/../package.json
+  // 文件系统解析为 b/package.json，不能与 a/package.json 共用词法缓存键。
+  mkdirSync(join(readonly, 'a'));
+  mkdirSync(join(readonly, 'b', 'sub'), { recursive: true });
+  writeFileSync(join(readonly, 'a', 'package.json'), '{"name":"a"}\n');
+  writeFileSync(join(readonly, 'b', 'package.json'), '{"name":"b"}\n');
+  writeFileSync(join(readonly, 'b', 'sub', 'package.json'), '{"name":"sub"}\n');
+  symlinkSync('../b/sub', join(readonly, 'a', 'link'));
   return { root, readonly, writable };
 }
 
@@ -103,6 +111,26 @@ function scenarioSymlink(root) {
   assert.equal(fs.existsSync(link), true);
   assert.equal(fs.existsSync(missingLink), false, '指向缺失目标的符号链接应返回 false');
   assert.throws(() => fs.realpathSync(missingLink), (error) => error && error.code === 'ENOENT');
+}
+
+function scenarioSymlinkDotDot(root) {
+  const fs = require('node:fs');
+  const api = require(process.env.TANUKI_SHIM_PATH);
+  const ro = join(root, 'readonly');
+  const aPackage = join(ro, 'a', 'package.json');
+  const bPackage = join(ro, 'b', 'package.json');
+  // 不能用 path.join：它会词法折叠 `..`，测试不到真实文件系统解析。
+  const viaDotDot = `${ro}/a/link/../package.json`;
+  const viaLink = join(ro, 'a', 'link', 'package.json');
+
+  assert.equal(api.stats().installed, true);
+  assert.match(fs.readFileSync(aPackage, 'utf8'), /"a"/);
+  assert.match(fs.readFileSync(viaDotDot, 'utf8'), /"b"/, '符号链接后的 .. 必须按文件系统解析，不能串到 a/package.json');
+  // Node 的非 native realpathSync 本身会词法折叠 `..`；这里验证会跟随链接的 native 实现。
+  assert.equal(fs.realpathSync.native(viaDotDot), fs.realpathSync(bPackage));
+  assert.equal(fs.existsSync(viaDotDot), true);
+  assert.match(fs.readFileSync(viaLink, 'utf8'), /"sub"/);
+  assert.match(fs.readFileSync(aPackage, 'utf8'), /"a"/);
 }
 
 function scenarioMissing(root) {
@@ -231,6 +259,7 @@ if (scenarioIndex !== -1) {
   const handlers = {
     cache: scenarioCache,
     symlink: scenarioSymlink,
+    symlinkDotDot: scenarioSymlinkDotDot,
     missing: scenarioMissing,
     nonReadonly: scenarioNonReadonly,
     fallback: scenarioFallback,

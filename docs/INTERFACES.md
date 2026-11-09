@@ -42,16 +42,17 @@ libsupervisor.so
 
 `RuntimeManager.start()` 在 `web` 启动前把 APK 资源 `dsh-startup/path-cache.cjs` 复制到应用私有目录，并以只读绑定挂到 `/opt/tanuki-startup`；只有准备和绑定都成功时才给 node 注入 `--require`。准备失败、脚本缺失或绑定异常时不注入，按原生方式启动，不阻塞 DSH。
 
-- 缓存范围只包括 rootfs 内只读目录的绝对路径：`/opt/node`、`/opt/engines`、`/opt/pnpm`、`/opt/tanuki`、`/opt/tanuki-phone`、`/opt/tanuki-startup`。
+- 缓存范围只包括 rootfs 内只读目录的绝对路径：`/opt/node`、`/opt/engines`、`/opt/pnpm`、`/opt/tanuki`、`/opt/tanuki-phone`、`/opt/tanuki-startup`。含 `.`、`..`、重复斜杠或尾部斜杠的路径直接交给原生实现，避免符号链接后的 `..` 被词法折叠后串项。
 - 接管 `realpathSync`、`realpathSync.native`、`existsSync` 和这些目录内 `package.json` 的 `readFileSync`；不缓存缺失路径、非只读目录、非 `r` 标志读取或超过 256 KiB 的 package.json。
-- 官方就绪行 `dsh web: http://127.0.0.1:<port>/...` 出现或默认 30 秒超时后卸载，之后全部直通 `node:fs`。`TANUKI_DSH_PATH_CACHE=0|false|off|no` 关闭；`TANUKI_DSH_PATH_CACHE_TIMEOUT_MS` 可调整超时。
+- 官方就绪行 `dsh web: http://127.0.0.1:<port>/...` 出现或默认 30 秒超时后卸载，之后全部直通 `node:fs`。`TANUKI_DSH_PATH_CACHE=0|false|off|no` 关闭；`TANUKI_DSH_PATH_CACHE_TIMEOUT_MS` 可调整超时（0 表示只靠地址行卸载，上限 180 秒）。
+- 两个配置由 `DshStartupConfig` 从宿主环境读取并校验，仅在 shim 绑定成功时显式写入 guest 环境；不展开 `env -i` 白名单，不把其他宿主环境带入客体。
 - 任何缓存逻辑异常都退回原生实现；不修改官方 npm 包，不改变 DSH UI/协议。该缓存只是启动加速，不是文件系统安全边界。
 
 #### 1.1.2 首帧前提前启动
 
 `MainActivity.onCreate()` 在 `setContent` 前调用 `RuntimeManager.requestEarlyStart()`，与首帧并行；只复用既有前台服务 `START` 链路和 `RuntimeManager.start()`，不另建进程或第二套密钥/用户数据流程。
 
-- 仅当环境 `READY`、服务为干净的 `STOPPED`、无安装/下载等互斥操作、无存活子进程、未在停止且无 `RECOVERY_REQUIRED` 时才发起；`STARTING/RUNNING/STOPPING/FAILED/INTERRUPTED` 都不自动启动。
+- 仅当环境 `READY`、服务为干净的 `STOPPED`、无安装/下载等互斥操作、无存活子进程、未在停止且无 `RECOVERY_REQUIRED` 时才发起；`STARTING/RUNNING/STOPPING/FAILED/INTERRUPTED` 都不自动启动。`Snapshot.operationActive` 覆盖 STAGING/TESTING/BACKUP/SWITCHING/RESTORING 等状态；独立 `UpdateManager`/`ApplicationUpdateManager` job 通过注入的忙碌信号单独拦截。
 - 仅 Launcher `ACTION_MAIN + CATEGORY_LAUNCHER` 冷启动触发；仪器测试、通知和内部显式 Component 启动不自动拉起，避免在已安装环境上干扰测试。
 - 用户设置“启动应用时自动运行 DSH”默认开启，可在设置中关闭。每个应用进程最多自动发起一次；Activity 重建不会重复拉起。
 - 前台服务收到独立的 `START_EARLY` 动作后会再次校验条件；条件已变化则静默返回，不把状态误置为 `FAILED`。自动发起失败时仍可手动启动。

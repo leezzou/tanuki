@@ -8,6 +8,37 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 
 /**
+ * DSH 启动期路径缓存的受控配置。
+ *
+ * 宿主只把经过校验的两个值写入 guest 环境；shim 仍只从 process.env 读取，
+ * 不扩大现有环境清理边界。默认开启、30 秒超时；0 表示只靠地址行卸载。
+ */
+data class DshStartupConfig(
+    val enabled: Boolean = true,
+    val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+) {
+    /** 仅在实际注入 --require 时传入 guest；bound=false 时不改变 guest 环境。 */
+    fun environment(bound: Boolean = true): List<String> = if (!bound) emptyList() else listOf(
+        "TANUKI_DSH_PATH_CACHE=${if (enabled) "1" else "0"}",
+        "TANUKI_DSH_PATH_CACHE_TIMEOUT_MS=$timeoutMs",
+    )
+
+    companion object {
+        const val DEFAULT_TIMEOUT_MS = 30_000L
+        const val MAX_TIMEOUT_MS = 180_000L
+        private val DISABLED_VALUES = setOf("0", "false", "off", "no")
+
+        fun fromEnvironment(getenv: (String) -> String? = { System.getenv(it) }): DshStartupConfig = runCatching {
+            val raw = getenv("TANUKI_DSH_PATH_CACHE")?.trim()?.lowercase()
+            val enabled = raw == null || raw !in DISABLED_VALUES
+            val timeout = getenv("TANUKI_DSH_PATH_CACHE_TIMEOUT_MS")?.trim()?.toLongOrNull()
+                ?.takeIf { it in 0..MAX_TIMEOUT_MS } ?: DEFAULT_TIMEOUT_MS
+            DshStartupConfig(enabled, timeout)
+        }.getOrDefault(DshStartupConfig())
+    }
+}
+
+/**
  * DSH 启动期只读路径缓存的宿主侧准备。
  *
  * shim 只从 APK 资源复制到应用私有目录，再以只读绑定挂入客体；不改官方 npm 包。

@@ -4,6 +4,7 @@ import com.tanuki.runtime.EarlyRuntimeStart
 import com.tanuki.runtime.EarlyStartGate
 import com.tanuki.runtime.EnvironmentState
 import com.tanuki.runtime.ServiceState
+import com.tanuki.runtime.Snapshot
 import com.tanuki.runtime.UpdateState
 import org.junit.Assert.*
 import org.junit.Test
@@ -27,8 +28,72 @@ class EarlyRuntimeStartTest {
         stopping = stopping,
     )
 
+    private fun snapshotConditions(
+        snapshot: Snapshot,
+        runtimeOperationActive: Boolean = false,
+        independentOperationActive: Boolean = false,
+        liveChild: Boolean = false,
+        stopping: Boolean = false,
+        enabled: Boolean = true,
+    ) = EarlyRuntimeStart.conditionsFrom(
+        enabled = enabled,
+        snapshot = snapshot,
+        runtimeOperationActive = runtimeOperationActive,
+        independentOperationActive = independentOperationActive,
+        liveChild = liveChild,
+        stopping = stopping,
+    )
+
     @Test fun startsOnlyWhenInstalledAndCleanlyStopped() {
         assertTrue(EarlyRuntimeStart.shouldStart(conditions()))
+    }
+
+    @Test fun realReadyAndStoppedSnapshotStarts() {
+        assertTrue(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.READY, service = ServiceState.STOPPED)
+        )))
+    }
+
+    @Test fun realUpdateStatesBlockEarlyStart() {
+        // 独立 UpdateManager 的 job 不在 RuntimeManager.job 中，必须由 snapshot.operationActive 覆盖。
+        for (update in listOf(
+            UpdateState.CHECKING,
+            UpdateState.STAGING,
+            UpdateState.TESTING,
+            UpdateState.BACKUP,
+            UpdateState.SWITCHING,
+            UpdateState.RESTORING,
+        )) {
+            val snapshot = Snapshot(environment = EnvironmentState.READY, service = ServiceState.STOPPED, update = update)
+            assertFalse("update=$update", EarlyRuntimeStart.shouldStart(snapshotConditions(snapshot)))
+        }
+    }
+
+    @Test fun realInstallingOrDownloadingEnvironmentBlocksEarlyStart() {
+        assertFalse(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.INSTALLING, service = ServiceState.STOPPED)
+        )))
+        assertFalse(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.DOWNLOADING, service = ServiceState.STOPPED)
+        )))
+        assertFalse(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.READY, service = ServiceState.STOPPED, operation = "initialize")
+        )))
+    }
+
+    @Test fun independentUpdateJobBlocksEarlyStart() {
+        // 状态尚未写入 STAGING 的窗口也必须由独立 job 信号拦截。
+        assertFalse(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.READY, service = ServiceState.STOPPED),
+            independentOperationActive = true,
+        )))
+    }
+
+    @Test fun runtimeJobBlocksEarlyStart() {
+        assertFalse(EarlyRuntimeStart.shouldStart(snapshotConditions(
+            Snapshot(environment = EnvironmentState.READY, service = ServiceState.STOPPED),
+            runtimeOperationActive = true,
+        )))
     }
 
     @Test fun userSettingCanDisableEarlyStart() {

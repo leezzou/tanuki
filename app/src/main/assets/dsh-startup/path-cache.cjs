@@ -99,12 +99,18 @@ function configuredTimeoutMs() {
 }
 
 // 只接受绝对路径，避免进程工作目录变化后命中错误条目。
+// 不调用 path.normalize：符号链接后的 `..` 必须先由文件系统跟随链接再解析，
+// 词法折叠会让 a/link/../package.json 与 a/package.json 共用错误缓存键。
 function cacheablePath(input) {
   if (typeof input !== 'string' || input.length === 0 || input.indexOf('\0') !== -1) return null;
-  if (!path.isAbsolute(input)) return null;
-  const normalized = path.normalize(input);
+  if (!path.isAbsolute(input) || input.endsWith(path.sep)) return null;
+  const parts = input.split(path.sep);
+  for (let i = 1; i < parts.length; i += 1) {
+    // `.`、`..`、重复斜杠和空段都改变文件系统解析语义，直接交给原生实现。
+    if (parts[i] === '' || parts[i] === '.' || parts[i] === '..') return null;
+  }
   for (const root of state.roots) {
-    if (normalized === root || normalized.startsWith(root + path.sep)) return normalized;
+    if (input === root || input.startsWith(root + path.sep)) return input;
   }
   return null;
 }

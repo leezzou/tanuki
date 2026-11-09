@@ -36,6 +36,31 @@ object EarlyRuntimeStart {
             !conditions.stopping
 
     /**
+     * 从真实 [Snapshot] 和独立更新任务生成判定条件。
+     *
+     * [Snapshot.operationActive] 已覆盖 environment/download/update/health 等状态；
+     * 独立更新任务（UpdateManager/ApplicationUpdateManager）使用自己的 job，
+     * 必须通过 [independentOperationActive] 单独传入，避免 STAGING/TESTING/RESTORING
+     * 期间因 manager.job 为空而误启动正式 DSH。
+     */
+    fun conditionsFrom(
+        enabled: Boolean,
+        snapshot: Snapshot,
+        runtimeOperationActive: Boolean,
+        independentOperationActive: Boolean,
+        liveChild: Boolean,
+        stopping: Boolean,
+    ): Conditions = Conditions(
+        enabled = enabled,
+        environment = snapshot.environment,
+        service = snapshot.service,
+        update = snapshot.update,
+        operationActive = snapshot.operationActive || runtimeOperationActive || independentOperationActive,
+        liveChild = liveChild,
+        stopping = stopping,
+    )
+
+    /**
      * 只对 Launcher 冷启动提前拉起。
      *
      * 仪器测试、通知和内部显式 Component 启动通常没有 MAIN/LAUNCHER，
