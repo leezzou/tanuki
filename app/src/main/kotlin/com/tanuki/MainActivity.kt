@@ -187,7 +187,7 @@ class MainActivity : ComponentActivity() {
     }
 
     fun action(name: String, version: String? = null) {
-        if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name=="DSH_UNINSTALL") && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         startForegroundService(Intent(this, RuntimeService::class.java).setAction(name).apply { version?.let { putExtra("version",it) } })
@@ -347,6 +347,9 @@ class MainActivity : ComponentActivity() {
                         reinstallDsh = { release -> selected=release;confirmation="DSH_REINSTALL" },
                         uninstallDsh = { release -> selected=release;confirmation="DSH_UNINSTALL" },
                         cacheDsh = { release -> selected=release;confirmation="DSH_STAGE" },
+                        loadInstalledDsh = { manager.components.installedDshDetails() },
+                        switchInstalledDsh = { version -> action("DSH_SWITCH", version) },
+                        uninstallInstalledDsh = { version -> action("DSH_UNINSTALL", version) },
                         setFullscreen = dshWindowMode::setFullscreen,
                         openBrowser = {
                             (application as TanukiApp).hideBrowserOverlay()

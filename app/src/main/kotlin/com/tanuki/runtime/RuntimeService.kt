@@ -92,6 +92,7 @@ class RuntimeService : Service() {
             "NODE_REINSTALL" -> manager.components.install(RuntimeComponent.NODE, true)
             "NODE_UNINSTALL" -> manager.components.uninstall(RuntimeComponent.NODE)
             "DSH_UNINSTALL" -> manager.components.uninstallDsh(intent.getStringExtra("version"))
+            "DSH_SWITCH" -> manager.components.switchDsh(intent.getStringExtra("version"))
             "STOP" -> scope.launch {
                 try {
                     manager.cancel(); (application as TanukiApp).updates.cancel(); appUpdates.cancel()

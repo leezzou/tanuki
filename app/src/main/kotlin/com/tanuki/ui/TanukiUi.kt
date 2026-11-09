@@ -107,6 +107,9 @@ data class TanukiUiCallbacks(
     val reinstallDsh: (Release) -> Unit = { },
     val uninstallDsh: (Release?) -> Unit = { },
     val cacheDsh: (Release) -> Unit = { },
+    val loadInstalledDsh: suspend () -> InstalledDshInventory = { InstalledDshInventory() },
+    val switchInstalledDsh: (String) -> Unit = { },
+    val uninstallInstalledDsh: (String) -> Unit = { },
     val setFullscreen: (Boolean) -> Unit = { },
     val selectVersion:(RuntimeComponent,String)->Unit={_,_->},
     val testSources:(RuntimeComponent)->Unit={},
@@ -349,6 +352,7 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
     val guided=guideStep!=null
     val automatic=ComponentSourceOption("auto","自动择优","先测速再使用最快可用源，下载失败后自动换源")
     var showVersions by rememberSaveable { mutableStateOf(false) }
+    var showInstalledDsh by rememberSaveable { mutableStateOf(false) }
     var selectedVersion by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = model.versions.firstOrNull { it.version == selectedVersion }
         ?: model.versions.firstOrNull { it.version == s.dsh }
@@ -435,6 +439,11 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             }
             TextButton(onClick=c.checkUpdates,enabled=!s.tanukiBusy,modifier=Modifier.heightIn(min=48.dp)) { Text("刷新") }
         }
+        // 已安装清单与“官方发布列表”分开：前者管理本机程序，后者负责下载/安装。
+        OutlinedButton(onClick={showInstalledDsh=true},enabled=!s.tanukiBusy,
+            modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),shape=MaterialTheme.shapes.medium) {
+            Text("已安装版本（${comps.installedDshVersions.size}）")
+        }
         if(comps.dshInstalled && !guided) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                 OutlinedButton(onClick={currentRelease?.let(c.reinstallDsh)},
@@ -506,6 +515,14 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             }
         },
         dismissButton = { TextButton(onClick = { showVersions = false }) { Text("取消") } })
+    if(showInstalledDsh) DshVersionManagerDialog(
+        activeVersion = s.dsh,
+        idle = s.tanukiIdle,
+        inventoryKey = comps.installedDshVersions,
+        load = c.loadInstalledDsh,
+        onSwitch = c.switchInstalledDsh,
+        onUninstall = c.uninstallInstalledDsh,
+        onDismiss = { showInstalledDsh = false })
     if(!guided)TanukiCard {
         TanukiDetails("来源与完整性") {
             val ubuntu=RuntimeCatalog.find(RuntimeComponent.UBUNTU,comps.selectedUbuntuVersion)!!

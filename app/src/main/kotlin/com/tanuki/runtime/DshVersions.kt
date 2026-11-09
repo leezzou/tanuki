@@ -1,0 +1,183 @@
+package com.tanuki.runtime
+
+import com.tanuki.update.VersionOrder
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
+
+/** 一个可运行的已安装 DSH 程序目录；字节数只统计目录内普通文件，不跟随链接。 */
+data class InstalledDshVersion(
+    val version: String,
+    val bytes: Long,
+    val installedAtMillis: Long,
+    val active: Boolean,
+    val verified: Boolean
+)
+
+data class InstalledDshInventory(val versions: List<InstalledDshVersion> = emptyList()) {
+    val totalBytes: Long get() = versions.sumOf { it.bytes }
+    val installedVersions: Set<String> get() = versions.mapTo(LinkedHashSet()) { it.version }
+    val activeVersion: String? get() = versions.firstOrNull { it.active }?.version
+}
+
+/**
+ * 已安装 DSH 清单与切换策略的纯逻辑部分，不依赖 Android API，可在 JVM 回归中直接验证。
+ *
+ * “可运行”要求目录名是合法版本、程序目录不是符号链接、`.installed` 与
+ * `node_modules/@deepseek-ai/dsh/lib/bin.js` 都是真实普通文件，且中间目录均未被重定向。
+ * `verified` 进一步要求依赖锁哈希与 `.installed` 一致，并存在本机启动检查通过的
+ * `.web-verified` 标记；缺少标记时仍列出目录，但明确显示“未校验”。
+ */
+object DshVersions {
+    val VERSION = Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
+    const val DOWNGRADE_MESSAGE = "旧版切换需先恢复匹配的数据快照"
+
+    private val BIN_PARTS = listOf("node_modules", "@deepseek-ai", "dsh", "lib")
+
+    /** 只做结构与链接校验，不读取依赖锁、不遍历体积；可安全用于频繁刷新的清单。 */
+    fun installedVersions(engines: File): Set<String> {
+        if (!engines.isDirectory || Files.isSymbolicLink(engines.toPath())) return emptySet()
+        return engines.listFiles().orEmpty()
+            .filter { it.name.matches(VERSION) && isInstalled(engines, it.name) }
+            .mapTo(LinkedHashSet<String>()) { it.name }
+    }
+
+    fun isInstalled(engines: File, version: String): Boolean {
+        if (!version.matches(VERSION) || Files.isSymbolicLink(engines.toPath())) return false
+        val directory = File(engines, version)
+        if (Files.isSymbolicLink(directory.toPath()) || !Files.isDirectory(directory.toPath(), LinkOption.NOFOLLOW_LINKS)) return false
+        val marker = File(directory, ".installed")
+        if (!Files.isRegularFile(marker.toPath(), LinkOption.NOFOLLOW_LINKS) || marker.length() == 0L) return false
+        var cursor = directory.toPath()
+        for (part in BIN_PARTS) {
+            cursor = cursor.resolve(part)
+            if (Files.isSymbolicLink(cursor) || !Files.isDirectory(cursor, LinkOption.NOFOLLOW_LINKS)) return false
+        }
+        return Files.isRegularFile(cursor.resolve("bin.js"), LinkOption.NOFOLLOW_LINKS)
+    }
+
+    /** 完整清单：版本、逻辑字节数、安装时间、当前/备用与校验状态。 */
+    fun scan(engines: File, activeVersion: String?): InstalledDshInventory {
+        if (!engines.isDirectory || Files.isSymbolicLink(engines.toPath())) return InstalledDshInventory()
+        val versions = engines.listFiles().orEmpty()
+            .filter { it.name.matches(VERSION) && isInstalled(engines, it.name) }
+            .sortedWith { left, right -> VersionOrder.compare(right.name, left.name) }
+            .map { directory ->
+                val marker = File(directory, ".installed")
+                InstalledDshVersion(
+                    version = directory.name,
+                    bytes = directoryBytes(directory),
+                    installedAtMillis = marker.lastModified().takeIf { it > 0L } ?: directory.lastModified(),
+                    active = directory.name == activeVersion,
+                    verified = isVerified(directory, marker)
+                )
+            }
+        return InstalledDshInventory(versions)
+    }
+
+    fun isOlder(candidate: String, current: String): Boolean =
+        candidate.matches(VERSION) && current.matches(VERSION) && VersionOrder.compare(candidate, current) < 0
+
+    private fun isVerified(directory: File, marker: File): Boolean {
+        val webVerified = File(directory, ".web-verified")
+        if (!Files.isRegularFile(webVerified.toPath(), LinkOption.NOFOLLOW_LINKS)) return false
+        val lock = File(directory, "package-lock.json")
+        if (!Files.isRegularFile(lock.toPath(), LinkOption.NOFOLLOW_LINKS) || marker.length() != 64L) return false
+        val expected = runCatching { marker.readText().trim() }.getOrNull() ?: return false
+        val actual = runCatching { sha256(lock) }.getOrNull() ?: return false
+        return expected.equals(actual, ignoreCase = true)
+    }
+
+    /** 与 DirectoryUsage 不同，这里按逻辑文件长度统计，保证纯 JVM 可测且不跟随任何链接。 */
+    private fun directoryBytes(root: File): Long {
+        var total = 0L
+        try {
+            Files.walkFileTree(root.toPath(), emptySet(), 64, object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    if (!attrs.isSymbolicLink && attrs.isRegularFile) {
+                        total = try {
+                            Math.addExact(total, attrs.size())
+                        } catch (_: ArithmeticException) {
+                            Long.MAX_VALUE
+                        }
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult {
+                    if (exc !is NoSuchFileException) throw exc
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        } catch (_: IOException) {
+            return total
+        }
+        return total
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+}
+
+/** 切换前的本机状态与数据兼容规则；与文件系统解耦，便于 JVM 覆盖各拒绝分支。 */
+object DshSwitch {
+    fun requireSwitchable(
+        target: String,
+        current: String,
+        installed: Set<String>,
+        serviceStopped: Boolean,
+        busy: Boolean,
+        liveChild: Boolean
+    ) {
+        check(!busy && !liveChild) { "请等待当前操作完成并停止 DSH 后再切换版本" }
+        check(serviceStopped) { "请先停止 DSH 服务再切换版本" }
+        require(target.matches(DshVersions.VERSION)) { "DSH 版本格式无效" }
+        require(current.matches(DshVersions.VERSION)) { "当前安装元数据缺少有效 DSH 版本；请先恢复匹配的数据快照" }
+        require(target != current) { "DSH $target 已是当前版本" }
+        require(target in installed) { "DSH $target 未安装或程序目录不完整" }
+        check(!DshVersions.isOlder(target, current)) { DshVersions.DOWNGRADE_MESSAGE }
+    }
+
+    /**
+     * 先创建当前数据快照，再只改写 installed.json 的 dsh 字段。
+     * 快照失败时不动元数据；写入失败时把 previous 写回，旧程序目录始终保留。
+     */
+    suspend fun apply(
+        previous: JSONObject,
+        target: String,
+        snapshot: suspend () -> String,
+        write: (JSONObject) -> Unit
+    ): String {
+        val snapshotName = snapshot()
+        val updated = JSONObject(previous.toString()).put("dsh", target)
+        try {
+            write(updated)
+        } catch (error: Throwable) {
+            try {
+                write(JSONObject(previous.toString()))
+            } catch (rollback: Throwable) {
+                error.addSuppressed(rollback)
+            }
+            throw error
+        }
+        return snapshotName
+    }
+}
