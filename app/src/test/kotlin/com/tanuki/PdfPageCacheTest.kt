@@ -70,6 +70,14 @@ class PdfPageCacheTest {
         assertNull(cache.bytesOf(2))
     }
 
+    @Test fun keysInLruOrderReflectsAccess() {
+        val cache = PdfPageCache<Int>(100)
+        cache.put(1, 30)
+        cache.put(2, 30)
+        cache.touch(1)
+        assertEquals(listOf(2, 1), cache.keysInLruOrder())
+    }
+
     @Test fun invalidInputsAreRejected() {
         assertThrows(IllegalArgumentException::class.java) { PdfPageCache<Int>(0) }
         val cache = PdfPageCache<Int>(10)

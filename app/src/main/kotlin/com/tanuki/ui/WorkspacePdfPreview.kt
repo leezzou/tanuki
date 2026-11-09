@@ -73,6 +73,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -402,6 +403,8 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                         attempts++
                     }
                 }
+                val reservationProtected = visiblePages.toSet()
+                var needsMemoryRetry = false
                 for (index in renderPlan) {
                     val cached = pages[index]
                     if (cached != null && cached.bytes <= maxPageBytes) {
@@ -410,7 +413,22 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                     }
                     pageErrors.remove(index)
                     var pending: Bitmap? = null
+                    var reservation = 0L
                     try {
+                        // 先按实际驻留字节腾出空间，再创建位图；避免先分配后淘汰造成峰值超预算。
+                        var evictedByReservation = memory.tryReserve(maxPageBytes, reservationProtected)
+                        var attempts = 0
+                        while (evictedByReservation == null && attempts < 6) {
+                            withFrameNanos { }
+                            evictedByReservation = memory.tryReserve(maxPageBytes, reservationProtected)
+                            attempts++
+                        }
+                        if (evictedByReservation == null) {
+                            needsMemoryRetry = true
+                            continue
+                        }
+                        evictedByReservation.forEach { key -> pages.remove(key) }
+                        reservation = maxPageBytes
                         val rendered = activeSession.renderPage(
                             index = index,
                             viewportWidth = viewport.width,
@@ -426,7 +444,13 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                         pending = null
                         aspects[index] = rendered.aspect
                         pages[index] = page
-                        val evicted = memory.store(index, page, protectedPages)
+                        val evicted = memory.store(
+                            key = index,
+                            value = page,
+                            protectedKeys = protectedPages,
+                            reservedBytes = reservation,
+                        )
+                        reservation = 0L
                         // 已淘汰但仍显示在屏上的页保留到离开组合，避免绘制已回收位图。
                         evicted.forEach { key -> if (!memory.isDisplayed(key)) pages.remove(key) }
                     } catch (failure: CancellationException) {
@@ -438,8 +462,14 @@ internal fun PdfPreview(files: WorkspaceFileManager, path: String, modifier: Mod
                     } catch (failure: Exception) {
                         pageErrors[index] = "第 ${index + 1} 页无法渲染：文件可能已损坏。"
                     } finally {
+                        if (reservation != 0L) memory.cancelReservation(reservation)
                         pending?.takeUnless { it.isRecycled }?.recycle()
                     }
+                }
+                if (needsMemoryRetry) {
+                    // 仍在显示的旧页会在随后几帧离开组合；稍后重试，避免可见页长期停在占位。
+                    delay(500)
+                    renderToken++
                 }
             }
 

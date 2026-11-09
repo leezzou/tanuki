@@ -19,6 +19,9 @@ internal class PdfPageCache<K : Any>(val budgetBytes: Long) {
 
     fun contains(key: K): Boolean = sizes.containsKey(key)
 
+    /** 按最近最少使用到最近的顺序返回键，供实际驻留字节预留时选择淘汰对象。 */
+    fun keysInLruOrder(): List<K> = sizes.keys.toList()
+
     fun bytesOf(key: K): Long? = sizes[key]
 
     /** 标记一次访问，使该页排到 LRU 队尾。 */

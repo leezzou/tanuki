@@ -79,6 +79,73 @@ class PdfPageMemoryTest {
         assertEquals(0, fixture.memory.usedBytes())
     }
 
+    @Test fun reservationEvictsUnprotectedCachedPagesBeforeAllocation() {
+        val fixture = Fixture(100)
+        val first = fixture.page(1, 40)
+        val second = fixture.page(2, 40)
+        fixture.memory.store(1, first, setOf(1))
+        fixture.memory.store(2, second, setOf(2))
+
+        val evicted = fixture.memory.tryReserve(40, setOf(1))
+        assertEquals(listOf(2), evicted)
+        assertTrue(second.released)
+        assertFalse(first.released)
+        assertEquals(80, fixture.memory.residentBytes())
+        assertFalse(fixture.memory.contains(2))
+    }
+
+    @Test fun reservationFailsWhileDisplayedPagesCannotBeFreed() {
+        val fixture = Fixture(100)
+        val first = fixture.page(1, 40)
+        fixture.memory.store(1, first, setOf(1))
+        fixture.memory.store(2, fixture.page(2, 40), setOf(2))
+        fixture.memory.display(1)
+        fixture.memory.display(2)
+        assertNull(fixture.memory.tryReserve(40, emptySet()))
+        assertEquals(80, fixture.memory.residentBytes())
+
+        fixture.memory.hide(1)
+        assertEquals(listOf(1), fixture.memory.tryReserve(40, emptySet()))
+        assertTrue(first.released)
+    }
+
+    @Test fun reservationIsConsumedByStoreWithoutDoubleCounting() {
+        val fixture = Fixture(100)
+        val page = fixture.page(1, 40)
+        assertEquals(emptyList<Int>(), fixture.memory.tryReserve(40, emptySet()))
+        assertEquals(40, fixture.memory.residentBytes())
+
+        fixture.memory.store(1, page, setOf(1), reservedBytes = 40)
+        assertEquals(40, fixture.memory.residentBytes())
+        assertEquals(40, fixture.memory.usedBytes())
+    }
+
+    @Test fun cancelledReservationRestoresCapacity() {
+        val fixture = Fixture(40)
+        assertNotNull(fixture.memory.tryReserve(40, emptySet()))
+        assertNull(fixture.memory.tryReserve(1, emptySet()))
+        fixture.memory.cancelReservation(40)
+        assertEquals(0, fixture.memory.residentBytes())
+        assertNotNull(fixture.memory.tryReserve(40, emptySet()))
+    }
+
+    @Test fun fullLruThenNewPlanReservesBeforeAllocation() {
+        val fixture = Fixture(100)
+        val pages = (1..5).map { fixture.page(it, 20) }
+        pages.forEach { fixture.memory.store(it.id, it, setOf(it.id)) }
+        fixture.memory.display(1)
+        assertEquals(100, fixture.memory.residentBytes())
+
+        // LRU 已满：必须先淘汰未显示的页，才能为新计划页预留 20 字节。
+        assertEquals(listOf(2), fixture.memory.tryReserve(20, setOf(1)))
+        assertEquals(100, fixture.memory.residentBytes())
+        assertFalse(fixture.memory.contains(2))
+
+        fixture.memory.store(6, fixture.page(6, 20), setOf(1, 6), reservedBytes = 20)
+        assertEquals(100, fixture.memory.residentBytes())
+        assertEquals(100, fixture.memory.usedBytes())
+    }
+
     @Test fun closeReleasesAllIncludingDeferredPages() {
         val fixture = Fixture(100)
         val first = fixture.page(1, 80)

@@ -8,11 +8,13 @@ package com.tanuki.ui
  * 由 [hide] 回收；[close] 统一回收全部剩余值。
  */
 internal class PdfPageMemory<K : Any, V : Any>(
-    budgetBytes: Long,
+    private val budgetBytes: Long,
     private val sizeOf: (V) -> Long,
     private val release: (V) -> Unit,
 ) {
     private val cache = PdfPageCache<K>(budgetBytes)
+    /** 已批准但尚未落库的在途位图字节数。 */
+    private var reservedBytes = 0L
     private val values = HashMap<K, V>()
     private val displayed = HashSet<K>()
 
@@ -33,6 +35,50 @@ internal class PdfPageMemory<K : Any, V : Any>(
     }
 
     fun usedBytes(): Long = synchronized(lock) { cache.usedBytes }
+
+    /** 实际驻留字节：缓存值 + 延迟回收/已替换旧值 + 在途预留。 */
+    fun residentBytes(): Long = synchronized(lock) { residentBytesLocked() }
+
+    /**
+     * 在分配位图前预留空间：按实际驻留字节（含延迟回收与在途）淘汰未显示、未保护的缓存页。
+     * 返回被淘汰的键；返回 null 表示仍放不下，调用方应等待组合释放旧页而不是继续分配。
+     * 调用方必须同步移除这些键在界面中的引用，避免持有已回收位图。
+     */
+    fun tryReserve(bytes: Long, protectedKeys: Set<K>): List<K>? {
+        require(bytes > 0L) { "PDF 页预留字节必须为正数" }
+        val toRelease = mutableListOf<V>()
+        val evicted = mutableListOf<K>()
+        val granted = synchronized(lock) {
+            if (closed) return@synchronized false
+            var resident = residentBytesLocked()
+            while (resident + bytes > budgetBytes) {
+                val victim = cache.keysInLruOrder().firstOrNull {
+                    it !in protectedKeys && it !in displayed && values.containsKey(it)
+                } ?: break
+                cache.remove(victim)
+                evicted += victim
+                values.remove(victim)?.let {
+                    resident -= sizeOf(it)
+                    toRelease += it
+                }
+            }
+            if (resident + bytes <= budgetBytes) {
+                reservedBytes += bytes
+                true
+            } else {
+                false
+            }
+        }
+        toRelease.forEach(release)
+        return if (granted) evicted else null
+    }
+
+    /** 归还未使用的预留（渲染失败、取消或任务被替换）。 */
+    fun cancelReservation(bytes: Long) {
+        synchronized(lock) {
+            reservedBytes = (reservedBytes - bytes).coerceAtLeast(0L)
+        }
+    }
 
     /** 页面进入组合：加入绘制保护，避免淘汰时回收仍在显示的位图。 */
     fun display(key: K) {
@@ -59,14 +105,21 @@ internal class PdfPageMemory<K : Any, V : Any>(
      * 存入一页并返回被淘汰的键，调用方应同步移除界面中对应的页。
      * 返回值保证：传入值要么被保存，要么被 [release]（文档已关闭等边界情况）。
      */
-    fun store(key: K, value: V, protectedKeys: Set<K>): Set<K> {
+    fun store(
+        key: K,
+        value: V,
+        protectedKeys: Set<K>,
+        reservedBytes: Long = 0L,
+    ): Set<K> {
         val evicted = mutableSetOf<K>()
         val toRelease = mutableListOf<V>()
         val wasClosed = synchronized(lock) {
             if (closed) {
+                cancelReservationLocked(reservedBytes)
                 toRelease += value
                 return@synchronized true
             }
+            cancelReservationLocked(reservedBytes)
             val previous = values.put(key, value)
             if (previous != null) {
                 // 同页重渲染：旧位图可能仍在绘制，延迟到离开组合后回收。
@@ -79,6 +132,15 @@ internal class PdfPageMemory<K : Any, V : Any>(
             val keys = cache.put(key, sizeOf(value), protectedKeys)
             evicted += keys
             toRelease += collectEvictedLocked(keys)
+            // 按实际驻留字节（含延迟回收/在途）再收紧一次，避免只按 cache.usedBytes 记账。
+            while (residentBytesLocked() > budgetBytes) {
+                val victim = cache.keysInLruOrder().firstOrNull {
+                    it !in protectedKeys && it !in displayed && values.containsKey(it)
+                } ?: break
+                cache.remove(victim)
+                evicted += victim
+                values.remove(victim)?.let { toRelease += it }
+            }
             false
         }
         if (wasClosed) {
@@ -115,8 +177,20 @@ internal class PdfPageMemory<K : Any, V : Any>(
             retired.clear()
             displayed.clear()
             cache.clear()
+            reservedBytes = 0L
         }
         toRelease.forEach(release)
+    }
+
+    private fun cancelReservationLocked(bytes: Long) {
+        reservedBytes = (reservedBytes - bytes).coerceAtLeast(0L)
+    }
+
+    private fun residentBytesLocked(): Long {
+        var total = reservedBytes
+        values.values.forEach { total += sizeOf(it) }
+        retired.values.forEach { list -> list.forEach { total += sizeOf(it) } }
+        return total
     }
 
     /** 必须在持锁状态下调用；只收集被淘汰且未显示的页。 */

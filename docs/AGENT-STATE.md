@@ -117,16 +117,16 @@
 
 ### PDF 原生阅读体验打磨（android_agent-35，PR #24 待 Review）
 
-- 分支 `ao/pdf-reading/native-reading`，基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `origin/main=c2f1b44`。独立 `/tmp` clone 提交与推送，不合并、不触发 AO Review。
+- 分支 `ao/pdf-reading/native-reading`，基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 rebase 到 `origin/main=b9eeb75`。独立 `/tmp` clone 提交与推送，不合并、不触发 AO Review。
 - 阅读器改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；同屏可见页全部优先加载，再在可见范围外预加载相邻页；按字节 LRU 缓存（堆的 1/8，24–64 MiB），单页渲染受长边 2048、4,000,000 像素与「缓存预算 ÷ (渲染计划页 + 1 在途) ÷ 4」限制，受保护页总字节不超预算；正在组合中绘制的位图延迟回收，离开组合/关闭文档时回收。
 - 交互：适应宽度/适应页面切换、双指 1–5x、双击 1x/2.5x、放大后横向平移、页码/总页数、跳页对话框（支持 `12`、`12/50`、`第12页`）；纵向滚动始终可用。放大时按缩放补上下边缘留白，首尾页文字在 1–5× 均可触达；纵向补偿按未缩放列表坐标计算，并延迟到新留白完成测量后执行；放大层由未缩放的阅读视口 `clipToBounds()` 裁剪。
 - 错误与限制：512 MiB 文件打开上限、加密/损坏/无页面/内存不足中文提示、单页渲染失败可重试；仍为只读预览，不接 WebView/外部 App，不做编辑/搜索/文本选择。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 341 tests / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 通过；新增 58 项 PDF 策略测试，`ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。Codex P2（缩放首尾可达、非 1× 纵向补偿、同屏 >3 页可见页加载、渲染集合内存预算、固定视口裁剪、分配前驻留预留）已修复并补回归。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 364 tests / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 通过；新增 58 项 PDF 策略测试，`ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。Codex P2（缩放首尾可达、非 1× 纵向补偿、同屏 >3 页可见页加载、渲染集合内存预算、固定视口裁剪、分配前驻留预留）已修复并补回归。
 - 待验证：真机/模拟器大文档连续滚动与内存曲线、捏合/双击/平移手感、视口裁剪截图、5x 清晰度、真实加密/损坏 PDF、深色主题；assemble/Android 仪器未跑。PR 与 head 以 GitHub 页面为准。
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-35 新跑）：rebase 到 `origin/main=c2f1b44` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 341 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 通过（新增 58 项 PDF 缓存/预加载/内存上限/跳页/视口/缩放可达性/预算联合/驻留预留策略测试）。
+- 已验证（本轮 android_agent-35 新跑）：rebase 到 `origin/main=b9eeb75` 后 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 364 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 通过（新增 58 项 PDF 缓存/预加载/内存上限/跳页/视口/缩放可达性/预算联合/驻留预留策略测试）。
 - 已验证（合并后本轮新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；306 tests / 0 failures / 0 errors / 0 skipped（含 `EarlyRuntimeStartTest` 17 项、`DshStartupConfigTest` 6 项，以及 main 的安全模式/聊天通知/XLSX 回归）；`node scripts/test-dsh-path-cache.mjs` 10/10 场景 PASS。未跑 assemble/设备/真实 PRoot DSH 启动。
 - 已验证（rebase 后 android_agent-29 新跑）：rebase 到 `main=5fd1ab4`（含安全模式 PR #25 与 XLSX PR #23）后 `compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
 - 已验证（PR #22 分支 android_agent-29 新跑）：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL；223 tests / 0 failures / 0 errors / 0 skipped（既有 205 + 新增 18），新增 `ChatNotificationPolicyTest` 10 项、`ChatNotificationRoutingTest` 4 项与 `DshChatProtocolTest` 4 项；`node scripts/test-chat-session-open.mjs` 通过。未跑 assemble/仪器/真实设备/ROM。
