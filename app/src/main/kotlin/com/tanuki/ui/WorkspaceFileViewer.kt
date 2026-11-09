@@ -172,7 +172,7 @@ internal fun WorkspaceFileViewer(
                             maxDimension = previewMaxDimension,
                             maxPixels = previewMaxPixels,
                         )
-                        WorkspaceFileManager.FileKind.DOCX -> DocxTextPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.DOCX -> DocxPreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.DOC -> Column(
                             Modifier.padding(24.dp),

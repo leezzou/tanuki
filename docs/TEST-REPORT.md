@@ -134,6 +134,18 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - rebase 到 `main=5fd1ab4`（含安全模式 PR #25 与 XLSX PR #23）后，在 `/tmp/tanuki-chat-notify` 复跑 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` → BUILD SUCCESSFUL，283 tests / 0 failures / 0 errors / 0 skipped；聊天通知 18 项与安全模式 32 项、XLSX 28 项共存。
 - 未执行：assemble、Android 仪器/真实设备、Android 13 权限弹窗与通知展示、group/summary/渠道设置、点击通知切会话、同会话新事件再次提醒的设备声音/振动、真实 DSH WebSocket、后台/息屏送达、MIUI/其他 ROM、DSH 升级后事件表/页面属性复核。编译/JVM/lint 不能替代设备与 ROM 验收。
 
+## DOCX 应用内原生预览验证（2026-11-09，android_agent-31，非设备）
+
+- 范围：把 DOCX 纯文本提取替换为 Compose 原生只读分页预览；新增 OOXML 解析（document/styles/numbering/rels/media）、样式/列表/表格/图片/页面设置、安全上限、纯 Kotlin 分页与图片策略、JVM 回归。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，已 merge 到 `main=f5f3bf3`（含温控 PR #21、XLSX 预览 PR #23、运行时安全模式 PR #25、聊天通知 PR #22、冷启动 PR #27、PDF 阅读 PR #24 与原生界面 PR #26），分支 `ao/docx-preview/root`，PR [#28](https://github.com/leezzou/tanuki/pull/28)；不改官方 DSH UI、不引入运行时文档库。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.Docx*'` → BUILD SUCCESSFUL，80 tests / 0 failures / 0 errors / 0 skipped（`DocxDocumentReaderTest` 25、`DocxSecurityTest` 22、`DocxPaginatorTest` 8、`DocxLayoutPolicyTest` 25）。
+  - `./gradlew :app:testModernDebugUnitTest`（rebase 前）→ BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped。
+  - merge `main=f5f3bf3` 后 `./gradlew :app:compileModernDebugKotlin :app:testModernDebugUnitTest` → BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80；测试 XML 位于 `app/build/test-results/testModernDebugUnitTest/`，不提交）；`lintModernDebug` BUILD SUCCESSFUL。
+- 新增回归覆盖：样式 basedOn/docDefaults/标题回退/直接格式覆盖与 `w:b w:val="0"`、字符样式、多级编号与 `%1.%2`/bullet/样式级 numPr、表格 grid/跨列/底纹/表头/单元格多段、DrawingML 与 VML 图片、外部/缺失/穿越关系、纸张尺寸与边距、page break/pageBreakBefore、损坏/截断 zip、缺少正文、坏 XML、DOCTYPE、未定义实体、路径穿越条目、条目数/归档大小/单条目/总解压/实际解压上限、XML 深度/元素上限、文字截断、宏/页眉/脚注/嵌入对象提示，以及分页装箱、页面几何/字号比例、图片采样/显示/像素预算、单元格预算/分段、超高表格行限制。
+- 本轮失败与修复：XML 本地名被统一小写导致 `pPr/sectPr/gridCol` 等失配（已改为保留 OOXML 大小写）；分页 gap 测试期望错误（已修正）；`DocxParagraph`/`DocxTable` 作为顶层类型引用错误（实际为 `DocxBlock` 嵌套类型）；早期对文本切片使用 `wrapContentHeight(unbounded = true)`，现已由“复用 `TextLayoutResult` + 按页合并绘制”替代，避免每行重新排版整段；表格单元格渲染 padding 与测量宽度统一；rebase 冲突保留 DOCX 与 XLSX 两个查看器分支，并合并 runtime 安全模式、聊天通知、冷启动与 PDF 文档，重新生成交接印章。Review P1/P2 修复：Bitmap 清理捕获 effect 快照；文本切片改为复用已测量布局并逐页合并、长段落按 8,000 字有界分段；表格列宽用 Long 求和并限制正文宽度；页首 gap 清零；渲染预算在行循环内生效并反馈截断；单元格段落共享原子预算并按 8,000 字分段，单元格内容高度限制在页面内容高度内，表格行高在创建 Compose 尺寸约束前 clamp；宽屏居中留白移到纸张宽度约束之外，页面按完整测量宽度绘制；超高单元格按已测量行边界保留可见文本前缀；极小视口框架至少容纳最小纸张宽度。
+- 未执行：assemble、Android 仪器/真实设备、真实 Word 复杂样本、双指/横向滚动与深色主题、超大文档性能、低 API/真机。lint 与 JVM/编译不能替代设备与真实样本验收。
+
 ## F1 文件查看器内置预览验证（2026-11-06，非设备）
 
 - 范围：`FileKind` PDF/DOCX/DOC 映射；PDF `PdfRenderer` 分页/缩放；DOCX `ZipFile`+`XmlPullParser` 文本提取与上限；图片/PDF 共享 `Zoomable` 的手势策略。基线 `main=cff09a3`，分支 `ao/tanuki-android-dsh/workspace-file-preview`，PR [#16](https://github.com/leezzou/tanuki/pull/16)。
