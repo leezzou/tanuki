@@ -150,7 +150,11 @@ internal fun WorkspaceFileViewer(
             } else {
                 val kind = info?.kind
                 val contentModifier = Modifier.weight(1f).fillMaxWidth()
-                    .padding(if (fullscreen || kind == WorkspaceFileManager.FileKind.PDF || kind == WorkspaceFileManager.FileKind.DOCX) 0.dp else 16.dp)
+                    .padding(
+                        if (fullscreen || kind == WorkspaceFileManager.FileKind.PDF ||
+                            kind == WorkspaceFileManager.FileKind.DOCX || kind == WorkspaceFileManager.FileKind.XLSX
+                        ) 0.dp else 16.dp,
+                    )
                 Box(contentModifier, contentAlignment = Alignment.Center) {
                     when (kind) {
                         WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let { bitmap ->
@@ -169,6 +173,7 @@ internal fun WorkspaceFileViewer(
                             maxPixels = previewMaxPixels,
                         )
                         WorkspaceFileManager.FileKind.DOCX -> DocxTextPreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(files, entry.path, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.DOC -> Column(
                             Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,

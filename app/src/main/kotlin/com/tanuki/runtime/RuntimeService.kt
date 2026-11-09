@@ -33,11 +33,19 @@ class RuntimeService : Service() {
                         s.operationActive -> s.stage
                         apk.busy -> apk.message
                         transfers.isNotEmpty() -> transfers.first().label
-                        else -> "环境 ${s.environment.label} · 服务 ${s.service.label}"
+                        else -> buildString {
+                            append("环境 ${s.environment.label} · 服务 ${s.service.label}")
+                            when (s.recovery.mode) {
+                                RecoveryMode.SAFE -> append(" · 安全模式")
+                                RecoveryMode.PROBATION -> append(" · 正常模式试用")
+                                RecoveryMode.NORMAL -> Unit
+                            }
+                            if (manager.hasPendingAutoRestart) append(" · 等待自动重启")
+                        }
                     }, s, transfers, apk))
                     notifiedAt = now
                 }
-                val needed = s.operationActive || apk.busy || transfers.isNotEmpty() || s.service == ServiceState.RUNNING
+                val needed = s.operationActive || apk.busy || transfers.isNotEmpty() || s.service == ServiceState.RUNNING || manager.hasPendingAutoRestart
                 if (needed) keepAwake() else releaseWake()
                 if(idle(s)) {
                     delay(500)
@@ -93,6 +101,16 @@ class RuntimeService : Service() {
             "NODE_UNINSTALL" -> manager.components.uninstall(RuntimeComponent.NODE)
             "DSH_UNINSTALL" -> manager.components.uninstallDsh(intent.getStringExtra("version"))
             "DSH_SWITCH" -> manager.components.switchDsh(intent.getStringExtra("version"))
+            "RECOVERY_TRIAL" -> scope.launch {
+                try { manager.tryNormalMode() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Throwable) { manager.fail(error) }
+            }
+            "RECOVERY_SAFE" -> scope.launch {
+                try { manager.returnToSafeMode() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Throwable) { manager.fail(error) }
+            }
             "STOP" -> scope.launch {
                 try {
                     manager.cancel(); (application as TanukiApp).updates.cancel(); appUpdates.cancel()
@@ -103,7 +121,7 @@ class RuntimeService : Service() {
         }
         return START_NOT_STICKY
     }
-    private fun idle(s:Snapshot)=!s.operationActive && !appUpdates.state.value.busy && manager.fileTransfers.state.value.isEmpty() && s.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED)
+    private fun idle(s:Snapshot)=!s.operationActive && !appUpdates.state.value.busy && manager.fileTransfers.state.value.isEmpty() && !manager.hasPendingAutoRestart && s.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED)
     private fun keepAwake() {
         if (wakeRenewal?.isActive == true) return
         val lease = wake ?: getSystemService(PowerManager::class.java)

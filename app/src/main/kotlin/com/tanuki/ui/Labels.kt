@@ -13,11 +13,24 @@ val WebState.label: String get() = when(this) { WebState.DISCONNECTED -> "未连
 val UpdateState.label: String get() = when(this) {
     UpdateState.UNCHECKED -> "没有检查"; UpdateState.CHECKING -> "检查中"; UpdateState.CHECK_FAILED -> "检查失败"; UpdateState.AVAILABLE -> "有候选版本"; UpdateState.CURRENT -> "没有更新"; UpdateState.STAGING -> "暂存中"; UpdateState.TESTING -> "隔离检查中"; UpdateState.WAITING -> "等待停止"; UpdateState.BACKUP -> "备份中"; UpdateState.SWITCHING -> "切换中"; UpdateState.SUCCESS -> "成功"; UpdateState.RESTORING -> "恢复中"; UpdateState.RESTORED_PENDING_CHECK -> "数据已恢复，待启动检查"; UpdateState.FAILED -> "更新失败"; UpdateState.RECOVERY_REQUIRED -> "需要恢复"
 }
-
 val DeviceCondition.label: String get() = when (this) {
-    DeviceCondition.NORMAL -> "正常";
-    DeviceCondition.WARM -> "轻度降级";
-    DeviceCondition.HOT -> "过热";
-    DeviceCondition.CRITICAL -> "严重过热";
+    DeviceCondition.NORMAL -> "正常"
+    DeviceCondition.WARM -> "轻度降级"
+    DeviceCondition.HOT -> "过热"
+    DeviceCondition.CRITICAL -> "严重过热"
     DeviceCondition.LOW_BATTERY -> "低电"
+}
+
+val FailureKind.label: String get() = when(this) {
+    FailureKind.LAUNCH_FAILED -> "启动命令失败"
+    FailureKind.STARTUP_FAILED -> "启动未就绪"
+    FailureKind.CRASHED_EARLY -> "就绪后 2 分钟内崩溃"
+    FailureKind.CRASHED_LATE -> "运行满 2 分钟后崩溃"
+    FailureKind.KILLED -> "进程被终止或低内存"
+    FailureKind.NO_SPACE -> "输出或磁盘空间不足"
+}
+val RecoveryMode.label: String get() = when(this) {
+    RecoveryMode.NORMAL -> "正常模式"
+    RecoveryMode.SAFE -> "安全模式"
+    RecoveryMode.PROBATION -> "正常模式试用"
 }

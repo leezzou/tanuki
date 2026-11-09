@@ -1,10 +1,10 @@
 # Tanuki 当前状态
 
-当前交接：[设备温控与省电策略](handoffs/20261109-1802-device-condition-policy.md)（android_agent-30，独立 worktree，基线 `2f3fac9`）。并行记录：[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，独立 worktree，基线 `5c680b9`）、[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；android_agent-23 实现 DSH 安装提速与国内镜像；均不改协议、AO 配置、既有安全/暂停项或 0.1.8 附件。
+当前交接：[设备温控与省电策略](handoffs/20261109-1802-device-condition-policy.md)（android_agent-30，独立 `/tmp` clone，已合并 `origin/main=5fd1ab4`；PR [#21](https://github.com/leezzou/tanuki/pull/21) 待独立 Review）。并行记录：[XLSX 应用内原生预览](handoffs/20261109-1807-xlsx-native-preview.md)（android_agent-32；PR [#23](https://github.com/leezzou/tanuki/pull/23) 待独立 Review）、[DSH 运行失败分类与安全模式](handoffs/20261109-1812-runtime-safe-mode.md)（android_agent-28；PR [#25](https://github.com/leezzou/tanuki/pull/25) 已合并为 `5fd1ab4`）、[DSH 已安装版本管理](handoffs/20261109-1539-dsh-installed-version-manager.md)（android_agent-25，基线 `5c680b9`）、[后台更新检查（APK 30 分钟 / DSH 24 小时）](handoffs/20261109-1535-background-update-check.md)（android_agent-24；PR [#19](https://github.com/leezzou/tanuki/pull/19) 已合并为 `6136451`）与 [DSH 安装提速与国内镜像](handoffs/20261109-1539-dsh-install-resilience.md)（android_agent-23；PR [#20](https://github.com/leezzou/tanuki/pull/20) 待审）。上一记录 [视频全屏允许旋转（FULL_SENSOR）](handoffs/20261106-1735-video-fullscreen-full-sensor.md)（android_agent-17；PR [#17](https://github.com/leezzou/tanuki/pull/17) 已合并为 `5c680b9`）。[文件查看器内置预览](handoffs/20261106-1647-workspace-file-preview.md)（F1，android_agent-16；PR #16 已合并为 `41609cb`）、W5 的 [研发治理与合并前门禁](handoffs/20261106-1415-governance-gates.md)（PR #14 已合并为 `cff09a3`）与 W8 的 [Android QA 能力核查报告](handoffs/20261106-1357-android-qa-readiness-audit.md) 保留。本轮 android_agent-30 实现设备温控/省电策略；android_agent-32 实现 XLSX 只读 OOXML 解析与 Compose 原生表格预览；android_agent-28 实现 DSH 运行失败分类、安全模式与 2 分钟 probation、有限自动重启和状态持久化；android_agent-25 实现已安装 DSH 清单、非当前版本卸载、已安装版本切换与版本管理对话框；android_agent-23 实现 DSH 安装提速与国内镜像；均不改协议、AO 配置、既有安全/暂停项或 0.1.8 附件。
 
 ## 0.1.8 交付与仓库基线
 
-- `main` 已前进到 `41609cb`（PR #16 文件预览合并提交；此前 `cff09a3` 为 PR #14 治理门禁合并提交）。`v0.1.8` tag 仍为 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（PR #8 浏览器输入线程修复合并提交）。用户已发布 0.1.8；Agent 不代合 main、不创建 tag/Release。
+- `main` 已前进到 `5fd1ab4`（PR #25 运行失败分类与安全模式合并提交；此前 `f5debf5` 为 PR #23 XLSX 预览合并提交，此前 `41609cb` 为 PR #16 文件预览合并提交，`cff09a3` 为 PR #14 治理门禁合并提交）。`v0.1.8` tag 仍为 `c196bbf4d211604bc2076de450a8ed2d52ddde99`（PR #8 浏览器输入线程修复合并提交）。用户已发布 0.1.8；Agent 不代合 main、不创建 tag/Release。
 - `artifacts/releases/0.1.8/` 六附件齐全。W1 只读复核 APK：`com.tanuki.modern.workspacecheck`、`versionName=0.1.8`、`versionCode=10`、minSdk26、targetSdk34、arm64-v8a；开发证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；APK 10,479,850 字节，SHA-256 `eb695a12778652075e0324c65486534dab98848f073daa14ea631291b69b146e`。公开 Release 的 `app-update.json` 与 APK 均返回 HTTP 200。
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
@@ -31,7 +31,7 @@
 
 ### 设备温控与省电策略（android_agent-30，PR #21 待审）
 
-- 分支 `ao/thermal-policy/device-condition-policy`，基于 `main=2f3fac9`，在 `/tmp` 独立 clone 验证/提交；未使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，head 以 PR 页面为准；未合并、未触发 Review。
+- 分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=5fd1ab4` 解决冲突；在 `/tmp` 独立 clone 验证/提交；未使用共享 worktree 的 `.git` 写操作。PR [#21](https://github.com/leezzou/tanuki/pull/21) 已创建，head 以 PR 页面为准；未合并、未触发 Review。
 - 新增纯策略 `DeviceConditionPolicy` 与 Android 采样/持久化 `DeviceConditionMonitor`：状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`，来源为 `PowerManager` thermal status、电池电量/充电和系统低内存；热状态按进入阈值升级、按更低退出边界并持续 30 秒降级，低电用进入/退出阈值（默认 20%/25%）迟滞，低内存有 60 秒解除迟滞。
 - 降级：后台更新检查在 HOT/CRITICAL/LOW_BATTERY 由被阻塞的具体 Worker 登记 APK/DSH 待办，恢复后只补跑实际登记过的检查，WorkManager 确认入队且待办代次未变化后才清除（无 Worker 跳过时不发请求，失败保留重试，确认期间重新登记的新待办不被误删）；DSH 依赖下载并发按 16/8/4/2/4 降档，自适应池只让多出的 worker 在完成当前归档后退休；日志展示 80/60/40/20/40 行；PDF 预览长边 2048/1600/1280/1024/1280、像素 4M/2.5M/1.6M/1M/1.6M。DSH 任务和前台交互始终 `RUN`，策略不调用取消。
 - 兼容：保留原两个唯一周期任务、联网约束、前台服务与唤醒锁；设置入口 `设置 · 运行与后台` 提供总开关与 10/15/20/25/30% 低电阈值；主线程/电池/热回调只向后台合并队列投递刷新请求，采样与写盘在后台串行完成，设置也后台写入；冷启动 Worker/设置通过一次性屏障等待 restore 完成，避免默认状态覆盖磁盘待办；状态与实际被跳过的检查写 `files/state/device-condition.json`，设置写 `device-condition-settings.json`，进程重启先恢复再校正。
@@ -92,10 +92,30 @@
 - 新对话框 `DshVersionManagerDialog` 列出当前/备用、占用、安装时间、总占用；非当前版本可确认卸载（保留用户数据），当前版本禁用卸载；旧版切换按钮禁用并显示快照说明；TanukiUi/MainActivity 只加入口、回调与 `DSH_SWITCH` 前台服务动作。
 - 本轮验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` BUILD SUCCESSFUL；151 JVM / 0 失败/错误/跳过，新增 `DshVersionsTest` 7 项与 `DshSwitchTest` 12 项；`:app:lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/仪器/设备；PR #18、CI、独立 Review 待办。
 
+### DSH 运行失败分类与安全模式（android_agent-28，PR #25 待 Review）
+
+- 分支 `ao/runtime-safe-mode/root`，PR [#25](https://github.com/leezzou/tanuki/pull/25)，功能提交 `b4a6ef5`（rebase 后 `dc0494b`），基线 `2f3fac9301c7c3484df85e99091e8f63dddc0a48`；在 `/tmp/tanuki-safe-mode` 独立 clone 验证/提交，不使用共享 worktree 的 `.git` 写操作。
+- 新增纯 Kotlin `RuntimeFailurePolicy`：`LAUNCH_FAILED/STARTUP_FAILED/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE` 分类；normal 下连续两次 `STARTUP_FAILED`/`CRASHED_EARLY` 进入安全模式；`rescue [--from-default-profile web]` 救援参数与独立 `safe-home`/`safe-dsh`；显式试用 normal 进入 2 分钟 `PROBATION`，失败回安全模式、稳定后转 normal；自动重启最多 3 次、2s/4s/8s 退避，`KILLED`/`NO_SPACE` 不自动重启；`state/failure-state.json` 持久化并支持进程重启恢复。
+- `RuntimeManager` 记录启动模式与官方就绪时间，按证据分类失败；安全模式不加载用户插件/配置、不挂载浏览器/phone 工具，项目工作区仍为原 `/workspaces`，不删除用户数据；`RuntimeService` 新增 `RECOVERY_TRIAL`/`RECOVERY_SAFE`，自动重启等待期间保持前台；UI 显示失败类型/安全模式/试用并提供退出试用入口。
+- 本轮验证：`/tmp` clone 中 `:app:compileModernDebugKotlin` BUILD SUCCESSFUL；rebase 到 `origin/main=f5debf5` 后 `:app:compileModernDebugKotlin`、完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug` BUILD SUCCESSFUL，265 tests / 0 failures / 0 errors / 0 skipped（40 个结果文件），新增 `RuntimeFailurePolicyTest` 32/32（rebase 前 DSH-only 237）。构建时因 Maven Central DNS 不稳定，仅用临时 `/tmp/mirror.init.gradle` 镜像，未提交、未改仓库配置。P1 复审修复：`timedOut` 在 noSpace/launch 之后优先判 `STARTUP_FAILED`，清理产生的 143/137 不再覆盖分类；RuntimeManager 在超时时不把清理退出码作为原始证据；新增 143/137、ready 行后 HTTP 超时与 ENOSPC 优先级回归。P2 复审修复：PROBATION 且上次服务活动时，进程重启一律回 SAFE，不用重开 App 的墙钟补足 2 分钟；只有存活稳定计时器提交 NORMAL。安全模式成功不提交 RESTORED_PENDING_CHECK，只有实际加载恢复 userdata 的 normal/probation 启动成功才标记 verified。P2 时间基准修复：日志就绪早于 HTTP 就绪时，`CRASHED_LATE` 仍可能落在实际 probation 窗口内；晚崩溃分支先判窗口，窗口内回 SAFE，不再直接转 NORMAL。PR #25 最新 head 的 push/PR CI 以 PR 页面为准；Android CI 不重建原生 `.so`，不能当设备验收。
+- 待验证：真实设备/PRoot rescue、真实 DSH 崩溃/低内存/磁盘满、插件配置隔离、UI 实机/大字体/深色、lint/assemble/仪器；PR、CI、独立 Codex High Review、合并与发布未完成/未授权。
+
+### XLSX 应用内原生预览（android_agent-32，PR #23 待 Review）
+
+- 分支 `ao/xlsx-preview/xlsx-native-preview`（从 `ao/xlsx-preview/root` 创建），基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；独立 `/tmp` clone 提交/推送，PR [#23](https://github.com/leezzou/tanuki/pull/23) 已创建，未触发 AO Review。
+- 新增 `XlsxWorkbookParser`：`ZipFile` + `XmlPullParser` 只读 workbook/rels/sharedStrings/styles/sheet，不依赖 LibreOffice/外部 App；支持多 sheet、行号/列标表头、冻结行/列、列宽/行高、合并单元格、基础字体/填充/四边边框、数字/百分比/日期/时间/布尔/错误值与公式缓存值、`date1904`。
+- 新增 Compose 表格 `XlsxTablePreview`：sheet 切换、LazyColumn 行虚拟化、共享水平滚动、0.5–2.0x 按钮缩放、截断与保真提示；`WorkspaceFileManager.FileKind` 增加 `XLSX` 并接入 `WorkspaceFileViewer`。
+- 安全上限：归档 64 MiB、条目 4096、总解压 256 MiB、单条目 32 MiB 且按实际解压字节复核；sheet 32、行 2000、列 128、单表 40000 单元格、全簿 120000 单元格、共享字符串 50000 条/400 万字符、单元格文本 2000 字/全簿 800 万字、XML 深度 64、合并区域 4096、合并数量 4096；合并生成的起点/占位单元格与普通单元格共享单表/全簿预算；标准实体/数字引用保留，冻结区按视口与缩放收缩，单元格字号按样式显示；拒绝 DOCDECL、未定义实体、`..`/绝对越界路径与外部工作表链接，损坏包给中文错误。
+- 明确不支持：图表、宏、透视表、外部链接、图片、复杂条件格式、隐藏行列、主题色、富文本多字体与公式重算；不宣称完整 Excel。
+- 本轮验证：`compileModernDebugKotlin` 与 `lintModernDebug` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析/格式化/策略回归与 `.xlsx` 分类回归。未跑 assemble、仪器与真机；真机大表滚动/缩放待验证。
+
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-30 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest --rerun-tasks` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m13s），232 tests / 0 failures / 0 errors / 0 skipped，其中新增 `DeviceConditionPolicyTest` 22 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 个 Error；未跑 assemble/仪器/真机。
-- 已验证（android_agent-24 历史）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
+- 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（3m14s，35 tasks），292 tests / 0 failures / 0 errors / 0 skipped（43 个结果文件）；新增 `DeviceConditionPolicyTest` 22 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
+
+- 已验证（本轮 android_agent-32 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，233 tests / 0 failures / 0 errors / 0 skipped；新增 XLSX 解析 18 项、格式化 4 项、缩放策略 5 项与 `.xlsx` 分类 1 项；`lintModernDebug` BUILD SUCCESSFUL。未跑 assemble/设备/仪器。
+- 已验证（本轮 android_agent-28 新跑）：`/tmp` 独立 clone 中 `compileModernDebugKotlin` 与rebase 到 `origin/main=f5debf5` 后完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，265 tests / 0 failures / 0 errors / 0 skipped；新增 `RuntimeFailurePolicyTest` 32/32。未跑 lint/assemble/设备/仪器。
+- 已验证（本轮 android_agent-24 新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`testModernDebugUnitTest` BUILD SUCCESSFUL，174 tests / 0 failures / 0 errors / 0 skipped，新增 `BackgroundUpdateChecksTest` 23 项全过。未跑 lint/assemble/设备/真实网络。
 - 已验证（本轮 android_agent-17 新跑）：rebase 到 `41609cb` 后 `:app:testModernDebugUnitTest --rerun-tasks` BUILD SUCCESSFUL（53m 56s，28 tasks executed），132 tests / 0 failures / 0 errors / 0 skipped，`VideoFullscreenPolicyTest` 6 项全过；`test-development-gates.py` 28 项 OK；`check-handoff.py`、`check-publication.py --git`、`package-source.py` 通过。`cff09a3` 基线上 110 项与 `d5b83fe` 的 CI 4/4 属 rebase 前结果。
 - 已验证（本轮 android_agent-23 新跑）：基线 `5c680b9` 上 `compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `:app:testModernDebugUnitTest` 155 tests / 0 failures / 0 errors / 0 skipped；Npm/Download/OperationProgress 目标回归 61 项通过。`cff09a3`/`41609cb` 基线上的 110/132 项与旧 CI 属历史结果，不是本轮复跑。
 - 已验证（android_agent-25 收尾新跑）：rebase 到 `origin/main=6136451` 后组合 #19+#20，`compileModernDebugKotlin` 与完整 JVM BUILD SUCCESSFUL，205 tests / 0 failures / 0 errors / 0 skipped；`NpmAdaptiveWorkerPoolTest` 2/2。
@@ -105,22 +125,25 @@
 - 已验证（#13/#15、W8 当时，历史）：宿主 mock/并发回归 19 tests OK（76.760s）；设备门禁脚本 `--help` 与 `bash -n` 通过；main/CI/设备 metadata 只读核对。
 - 已验证（W5 前轮，历史）：24 项门禁离线回归；真实 `gh`/`ao` 只读 CLI 格式核对。
 - 已验证（W2/W3/W1 前轮，历史）：worktree 构建引导、CI/RPC 契约、文档门禁恢复。
-- 待验证：设备温控/省电策略的真机温控、低电/低内存注入、WorkManager 真实调度与重启恢复、设置页与通知；DSH 安装 PR #20 的独立 Codex High Review、真实设备/弱网镜像切换与 4000 包规模验收；后台更新检查的真实 WorkManager 调度/通知/网络与设备徽标；视频全屏 PR #17 的设备旋转/恢复验收；F1 的设备手势/PDF/DOCX 验收；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
+- 待验证：设备温控/省电策略的真机温控、低电/低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级像素；XLSX 原生预览的真机/模拟器双向滚动、冻结区手势、缩放可读性、大表性能、深色主题与真实 Excel/WPS 文件；DSH 安全模式在真实设备/PRoot 的 rescue 启动、真实崩溃/低内存/磁盘满与插件隔离；DSH 安装 PR #20 的独立 Codex High Review、真实设备/弱网镜像切换与 4000 包规模验收；后台更新检查的真实 WorkManager 调度/通知/网络与设备徽标；视频全屏 PR #17 的设备旋转/恢复验收；F1 的设备手势/PDF/DOCX 验收；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 ## 环境与阻塞
 
+- 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=5fd1ab4` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
-- 当前分支：DSH 安装分支 `ao/dsh-install-2/install-resilience`，已 rebase 到 `origin/main=6136451`；在 `/tmp` 干净 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。视频/F1 分支已随 PR #17/#16 合并。温控分支 `ao/thermal-policy/device-condition-policy` 基于 `main=2f3fac9`，同样在 `/tmp` 独立 clone 验证/提交。
+- 当前分支：安全模式分支 `ao/runtime-safe-mode/root`（基线 `2f3fac9`；PR #25），在 `/tmp/tanuki-safe-mode` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作；DSH 安装分支 `ao/dsh-install-2/install-resilience`，已 rebase 到 `origin/main=6136451`；XLSX 预览分支 `ao/xlsx-preview/xlsx-native-preview`，基于 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，在 `/tmp` 干净 clone 提交/推送。视频/F1 分支已随 PR #17/#16 合并。
 - 设备：本轮未启动/停止、未安装、未跑仪器；0.1.8 冒烟证据来自 android_agent-10 的独立 QA 会话。
-- 无当前产品修复阻塞；PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
+- 无当前产品修复阻塞；PR #21、PR #17 的独立 Review、CI 与合并由用户和编排器推进，Agent 不自行合并/发布。
 
 ## 下一步
 
-1. 温控 PR：等待独立 Codex High Review 与真机 QA；不自行合并、不触发 Review、不发布。
-2. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
-2. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-3. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
-4. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
-5. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
-6. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+1. 温控 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待当前完整 SHA 的独立 Codex High Review；真机温控/低电/低内存/WorkManager 调度与重启恢复由独立 QA 另行授权。
+2. 安全模式 PR [#25](https://github.com/leezzou/tanuki/pull/25)：由用户/编排器决定是否触发独立 Codex High Review；真机崩溃/低内存/磁盘满与 PRoot rescue 由独立 Android QA 另行授权验证。
+3. XLSX 预览 PR [#23](https://github.com/leezzou/tanuki/pull/23)：由 Orchestrator/用户决定是否触发当前完整 SHA 的独立 Codex High Review；真机大表/手势 QA 另行授权。
+4. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
+5. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
+6. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+7. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
+8. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
+9. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。

@@ -91,6 +91,49 @@ private fun RecoveryGuidance(s:Snapshot,c:TanukiUiCallbacks) {
     }
 }
 
+
+@Composable
+internal fun RuntimeRecoveryCard(s: Snapshot, c: TanukiUiCallbacks) {
+    val recovery = s.recovery
+    if (recovery.mode == RecoveryMode.NORMAL && (recovery.lastFailure == null || (s.service == ServiceState.RUNNING && s.error.isBlank()))) return
+    SetupPanel {
+        Text(
+            when (recovery.mode) {
+                RecoveryMode.SAFE -> "安全模式"
+                RecoveryMode.PROBATION -> "正在试用正常模式"
+                RecoveryMode.NORMAL -> "最近一次启动失败"
+            },
+            style = MaterialTheme.typography.titleMedium
+        )
+        recovery.lastFailure?.let {
+            SetupCaption("失败类型：${it.label}" + if (recovery.restartAttempts > 0) " · 自动重启计数 ${recovery.restartAttempts}" else "")
+        }
+        when (recovery.mode) {
+            RecoveryMode.SAFE -> {
+                SetupCaption("当前使用独立的最小救援配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
+                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
+                Button(
+                    onClick = { c.command("RECOVERY_TRIAL") },
+                    enabled = !s.setupBusy,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) { Text("尝试恢复正常模式（进入 2 分钟试用）") }
+                SetupCaption("试用后 2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。")
+            }
+            RecoveryMode.PROBATION -> {
+                SetupCaption(if (s.service == ServiceState.RUNNING) "正在加载正常模式的插件与配置。2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。" else "上次正常模式试用未在运行。可退出试用回到安全模式，或手动启动继续试用；已中断任务不会自动重放。")
+                OutlinedButton(
+                    onClick = { c.command("RECOVERY_SAFE") },
+                    enabled = !s.setupBusy,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) { Text("退出试用，回到安全模式") }
+            }
+            RecoveryMode.NORMAL -> {
+                SetupCaption(if (s.service == ServiceState.RUNNING) "服务已按正常模式运行。自动重启不会重放已中断的任务；若反复失败，可在环境维护入口重新检查组件。" else "当前服务未运行，可能正在等待有限次自动重启或已停止自动重启；已中断任务不会自动重放。")
+            }
+        }
+    }
+}
+
 @Composable
 private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onShowSteps:()->Unit) {
     val s=model.snapshot
@@ -100,6 +143,7 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         SetupCaption("管理本机项目，在 DeepSeek Harness 中开始工作。")
     }
     RecoveryGuidance(s,c)
+    RuntimeRecoveryCard(s,c)
     if(model.support.state==com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED)WebViewCard(model.support,s.setupIdle,c)
     Box(
         Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(tanukiHeroBrush()),
