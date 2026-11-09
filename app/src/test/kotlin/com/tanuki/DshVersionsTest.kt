@@ -98,6 +98,14 @@ class DshVersionsTest {
     }
 
     @Test
+    fun uninstallPolicyOnlyAllowsNonCurrentVersions() {
+        assertFalse("当前版本必须在版本管理中禁用卸载", DshVersions.canUninstallFromManager("1.2.0", "1.2.0"))
+        assertTrue(DshVersions.canUninstallFromManager("1.3.0", "1.2.0"))
+        assertTrue("元数据缺失时仍可卸载有效备用版本", DshVersions.canUninstallFromManager("1.2.0", ""))
+        assertFalse(DshVersions.canUninstallFromManager("not-a-version", "1.2.0"))
+    }
+
+    @Test
     fun missingOrEmptyEnginesDirectoryHasEmptyInventory() {
         val missing = File(temporary.root, "missing-engines")
         assertTrue(DshVersions.scan(missing, "1.0.0").versions.isEmpty())

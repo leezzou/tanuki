@@ -154,7 +154,7 @@ private fun InstalledDshRow(
         }
         ManagerCaption("占用 ${formatDshBytes(item.bytes)} · 安装于 ${formatDshTime(item.installedAtMillis)}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (item.active) {
+            if (!DshVersions.canUninstallFromManager(item.version, activeVersion)) {
                 ManagerCaption("当前版本不可在此卸载；主界面仍保留原卸载入口。")
             } else {
                 OutlinedButton(onClick = { onSwitch(item.version) }, enabled = idle && !older,

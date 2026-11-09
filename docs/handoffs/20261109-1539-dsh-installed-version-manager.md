@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 已实现：`DshVersions` 纯逻辑清单与切换策略；`RuntimeComponents.installedDshDetails()` 与 `switchDsh()`；`RuntimeService` 的 `DSH_SWITCH`；独立 `DshVersionManagerDialog`；TanukiUi 入口与 MainActivity 回调。
-- 已验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` 均 BUILD SUCCESSFUL；146 JVM 测试 0 失败/0 错误/0 跳过，其中 `DshVersionsTest` 5 项、`DshSwitchTest` 9 项。
+- 已验证：`:app:compileModernDebugKotlin` 与 `:app:testModernDebugUnitTest` 均 BUILD SUCCESSFUL；147 JVM 测试 0 失败/0 错误/0 跳过，其中 `DshVersionsTest` 6 项、`DshSwitchTest` 9 项。
 - 待验证：PR 的 Host/Android CI、独立 Codex High Review、真实设备上的对话框布局/切换/卸载、`DataSnapshots.create` 的真实数据量耗时与失败路径。
 - 当前分支：`ao/dsh-version-manager/root`（独立 worktree，基线 `5c680b9`）；未运行真实 DSH 任务。
 - 关键事实：`DshVersions` 只把程序目录、`.installed`、依赖入口与中间目录都非符号链接的版本视为已安装；`verified` 还要求依赖锁哈希与 `.installed` 一致且存在 `.web-verified`。
@@ -29,7 +29,7 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshVersionManagerDialog.kt` | 新增独立“已安装 DSH 版本”对话框：总占用、当前/备用、校验、切换/卸载确认与降级说明。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 仅新增入口按钮、对话框调用与 3 个回调字段。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 仅接线清单读取、切换与卸载回调，并把 `DSH_SWITCH` 纳入前台通知条件。 |
-| `app/src/test/kotlin/com/tanuki/DshVersionsTest.kt` | 清单校验、体积/时间、符号链接、校验状态回归。 |
+| `app/src/test/kotlin/com/tanuki/DshVersionsTest.kt` | 清单校验、占用/时间、符号链接、校验状态与版本管理卸载保护回归。 |
 | `app/src/test/kotlin/com/tanuki/DshSwitchTest.kt` | 当前/未安装/运行中/降级拒绝、成功元数据更新、写入失败回滚、快照失败不动元数据。 |
 
 ## 验证记录
@@ -37,7 +37,7 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin` | 通过（BUILD SUCCESSFUL，2m45s） | 本 worktree，JDK17；仅告警既有弃用项。 |
-| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 146 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 5/5、`DshSwitchTest` 9/9。 |
+| `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest` | 通过（BUILD SUCCESSFUL） | 147 tests / 0 failures / 0 errors / 0 skipped；`DshVersionsTest` 6/6、`DshSwitchTest` 9/9。 |
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m07s） | 仅有既有弃用/可读性告警；lint 报告写入工作材料，不提交。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261109-1539-dsh-installed-version-manager.md` | 通过 | 刷新 `docs/handoffs/CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |

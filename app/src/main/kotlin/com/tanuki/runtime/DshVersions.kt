@@ -86,6 +86,10 @@ object DshVersions {
     fun isOlder(candidate: String, current: String): Boolean =
         candidate.matches(VERSION) && current.matches(VERSION) && VersionOrder.compare(candidate, current) < 0
 
+    /** 版本管理只允许卸载非当前的有效版本；主界面原有当前版本卸载入口不受此限制。 */
+    fun canUninstallFromManager(version: String, activeVersion: String): Boolean =
+        version.matches(VERSION) && version != activeVersion
+
     private fun isVerified(directory: File, marker: File): Boolean {
         val webVerified = File(directory, ".web-verified")
         if (!Files.isRegularFile(webVerified.toPath(), LinkOption.NOFOLLOW_LINKS)) return false
