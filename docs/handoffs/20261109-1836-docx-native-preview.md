@@ -17,7 +17,7 @@
 - 已实现安全边界：归档/条目/总解压/单条目/正文/辅助 XML/图片大小与数量、XML 元素与深度、文字量、块数/单元格数上限；拒绝路径穿越、重复条目、DOCTYPE、未定义实体与不安全关系目标；外部关系不联网；图片解码采样与总像素预算；损坏/加密/超限返回中文错误。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，260 tests / 0 failures / 0 errors / 0 skipped，其中新增 DOCX 回归 65 项。
 - 待验证：真实设备上的双指缩放/横向滚动/深色主题/超大文档性能、真实 Word 复杂样本、低 API/真机；lint、assemble、Android 仪器未跑。
-- 当前基线：`main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/docx-preview/root`（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；功能提交 `e2db04f1a24ad49754a5edb0821fda7f04087b02`，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
+- 当前基线：`main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`；分支 `ao/docx-preview/root`（独立 `/tmp` clone 提交/验证），PR [#28](https://github.com/leezzou/tanuki/pull/28)；功能提交 `e2db04f1a24ad49754a5edb0821fda7f04087b02`；PR 后续仅有交接/状态文档回填提交，最终 head 以 PR 页面为准；不合并、不触发 AO Review。
 - 关键源码：[`DocxDocumentReader.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxDocumentReader.kt)、[`DocxModel.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxModel.kt)、[`DocxStyles.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxStyles.kt)、[`DocxNumbering.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxNumbering.kt)、[`DocxXml.kt`](../../app/src/main/kotlin/com/tanuki/storage/docx/DocxXml.kt)、[`DocxLayout.kt`](../../app/src/main/kotlin/com/tanuki/ui/DocxLayout.kt)、[`WorkspaceDocxPreview.kt`](../../app/src/main/kotlin/com/tanuki/ui/WorkspaceDocxPreview.kt)。
 
 ## 本次改动
