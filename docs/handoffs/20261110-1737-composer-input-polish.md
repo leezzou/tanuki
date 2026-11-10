@@ -54,6 +54,8 @@
 | `python3 scripts/check-publication.py --git` | Publication check passed；673 public files / 672 index entries / 0 findings | 未输出匹配值 |
 | `gh pr create --base main --head ao/composer-input/input-polish` | PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建 | 未合并、未发布 |
 | `gh run watch 42798827155 --exit-status` | success；Android build/JVM/lint 7m7s，Host scripts/handoff 39s | head `e4daf58`；仅 CI，不等于设备验证或独立审查 |
+| 同 SHA push 运行 42798815793 | 暴露 `fileUploadsBeforePromptAndUsesReceipt` 测试竞态：先读到 `UPLOADED`、worker 尚未置 `uploadBusy=false` | 产品逻辑无失败；已改为同时等待两个状态 |
+| `... --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；20 tests / 0 failures | 竞态修复后定向复跑 |
 
 - 哪些是前一轮结果，哪些是本次新验证：52 项目标回归、805 项完整 JVM、lint 均为本分支新跑；805 中既有回归不是本切片新增。
 - 未测试、超时、失败和暂未复现的情况：真实设备 UI/输入法/选择器/粘贴/拖入/跨应用临时权限/上传取消/停止、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 焦点/键盘事件没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试。
@@ -62,7 +64,7 @@
 
 - 页面接线：`DshNativePage`/`MainActivity` 归集成方；需要把 `DshNativeState.running` 同步到 `nativeComposer.setGenerationRunning(running)`，并在需要时把页面停止按钮与 `nativeComposer.requestStop()` 统一，避免两处状态不一致。
 - 未验证：设备/模拟器、真实 DSH、上传取消的服务端残留（官方无上传取消端点，本地不保留残缺文件）、真实键盘导航。
-- 未完成：PR #48 的独立 Codex High 审查；按项目规则最新 SHA 必须独立审查。CI 已在代码 head `e4daf58` 通过。
+- 未完成：PR #48 的独立 Codex High 审查；按项目规则最新 SHA 必须独立审查。CI 已在 `e4daf58` 通过；同 SHA 的 push 运行暴露测试竞态，已由 `dfa031f` 修复并定向复跑，最终 head CI 以 PR 页面为准。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按项目既有暂停项保留；本次未触碰。
 
@@ -81,7 +83,7 @@
 
 ## 产物与校验
 
-- PR：https://github.com/leezzou/tanuki/pull/48（代码 head `0b5283c`；本记录提交后以 PR 当前 head 为准）。
+- PR：https://github.com/leezzou/tanuki/pull/48（代码 head `dfa031f`；本记录提交后以 PR 当前 head 为准）。
 - 新/旧APK、源码ZIP及校验文件：本轮未生成 APK、源码 ZIP 或发布附件；只改源码/测试/文档。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布、未合并。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：普通 PR 只新增本记录，不改共享状态。
