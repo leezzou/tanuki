@@ -1,6 +1,6 @@
 # 应用内更新
 
-当前已发布 **0.1.9/code11** 为 Pre-release：`v0.1.9` tag 为 `5c680b9`，APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；0.1.9 没有随版本记录完整设备验收。**0.1.10/code12** 为本地发布候选，本版执行 push main、创建 tag `v0.1.10` 与 Pre-release；状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.9/code11** 为 Pre-release：`v0.1.9` tag 为 `5c680b9`，APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；0.1.9 没有随版本记录完整设备验收。**0.1.11/code13** 为当前发布候选（基线 `main=1f7222d0e4ac`，#40 合并后 rebase；候选 APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`）；0.1.10/code12 为历史本地候选，未发布。状态以[交接](AGENT-STATE.md)为准。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -48,23 +48,23 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）；当前候选 `v0.1.10`（code12）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）；当前候选 `v0.1.11`（code13）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
-0.1.10 候选基于 `main=9e7edbb9`，包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机 等已合并改动；行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)。候选 release 须独立完成适用测试；debug 或 0.1.8/0.1.9 历史结果不能替代。完成全部验证、文档与交接、过期记录清理及公开/实际 index 检查后，统一一次 commit/push；由用户自行合并 PR 并在网页发布 Release，Agent 不创建 tag 或上传 Release。
+0.1.11 候选基于 `main=1f7222d0e4ac`，包含 0.1.9 之后合并的原生聊天/输入栏/审批接线、交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等；#40 `DshTransport` 待合并；行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)。候选 release 须独立完成适用测试；debug 或 0.1.8/0.1.9 历史结果不能替代。完成全部验证、文档与交接、过期记录清理及公开/实际 index 检查后，统一一次 commit/push；由用户自行合并 PR 并在网页发布 Release，Agent 不创建 tag 或上传 Release。
 
-下面命令以当前候选 0.1.10/code12 为例；未来发版替换为用户确认的版本和递增 code：
+下面命令以当前候选 0.1.11/code13 为例；未来发版替换为用户确认的版本和递增 code：
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.11 --version-code 13 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
-脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.10/`：
+脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.11/`：
 
-- `Tanuki-0.1.10-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
-- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.10` 的同一个 Release，不能只上传 APK。
-- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.10-source.zip`、原生对应源码与校验文件。
+- `Tanuki-0.1.11-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
+- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.11` 的同一个 Release，不能只上传 APK。
+- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.11-source.zip`、原生对应源码与校验文件。
 
 清单结构为 `schemaVersion:1` / `packages` 数组，每个包包含 `packageName`、`versionName`、整数 `versionCode/minSdk/bytes`、`assetName`、`sha256`、`certificateSha256`。不要把文档示例或其他包/版本的元数据当成实际附件。更换/重打 APK 后必须重跑生成和外部散列检查。
 
@@ -76,4 +76,4 @@ python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --chan
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-本轮为 0.1.10 本地发布准备（分支 `ao/xlsx-preview/release-0.1.10`，`/tmp` 独立 clone）；0.1.9 及更早交付附件保持原样。本版执行 push main、创建 tag `v0.1.10` 与 Pre-release、未上传；最终由用户确认合并与 Pre-release 上传，Agent 不直推 main 或修改保护规则。
+本轮为 0.1.11 本地发布准备（分支 `ao/handoff-conflicts/release-0.1.11`，独立 worktree）；当前 main=`1f7222d0e4ac`，#40 合并后 rebase 再统一 commit/push、创建 tag `v0.1.11` 与 Pre-release 上传；0.1.9 及更早交付附件保持原样。最终由用户确认合并与 Pre-release 上传，Agent 不直推 main 或修改保护规则。

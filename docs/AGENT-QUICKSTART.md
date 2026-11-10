@@ -132,7 +132,7 @@ bash scripts/verify-workspace.sh \
 
 ## 7. 完成与交付
 
-当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`）；**0.1.10/code12** 正在最终发布（最终 `main=9e7edbb9`，包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机）。本轮完整 JVM 535 tests / 0 failures、lint 通过；设备 QA 仍未执行。0.1.7/0.1.8/0.1.9 历史证据见 [测试现状](TEST-REPORT.md)，不能混算成 0.1.10 已通过设备验收。
+当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`）；**0.1.11/code13** 为当前发布候选，准备基线 `main=1f7222d0e4ac`（#40 合并后 rebase），包含 0.1.9 之后的交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等。0.1.10/code12 为历史本地候选，未发布。本轮完整 JVM/lint/候选 APK 结果见 [测试现状](TEST-REPORT.md)；设备 QA 仍未执行，0.1.7/0.1.8/0.1.9 历史证据不能混算成 0.1.11 已通过设备验收。
 
 1. 完成本次交接记录，诚实写明实际验证及未测范围。普通 PR **不修改 `AGENT-STATE.md` / `CURRENT.json`**；每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、清理本次确认过期的记录并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
 2. `python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md`。集成维护方在批量合并后更新状态，再运行 `--integrate` 与 `--release`；普通 PR 不运行写印章的命令。
@@ -141,4 +141,4 @@ bash scripts/verify-workspace.sh \
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。
 6. 最终答复给清楚的产物路径、完成项、暂停/阻塞项和下一步，不留下只存在聊天里的必要信息。
 
-本轮发布分支为 `ao/xlsx-preview/release-0.1.10`，最终基线为远端 `origin/main=9e7edbb9`；只改版本号、发布文档与交接，不改产品功能代码/协议。发布动作（push main、tag v0.1.10、Pre-release 上传）已获用户明确授权；合并已由用户完成。
+本轮发布分支为 `ao/handoff-conflicts/release-0.1.11`，准备基线为 `origin/main=1f7222d0e4ac`；只改版本号、发布文档、交接与印章，不改产品功能代码/协议。#40 合并后 rebase 到新 main，再统一 commit/push、创建 tag v0.1.11 与 Pre-release 上传；未获最终授权前不合并、不发布。
