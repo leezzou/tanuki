@@ -191,31 +191,39 @@ internal fun WorkspaceFilesPage(
         dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
         confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
     externalDocument?.let { document ->
-        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
-            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
-            canEdit = false,
-            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
-            onClose = onCloseExternal,
-            onExport = { onExportExternal(document) },
-            onEdit = {},
-            onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
-            onReselect = onReselectExternal)
+        Box(modifier.fillMaxSize()) {
+            WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
+                actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                canEdit = false,
+                previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
+                onClose = onCloseExternal,
+                onExport = { onExportExternal(document) },
+                onEdit = {},
+                onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
+                onReselect = onReselectExternal)
+            // 查看器和列表共用同一个传输浮层；从查看器导出后仍能看到进度并取消。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+        }
         return
     }
     openedEntry?.let { entry ->
         val document = remember(files, entry.path) { WorkspaceDocument(files, entry.path, entry.name) }
-        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
-            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
-            canEdit = location.writable && !runtimeRunning && !entry.linked,
-            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
-            onClose = { onFullscreen(false); openedEntry = null },
-            onExport = { onExportFile(files, entry.path, entry.name) },
-            onEdit = { runTask {
-                val editable = files.preview(entry.path)
-                check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
-                begin("编辑文本", listOf(entry)); content = editable.text
-                draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
-            } })
+        Box(modifier.fillMaxSize()) {
+            WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
+                actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                canEdit = location.writable && !runtimeRunning && !entry.linked,
+                previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
+                onClose = { onFullscreen(false); openedEntry = null },
+                onExport = { onExportFile(files, entry.path, entry.name) },
+                onEdit = { runTask {
+                    val editable = files.preview(entry.path)
+                    check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
+                    begin("编辑文本", listOf(entry)); content = editable.text
+                    draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
+                } })
+            // 编辑动作会离开查看器；传输浮层保持在当前页面，不因分支切换丢失。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+        }
         return
     }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -442,9 +450,9 @@ internal fun WorkspaceFilesPage(
             // 传输流只在 overlay 内订阅；进度帧不会重组列表或改变列表测量。
             FileTransferOverlay(
                 transfers = transfers,
-                snackbarHostState = snackbarHostState,
                 bottomInset = bottomInset,
                 onCancelTransfer = onCancelTransfer,
+                snackbarHostState = snackbarHostState,
             )
         }
     }
@@ -517,23 +525,26 @@ internal fun WorkspaceFilesPage(
 @Composable
 private fun FileTransferOverlay(
     transfers: StateFlow<List<FileTransferProgress>>,
-    snackbarHostState: SnackbarHostState,
     bottomInset: Dp,
     onCancelTransfer: (Long) -> Unit,
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     val items by transfers.collectAsState()
     val summary = FileTransferPresentation.summary(items)
     var sheet by remember { mutableStateOf(false) }
     LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) sheet = false }
     Box(Modifier.fillMaxSize()) {
-        SnackbarHost(
-            snackbarHostState,
-            Modifier.align(Alignment.BottomCenter).padding(
-                start = 16.dp,
-                end = 16.dp,
-                bottom = bottomInset + if (summary != null) 76.dp else 16.dp,
-            ),
-        )
+        // 查看器内没有 SnackbarHost，避免和查看器自己的错误行重复；列表页仍由此统一呈现提示。
+        snackbarHostState?.let { host ->
+            SnackbarHost(
+                host,
+                Modifier.align(Alignment.BottomCenter).padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = bottomInset + if (summary != null) 76.dp else 16.dp,
+                ),
+            )
+        }
         summary?.let {
             TransferPill(
                 summary = it,

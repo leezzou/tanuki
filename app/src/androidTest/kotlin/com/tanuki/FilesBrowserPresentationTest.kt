@@ -22,10 +22,13 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.tanuki.browser.AgentBrowserController
+import com.tanuki.runtime.FileTransferProgress
+import com.tanuki.runtime.OperationTiming
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.WorkspaceFilesPage
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -399,6 +402,50 @@ class FilesBrowserPresentationTest {
             find("hello.txt")
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
+    @Test fun viewerKeepsTransferPillAndCancelAvailable() {
+        val folder = fixture()
+        val activity = launch()
+        val transfers = MutableStateFlow<List<FileTransferProgress>>(emptyList())
+        var cancelled = 0L
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme {
+                        WorkspaceFilesPage(
+                            WorkspaceFileManager(runtime.paths), {}, {},
+                            Modifier.fillMaxSize().safeDrawingPadding(),
+                            onExportFile = { _, path, _ ->
+                                val now = SystemClock.elapsedRealtime()
+                                transfers.value = listOf(FileTransferProgress(
+                                    id = 7L,
+                                    label = "导出 ${path.substringAfterLast('/')}",
+                                    received = 1024L * 1024,
+                                    total = 4L * 1024 * 1024,
+                                    timing = OperationTiming(now - 2_000, now),
+                                ))
+                            },
+                            transfers = transfers,
+                            onCancelTransfer = { id ->
+                                cancelled = id
+                                transfers.value = emptyList()
+                            },
+                        )
+                    }
+                }
+            }
+            click(folder.name); click("hello.txt")
+            find("original text")
+            // 从查看器发起一个仍在复制中的长任务；浮层必须留在查看器上而不是被早返回吞掉。
+            click("导出此文件")
+            find("文件传输25%，共 1 项，点击查看详情")
+            click("取消文件传输")
+            await { cancelled == 7L }
+            assertTrue("取消后浮层必须消失", nodes().none {
+                it.contentDescription?.toString()?.startsWith("文件传输") == true
+            })
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+
     @Test fun textViewerCanReadPastEditorLimitAndUnknownFilesOfferOpenWith() {
         val folder = fixture()
         File(folder, "large.txt").writeText("start of document\n" + "分段阅读内容\n".repeat(40000) + "end of document")

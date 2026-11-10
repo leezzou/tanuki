@@ -12,6 +12,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（28m16s）；仅编译，未运行仪器测试。
 - 新增 10 项 JVM 回归：工作区在 DSH 运行时显示只读并可停止、手机存储未授权/已授权/写入可撤销、挂载位置只读说明；传输百分比只由正总量产生、未知总量不显示整体百分比、多任务按字节加权、二进制大小文本、剩余时间估算的可用边界与中文时长。
 - 未执行：模拟器/真机上的深色模式、大字体、360dp 窄屏、触控区实际尺寸、列表滚动锚定、底部 sheet 手势、TalkBack；未安装 APK，未做 Android 仪器测试、独立 Review、合并或发布。编译/JVM/lint 不能替代设备验收。
+- 复审 P2 修复（查看器内传输入口）：`WorkspaceFilesPage` 的 `externalDocument` / `openedEntry` 分支原先在 `FileTransferOverlay` 之前 return，查看器内导出/复制后进度被全局 banner 隐藏且无法取消。现把浮层放进两个查看器分支的共同父 `Box`，Snackbar 仍只在列表分支挂载，避免查看器错误行重复。新增 Compose 仪器回归 `viewerKeepsTransferPillAndCancelAvailable`：在查看器点“导出此文件”，注入 4 MiB 长传输（25%），断言浮层可见、取消后消失。
+- 复审修复后验证：`compileModernDebugKotlin`、`compileModernDebugAndroidTestKotlin`、`lintModernDebug` → BUILD SUCCESSFUL（6m07s），lint 0 errors / 104 warnings；新增仪器用例仅编译，当前无可用测试设备，未运行。
 
 ## 文本编码识别与兜底验证（2026-11-10，android_agent-57，非设备）
 
