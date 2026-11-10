@@ -20,7 +20,7 @@
 ## 当前状态
 
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、MainActivity 接线、文档与回归。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`、`lintModernDebug`、`assembleModernDebug` 均通过；完整 JVM 结果见下。最终复核：569 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 94 warnings / 1 hint，assemble BUILD SUCCESSFUL（未安装）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`、`lintModernDebug`、`assembleModernDebug` 均通过；完整 JVM 结果见下。合入 `main=533eff4` 后最终复核：592 tests / 0 failures / 0 errors / 0 skipped（72 个结果文件），lint 0 errors / 94 warnings / 1 hint；合并前 assemble BUILD SUCCESSFUL（未安装），合并后由 PR CI 复核构建。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、assemble/仪器/真机。
 - 当前目标包名：`com.tanuki.modern`（debug）；分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`；无运行中安装/设备任务。
 - 关键事实：官方 DSH `0.2.1-rc.5` 审批是 Agent-scoped waterfall，经 `/api/remote.mux` `$events` 下发；回答走 `POST /api/$events/result`，outcome 仅 `allowed-once`/`rejected`/`cancelled`/`unavailable`。工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。
@@ -61,7 +61,7 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh` + `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | JDK17 worktree 环境；未跑 assemble |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；70 个结果文件，569 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 新增 34 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；72 个结果文件，592 tests / 0 failures / 0 errors / 0 skipped | 合入 main=533eff4 后；基线 535 + 本切片 34 + PR #34 23 |
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 94 warnings / 1 hint | 存量弃用/可读性告警；非零告警 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | 仅打包验证，未安装/未设备执行 |
 | 目标回归 `DshApprovalProtocolTest` 9、`DshToolTimelineTest` 8、`DshWebSocketTest` 5、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 7 | 34/34 通过 | 本地合成 HTTP+WebSocket 服务器；不代表真实 DSH |

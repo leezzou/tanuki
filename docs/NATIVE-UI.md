@@ -102,7 +102,7 @@
 本轮（android_agent-45，基线 `origin/main=0555c3c`）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，70 个结果文件，**569 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 本切片新增 34）。
+- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**592 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；基线 535 + 本切片 34 + 合入 PR #34 的 23）。
 - `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint（既有弃用/可读性告警）。
 - `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（仅打包验证，未安装）。
 - 新增 `DshApprovalProtocolTest` 9 项：ready/waterfall/cancel/error 帧、字段白名单、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆。
