@@ -30,6 +30,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -68,6 +69,7 @@ internal fun WorkspaceFileViewer(
     var error by remember(files, entry.path) { mutableStateOf<String?>(null) }
     var loading by remember(files, entry.path) { mutableStateOf(true) }
     var forceText by remember(files, entry.path) { mutableStateOf(false) }
+    var copiedPath by remember(files, entry.path) { mutableStateOf(false) }
     var opening by remember { mutableStateOf(false) }
     var copied by remember { mutableLongStateOf(0L) }
     var copyTotal by remember { mutableLongStateOf(0L) }
@@ -145,6 +147,15 @@ internal fun WorkspaceFileViewer(
                     Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
             } else if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+            // 未知/不支持类型被强制按文本打开时，保留返回类型说明的入口，避免用户只能退出查看器。
+            if (forceText && info?.kind != null && info?.kind != WorkspaceFileManager.FileKind.TEXT) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("按文本方式查看（只读）", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { forceText = false }) { Text("返回类型说明") }
+                    }
+                }
+            }
             if (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT) {
                 TextFileReader(files, entry.path, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
             } else {
@@ -185,12 +196,18 @@ internal fun WorkspaceFileViewer(
                         }
                         WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
                         WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
-                        WorkspaceFileManager.FileKind.OTHER -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text(info?.mimeType.orEmpty(), style = MaterialTheme.typography.titleMedium)
-                            Text("使用设备上的应用打开此文件。原文件不会被修改。", style = MaterialTheme.typography.bodyMedium)
-                            OutlinedButton(onClick = { forceText = true }) { Text("按文本查看") }
-                        }
+                        WorkspaceFileManager.FileKind.OTHER -> UnsupportedPreview(
+                            name = entry.name,
+                            mime = info?.mimeType.orEmpty(),
+                            copied = copiedPath,
+                            onOpenAsText = { forceText = true },
+                            onCopyPath = {
+                                clipboard.setText(AnnotatedString(files.guestPath(entry.path)))
+                                copiedPath = true
+                            },
+                        )
+                        // 信息读取失败时由上方错误文案说明；这里给出兜底提示，不能留下空白区域。
+                        null -> if (!loading) Text("无法读取文件类型信息，请返回后重试。", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
                         else -> Unit
                     }
                 }
@@ -212,6 +229,8 @@ internal fun WorkspaceFileViewer(
 private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: Modifier, clipboardCopy: (String) -> Unit) {
     var requestedEncoding by rememberSaveable(files, path) { mutableStateOf("自动") }
     var offsets by remember(files, path, requestedEncoding) { mutableStateOf(listOf(0L)) }
+    // 与 offsets 平行保存每段第一行的行号，上一段/下一段不会重新从 1 计数。
+    var lineStarts by remember(files, path, requestedEncoding) { mutableStateOf(listOf(1)) }
     var pageIndex by remember(files, path, requestedEncoding) { mutableIntStateOf(0) }
     var page by remember(files, path, requestedEncoding) { mutableStateOf<WorkspaceFileManager.TextPage?>(null) }
     var error by remember(files, path) { mutableStateOf<String?>(null) }
@@ -221,12 +240,15 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
     var matchIndex by remember { mutableIntStateOf(0) }
     var fontSize by rememberSaveable { mutableIntStateOf(16) }
     var wrap by rememberSaveable { mutableStateOf(true) }
+    var showLineNumbers by rememberSaveable { mutableStateOf(true) }
     var encodingMenu by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val text = page?.text.orEmpty()
+    val startLine = lineStarts.getOrElse(pageIndex) { 1 }
+    val numbered = remember(text, startLine, showLineNumbers) { TextPageLayout.number(text, startLine, showLineNumbers) }
     val matches = remember(text, query) {
         buildList {
             if (query.isNotEmpty()) {
@@ -235,8 +257,14 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
             }
         }
     }
+    // 搜索仍以原始文本计算，再换算为带行号文本，避免把行号里的数字当作匹配。
+    val displayMatches = remember(matches, text, numbered.prefixLength) {
+        TextPageLayout.displayOffsets(matches, text, numbered.prefixLength)
+    }
     LaunchedEffect(files, path, requestedEncoding, pageIndex) {
         loading = true; error = null; copied = false
+        // 切换到新分段时先清空旧文本，避免读取失败后继续展示上一段却显示新行号。
+        page = null; layout = null
         try {
             page = files.readTextPage(path, offsets[pageIndex], requestedEncoding)
             matchIndex = 0; vertical.scrollTo(0); horizontal.scrollTo(0)
@@ -247,8 +275,8 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
         } finally { loading = false }
     }
     LaunchedEffect(query) { matchIndex = 0 }
-    LaunchedEffect(matchIndex, matches, layout) {
-        val target = matches.getOrNull(matchIndex) ?: return@LaunchedEffect
+    LaunchedEffect(matchIndex, displayMatches, layout) {
+        val target = displayMatches.getOrNull(matchIndex) ?: return@LaunchedEffect
         val result = layout ?: return@LaunchedEffect
         if (target < result.layoutInput.text.length) {
             val bounds = result.getBoundingBox(target)
@@ -258,18 +286,26 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
     }
     val highlight = MaterialTheme.colorScheme.secondaryContainer
     val selected = MaterialTheme.colorScheme.tertiaryContainer
-    val annotated = remember(text, matches, matchIndex, highlight, selected) {
+    val gutterColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val annotated = remember(numbered, displayMatches, matchIndex, highlight, selected, gutterColor, query) {
         buildAnnotatedString {
-            append(text)
-            for ((index, start) in matches.withIndex()) addStyle(SpanStyle(background = if (index == matchIndex) selected else highlight), start, start + query.length)
+            append(numbered.text)
+            val gutter = SpanStyle(color = gutterColor)
+            for (start in numbered.numberStarts) addStyle(gutter, start, (start + numbered.prefixLength).coerceAtMost(numbered.text.length))
+            for ((index, start) in displayMatches.withIndex()) {
+                addStyle(SpanStyle(background = if (index == matchIndex) selected else highlight), start, (start + query.length).coerceAtMost(numbered.text.length))
+            }
         }
     }
+    val hasNext = page?.let { TextPageLayout.canAdvance(it.nextOffset, it.totalBytes) } == true
+    val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes, it.hasMore) } == true
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { searchVisible = !searchVisible }) { Icon(Icons.Default.Search, "查找文本") }
             IconButton(onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) }, enabled = fontSize > 12) { Text("A−", Modifier.semantics { contentDescription = "减小字号" }) }
             Text("${fontSize}sp", style = MaterialTheme.typography.labelMedium)
             IconButton(onClick = { fontSize = (fontSize + 2).coerceAtMost(32) }, enabled = fontSize < 32) { Text("A+", Modifier.semantics { contentDescription = "增大字号" }) }
+            FilterChip(selected = showLineNumbers, onClick = { showLineNumbers = !showLineNumbers }, label = { Text("行号") })
             FilterChip(selected = wrap, onClick = { wrap = !wrap }, label = { Text("自动换行") })
             Spacer(Modifier.width(8.dp))
             Box {
@@ -298,14 +334,55 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp),
                 softWrap = wrap, onTextLayout = { layout = it })
         }
-        Text("${page?.encoding ?: requestedEncoding} · 第 ${pageIndex + 1} 段" + page?.let { " · ${viewerBytes(it.nextOffset)} / ${viewerBytes(it.totalBytes)}" }.orEmpty(),
+        Text(
+            "${page?.encoding ?: requestedEncoding} · 第 $startLine–${startLine + numbered.lineCount - 1} 行" +
+                page?.let { " · 已显示 ${viewerBytes(it.nextOffset)} / ${viewerBytes(it.totalBytes)}" }.orEmpty(),
             Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (truncated) Text(
+            "文件较大（${viewerBytes(page?.totalBytes ?: 0)}），仅显示前 ${viewerBytes(TextPageLayout.MAX_VIEW_BYTES)}；已截断。可导出或使用其他应用打开完整文件。",
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { pageIndex-- }, enabled = pageIndex > 0 && !loading) { Text("上一段") }
             TextButton(onClick = {
-                page?.let { current -> offsets = offsets.take(pageIndex + 1) + current.nextOffset; pageIndex++ }
-            }, enabled = page?.hasMore == true && !loading) { Text("下一段") }
+                page?.let { current ->
+                    offsets = offsets.take(pageIndex + 1) + current.nextOffset
+                    lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
+                    pageIndex++
+                }
+            }, enabled = hasNext && !loading) { Text(if (truncated) "已截断" else "下一段") }
+        }
+    }
+}
+
+/**
+ * 未知或暂不支持的类型：给出明确中文说明与“用文本打开/复制路径”回退。
+ * 不渲染空白区域，也不把文件内容送进任何解析器，保证不会白屏或崩溃。
+ */
+@Composable
+private fun UnsupportedPreview(
+    name: String, mime: String, copied: Boolean,
+    onOpenAsText: () -> Unit, onCopyPath: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) {
+        TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+        Text("暂不支持内置预览", style = MaterialTheme.typography.titleMedium)
+        Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text("文件类型：${mime.ifBlank { "未知" }}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "该格式没有内置查看器。可以按文本方式打开（只读，适合代码、配置和日志），或复制路径后用其他应用打开；原文件不会被修改。",
+            style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onOpenAsText) { Text("用文本打开") }
+            OutlinedButton(onClick = onCopyPath) { Text(if (copied) "已复制路径" else "复制路径") }
         }
     }
 }
