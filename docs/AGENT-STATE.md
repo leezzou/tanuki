@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 最终 head `5f484e6` CI 4/4 通过，独立 Review/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) Codex Review 的 3 条意见已修复，review 修复新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -20,13 +20,13 @@
 
 - 基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`；只读代码与现有交接后实现，未启动设备、未安装/卸载真实 DSH。
 - 清单：版本管理对话框明确显示“当前使用/备用”、占用空间、安装时间、依赖锁/启动校验与总占用；当前版本无卸载入口，当前元数据缺失时禁止切换与卸载并显示中文原因。
-- 卸载策略：新增纯逻辑 `DshUninstall.requireUninstallable`，拒绝当前版本、运行中服务、活动子进程、更新检查/安装占用与无效/未安装版本；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
-- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除失败且目录完整时回滚并保留原程序，已部分删除时保留隔离目录由 `recover()` 继续清理；所有失败给中文原因。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除；L2S 只回收无引用硬链接载荷。
+- 卸载策略：新增纯逻辑 `DshUninstall.requireUninstallable`，拒绝当前版本、运行中服务、活动子进程、更新检查/安装占用与无效/未安装版本；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。Review 修复：删除开始后一律不回滚（标记文件不能证明目录完整），回滚 move 失败保留 prepared 日志。
+- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除开始后不再回滚，隔离目录与 committed 日志由 `recover()` 清理；提交日志失败只有移回成功才清 prepared 日志，回滚失败保留记录。新增 `DshUninstallRecovery`：prepared 移回隔离目录，committed 只清理隔离目录、保留 engines 中可能重装的 target，旧协议无 phase 仍删除 target。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除。
 - 互斥：安装、启动、切换、卸载共用环境 mutation；新增 `DshVersionGate` 供切换/卸载与 `UpdateManager.check()` 共用，锁顺序固定 mutation → versionGate；环境锁被占用时写入中文错误而非只记事件。
 - UI：主界面当前版本“卸载”改为“管理版本”；官方版本列表只对非当前已安装版本显示“卸载该备用版本”；确认框显示版本、占用、安装时间和保留范围。
 - 恢复：组件事务日志改用 `AtomicFile.delete()`，避免只删主文件留下 `.bak` 导致下次启动恢复已完成的卸载/替换事务。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9、`DshVersionsTest` 7、`DshSwitchTest` 12）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**，详见 [测试报告](TEST-REPORT.md)。
-- 待验证：独立 Codex High Review（PR #33 最终 head `5f484e6` 的 Host/Android CI 4/4 已通过）；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、进程在 prepared/committed 之间中断后的恢复；未跑 assemble/仪器/真机。
+- 待验证：review 修复后新 head 的 Host/Android CI 与独立 Codex High Review 复核；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、删除中断后的隔离清理、prepared/committed 中断恢复；未跑 assemble/仪器/真机。
 
 ### 远程主机直连 SSH 切片（android_agent-34，PR #29 待审）
 
@@ -190,7 +190,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9 项：当前版本/运行中/更新占用/缺失元数据拒绝、备用卸载保留共享数据、删除失败回滚、部分删除保留隔离、提交日志失败回滚、并发锁串行、并发卸载只成功一次）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、真机。
+- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 33 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 14 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、并发锁与并发卸载）；完整 JVM **549 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、真机。
 - 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-31 新跑，merge `f5f3bf3` 后）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
@@ -218,7 +218,7 @@
 
 ## 环境与阻塞
 
-- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，最终 head `5f484e6` 的 CI 4/4 通过；本轮未启动设备。
+- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，Codex Review 3 条已修复；review 修复新 head 的 CI 以 PR 页面为准；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -230,7 +230,7 @@
 
 ## 下一步
 
-1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：最终 head `5f484e6` CI 已通过，等待独立 Codex High Review；设备验收另行授权（清单、确认、卸载备用、回滚、更新检查互斥、进程中断恢复）。不合并、不发布。
+1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：Codex Review 3 条已修复并 resolve，等待新 head CI 与独立 Codex High Review 复核；设备验收另行授权（清单、确认、卸载备用、删除中断隔离、prepared/committed 恢复）。不合并、不发布。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。

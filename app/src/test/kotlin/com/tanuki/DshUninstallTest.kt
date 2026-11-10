@@ -1,6 +1,7 @@
 package com.tanuki
 
 import com.tanuki.runtime.DshUninstall
+import com.tanuki.runtime.DshUninstallRecovery
 import com.tanuki.runtime.DshVersionGate
 import com.tanuki.runtime.DshVersions
 import kotlinx.coroutines.CompletableDeferred
@@ -115,10 +116,14 @@ class DshUninstallTest {
     }
 
     @Test
-    fun deleteFailureRollsBackCompleteStandbyDirectory() = runBlocking {
+    fun deleteFailureAfterRemovingDependencyKeepsQuarantineEvenWithMarkers() = runBlocking {
         val engines = temporary.newFolder("engines")
         seed(engines, "1.2.0")
         val standby = seed(engines, "1.3.0")
+        val dependency = File(standby, "node_modules/left-pad/index.js").apply {
+            parentFile!!.mkdirs()
+            writeText("dependency")
+        }
         val quarantine = File(temporary.root, "runtime/dsh-1.3.0.uninstall")
         var cleared = 0
 
@@ -129,17 +134,24 @@ class DshUninstallTest {
                 quarantine = quarantine,
                 journal = {},
                 clearJournal = { cleared++ },
-                delete = { throw java.io.IOException("磁盘忙") }
+                delete = {
+                    // 模拟 deleteTree 已删掉普通依赖后抛错：标记文件仍然存在也不能证明目录完整。
+                    File(it, "node_modules/left-pad/index.js").delete()
+                    throw java.io.IOException("删除被中断")
+                }
             )
         }.exceptionOrNull()
 
         assertTrue("失败必须是可解释的异常", error is IllegalStateException)
-        assertTrue("失败原因必须是中文并说明已回滚", error!!.message!!.contains("已回滚并保留原版本"))
-        assertTrue(error.message!!.contains("磁盘忙"))
-        assertTrue("回滚后原程序目录必须恢复", standby.isDirectory)
-        assertTrue("恢复后仍应被识别为已安装版本", DshVersions.isInstalled(engines, "1.3.0"))
-        assertFalse(quarantine.exists())
-        assertEquals(1, cleared)
+        assertTrue("必须说明已隔离且未完成清理", error!!.message!!.contains("残留清理未完成"))
+        assertTrue(error.message!!.contains("用户数据未删除"))
+        assertFalse("半删目录不能移回 engines", standby.exists())
+        assertTrue("隔离目录保留给 recover 清理", quarantine.isDirectory)
+        assertFalse("被删依赖不能重新变完整", dependency.exists())
+        assertTrue("标记文件仍在，证明不能靠标记判断完整性", File(quarantine, ".installed").isFile)
+        assertTrue(File(quarantine, "node_modules/@deepseek-ai/dsh/lib/bin.js").isFile)
+        assertFalse(DshVersions.isInstalled(engines, "1.3.0"))
+        assertEquals("提交日志必须保留，重启后才能继续清理", 0, cleared)
     }
 
     @Test
@@ -198,6 +210,122 @@ class DshUninstallTest {
         assertTrue(error.message!!.contains("已回滚并保留原版本"))
         assertFalse("提交日志失败时不能删除程序", deleted)
         assertTrue(standby.isDirectory)
+        assertFalse(quarantine.exists())
+    }
+
+    @Test
+    fun journalCommitFailureAndRollbackMoveFailureKeepsPreparedJournal() = runBlocking {
+        val engines = temporary.newFolder("engines")
+        seed(engines, "1.2.0")
+        val standby = seed(engines, "1.3.0")
+        val quarantine = File(temporary.root, "runtime/dsh-1.3.0.uninstall")
+        var cleared = 0
+        var moves = 0
+
+        val error = runCatching {
+            DshUninstall.apply(
+                version = "1.3.0",
+                target = standby,
+                quarantine = quarantine,
+                journal = { if (it == "committed") throw java.io.IOException("状态目录不可写") },
+                clearJournal = { cleared++ },
+                delete = { error("提交日志失败时不应开始删除") },
+                move = { from, to ->
+                    moves++
+                    // 第一次是 target→quarantine；第二次回滚故意失败。
+                    if (moves == 1) from.renameTo(to) else false
+                }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertTrue("必须说明回滚未完成", error!!.message!!.contains("回滚未完成"))
+        assertTrue(error.message!!.contains("已保留恢复记录"))
+        assertFalse("回滚失败时原程序仍在隔离目录", standby.exists())
+        assertTrue(quarantine.isDirectory)
+        assertEquals("prepared 日志必须保留，供下次启动重试", 0, cleared)
+
+        // 模拟下次启动 recover：prepared 阶段把完整隔离目录移回 engines。
+        DshUninstallRecovery.apply(
+            phase = "prepared",
+            target = standby,
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+        assertTrue("恢复后应回到 engines", standby.isDirectory)
+        assertTrue(DshVersions.isInstalled(engines, "1.3.0"))
+        assertFalse(quarantine.exists())
+    }
+
+    @Test
+    fun committedRecoveryKeepsReinstalledTargetAndOnlyRemovesQuarantine() {
+        val engines = temporary.newFolder("engines")
+        val target = seed(engines, "1.3.0")
+        val quarantine = File(temporary.root, "runtime/dsh-1.3.0.uninstall").apply { mkdirs() }
+        File(quarantine, "partial").writeText("half deleted")
+
+        DshUninstallRecovery.apply(
+            phase = "committed",
+            target = target,
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+
+        assertTrue("同版本重装后的有效程序不能被 committed 恢复删除", target.isDirectory)
+        assertTrue(DshVersions.isInstalled(engines, "1.3.0"))
+        assertFalse("只清理本次卸载的隔离目录", quarantine.exists())
+    }
+
+    @Test
+    fun preparedRecoveryRestoresQuarantineAfterRollbackInterrupted() {
+        val engines = temporary.newFolder("engines")
+        val target = File(engines, "1.3.0")
+        // 隔离目录本身就是程序目录，不是它的父目录。
+        val quarantine = seed(File(temporary.root, "runtime"), "dsh-1.3.0.uninstall")
+
+        DshUninstallRecovery.apply(
+            phase = "prepared",
+            target = target,
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+
+        assertTrue("回滚改名后中断，恢复时应移回 target", target.isDirectory)
+        assertTrue(DshVersions.isInstalled(engines, "1.3.0"))
+        assertFalse(quarantine.exists())
+    }
+
+    @Test
+    fun preparedRecoveryKeepsExistingTargetAndDropsStaleQuarantine() {
+        val engines = temporary.newFolder("engines")
+        val target = seed(engines, "1.3.0")
+        val quarantine = seed(File(temporary.root, "runtime"), "dsh-1.3.0.uninstall")
+
+        DshUninstallRecovery.apply(
+            phase = "prepared",
+            target = target,
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+
+        assertTrue(target.isDirectory)
+        assertFalse("target 已存在时不能覆盖，只清理隔离副本", quarantine.exists())
+    }
+
+    @Test
+    fun legacyJournalWithoutPhaseStillRemovesTarget() {
+        val engines = temporary.newFolder("engines")
+        val target = seed(engines, "1.3.0")
+        val quarantine = File(temporary.root, "runtime/dsh-1.3.0.uninstall").apply { mkdirs() }
+
+        DshUninstallRecovery.apply(
+            phase = null,
+            target = target,
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+
+        assertFalse("旧协议表示卸载已提交，保留原删除语义", target.exists())
         assertFalse(quarantine.exists())
     }
 

@@ -268,26 +268,23 @@ object DshUninstall {
         } catch (error: Throwable) {
             // 无法记录提交就不能继续删除；完整目录必须移回原位。
             val restored = move(quarantine, target)
-            runCatching { clearJournal() }
+            if (restored) {
+                runCatching { clearJournal() }
+                throw IllegalStateException("卸载 DSH $version 未能写入事务记录，已回滚并保留原版本：${reason(error)}", error)
+            }
+            // 回滚失败时必须保留 prepared 记录，下次启动的 recover 才能把隔离目录移回。
             throw IllegalStateException(
-                if (restored) "卸载 DSH $version 未能写入事务记录，已回滚并保留原版本：${reason(error)}"
-                else "卸载 DSH $version 未能写入事务记录，且回滚未完成；程序已移到 ${quarantine.name}，请重新打开应用完成恢复：${reason(error)}",
+                "卸载 DSH $version 未能写入事务记录，且回滚未完成；已保留恢复记录，程序在 ${quarantine.name}，请重新打开应用完成恢复：${reason(error)}",
                 error
             )
         }
         try {
             delete(quarantine)
         } catch (error: Throwable) {
-            // 只有结构仍完整的目录才值得回滚；删除已触及安装标记/入口时保留隔离目录交给 recover 清理。
-            val intact = quarantine.isDirectory &&
-                File(quarantine, ".installed").isFile &&
-                File(quarantine, "node_modules/@deepseek-ai/dsh/lib/bin.js").isFile
-            if (intact && move(quarantine, target)) {
-                runCatching { clearJournal() }
-                throw IllegalStateException("卸载 DSH $version 失败，已回滚并保留原版本：${reason(error)}", error)
-            }
+            // 删除一旦开始就无法证明目录仍完整：即使 .installed 和入口还在，也可能已删掉某个依赖。
+            // 因此不再把隔离目录移回 engines；保留 committed 日志，由 recover 继续清理。
             throw IllegalStateException(
-                "卸载 DSH $version 失败，程序目录已移出但残留清理未完成；请重新打开应用完成清理，用户数据未删除：${reason(error)}",
+                "卸载 DSH $version 失败，程序目录已隔离且残留清理未完成；请重新打开应用完成清理，用户数据未删除：${reason(error)}",
                 error
             )
         }
@@ -295,6 +292,54 @@ object DshUninstall {
     }
 
     private fun reason(error: Throwable): String = error.message ?: error.javaClass.simpleName
+}
+
+/** 卸载事务在进程重启后的恢复动作；与 Android API 解耦，便于 JVM 验证各阶段。 */
+enum class DshUninstallRecoveryStep {
+    /** prepared：提交前中断，把完整隔离目录移回 engines。 */
+    RESTORE_QUARANTINE,
+    /** 只清理隔离目录，不碰 engines 中可能已经重装的有效版本。 */
+    REMOVE_QUARANTINE,
+    /** 旧协议（无 phase）：日志表示卸载已提交，删除原目标目录。 */
+    REMOVE_TARGET
+}
+
+object DshUninstallRecovery {
+    /**
+     * 新协议的 committed 只代表“可以删除隔离目录”，不再代表 target 属于本次事务：
+     * 回滚后清日志失败、或用户在同进程重装同版本，都可能让 engines 中重新出现有效 target。
+     * 因此 committed 绝不能删除 target；只有旧协议无 phase 的日志才继续删除 target。
+     */
+    fun plan(phase: String?, targetExists: Boolean, quarantineExists: Boolean): List<DshUninstallRecoveryStep> = when (phase) {
+        "prepared" -> when {
+            quarantineExists && !targetExists -> listOf(DshUninstallRecoveryStep.RESTORE_QUARANTINE)
+            quarantineExists -> listOf(DshUninstallRecoveryStep.REMOVE_QUARANTINE)
+            else -> emptyList()
+        }
+        "committed" -> if (quarantineExists) listOf(DshUninstallRecoveryStep.REMOVE_QUARANTINE) else emptyList()
+        else -> buildList {
+            if (targetExists) add(DshUninstallRecoveryStep.REMOVE_TARGET)
+            if (quarantineExists) add(DshUninstallRecoveryStep.REMOVE_QUARANTINE)
+        }
+    }
+
+    /** 执行恢复动作；失败时抛出中文异常，保留事务日志供下次重试。 */
+    fun apply(
+        phase: String?,
+        target: File,
+        quarantine: File,
+        deleteFile: (File) -> Unit,
+        move: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
+    ) {
+        for (step in plan(phase, target.exists(), quarantine.exists())) {
+            when (step) {
+                DshUninstallRecoveryStep.RESTORE_QUARANTINE ->
+                    check(move(quarantine, target)) { "上次卸载回滚未完成，请保留数据后重试" }
+                DshUninstallRecoveryStep.REMOVE_QUARANTINE -> if (quarantine.exists()) deleteFile(quarantine)
+                DshUninstallRecoveryStep.REMOVE_TARGET -> deleteFile(target)
+            }
+        }
+    }
 }
 
 /** 切换前的本机状态与数据兼容规则；与文件系统解耦，便于 JVM 覆盖各拒绝分支。 */

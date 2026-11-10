@@ -298,16 +298,12 @@ class RuntimeComponents(private val manager: RuntimeManager) {
                 val version=journal.getString("version");require(version.matches(VERSION))
                 val target=File(paths.engines,version)
                 val quarantine=File(paths.runtime,"dsh-$version.uninstall")
-                if(journal.optString("phase")=="prepared") {
-                    // 提交前中断：完整隔离目录移回原位置，恢复为未卸载状态。
-                    if(quarantine.exists() && !target.exists()) {
-                        owned(quarantine);owned(target)
-                        check(quarantine.renameTo(target)) { "上次卸载回滚未完成，请保留数据后重试" }
-                    } else if(quarantine.exists()) remove(quarantine)
-                } else {
-                    // 已提交：继续清理目标与隔离目录，不恢复半删程序。
-                    remove(target);remove(quarantine)
-                }
+                DshUninstallRecovery.apply(
+                    phase=journal.optString("phase").takeIf { it.isNotEmpty() },
+                    target=target,
+                    quarantine=quarantine,
+                    move={from,to->owned(from);owned(to);from.renameTo(to)},
+                    deleteFile={remove(it)})
             } else {
                 val targets=when(name) {
                     "ubuntu"->listOf(paths.root,paths.stage)
