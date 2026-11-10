@@ -15,9 +15,9 @@
 ## 当前状态
 
 - 已实现：BOM/严格 UTF-8/无 BOM UTF-16/GB18030/Big5/Shift_JIS 顺序识别与 Latin-1 兜底；显示解码使用替代字符，不再向界面抛解码异常；二进制专用面板；4 MiB 截断；顶部可关闭编码提示与手动切换；自动识别后跨页沿用具体编码。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 JVM 31 tests / 0 failures；完整 `testModernDebugUnitTest` 805 tests / 90 个结果文件 / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 0 errors / 102 warnings / 1 hint。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 JVM 31 tests / 0 failures；完整 `testModernDebugUnitTest` 832 tests / 92 个结果文件 / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 0 errors / 103 warnings / 1 hint。
 - 待验证：Android 设备/模拟器打开真实 GBK `.txt`/`.cpp`、二进制伪装文本、4 MiB 大文件、手动切换与深色/大字体下的提示条布局；Android 仪器测试；独立 Codex High Review。
-- 当前目标包名：未构建/安装新 APK；源码分支 `ao/text-decoding/text-encoding`（从 `ao/text-decoding/root` 建立），基线 `4f2a3717`，PR [#53](https://github.com/leezzou/tanuki/pull/53)；fetch 发现远端 `origin/main` 已前进到 `326726c`（仅文档），按用户指定 SHA 保留基线，未合并该文档提交。
+- 当前目标包名：未构建/安装新 APK；源码分支 `ao/text-decoding/text-encoding`（#53，从 `ao/text-decoding/root` 建立）与 `ao/text-decoding/text-encoding-cap`（#55），基线 `4f2a3717`，PR [#53](https://github.com/leezzou/tanuki/pull/53)；#53 已 squash 合并为 `main=00fa462`。4 MiB 多字节边界修复因 #53 已合并，改在最新 `main=26694f4` 上以 follow-up PR [#55](https://github.com/leezzou/tanuki/pull/55) 交付，head `03a8f10`。
 - 关键事实与可定位源码：探测/解码在 `app/src/main/kotlin/com/tanuki/storage/TextFileReader.kt`；文本分类与二进制标记传递在 `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`；提示条/手动切换/二进制面板在 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt`；4 MiB 截断在 `app/src/main/kotlin/com/tanuki/ui/TextPageLayout.kt`。
 
 ## 本次改动
@@ -42,7 +42,7 @@
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.TextPageLayoutTest' -x buildNativeRuntime` | BUILD SUCCESSFUL，28 tests / 0 failures / 0 errors / 0 skipped | 首次 Big5 用例失败（GB18030 误判），已把候选评分改为按编码区分假名权重并补常用繁体字，复跑通过。 |
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | BUILD SUCCESSFUL（5m09s），**802 tests / 90 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint** | 首次交付验证；新增 8 项（794 → 802）。lint warning 数与 0.1.11 基线一致，无新增 error。 |
 | Review P2 修复：`READABLE_ENCODINGS` 接受自动探测的 Shift_JIS/UTF-32LE/BE；未知大小流 EOF 后 `hasMore=false` 并返回实际总大小 | 定向 30 tests / 0 failures；完整 JVM 804 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 新增 Shift_JIS、UTF-32LE/BE 跨页与未知大小空文件/短文件/多页末页回归；未改 content://、TEST-REPORT 或共享状态。 |
-| Review P2 修复（4 MiB 多字节边界）：上限切在字符内部时在完整字符处停止，不再把残字节按 Latin-1 显示；截断判定结合 `hasMore` | 定向 31 tests / 0 failures；完整 JVM 805 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 新增 UTF-8 三字节字符横跨 4 MiB 边界回归；完整套件首次出现 1 次无关的 `DshComposerControllerTest.onSentReceivesSessionId` 时序抖动，单测复跑通过后全套复跑通过。 |
+| Review P2 修复（4 MiB 多字节边界）：上限切在字符内部时在完整字符处停止，不再把残字节按 Latin-1 显示；截断判定结合 `hasMore` | 定向 31 tests / 0 failures；完整 JVM 832 tests / 92 文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 103 warnings / 1 hint；PR #55 四项 CI check 全 pass | 基于最新 `main=26694f4`；新增 UTF-8 三字节字符横跨 4 MiB 边界回归；完整套件首次出现 1 次已知 `NpmAdaptiveWorkerPoolTest` 时序抖动（8/9），单测复跑通过后全套复跑通过。 |
 | `git rev-parse origin/main` / `git log --oneline 4f2a371..origin/main` | fetch 后 `origin/main=326726c`，仅 `docs: correct 0.1.11 post-release status (#45)` 的文档改动 | 按用户指定基线 `4f2a3717` 建分支；未合并该文档提交，PR 合并前由集成方决定是否同步。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：上述编译、定向 JVM、完整 JVM/lint 均为本轮新跑；0.1.11 的 794 tests、APK 与设备事实为前轮记录，本轮未复跑。
