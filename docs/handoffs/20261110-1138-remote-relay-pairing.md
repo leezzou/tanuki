@@ -47,6 +47,7 @@
 | `scripts/remote-relay/host_agent.py` | 只出站主机端 agent：注册、连接本机回环 sshd、双向转发、重连 |
 | `scripts/remote-relay/test_remote_relay.py` | 6 项回环端到端自测（合成证书/字节，不访问外网） |
 | `scripts/remote-relay/gen-cert.sh` | 自签名中继证书生成辅助 |
+| `.github/workflows/verify.yml` | Host job 增加 Python 中继回环自测步骤 |
 | `docs/AGENT-STATE.md` | 新增本轮状态小节、更新当前交接链接与下一步 |
 
 ## 验证记录
@@ -55,7 +56,7 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL（约 3m53s；含既有告警） | 仅 Kotlin 编译；未跑设备 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` | BUILD SUCCESSFUL；16 tests / 0 failures / 0 errors / 0 skipped | 覆盖配对链接、帧、HMAC 向量、钉扎、重连、假中继 DATA 回声、错误 token、存储、身份/Cookie、控制器 |
-| `cd scripts/remote-relay && python3 test_remote_relay.py` | OK；6 tests / 0 failures | 自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA、错误 token、未知房间、明文拒绝、日志不含 token；仅回环 |
+| `cd scripts/remote-relay && python3 test_remote_relay.py` | OK；6 tests / 0 failures | 自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA、错误 token、未知房间、明文拒绝、日志不含 token；仅回环；已加入 CI Host job |
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m28s）；66 个结果文件，551 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 16；lint 告警数与基线相同，无新增 Error |
 | `python3 scripts/check-handoff.py --record ...` / 无参检查 | 待执行 | 结束后刷新印章 |
 | `python3 scripts/package-source.py` | 待执行 | 仅检查源码包，不提交 |
