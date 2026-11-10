@@ -12,6 +12,18 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
 - 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
 
+## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
+
+- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，未安装、未发布。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
+  - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m05s），28 tests / 0 failures / 0 errors / 0 skipped。
+  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（3m30s；优化搜索下标换算前另有一次 6m23s 同结果），**557 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 95 warnings / 1 hint**。
+- 新增回归 22 项：`FileTypeCatalogTest` 10（C/C++/头文件、`.ts` 与 `video/mp2t` 冲突、常见语言、配置/标记/数据、图片/音频/视频扩展名与 MIME、PDF/DOCX/XLSX/旧版 Office、归档/二进制不探测、无扩展名与点号文件、大小写/复合扩展名、纯 MIME 回退）；`TextPageLayoutTest` 9（行号宽度/空文本/末尾换行、关闭行号、搜索下标换算、跨段行号、4 MiB 上限、截断判定、行数统计）；`TextFileReaderTest` 增补 3（64 KiB 页与空文件边界、跨页多字节字符不拆分、UTF-16LE 不完整字符/ISO-8859-1/未知编码）。
+- 覆盖点：分类不依赖 Android `MimeTypeMap`，扩展名优先于 MIME；媒体扩展名在缺少 MIME 时仍进入正确查看器；未知类型只在非明确二进制时做有界 UTF-8 内容探测；行号与正文同一段文本，自动换行不错位；搜索仍以原始文本下标计算，再一次性批量换算为带行号下标（避免单字符搜索数千匹配时退化为 O(n×m)）；截断只在文件超过 4 MiB 且仍有内容时提示。
+- 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
+- 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
+
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
 - 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。
