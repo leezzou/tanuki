@@ -133,25 +133,25 @@ fun DshComposerBar(
                 val imageTotal = current.limits.effectiveMaxMessageImageBytes().toLong()
                 val remainingImage = (imageTotal - imageBytes).coerceAtLeast(0)
                 DshAttachmentReadBudget(
-                    maxItems = minOf(
-                        DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size,
-                        current.limits.maxImagesPerMessage - imageCount
-                    ).coerceAtLeast(0),
+                    maxItems = (DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size)
+                        .coerceAtLeast(0),
                     remainingBytes = minOf(remainingTotal, remainingImage),
                     maxItemBytes = current.limits.effectiveMaxImageBytes(),
-                    totalLabelBytes = minOf(DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong(), imageTotal)
+                    totalLabelBytes = minOf(DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong(), imageTotal),
+                    typeMaxItems = (current.limits.maxImagesPerMessage - imageCount).coerceAtLeast(0),
+                    typeLabel = "图片"
                 )
             }
             DshAttachmentKind.FILE -> {
                 val fileCount = current.attachments.count { it.kind == DshAttachmentKind.FILE }
                 DshAttachmentReadBudget(
-                    maxItems = minOf(
-                        DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size,
-                        DshComposerProtocol.MAX_FILES_PER_MESSAGE - fileCount
-                    ).coerceAtLeast(0),
+                    maxItems = (DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size)
+                        .coerceAtLeast(0),
                     remainingBytes = remainingTotal,
                     maxItemBytes = DshComposerProtocol.MAX_FILE_BYTES,
-                    totalLabelBytes = DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong()
+                    totalLabelBytes = DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong(),
+                    typeMaxItems = (DshComposerProtocol.MAX_FILES_PER_MESSAGE - fileCount).coerceAtLeast(0),
+                    typeLabel = "文件"
                 )
             }
         }

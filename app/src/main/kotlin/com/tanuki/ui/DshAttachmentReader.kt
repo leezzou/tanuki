@@ -130,6 +130,7 @@ object DshAttachmentReader {
         }
         val remainingBudget = budget.copy(
             maxItems = (budget.maxItems - dataUris.size).coerceAtLeast(0),
+            typeMaxItems = (budget.typeMaxItems - dataUris.size).coerceAtLeast(0),
             remainingBytes = (budget.remainingBytes - dataBytes).coerceAtLeast(0)
         )
         val fromUris = if (uris.isEmpty() || remainingBudget.maxItems <= 0 || remainingBudget.remainingBytes <= 0) {
@@ -161,10 +162,8 @@ object DshAttachmentReader {
         }
         val imageResult = readUris(context, images, DshAttachmentKind.IMAGE, imageBudget)
         val usedByImages = imageResult.items.sumOf { it.bytes.size.toLong() }
-        val remainingFileBudget = fileBudget.copy(
-            maxItems = (fileBudget.maxItems - imageResult.items.size).coerceAtLeast(0),
-            remainingBytes = (fileBudget.remainingBytes - usedByImages).coerceAtLeast(0)
-        )
+        // 图片只扣总附件名额和共享字节，文件类型名额保持不变。
+        val remainingFileBudget = fileBudget.afterImages(imageResult.items.size, usedByImages)
         val fileResult = if (files.isEmpty() || remainingFileBudget.maxItems <= 0 || remainingFileBudget.remainingBytes <= 0) {
             DshAttachmentReadResult()
         } else {

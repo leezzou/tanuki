@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-46
 - 时间：2026-11-10 11:42 CST
-- 状态：组件 PR [#43](https://github.com/leezzou/tanuki/pull/43) 已创建（head `0b747ab`）；已合入 `origin/main=7593805a`，PR 交接检查通过，合并提交待推送
+- 状态：组件 PR [#43](https://github.com/leezzou/tanuki/pull/43) 已创建；已合入 `origin/main=7593805a`，PR 交接检查通过；本轮混合名额修复待推送
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：原生输入栏组件（多行、`Ctrl/⌘+Enter` 发送、按会话草稿）、@ 文件/会话补全、斜杠命令目录/补全/执行、图片/文件选择与预览、普通文件上传换 receipt、图片 base64 随 prompt、粘贴图片、拖入文件、大小/类型限制中文错误；5 项评审修复。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标回归 38 项全过；完整 JVM 638 tests / 0 failures / 0 errors / 0 skipped（75 个结果文件，含 main 既有回归）；`lintModernDebug` 0 errors / 97 warnings / 1 hint，新增文件无 lint 告警。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标回归 39 项全过；完整 JVM 639 tests / 0 failures / 0 errors / 0 skipped（75 个结果文件，含 main 既有回归）；`lintModernDebug` 0 errors / 97 warnings / 1 hint，新增文件无 lint 告警。
 - 待验证：42 接线后的真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、跨应用临时权限、上传失败重试；真实 PRoot DSH；assemble、Android 仪器、真机。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`（modern flavor 为 `com.tanuki.modern`）；分支 `ao/input-attachments/components`，已合入 `origin/main=7593805a8a2f685e056c9fde7487b504d0a08552`；PR #43 已创建；无设备/模拟器任务。
 - 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 6 个组件文件；契约见 `docs/INTERFACES.md` 1.9.1。
@@ -27,6 +27,7 @@
 - P1 发送成功误清新草稿：发送前快照 `submittedText` 与附件 id；成功时仅移除本次提交的文本/附件，发送期间的新文本、新附件保留并回写草稿；延迟响应回归 `sendKeepsEditsMadeWhileWaitingForResponse`。
 - P1 异步附件串会话：新增 `DshComposerSessionToken(sessionId, generation)`；选择器打开、粘贴、拖入读取前捕获，返回时 `isCurrentSession` 校验；`addImages/addFiles` 也接受 token 做二次拒绝；回归 `staleAttachmentTokenIsRejectedAfterSessionSwitch`。
 - P2 批量读取预算：新增 `DshAttachmentReadBudget`，`readUris`/剪贴板/拖入在读取每个 URI 前按剩余数量、剩余总量和单文件上限分配；不再先把整批字节读进内存；回归 `batchBudgetStopsBeforeOverAllocating`。
+- P2 混合拖入名额：总附件名额 `maxItems` 与类型名额 `typeMaxItems` 分开；`afterImages()` 只扣总名额/共享字节，不扣文件名额；混合拖入回归 `mixedDropKeepsFileTypeQuotaAfterImages`。
 - P2 拖入开始判定：`shouldStartDragAndDrop` 改用 `event.mimeTypes()`，不再依赖 ACTION_DROP 才提供的 `clipData`；纯策略 `DshComposerDragPolicy.accepts` 有回归。
 - P2 跨应用临时权限：`onDrop` 调 `Activity.requestDragAndDropPermissions`，权限保留到异步读取结束并在 `finally` release；真实外部 provider 读取仍需设备验证。
 
@@ -67,12 +68,12 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL；仅既有弃用/平台告警 | 本 worktree；未跑原生 `buildNativeRuntime` |
-| `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**38 tests / 0 failures / 0 errors / 0 skipped** | 17 + 8 + 13；不含 transport 认证/HTTP |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；75 个结果文件、**638 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 97 warnings / 1 hint** | 含 main 既有回归；新增文件无 lint 告警 |
+| `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**39 tests / 0 failures / 0 errors / 0 skipped** | 18 + 8 + 13；不含 transport 认证/HTTP |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；75 个结果文件、**639 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 97 warnings / 1 hint** | 含 main 既有回归；新增文件无 lint 告警 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1142-input-attachments.md` | Handoff PR check passed | 普通 PR 模式；`AGENT-STATE`/`CURRENT.json` 与 main 完全一致，未修改 |
 | `git diff --check` | 无输出 | 无空白错误 |
 
-- 哪些是前一轮结果，哪些是本次新验证：638/0/0/0、lint 0 errors/97 warnings/1 hint、38 项目标回归均为本组件分支新跑；main 既有回归不是本切片新增。
+- 哪些是前一轮结果，哪些是本次新验证：639/0/0/0、lint 0 errors/97 warnings/1 hint、39 项目标回归均为本组件分支新跑；main 既有回归不是本切片新增。
 - 未测试、超时、失败和暂未复现的情况：真实设备 UI/键盘/选择器/粘贴/拖入/跨应用临时权限/上传失败重试、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 交互没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试；transport 认证/HTTP 由 42 统一实现，本分支未测。
 
 ## 未完成与暂停项
@@ -83,7 +84,7 @@
 
 ## 下一步
 
-1. 组件 PR #43 已创建；本次只推送合入 `main=7593805a` 与交接更新，之后不再 push 新提交。
+1. 组件 PR #43 已创建；本次推送混合名额修复与交接更新，之后等待评审。
 2. 由编排器先合 #42（交接机制），再合本组件 PR，最后 #40 rebase 只保留接线。
 3. 若 #40 评审指出 composer 问题，由编排器转交后通过 42 分支或另开小 PR 修复。
 

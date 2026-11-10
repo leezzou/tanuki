@@ -37,17 +37,31 @@ data class DshAttachmentReadBudget(
     val maxItems: Int,
     val remainingBytes: Long,
     val maxItemBytes: Int,
-    val totalLabelBytes: Long
+    val totalLabelBytes: Long,
+    /** 当前类型的剩余名额；图片/文件各自独立，不能被另一类型消耗。 */
+    val typeMaxItems: Int = maxItems,
+    val typeLabel: String = "附件"
 ) {
-    /** 返回当前条目可读取的最大字节；数量或总量已用尽时返回 null。 */
+    /** 返回当前条目可读取的最大字节；总名额、类型名额或总量已用尽时返回 null。 */
     fun limitFor(acceptedItems: Int, usedBytes: Long): Int? {
-        if (acceptedItems >= maxItems || remainingBytes <= usedBytes) return null
+        if (acceptedItems >= maxItems || acceptedItems >= typeMaxItems || remainingBytes <= usedBytes) return null
         return minOf(maxItemBytes.toLong(), remainingBytes - usedBytes).toInt()
     }
 
-    fun exhaustionMessage(acceptedItems: Int): String =
-        if (acceptedItems >= maxItems) "还能添加 $maxItems 个附件"
-        else "附件总大小不能超过 ${DshComposerPolicy.formatBytes(totalLabelBytes)}"
+    /** 图片只消耗总附件名额与共享字节预算，保留文件类型名额。 */
+    fun afterImages(imageCount: Int, imageBytes: Long): DshAttachmentReadBudget = copy(
+        maxItems = (maxItems - imageCount).coerceAtLeast(0),
+        remainingBytes = (remainingBytes - imageBytes).coerceAtLeast(0)
+    )
+
+    fun exhaustionMessage(acceptedItems: Int): String = when {
+        acceptedItems >= typeMaxItems -> {
+            val suffix = if (typeLabel.isBlank() || typeLabel == "附件") "" else "（$typeLabel）"
+            "还能添加 $typeMaxItems 个附件$suffix"
+        }
+        acceptedItems >= maxItems -> "还能添加 $maxItems 个附件"
+        else -> "附件总大小不能超过 ${DshComposerPolicy.formatBytes(totalLabelBytes)}"
+    }
 }
 
 /** 官方 prompt 的内容块；顺序由调用方决定，原生输入栏按附件后文本发送。 */
