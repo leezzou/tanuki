@@ -34,12 +34,12 @@
 | INPUT-07/08/09 | ☐ | 模型/推理/权限预设选择器未接 |
 | ATT-01..04/06 | ◐ | 附件选择、上传、限制、失败重试与文件引用；历史图片读取未接 |
 | ATT-05 | ☐ | `session/attachment` 授权图片加载未接 |
-| APPROVAL-01/02 | ✅ | 45 `DshApprovalPanel`：工具名/参数/风险；`$events/result` 允许一次/拒绝 |
+| APPROVAL-01/02 | ✅ | 53 `DshApprovalPanel`：来源/工具名/风险/参数摘要/长参数折叠；批量逐条编号、高风险二次确认；`$events/result` 允许一次/拒绝 |
 | APPROVAL-05 | ◐ | 提问只读展示 + 跳官方；多选/自定义答案未接 |
-| APPROVAL-07/08 | ✅ | 按审批会话查参数；一次性/本次运行记忆，不写配置 |
-| APPROVAL-06/10 | ☐ | 计划审阅、审计展示未接；持久策略不做（官方一次性） |
+| APPROVAL-07/08 | ✅ | 按审批会话查参数；本次运行记忆可逐条撤销/全部清除，不写配置 |
+| APPROVAL-06/10 | ◐ | 计划卡片/解析组件就绪，`DshNativePage` 接线待集成方；审计展示未接；持久策略不做（官方一次性） |
 | MODEL-01..10 | ☐ | 模型/推理/用量/配额均未接 |
-| TOOL-01/02 | ✅ | 工具卡状态、输出/错误折叠、diff/文件变更、长输出截断 |
+| TOOL-01/02 | ✅ | 工具卡状态/耗时、输出/错误折叠与复制、diff/文件变更、长输出截断 |
 | WORK/文件树/diff/搜索 | ☐ | 另行工作区切片 |
 | SET/技能/插件 | ☐/◐ | 通知设置已有；主题/语言/链接打开/技能列表/插件管理未接 |
 
@@ -141,15 +141,15 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | CHAT-03 | 代码块/高亮/复制 | 语法高亮、复制、行号/折叠 | `仅官方` | P2 · 原生消息渲染 · 未排期 · A-CHAT-03 |
 | CHAT-04 | 消息图片 | 用户/助手图片、内嵌预览、点击浮层、失败状态 | `仅官方`：原生跳过图片 | P1 · `session/attachment` · 未排期 · A-ATT-01、A-CHAT-03 |
 | CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `仅官方` | P1 · `fileUploads/*`、`fileReferences/list` · 46 输入（未提交） · A-ATT-01、A-CHAT-03 |
-| CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `原生完整`：`DshToolCard`，来自 page/follow 工具事件 | — · `DshToolTimeline`/`DshNativeController.tools` · android_agent-45 + 42 接线 · A-TOOL-01、A-TOOL-02 |
-| CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `原生完整`：输出/错误折叠、长输出截断、diff/文件变更 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
+| CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `原生完整`：`DshToolCard`，来自 page/follow 工具事件；计划工具由 `DshPlanCard` 单独承载 | — · `DshToolTimeline`/`DshNativeController.tools`/`DshPlanParser` · android_agent-53 · A-TOOL-01、A-TOOL-02 |
+| CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `原生完整`：输出/错误折叠与复制、长输出截断、diff/文件变更、真实耗时 | — · `DshToolCard` · android_agent-53 · A-TOOL-01 |
 | CHAT-08 | 推理/思考过程 | 思考预览、过程分组、完全展开模式 | `仅官方`：原生只取 text-delta，不显示 reasoning | P2 · `DshFollowParser` · android_agent-42 · A-CHAT-02 |
 | CHAT-09 | Token 用量/上下文 | 每轮 token、输出速度、缓存命中、会话统计 | `仅官方` | P2 · 原生统计条 · 未排期 · A-CHAT-02 |
 | CHAT-10 | 轮次折叠/过程分组 | 已完成轮次过程可折叠，最终答案不隐藏 | `仅官方` | P2 · 原生消息分组 · 未排期 · A-CHAT-03 |
 | CHAT-11 | 失败行/重试/欠费 | 终止轮次红点、失败摘要、重试、欠费中立文案 | `仅官方`：原生只有整页错误 banner | P0/P1 · 原生消息状态 · 42 聊天链路（错误/失败行） · A-CHAT-01、A-CHAT-03 |
 | CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-05 |
 | CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-CHAT-05 |
-| CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*`、`approval/request` · 45 审批（42 提供事件） · A-APPROVAL-02 |
+| CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `组件就绪`：`DshPlanCard`/`DshPlanParser`，待 42 接线页面状态 | P1 · `userQuestions/*`、`approval/request` · android_agent-53 + 42 · A-APPROVAL-02 |
 | CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：android_agent-42 未提交的 `DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · 42 聊天链路 · A-CHAT-01、A-CHAT-03 |
 | CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-05 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
@@ -209,14 +209,14 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `原生完整`：`DshApprovalPanel` 展示工具名/参数/风险/其他会话计数 | — · `DshApprovalController`/`DshApprovalPanel` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `原生完整`：`DshApprovalPanel` 展示来源/工具名/风险等级/参数摘要/完整参数折叠/其他会话计数；批量逐条编号，高风险允许二次确认 | — · `DshApprovalController`/`DshApprovalPanel` · android_agent-53 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `原生完整`：允许一次/拒绝经 `$events/result` 回传 | — · `DshApprovalSession` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
 | APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · 45 审批（42 提供事件） · A-APPROVAL-01、A-APPROVAL-02 |
-| APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*` · 45 审批 · A-APPROVAL-02 |
-| APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `原生完整`：按审批会话查工具参数，长参数可展开 | — · `DshNativeController.tool` · android_agent-45 + 42 接线 · A-TOOL-02 |
-| APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `仅官方` | P1 · waterfall 语义 · 45 审批 · A-APPROVAL-01 |
+| APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `组件就绪`：`DshPlanCard` 多步骤进度与审阅按钮、`DshPlanParser` 解析计划事件/计划工具调用；`DshNativePage` 状态接线待集成方 | P1 · `userQuestions/*`/计划事件 · android_agent-53 + 42 接线 · A-APPROVAL-02 |
+| APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `原生完整`：按审批会话查工具参数，摘要+完整参数折叠 | — · `DshNativeController.tool`/`DshApprovalPanel` · android_agent-53 · A-TOOL-02 |
+| APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `原生完整（本次运行内存）`：按会话+工具+风险复用，可逐条撤销/全部清除；不写官方持久配置 | — · `DshApprovalMemory`/`DshApprovalController` · android_agent-53 · A-APPROVAL-01 |
 | APPROVAL-09 | 审批通知 | 等待审批/提问时提醒，点击定位会话 | `原生替代`：Android 通知已实现（PR #22），点击定位会话；无内联批准动作 | — · `ChatNotification*` · android_agent-29/PR #22 · A-NOTIFY-01、A-NOTIFY-02 |
 | APPROVAL-10 | 审计日志 | 每个请求与结果写入会话审计日志 | `仅官方` | P2 · 官方审计 · 未排期 · A-APPROVAL-03 |
 
@@ -224,8 +224,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| TOOL-01 | 工具调用卡片/状态 | 运行/完成/失败/取消状态，参数摘要，展开详情 | `原生完整`：运行/成功/失败状态、参数摘要、展开详情 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
-| TOOL-02 | 工具输出/错误 | 输出、退出码、错误、长输出折叠 | `原生完整`：输出/错误、命令/cwd、diff/文件变更、截断提示 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
+| TOOL-01 | 工具调用卡片/状态 | 运行/完成/失败/取消状态，参数摘要，展开详情 | `原生完整`：运行/成功/失败状态、真实耗时、参数摘要、展开详情 | — · `DshToolCard` · android_agent-53 · A-TOOL-01 |
+| TOOL-02 | 工具输出/错误 | 输出、退出码、错误、长输出折叠 | `原生完整`：输出/错误、命令/cwd、diff/文件变更、截断提示、输出与错误复制 | — · `DshToolCard` · android_agent-53 · A-TOOL-01 |
 | TOOL-03 | 终端面板 | 右侧栏终端、多 shell、重连、快捷键 | `仅官方`：原生浏览器/文件页不是会话终端 | P2 · `terminal/*` · 未排期 · A-TOOL-03 |
 | TOOL-04 | 浏览器面板 | 右侧栏浏览器、tab、sandbox、链接偏好 | `原生替代/仅官方`：原生有独立浏览器（tab/收藏/历史/下载/AI 操作授权），但不作为会话侧栏面板 | P2 · `Browser*`/官方 sidebar browser · 未排期 · A-TOOL-03 |
 | TOOL-05 | 文件工具/预览 | 会话内文件树、预览、变更 | `原生部分`：原生文件页可浏览/预览/编辑，但不是会话内工具卡片 | P2 · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |

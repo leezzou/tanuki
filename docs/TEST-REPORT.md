@@ -206,6 +206,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - P1/P2 修复：认证网络 I/O 移出 monitor，`reset()` 只短暂持锁并按代次拒绝旧 Cookie 发布；401 重试必须属于当前代次；消息按官方 append-origin 语义过滤。
 - 未执行：assemble、仪器测试、真实设备、真实 PRoot 内 DSH 与 WebSocket/审批/发送。最终 head CI 与独立 Pi Review 以 PR 页面为准。
 
+## 原生审批/工具/计划呈现增强验证（2026-11-10，android_agent-53，非设备）
+
+- 范围：在既有 45 审批/工具组件上补来源、风险、参数摘要、批量编号、高风险二次确认、记忆逐条撤销、中文失败/重试、真实耗时、diff 增删配色、复制输出，以及计划多步骤卡片/解析。主改 `DshApproval*`/`DshTool*`/`DshPlan*`；`DshNativePage`/`MainActivity` 不由本切片接线。基线 `origin/main=4f2a3717`；分支 `ao/native-approval-ui/root`；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 实际执行（本 worktree，`-x buildNativeRuntime`）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshPlanTest' --tests 'com.tanuki.DshToolTimelineTest' --tests 'com.tanuki.DshApprovalProtocolTest' --tests 'com.tanuki.DshApprovalControllerTest' --console=plain` → BUILD SUCCESSFUL；**51 tests / 0 failures / 0 errors / 0 skipped**。
+  - `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL；**810 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。
+- 新增/覆盖：
+  - `DshPlanTest` 7 项：计划工具调用进度、计划审阅事件默认待审阅、`fromReviewPayload`、显式 approved/changes-requested、同 id 更新替换、blocked/skipped、截断与非法输入。
+  - `DshToolTimelineTest` 3 项新增：call/result 时间差耗时、运行中/孤儿不伪造耗时、耗时文案边界。
+  - `DshApprovalProtocolTest` 4 项新增：来源短标签不复制其他字段、参数摘要（命令/路径/长文本截断）、中文失败/英文异常映射、记忆单条撤销立即生效。
+  - `DshApprovalControllerTest` 2 项新增：撤销后相同审批不再自动回答、断线保留待审批并可重试同一 eventId；origin 变化测试补“旧待审批失效”notice 断言。
+- 未执行：真实 Android 设备/模拟器上的布局/深色/大字体/长参数/长 diff/计划卡交互；真实 PRoot DSH 的计划审阅/审批/工具事件字段；assemble、Android 仪器、真机、合并/发布。JVM/lint 不能替代设备验收。
+
 ## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
 
 - 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=bc802cf`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。

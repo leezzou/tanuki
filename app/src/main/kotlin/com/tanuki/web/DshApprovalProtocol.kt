@@ -1,7 +1,11 @@
 package com.tanuki.web
 
 import org.json.JSONObject
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import java.net.URI
+import java.net.UnknownHostException
 import java.util.UUID
 
 /**
@@ -29,6 +33,8 @@ data class DshApprovalRequest(
     val callId: String? = null,
     val reason: String? = null,
     val displayReason: String? = null,
+    /** 官方 request 中可选的来源说明（插件、服务或调用端）；只保留短文本。 */
+    val source: String? = null,
     /** 官方 toolName 缺失/非法；界面只能拒绝，不能按记忆自动允许。 */
     val unknownTool: Boolean = false
 )
@@ -44,6 +50,7 @@ object DshApprovalProtocol {
     const val MAX_FRAME_BYTES = 1_048_576
     const val MAX_TOOL_NAME_CHARS = 128
     const val MAX_REASON_CHARS = 2_000
+    const val MAX_SOURCE_CHARS = 120
 
     /**
      * 审批必须使用 `interactions=answer` 的 API Peer。
@@ -167,9 +174,29 @@ object DshApprovalProtocol {
                 callId = callId,
                 reason = reason,
                 displayReason = displayReason,
+                source = sourceOf(request),
                 unknownTool = !knownTool
             )
         )
+    }
+
+    /**
+     * 官方审批请求可能带来源对象（插件/服务/调用端）或来源字符串。
+     * 这里只取一个短标签，不复制对象里的其他字段，避免把凭据或内部路径带进界面。
+     */
+    private fun sourceOf(request: JSONObject): String? {
+        if (!request.has("source") || request.isNull("source")) return null
+        val raw = request.opt("source")
+        val text = when (raw) {
+            is JSONObject -> listOf("name", "label", "title", "kind", "id")
+                .firstNotNullOfOrNull { key ->
+                    raw.optString(key).trim().takeIf { it.isNotEmpty() }
+                }
+            is String -> raw.trim()
+            else -> null
+        } ?: return null
+        val bounded = text.filterNot { it == '\u0000' }.trim()
+        return bounded.takeIf { it.isNotEmpty() }?.let { it.take(MAX_SOURCE_CHARS) }
     }
 
     /** displayReason 是本地化对象（至少 en）；旧版本可能是字符串，两种都只取短文本。 */
@@ -243,13 +270,94 @@ object DshApprovalRisk {
     private val READ_TOOLS = setOf("read", "list", "glob", "grep", "search", "stat", "status")
 }
 
+/**
+ * 审批卡片的一行参数摘要。
+ *
+ * 审批请求本身只带工具名与原因，参数由关联工具调用补齐；这里从原始参数中提取
+ * 命令、路径、地址或查询等最影响判断的字段，让用户在展开完整 JSON 前就能核对。
+ */
+data class DshApprovalSummary(val headline: String, val field: String)
+
+object DshApprovalPresentation {
+    const val MAX_HEADLINE_CHARS = 180
+
+    fun summarize(arguments: String?): DshApprovalSummary? {
+        val raw = arguments?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val json = runCatching { JSONObject(raw) }.getOrNull()
+        if (json == null) return DshApprovalSummary(bounded(raw), "参数")
+        for ((field, keys) in FIELDS) {
+            for (key in keys) {
+                val value = json.optString(key).trim()
+                if (value.isNotEmpty()) return DshApprovalSummary(bounded(value), field)
+            }
+        }
+        // 没有常见字段时只列出前三个标量，避免把整段 JSON 当成摘要。
+        val summary = buildList {
+            val names = json.keys()
+            while (names.hasNext() && size < 3) {
+                val key = names.next()
+                val value = json.opt(key)
+                if (value is String || value is Number || value is Boolean) {
+                    add("$key=${bounded(value.toString(), 60)}")
+                }
+            }
+        }.joinToString(" · ")
+        return summary.takeIf { it.isNotBlank() }?.let { DshApprovalSummary(bounded(it), "参数") }
+    }
+
+    private fun bounded(value: String, max: Int = MAX_HEADLINE_CHARS): String {
+        val clean = value.filterNot { it == '\u0000' }.replace('\n', ' ').trim()
+        return if (clean.length <= max) clean else clean.take(max) + "…"
+    }
+
+    private val FIELDS = listOf(
+        "命令" to listOf("command", "cmd", "script", "commandLine"),
+        "路径" to listOf("file_path", "filePath", "path", "file", "target"),
+        "地址" to listOf("url", "uri", "endpoint"),
+        "查询" to listOf("query", "pattern", "search"),
+        "工作目录" to listOf("cwd", "workdir", "working_directory", "workingDirectory")
+    )
+}
+
+/** 审批通道失败的统一中文文案；`retryable` 表示保留待审批项并允许用户重试。 */
+data class DshApprovalFailure(val message: String, val retryable: Boolean = true)
+
+object DshApprovalFailures {
+    fun describe(error: Throwable): DshApprovalFailure {
+        val fallback = when (error) {
+            is DshApiException -> "官方审批接口返回 ${error.code}，请重试"
+            is SocketTimeoutException -> "审批通道连接超时，请确认 DSH 仍在运行后重试"
+            is ConnectException -> "无法连接 DSH 审批通道，请确认服务仍在运行后重试"
+            is UnknownHostException -> "无法解析 DSH 服务地址，请重试"
+            is IOException -> englishOrChinese(error.message)
+            else -> englishOrChinese(error.message)
+        }
+        return DshApprovalFailure(fallback, retryable = true)
+    }
+
+    private fun englishOrChinese(message: String?): String {
+        val text = message?.trim().orEmpty()
+        if (text.isEmpty()) return "审批通道异常，请重试"
+        // 已有中文原因（连接层主动生成）原样保留；纯英文底层异常不直接展示给用户。
+        val chinese = text.any { it.code in 0x4e00..0x9fff }
+        return if (chinese) text.take(200) else "审批通道连接失败，请重试"
+    }
+}
+
 /** 一条“本次原生界面运行内记住”的审批选择。 */
 data class DshRememberedChoice(
     val sessionId: String,
     val toolName: String,
     val risk: DshRiskLevel,
     val outcome: DshApprovalOutcome
-)
+) {
+    /** 仅用于界面列表定位，不参与官方协议。 */
+    val id: String get() = "$sessionId\u0000${toolName.lowercase()}\u0000${risk.name}"
+
+    val outcomeLabel: String
+        get() = if (outcome == DshApprovalOutcome.ALLOWED_ONCE) "允许一次" else "拒绝"
+}
 
 /**
  * 原生界面内的审批记忆。
@@ -275,6 +383,15 @@ class DshApprovalMemory {
         synchronized(lock) { entries[key(sessionId, toolName, risk)]?.outcome }
 
     fun snapshot(): List<DshRememberedChoice> = synchronized(lock) { entries.values.toList() }
+
+    /** 单独撤销一条记忆；撤销后相同会话/工具/风险不再自动回答。 */
+    fun forget(choice: DshRememberedChoice): Boolean = synchronized(lock) {
+        entries.remove(choice.id) != null
+    }
+
+    fun forget(sessionId: String, toolName: String, risk: DshRiskLevel): Boolean = synchronized(lock) {
+        entries.remove(key(sessionId, toolName, risk)) != null
+    }
 
     fun clear() = synchronized(lock) { entries.clear() }
 

@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -192,16 +193,21 @@ class DshApprovalControllerTest {
         assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), second.answers)
     }
 
-    @Test fun originChangeReplacesOldTransport() {
+    @Test fun originChangeReplacesOldTransportAndReportsDroppedApproval() {
         val harness = Harness()
         harness.controller.start()
         val first = harness.transports.single()
+        first.listener.onApproval(request("e1"))
         harness.origin = "http://127.0.0.1:2"
         harness.controller.start()
         assertEquals(2, harness.transports.size)
         assertTrue(first.closed)
         assertFalse(harness.transports[1].closed)
         assertTrue(harness.controller.state.value.ready)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertTrue(harness.controller.state.value.notice!!.contains("1 个旧待审批"))
+        harness.controller.dismissNotice()
+        assertNull(harness.controller.state.value.notice)
     }
 
     @Test fun disconnectDuringConnectDoesNotMarkConnected() {
@@ -224,6 +230,41 @@ class DshApprovalControllerTest {
         assertTrue(harness.controller.state.value.shouldShowPanel())
         harness.controller.clearRemembered()
         assertFalse(harness.controller.state.value.shouldShowPanel())
+    }
+
+    @Test fun forgettingRememberedChoiceStopsAutoAnswerImmediately() {
+        val harness = Harness()
+        harness.controller.start()
+        val transport = harness.transports.single()
+        transport.listener.onApproval(request("e1"))
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE, remember = true)
+        val choice = harness.controller.state.value.remembered.single()
+
+        harness.controller.forgetRemembered(choice)
+        assertTrue(harness.controller.state.value.remembered.isEmpty())
+        transport.listener.onApproval(request("e2"))
+        assertEquals("e2", harness.controller.state.value.pending.single().request.eventId)
+        assertEquals(1, transport.answers.size)
+    }
+
+    @Test fun disconnectKeepsPendingAndRetryCanAnswerSameEvent() {
+        val harness = Harness()
+        harness.controller.start()
+        val first = harness.transports.single()
+        first.listener.onApproval(request("e1"))
+        first.listener.onDisconnected("审批通道已断开")
+        val state = harness.controller.state.value
+        assertEquals(1, state.pending.size)
+        assertTrue(state.errorRetryable)
+        assertFalse(state.ready)
+
+        harness.controller.retry()
+        val second = harness.transports[1]
+        assertTrue(harness.controller.state.value.ready)
+        assertEquals(1, harness.controller.state.value.pending.size)
+        harness.controller.answer("e1", DshApprovalOutcome.REJECTED)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), second.answers)
     }
 
     @Test fun closeClearsRememberedChoices() {

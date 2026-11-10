@@ -1,9 +1,9 @@
 package com.tanuki.ui
 
-import com.tanuki.runtime.Redact
-import com.tanuki.web.DshApiException
 import com.tanuki.web.DshApprovalMemory
 import com.tanuki.web.DshApprovalOutcome
+import com.tanuki.web.DshApprovalFailure
+import com.tanuki.web.DshApprovalFailures
 import com.tanuki.web.DshApprovalRequest
 import com.tanuki.web.DshApprovalRisk
 import com.tanuki.web.DshApprovalSession
@@ -45,6 +45,10 @@ data class DshApprovalState(
     val ready: Boolean = false,
     val pending: List<DshPendingApproval> = emptyList(),
     val error: String? = null,
+    /** 审批通道失败是否可重试；待审批项始终保留，不因断线静默删除。 */
+    val errorRetryable: Boolean = false,
+    /** 服务地址变化导致旧审批失效等需要明确告知用户的情况，不静默丢弃。 */
+    val notice: String? = null,
     val remembered: List<DshRememberedChoice> = emptyList()
 ) {
     fun pendingFor(sessionId: String?): List<DshPendingApproval> =
@@ -55,7 +59,7 @@ data class DshApprovalState(
 
     /** 记住的选择存在时即使没有待审批，也要保留面板与“清除记住的选择”入口。 */
     fun shouldShowPanel(): Boolean =
-        pending.isNotEmpty() || error != null || connecting || remembered.isNotEmpty()
+        pending.isNotEmpty() || error != null || notice != null || connecting || remembered.isNotEmpty()
 }
 
 /**
@@ -99,7 +103,15 @@ class DshApprovalController(
             connectedOrigin = null
             synchronized(answering) { answering.clear() }
             synchronized(lookupTokens) { lookupTokens.clear() }
-            _state.value = DshApprovalState(remembered = memory.snapshot())
+            val dropped = _state.value.pending.size
+            _state.value = DshApprovalState(
+                remembered = memory.snapshot(),
+                notice = if (dropped > 0) {
+                    "DSH 服务地址已变化，$dropped 个旧待审批已失效；请到官方界面重新处理。"
+                } else {
+                    null
+                }
+            )
         }
         val current = _state.value
         if (session != null && (current.connecting || current.connected)) return
@@ -107,11 +119,13 @@ class DshApprovalController(
         session = null
         val token = ++generation
         connectJob?.cancel()
-        _state.update { it.copy(connecting = true, error = null) }
+        _state.update { it.copy(connecting = true, error = null, errorRetryable = false) }
         val created = sessionFactory(object : DshApprovalSession.Listener {
             override fun onReady() {
                 if (token != generation) return
-                _state.update { it.copy(connecting = false, connected = true, ready = true, error = null) }
+                _state.update {
+                    it.copy(connecting = false, connected = true, ready = true, error = null, errorRetryable = false)
+                }
                 // 断线时未完成的参数查询会被旧代次丢弃；新流就绪后对保留项重新发起。
                 resumePendingLookups()
             }
@@ -134,7 +148,13 @@ class DshApprovalController(
                 scope.launch(ioDispatcher) {
                     current.answerNext(eventId).onFailure { error ->
                         if (session === current && token == generation) {
-                            _state.update { it.copy(error = "无法跳过非审批请求：${messageOf(error)}") }
+                            val failure = messageOf(error)
+                            _state.update {
+                                it.copy(
+                                    error = "无法跳过非审批请求：${failure.message}",
+                                    errorRetryable = failure.retryable
+                                )
+                            }
                         }
                     }
                 }
@@ -149,14 +169,16 @@ class DshApprovalController(
                 synchronized(answering) { answering.clear() }
                 synchronized(lookupTokens) { lookupTokens.clear() }
                 current?.close()
+                val failure = DshApprovalFailures.describe(IOException(message))
                 _state.update {
                     it.copy(
                         connecting = false,
                         connected = false,
                         ready = false,
-                        error = message,
+                        error = failure.message,
+                        errorRetryable = failure.retryable,
                         pending = it.pending.map { item ->
-                            if (item.answering) item.copy(answering = false, error = "连接已断开，未能回答") else item
+                            if (item.answering) item.copy(answering = false, error = "连接已断开，未能回答；可重试") else item
                         }
                     )
                 }
@@ -175,15 +197,24 @@ class DshApprovalController(
                     created.close()
                     return@onSuccess
                 }
-                _state.update { it.copy(connecting = false, connected = true, error = null) }
+                _state.update {
+                    it.copy(connecting = false, connected = true, error = null, errorRetryable = false)
+                }
             }.onFailure { error ->
                 created.close()
                 if (session === created) {
                     session = null
                     connectedOrigin = null
                 }
+                val failure = messageOf(error)
                 _state.update {
-                    it.copy(connecting = false, connected = false, ready = false, error = messageOf(error))
+                    it.copy(
+                        connecting = false,
+                        connected = false,
+                        ready = false,
+                        error = failure.message,
+                        errorRetryable = failure.retryable
+                    )
                 }
             }
         }
@@ -195,7 +226,19 @@ class DshApprovalController(
         session?.close()
         session = null
         generation++
-        _state.update { it.copy(connecting = false, connected = false, ready = false, error = null) }
+        // 旧代次在途回答/参数查询的标记必须清掉，否则同一 eventId 重连后会被当成仍在提交。
+        synchronized(answering) { answering.clear() }
+        synchronized(lookupTokens) { lookupTokens.clear() }
+        _state.update {
+            it.copy(
+                connecting = false,
+                connected = false,
+                ready = false,
+                error = null,
+                errorRetryable = false,
+                notice = null
+            )
+        }
         start()
     }
 
@@ -251,6 +294,22 @@ class DshApprovalController(
         applyTool(item.request.eventId, tool)
     }
 
+    /**
+     * 单独撤销一条“记住本次运行”的选择。
+     *
+     * 撤销立即写入内存表：之后到达的相同会话/工具/风险审批不会再自动回答；
+     * 已经发出的官方审批结果无法撤回，也不应伪造撤回。
+     */
+    fun forgetRemembered(choice: DshRememberedChoice) {
+        if (!memory.forget(choice)) return
+        _state.update { it.copy(remembered = memory.snapshot()) }
+    }
+
+    /** 清除服务地址变化等一次性提示；不影响待审批项或记忆。 */
+    fun dismissNotice() {
+        _state.update { it.copy(notice = null) }
+    }
+
     /** 清空“记住本次运行”的选择；已发出的官方审批结果不受影响。 */
     fun clearRemembered() {
         memory.clear()
@@ -290,7 +349,7 @@ class DshApprovalController(
             risk = baseRisk,
             lookupPending = !request.unknownTool && request.callId != null
         )
-        _state.update { it.copy(pending = it.pending + item) }
+        _state.update { it.copy(pending = it.pending + item, notice = null) }
         if (request.unknownTool) return
         val callId = request.callId
         if (callId == null) {
@@ -400,7 +459,10 @@ class DshApprovalController(
                 state.copy(
                     pending = state.pending.map {
                         if (it.request.eventId == eventId) {
-                            it.copy(answering = false, error = messageOf(error ?: IOException("审批回答失败")))
+                            it.copy(
+                                answering = false,
+                                error = messageOf(error ?: IOException("审批回答失败")).message
+                            )
                         } else it
                     }
                 )
@@ -408,11 +470,7 @@ class DshApprovalController(
         }
     }
 
-    private fun messageOf(error: Throwable): String = when (error) {
-        is DshApiException -> "官方接口返回 ${error.code}"
-        is IOException -> Redact.text(error.message ?: "审批通道失败").take(200)
-        else -> Redact.text(error.message ?: "审批通道失败").take(200)
-    }
+    private fun messageOf(error: Throwable): DshApprovalFailure = DshApprovalFailures.describe(error)
 
     private companion object {
         const val LOOKUP_TIMEOUT_MS = 2_000L

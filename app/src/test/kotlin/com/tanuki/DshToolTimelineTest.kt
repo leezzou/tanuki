@@ -6,6 +6,7 @@ import com.tanuki.web.DshFileDiff
 import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshToolArguments
+import com.tanuki.web.DshToolDuration
 import com.tanuki.web.DshToolStatus
 import com.tanuki.web.DshToolTimeline
 import org.json.JSONArray
@@ -150,6 +151,33 @@ class DshToolTimelineTest {
         assertTrue(DshToolArguments.paths("""{"file_path":"/w/a","paths":["/w/b"]}""").containsAll(listOf("/w/a", "/w/b")))
         assertNull(DshToolArguments.command("not-json"))
         assertFalse(DshToolArguments.pretty("not-json")!!.contains("\n"))
+    }
+
+    @Test fun toolDurationUsesCallAndResultTimes() {
+        val records = JSONArray()
+            .put(call(1, "c1", "bash", """{"command":"ls","cwd":"/workspaces"}"""))
+            .put(result(3, "c1", "ok", isError = false))
+        val tool = (DshToolTimeline.parse(records).single() as DshTimelineItem.Tool).tool
+        assertEquals(2L, tool.durationMs)
+        assertEquals("2 毫秒", DshToolDuration.label(tool.durationMs))
+    }
+
+    @Test fun runningToolAndOrphanResultHaveNoFabricatedDuration() {
+        val running = (DshToolTimeline.parse(JSONArray().put(call(1, "c1", "bash", """{"command":"ls"}""")))
+            .single() as DshTimelineItem.Tool).tool
+        assertNull(running.durationMs)
+        val orphan = (DshToolTimeline.parse(JSONArray().put(result(5, "c9", "only", isError = false)))
+            .single() as DshTimelineItem.Tool).tool
+        assertNull(orphan.durationMs)
+    }
+
+    @Test fun durationLabelIsBoundedAndReadable() {
+        assertEquals("0 毫秒", DshToolDuration.label(0L))
+        assertEquals("1.5 秒", DshToolDuration.label(1_500L))
+        assertEquals("2 分 3 秒", DshToolDuration.label(123_000L))
+        assertEquals("1 小时 1 分", DshToolDuration.label(3_660_000L))
+        assertNull(DshToolDuration.label(null))
+        assertNull(DshToolDuration.label(-1L))
     }
 
     private fun call(seq: Int, callId: String, name: String, arguments: String): JSONObject = event(

@@ -2,6 +2,7 @@ package com.tanuki.web
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /** 工具调用的界面状态；没有读到结果时明确标为“进行中/未完成”，不伪造成功。 */
 enum class DshToolStatus(val label: String) {
@@ -50,12 +51,20 @@ data class DshToolItem(
     val diffs: List<DshFileDiff>,
     val files: List<String>,
     val outputTruncated: Boolean,
-    val risk: DshRiskAssessment
+    val risk: DshRiskAssessment,
+    /** 官方 tool/call 事件时间；孤儿结果没有起点时保持 0，不伪造耗时。 */
+    val startedAt: Long = time,
+    /** 官方 tool/result 事件时间；进行中为 null。 */
+    val finishedAt: Long? = null
 ) {
     val key: String get() = "tool:$callId"
     val hasDetails: Boolean
         get() = command != null || diffs.isNotEmpty() || files.isNotEmpty() ||
             !output.isNullOrBlank() || !error.isNullOrBlank() || !arguments.isNullOrBlank()
+    val durationMs: Long?
+        get() = finishedAt?.let { finish ->
+            if (startedAt > 0L && finish >= startedAt) finish - startedAt else null
+        }
 }
 
 /**
@@ -223,7 +232,9 @@ object DshToolTimeline {
             diffs = result?.diffs.orEmpty().take(MAX_DIFF_FILES),
             files = files.take(MAX_FILE_PATHS),
             outputTruncated = result?.outputTruncated == true,
-            risk = DshApprovalRisk.assess(name, arguments)
+            risk = DshApprovalRisk.assess(name, arguments),
+            startedAt = time,
+            finishedAt = result?.time?.takeIf { it > 0L }
         )
     }
 
@@ -238,7 +249,8 @@ object DshToolTimeline {
             error = result.error,
             diffs = result.diffs.take(MAX_DIFF_FILES),
             files = mergedFiles.take(MAX_FILE_PATHS),
-            outputTruncated = result.outputTruncated
+            outputTruncated = result.outputTruncated,
+            finishedAt = result.time.takeIf { it > 0L }
         )
     }
 
@@ -256,7 +268,9 @@ object DshToolTimeline {
         diffs = diffs,
         files = diffs.map { it.path },
         outputTruncated = outputTruncated,
-        risk = DshRiskAssessment(DshRiskLevel.UNKNOWN, "历史页未包含对应的工具调用")
+        risk = DshRiskAssessment(DshRiskLevel.UNKNOWN, "历史页未包含对应的工具调用"),
+        startedAt = 0L,
+        finishedAt = event.optLong("time", 0L).takeIf { it > 0L }
     )
 
     private fun textOf(content: JSONArray): String {
@@ -382,6 +396,27 @@ object DshToolArguments {
         val raw = arguments?.trim().orEmpty()
         if (raw.isEmpty() || raw.length > 65_536) return null
         return runCatching { JSONObject(raw) }.getOrNull()
+    }
+}
+
+/** 工具卡片耗时文案；只格式化真实起止时间，未知返回 null。 */
+object DshToolDuration {
+    fun label(durationMs: Long?): String? {
+        if (durationMs == null || durationMs < 0L) return null
+        return when {
+            durationMs < 1_000L -> "${durationMs} 毫秒"
+            durationMs < 60_000L -> String.format(Locale.ROOT, "%.1f 秒", durationMs / 1_000.0)
+            durationMs < 3_600_000L -> {
+                val minutes = durationMs / 60_000L
+                val seconds = (durationMs % 60_000L) / 1_000L
+                if (seconds == 0L) "$minutes 分钟" else "$minutes 分 $seconds 秒"
+            }
+            else -> {
+                val hours = durationMs / 3_600_000L
+                val minutes = (durationMs % 3_600_000L) / 60_000L
+                if (minutes == 0L) "$hours 小时" else "$hours 小时 $minutes 分"
+            }
+        }
     }
 }
 
