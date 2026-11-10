@@ -21,10 +21,10 @@
   - 卸载只处理 `engines/<version>` 与隔离目录；共享 `userdata`、`workspaces`、`backups`、下载缓存和用户会话不在删除范围；硬链接载荷只回收不再被引用的项。
   - 切换/卸载与安装、启动共用环境 mutation；切换/卸载与更新检查共用 `DshVersionGate`，锁顺序固定为 mutation → versionGate。
   - 主界面当前版本“卸载”入口改为“管理版本”；官方版本选择弹窗只对非当前已安装版本显示“卸载该备用版本”。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 15 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **550 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 15 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **550 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **573 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
 - PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建。Codex Review 的 3 条意见（删除后完整性、回滚日志保留、committed 误删 target）已在 `6c75914` 修复：删除开始后不再回滚，`prepared` 回滚失败保留日志，`DshUninstallRecovery` 让 committed 只清理隔离目录并保留可能重装的 target。第四轮发现 DSH 重装会覆盖共用 `component-transaction`：`replace()` 现在先 `recover()` 再写新日志，并补“卸载失败后重装另一版本，重启只清隔离目录、保留当前版本”的回归。review 修复新 head 以 PR 页面为准。
 - 待验证：review 修复后新 head 的 Host/Android CI、独立 Codex High Review 复核、真实设备上的版本列表/确认/卸载/回滚/清单刷新、真实 Node 降级/依赖锁损坏/进程中断恢复。
-- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；未启动设备，未切换/卸载真实 DSH。
+- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已合并 `origin/main=533eff4`（PR #34 文件查看器格式）解决 AGENT-STATE/CURRENT.json 冲突；合并后完整 JVM **573 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/94 warnings/1 hint；未启动设备，未切换/卸载真实 DSH。
 - 关键事实：卸载事务只接收程序目录和隔离目录；当前版本不提供任何后端卸载路径；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
 
 ## 本次改动
@@ -48,13 +48,13 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` | 通过（BUILD SUCCESSFUL） | 本 worktree，JDK17；34 tests / 0 failures / 0 errors / 0 skipped（卸载 15、版本 7、切换 12）。 |
-| `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m30s） | 66 个结果文件、**550 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 15）；`lintModernDebug` **0 errors / 94 warnings / 1 hint**；不替代设备验收。 |
+| `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m30s） | 66 个结果文件、**550 tests / 0 failures / 0 errors / 0 skipped**（合并前）；合并 `origin/main=533eff4` 后 **573 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；`lintModernDebug` **0 errors / 94 warnings / 1 hint**；不替代设备验收。 |
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest' --rerun-tasks` | 通过 | 首次完整运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未改该测试。 |
 | GitHub Actions 42756830044 / 42756838942 | 通过 | review 修复前 head `1fa66bd` 的 Host/Android 4/4 全绿；review 修复后的新 head CI 以 PR 页面为准。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1142-dsh-version-uninstall.md` | 通过 | 刷新 `CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：review 修复后的 34 项目标 JVM、完整 550 项与 lint 为本次新跑；review 修复前的 28/544 项是历史结果，不作为当前 head 结论。
+- 哪些是前一轮结果，哪些是本次新验证：review 修复后的 34 项目标 JVM、完整 550 项与合并后 573 项、lint 为本次新跑；review 修复前的 28/544 项是历史结果；合并前的 550 项也不再代表合并后 head，以 573 项为准。
 - 未测试、超时、失败和暂未复现的情况：未跑 assemble、Android 仪器、真实设备；未在真实 userdata 上执行卸载；未验证进程在 `prepared`/`committed` 之间被杀后的 OEM 行为；review 修复后新 head 的 CI 待跑。
 
 ## 未完成与暂停项

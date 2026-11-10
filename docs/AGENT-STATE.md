@@ -1,6 +1,19 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) Codex Review 的 3 条意见已修复，review 修复新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 四轮 Codex Review 意见已修复，已合并 `origin/main=533eff4`，新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+
+并行交接（android_agent-41）：
+
+## 文件查看器格式支持扩展（android_agent-41，PR [#34](https://github.com/leezzou/tanuki/pull/34) 待审）
+
+- 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；未合并、未发布、未创建 tag/Release。
+- 新增纯 Kotlin `FileTypeCatalog` 集中维护扩展名、规范 MIME 与类别：C/C++/头文件（c、h、cpp、cc、cxx、hpp、hh、hxx、inl、ipp、m、mm、cu 等）、Java/Kotlin/Python/JS/TS/Go/Rust/Shell 及多种语言、JSON/XML/YAML/TOML/INI/属性/`.env` 等已知点号配置、Markdown/纯文本/日志、HTML/CSS/SQL/CSV/TSV、SVG；点号配置只匹配已知名称与 `.env`/`.env.*`，`.DS_Store` 归为隐藏二进制、`.env-image.png` 按媒体扩展名处理；图片/音频/视频扩展名在缺少系统 MIME 时仍能进入对应查看器；PDF/DOCX/XLSX 保持内置预览，`.doc` 保持旧版提示，`.xls`/`.xlsm`/`.pptx`/`.odt` 等归为不支持并回退。
+- 分类改为扩展名优先于 MIME，修复 `.ts` 在 Android 上可能被 `video/mp2t` 当成视频的问题；未知类型仅在非明确二进制/归档/旧版 Office 时做有界 UTF-8 内容探测，避免误判。
+- 文本查看器保留 64 KiB 分页，新增可开关行号（行号与正文同一段文本，自动换行不错位）、当前行范围与已显示字节、单次查看 4 MiB 上限与中文截断提示；仍为等宽字体、只读选择复制、搜索/编码切换。
+- 未知/不支持类型显示“暂不支持内置预览”中文说明，提供“用文本打开”“复制路径”和返回类型说明；读取失败显示错误兜底，不白屏。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 29 tests / 0 failures；完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件，0.1.10 基线 535 + 新增 23）、`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码组合 BUILD SUCCESSFUL（2m49s）。
+- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR #34 的独立 Codex High Review 待办。
+- 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -218,7 +231,7 @@
 
 ## 环境与阻塞
 
-- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，Codex Review 3 条已修复；review 修复新 head 的 CI 以 PR 页面为准；本轮未启动设备。
+- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，四轮 Codex Review 意见已修复，已合并 `origin/main=533eff4`；合并后 JVM 573/0、lint 0 errors，PR 新 head CI 以页面为准；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -230,7 +243,7 @@
 
 ## 下一步
 
-1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：Codex Review 3 条已修复并 resolve，等待新 head CI 与独立 Codex High Review 复核；设备验收另行授权（清单、确认、卸载备用、删除中断隔离、prepared/committed 恢复）。不合并、不发布。
+1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：四轮 Codex Review 意见已修复并 resolve，已合并 `origin/main=533eff4`；等待合并后新 head CI 与独立 Codex High Review 复核；设备验收另行授权（清单、确认、卸载备用、删除中断隔离、prepared/committed 恢复、重装不覆盖日志）。不合并、不发布。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。

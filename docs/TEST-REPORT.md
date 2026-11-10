@@ -7,7 +7,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：已安装 DSH 清单（当前使用/备用、占用、安装时间、校验）、非当前版本卸载确认、当前/运行/更新占用拒绝、两阶段卸载与失败回滚、共享数据保护、切换/卸载与安装/启动/更新检查互斥。基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` → BUILD SUCCESSFUL，34 tests / 0 failures / 0 errors / 0 skipped（卸载 15、版本 7、切换 12）。
-  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m30s），66 个结果文件、**550 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` **0 errors / 94 warnings / 1 hint**。
+  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m30s），66 个结果文件、**550 tests / 0 failures / 0 errors / 0 skipped**；合并 `origin/main=533eff4`（PR #34 文件查看器）后完整 JVM **573 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）、`lintModernDebug` **0 errors / 94 warnings / 1 hint**。
 - 新增回归 15 项（`DshUninstallTest`）：当前版本卸载被拒；运行中/活动子进程/更新检查/安装占用被拒；当前元数据缺失、非法版本、未安装版本被拒；卸载备用版本后程序目录消失、当前版本与 `userdata`/`workspaces`/`backups`/下载缓存保留、清单重扫只剩当前版本；删除普通依赖后两个标记仍在也不回滚、保留隔离目录与 committed 日志；删除已触及 `.installed` 后同样不回滚；提交日志失败时在删除前回滚；提交日志失败且回滚 move 失败时保留 prepared 日志，下次 prepared 恢复移回；committed 恢复只清理隔离目录并保留同版本重装的 target；prepared 恢复移回隔离目录；target 已存在时 prepared 只清理隔离副本；旧协议无 phase 仍删除 target；版本窄锁第二次 `tryEnter` 被拒且等待者串行；两个并发卸载同一版本只能成功一个；卸载失败后重装另一版本，重启恢复只清隔离目录并保留当前版本。
 - 首次完整 JVM 运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未修改该测试。
 - 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、独立 Review 复核。review 修复前 head `1fa66bd` 的 Host/Android CI 4/4 通过；review 修复后新 head 的 CI 以 PR 页面为准。JVM 与 lint 不能替代设备验收。
@@ -21,6 +21,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` → 通过。
 - 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
 - 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
+
+## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
+
+- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，PR [#34](https://github.com/leezzou/tanuki/pull/34)，未安装、未发布。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
+  - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m39s），29 tests / 0 failures / 0 errors / 0 skipped。
+  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（2m49s；此前同结果运行 6m23s/3m27s），**558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 95 warnings / 1 hint**。
+- 新增回归 23 项：`FileTypeCatalogTest` 11（C/C++/头文件、`.ts`/`.mts` 与 `video/mp2t` 冲突、常见语言、配置/标记/数据、图片/音频/视频扩展名与 MIME、PDF/DOCX/XLSX/旧版 Office、归档/二进制不探测、无扩展名与已知点号配置、隐藏二进制与 `.env` 前缀媒体、大小写/复合扩展名、纯 MIME 回退）；`TextPageLayoutTest` 9（行号宽度/空文本/末尾换行、关闭行号、搜索下标换算、跨段行号、4 MiB 上限、截断判定、行数统计）；`TextFileReaderTest` 增补 3（64 KiB 页与空文件边界、跨页多字节字符不拆分、UTF-16LE 不完整字符/ISO-8859-1/未知编码）。
+- 覆盖点：分类不依赖 Android `MimeTypeMap`，扩展名优先于 MIME；媒体扩展名在缺少 MIME 时仍进入正确查看器；未知类型只在非明确二进制时做有界 UTF-8 内容探测；行号与正文同一段文本，自动换行不错位；搜索仍以原始文本下标计算，再一次性批量换算为带行号下标（避免单字符搜索数千匹配时退化为 O(n×m)）；截断只在文件超过 4 MiB 且仍有内容时提示。
+- Review P2 修复：点号配置只匹配已知文件名与 `.env`/`.env.*` 变体；`.DS_Store` 明确归为隐藏二进制并跳过内容探测，`.env-image.png` 因媒体扩展名优先按图片处理；新增隐藏二进制/`.env` 前缀媒体回归（`FileTypeCatalogTest` 11 项），完整 JVM 558 tests 通过。
+- 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
+- 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
 
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
