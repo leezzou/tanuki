@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.*
+import com.tanuki.storage.ImportProgress
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
@@ -39,7 +40,7 @@ internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileT
             }, snapshot.timing))
         }
         transferItems.forEach { add(ProgressItem("file-${it.id}", it.label,
-            if (it.total > 0) (it.received.toDouble() / it.total).toFloat().coerceIn(0f, 1f) else null,
+            ImportProgress.fraction(it.received, it.total),
             transferDetail(it.received, it.total), it.timing, it.id)) }
     }
     if (items.isEmpty()) return
