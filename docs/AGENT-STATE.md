@@ -4,7 +4,7 @@
 
 ### 原生界面对齐：非聊天主链路（android_agent-44，PR #38 待审）
 
-- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（合并提交 `a99be6c`）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
+- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）与 `origin/main=1cb7ad9`（原生对齐审计矩阵）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
 - 已实现：会话列表/标题过滤/官方内容搜索/新建/重命名/归档/本机未读/运行状态；会话级模型选择与权限模式（完全权限二次确认）；Skills 与斜杠命令只读目录；安全模式只读；远程 SSH 隧道 origin 复用；设置 → 网页与兼容性 → 原生会话管理。
 - 官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`，不直接改 `userdata/dsh`；归档恢复列表需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；新增 `DshSessionAdminApiTest` 7 项与 `DshSessionManagerControllerTest` 14 项；预合并完整 `testModernDebugUnitTest` 556/0/0/0；合并 `origin/main=533eff4` 后 **69 个结果文件、579 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 95 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。
@@ -259,3 +259,7 @@
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+
+## 并发审计记录
+
+- [原生界面与官方网页版功能对齐审计](handoffs/20261110-1140-native-parity-audit.md)（android_agent-47，只读审计 + 验收清单；未改产品代码，待编排器汇总）。
