@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tanuki.storage.FileLocation
+import com.tanuki.storage.OpenDocument
+import com.tanuki.storage.WorkspaceDocument
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -43,11 +45,17 @@ import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WorkspaceFilesPage(
+internal fun WorkspaceFilesPage(
     manager: WorkspaceFileManager, onImport: () -> Unit, onExport: () -> Unit,
     modifier: Modifier = Modifier, runtimeRunning: Boolean = false, onStop: () -> Unit = {}, bottomInset: Dp = 0.dp,
     onRequestStoragePermission: () -> Unit = {}, phoneStorageGranted: Boolean = false,
     onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> },
+    onOpenExternal: () -> Unit = {},
+    externalDocument: OpenDocument? = null,
+    onCloseExternal: () -> Unit = {},
+    onCopyExternalToWorkspace: (OpenDocument) -> Unit = {},
+    onExportExternal: (OpenDocument) -> Unit = {},
+    onReselectExternal: (() -> Unit)? = null,
     fullscreen: Boolean = false, onFullscreen: (Boolean) -> Unit = {},
     phoneWriteAllowed: Boolean = false, phoneWritingAvailable: Boolean = false,
     onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {},
@@ -146,8 +154,22 @@ fun WorkspaceFilesPage(
         text = { Text("允许本次 DSH 运行期间新建、修改、重命名和删除系统已授权的手机共享文件。可以随时撤销，停止 DSH 后自动恢复只读。") },
         dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
         confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
+    externalDocument?.let { document ->
+        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
+            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+            canEdit = false,
+            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
+            onClose = onCloseExternal,
+            onExport = { onExportExternal(document) },
+            onEdit = {},
+            onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
+            onReselect = onReselectExternal)
+        return
+    }
     openedEntry?.let { entry ->
-        WorkspaceFileViewer(files, entry, modifier, bottomInset, actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+        val document = remember(files, entry.path) { WorkspaceDocument(files, entry.path, entry.name) }
+        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
+            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
             canEdit = location.writable && !runtimeRunning && !entry.linked,
             previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
             onClose = { onFullscreen(false); openedEntry = null },
@@ -190,6 +212,7 @@ fun WorkspaceFilesPage(
                             listOf("新建文件夹", "新建文本文件").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { begin(label) }) }
                             DropdownMenuItem(text = { Text("导出整个工作区") }, onClick = { menu = false; onExport() })
                         }
+                        DropdownMenuItem(text = { Text("打开手机/其他应用文件") }, onClick = { menu = false; onOpenExternal() })
                         DropdownMenuItem(text = { Text("导入文件到工作区") }, onClick = { menu = false; onImport() })
                         DropdownMenuItem(text = { Text("复制当前目录路径") }, onClick = { menu = false; copyPath(directory) })
                     }

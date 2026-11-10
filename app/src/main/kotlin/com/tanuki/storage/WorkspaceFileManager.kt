@@ -296,7 +296,7 @@ class WorkspaceFileManager(
         val file = payload(resolve(relative, true))
         val before = Files.readAttributes(file, BasicFileAttributes::class.java, noFollow)
         val page = TextFileReader.read(file, offset, encoding)
-        val revision = if (offset == 0L && !page.hasMore && page.totalBytes <= TEXT_LIMIT && page.encoding == "UTF-8") {
+        val revision = if (offset == 0L && !page.hasMore && page.totalBytes in 0..TEXT_LIMIT && page.encoding == "UTF-8") {
             val bytes = ByteArray(TEXT_LIMIT + 1)
             var count = 0
             Files.newInputStream(file, noFollow).use { input ->

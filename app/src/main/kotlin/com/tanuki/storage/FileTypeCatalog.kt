@@ -95,6 +95,14 @@ internal object FileTypeCatalog {
         put("xlsx", FileKind.XLSX)
     }
 
+    /** 外部 content:// 提供方可能只给 MIME、显示名没有扩展名；按 MIME 直开内置查看器。 */
+    private val explicitMimeKinds: Map<String, FileKind> = mapOf(
+        "application/pdf" to FileKind.PDF,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" to FileKind.DOCX,
+        "application/msword" to FileKind.DOC,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" to FileKind.XLSX,
+    )
+
     private val textLikeMimeTypes = setOf(
         "application/json", "application/ld+json", "application/xml", "application/xhtml+xml",
         "application/yaml", "application/x-yaml", "application/toml", "application/javascript",
@@ -121,6 +129,7 @@ internal object FileTypeCatalog {
         if (lowerName in textNames || isDotConfig(lowerName)) return FileKind.TEXT
 
         val type = normalizeMime(mime) ?: return FileKind.OTHER
+        explicitMimeKinds[type]?.let { return it }
         return when {
             type.startsWith("text/") -> FileKind.TEXT
             type.startsWith("image/") -> FileKind.IMAGE

@@ -1,9 +1,15 @@
 package com.tanuki
 
+import com.tanuki.storage.ChannelSeekableInput
+import com.tanuki.storage.SeekableInput
+import com.tanuki.storage.StreamSeekableInput
 import com.tanuki.storage.TextFileReader
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.nio.channels.FileChannel
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 
 class TextFileReaderTest {
     @Test fun pagesDoNotSplitUtf8AndAreNotBoundedByEditorLimit() {
@@ -126,5 +132,83 @@ class TextFileReaderTest {
             assertEquals("", empty.text)
             assertFalse(empty.hasMore)
         } finally { Files.delete(file) }
+    }
+
+    @Test fun seekableContentSourceReadsOnlyCurrentPageWindow() {
+        val file = Files.createTempFile("text-window", ".txt")
+        try {
+            val text = "行内容中文🙂\n".repeat(120_000)
+            Files.write(file, text.toByteArray())
+            val counting = CountingSeekable(
+                ChannelSeekableInput(FileChannel.open(file, StandardOpenOption.READ))
+            )
+            val first = TextFileReader.read(counting, 0)
+            assertTrue(first.hasMore)
+            assertTrue("单次读取不能超过一页: ${counting.maxRead}", counting.maxRead <= TextFileReader.PAGE_BYTES)
+            assertTrue("当前页读取量不能超过一页加表头: ${counting.totalRead}",
+                counting.totalRead <= TextFileReader.PAGE_BYTES + 4)
+            val firstOffset = first.nextOffset
+
+            counting.reset()
+            val second = TextFileReader.read(counting, firstOffset)
+            assertTrue(second.nextOffset >= firstOffset)
+            assertTrue(counting.maxRead <= TextFileReader.PAGE_BYTES)
+            assertTrue(counting.totalRead <= TextFileReader.PAGE_BYTES + 4)
+            counting.close()
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun streamOnlyProviderPagesForwardWithoutWholeFileBuffer() {
+        val text = "云盘顺序流内容\n".repeat(80_000)
+        val bytes = text.toByteArray()
+        val first = TextFileReader.read(
+            StreamSeekableInput(ByteArrayInputStream(bytes), bytes.size.toLong()),
+            0,
+        )
+        assertTrue(first.hasMore)
+        assertEquals(bytes.size.toLong(), first.totalBytes)
+        val second = TextFileReader.read(
+            StreamSeekableInput(ByteArrayInputStream(bytes), bytes.size.toLong()),
+            first.nextOffset,
+        )
+        assertTrue(second.offset >= first.nextOffset)
+        assertEquals(bytes.size.toLong(), second.totalBytes)
+    }
+
+    @Test fun streamSourceHandlesUtf8BomWithoutRewinding() {
+        val text = "中文BOM内容\n".repeat(20_000)
+        val bytes = byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte()) + text.toByteArray()
+        val page = TextFileReader.read(
+            StreamSeekableInput(ByteArrayInputStream(bytes), bytes.size.toLong()),
+            0,
+        )
+        assertEquals("UTF-8", page.encoding)
+        assertTrue(page.text.startsWith("中文BOM内容"))
+    }
+
+    @Test fun unknownSizeStreamStillReportsHasMoreAndUnknownTotal() {
+        val bytes = "未知大小文本\n".repeat(30_000).toByteArray()
+        assertTrue(bytes.size > TextFileReader.PAGE_BYTES)
+        val page = TextFileReader.read(StreamSeekableInput(ByteArrayInputStream(bytes), null), 0)
+        assertTrue(page.hasMore)
+        assertEquals(-1L, page.totalBytes)
+    }
+
+    private class CountingSeekable(private val delegate: SeekableInput) : SeekableInput {
+        override val size: Long? get() = delegate.size
+        var maxRead = 0
+        var totalRead = 0L
+
+        override fun seek(offset: Long) = delegate.seek(offset)
+        override fun read(buffer: ByteArray, offset: Int, count: Int): Int {
+            val read = delegate.read(buffer, offset, count)
+            if (read > 0) {
+                maxRead = maxOf(maxRead, read)
+                totalRead += read
+            }
+            return read
+        }
+        fun reset() { maxRead = 0; totalRead = 0 }
+        override fun close() = delegate.close()
     }
 }
