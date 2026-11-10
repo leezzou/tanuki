@@ -78,14 +78,6 @@ sealed interface DshOutgoingPart {
     }
 }
 
-/** 官方 commands/list 返回的斜杠命令描述；只保留原生补全需要的字段。 */
-data class DshCommand(
-    val name: String,
-    val description: String,
-    val inputHint: String?,
-    val allowsAttachments: Boolean
-)
-
 /** 官方 fileReferences/list 返回的文件/目录候选。 */
 data class DshFileReference(val path: String, val kind: String, val mention: String)
 
@@ -281,7 +273,7 @@ object DshComposerProtocol {
                 name = name,
                 description = description,
                 inputHint = input?.optString("hint")?.let { safeText(it, 120) }?.takeIf { it.isNotBlank() },
-                allowsAttachments = input?.optBoolean("attachments", false) == true
+                acceptsAttachments = input?.optBoolean("attachments", false) == true
             )
         }
         return result.sortedBy { it.name }

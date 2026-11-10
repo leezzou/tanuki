@@ -597,7 +597,7 @@ private fun CommandMenu(commands: List<DshCommand>, onPick: (DshCommand) -> Unit
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (command.allowsAttachments) {
+                    if (command.acceptsAttachments) {
                         Text("可带附件", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }

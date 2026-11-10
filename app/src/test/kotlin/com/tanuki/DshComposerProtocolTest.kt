@@ -140,8 +140,8 @@ class DshComposerProtocolTest {
             .put(JSONObject().put("name", "").put("description", "空"))
         val commands = DshComposerProtocol.parseCommands(array)
         assertEquals(listOf("compact", "goal"), commands.map { it.name })
-        assertFalse(commands[0].allowsAttachments)
-        assertTrue(commands[1].allowsAttachments)
+        assertFalse(commands[0].acceptsAttachments)
+        assertTrue(commands[1].acceptsAttachments)
         assertEquals("目标内容", commands[1].inputHint)
     }
 
