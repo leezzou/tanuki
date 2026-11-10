@@ -557,7 +557,9 @@ class DshComposerController(
         stopJob?.cancel()
         stopJob = scope.launch {
             val result = client.cancel(sessionId)
-            if (sessionId != _state.value.sessionId) return@launch
+            // 旧代次的停止回执可能已被取消但被 runCatching 包成失败；切走再切回同会话时
+            // 仅比较 sessionId 会放过它，必须用代次拒绝，避免污染新状态/新定时器。
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
             result.onSuccess {
                 // 停止只影响生成；在途 prompt 的回执必须继续走完，不能在这里 cancel sendJob。
                 val latest = _state.value

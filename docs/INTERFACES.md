@@ -253,7 +253,7 @@ HTTP 200..399 或 401 → 存活
 - 发送/停止同键位形变：空闲为发送（↑），生成中为停止（■ 实心主色），同一 36dp 位置/尺寸；禁用态用低对比底色。只对图标做短促的淡入缩放/位移动画，不重建整条输入框。没有真实语音/听写能力，因此不放假入口。
 - `Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
 - `@`/斜杠候选支持上下键循环选择、Enter/Tab 插入、Esc 关闭；斜杠候选按命令名前缀、名称包含、描述/参数提示包含排序。插入只替换当前 `@` 查询或首行命令 token，保留后续参数与换行。
-- 停止生成由 `requestStop()` 调 `session/cancel`。accepted 只进入 `DshStopOutcome.REQUESTED` 并保持“正在停止”，保留 `generationRunning` 与停止入口；超时仍未收到官方 idle 时降级为“停止请求已发送，仍在收尾”并重新开放停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。
+- 停止生成由 `requestStop()` 调 `session/cancel`。停止回执处理前必须校验 `sessionId` 与 `generation` 代次；切会话后旧回执（即使被 `runCatching` 包装成失败）直接丢弃，不覆盖新会话状态或定时器。accepted 只进入 `DshStopOutcome.REQUESTED` 并保持“正在停止”，保留 `generationRunning` 与停止入口；超时仍未收到官方 idle 时降级为“停止请求已发送，仍在收尾”并重新开放停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。
 - 未接线兜底：只有页面调用过 `setGenerationRunning(...)` 后，提交回执才可能把 `generationRunning` 置真；未接 running 的产品里发送键保持可用，不会被永久替换成停止键。官方状态带版本号，提交回执在等待期间发现官方状态已变化时不再覆盖它，避免已确认 idle 被迟到的 prompt accepted 重新置为运行中。
 - 运行态兜底：接入 running 后，每个 `setGenerationRunning(true)`/stream 事件都会重置 30 秒窗口；窗口内没有新事件时自动把 `generationRunning` 置回 false 并提示“已恢复发送”，避免 live 中断或接线遗漏把发送键永久锁死。页面应把 live 开始/结束/失败都同步到 `setGenerationRunning`。
 - 文件上传显示不定进度（官方 unary 上传无字节回调，不伪造百分比）；上传中可点“取消”，立即移除本地卡片并使晚到响应失效，不留下本地半成品。官方没有上传取消端点，服务端可能仍完成已发出的请求，界面不把它写成已发送附件。

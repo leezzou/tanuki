@@ -461,6 +461,30 @@ class DshComposerControllerTest {
         awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
     }
 
+    @Test fun staleStopResponseDoesNotAffectReenteredSession() {
+        val remote = FakeRemote().apply { cancelDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("A")
+        controller.setGenerationRunning(false)
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        controller.requestStop()
+
+        // 停止请求还在等待时切到 B 再切回 A；旧回执必须被代次拒绝。
+        controller.setSession("B")
+        controller.setSession("A")
+        Thread.sleep(220)
+        assertNull(controller.state.value.stopOutcome)
+        assertNull(controller.state.value.error)
+        assertFalse(controller.state.value.stopping)
+
+        controller.setGenerationRunning(true)
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertNull(requested.error)
+    }
+
     @Test fun stopDoesNotCancelDelayedPromptReceipt() {
         val remote = FakeRemote().apply { promptDelayMillis = 120 }
         val controller = controller(remote)
