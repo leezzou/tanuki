@@ -4,7 +4,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）
 
-- 范围：`WorkspaceFilesPage` 顶部 56dp 主操作行、可横滚面包屑/搜索/选择三态第二行、权限 chip 与底部 sheet、传输悬浮胶囊与详情 sheet、Snackbar 提示、列表满高和固定底部避让；同时让文件页隐藏全局传输 banner，新增权限/传输纯状态与格式化回归。基线 `origin/main=1122d3f`，分支 `ao/files-layout/info-hierarchy`，不合并、不发布。
+- 范围：`WorkspaceFilesPage` 顶部 56dp 主操作行、可横滚面包屑/搜索/选择三态第二行、权限 chip 与底部 sheet、传输悬浮胶囊与详情 sheet、Snackbar 提示、列表满高和固定底部避让；同时让文件页隐藏全局传输 banner，新增权限/传输纯状态与格式化回归。基线 `origin/main=1122d3f`，分支 `ao/files-layout/info-hierarchy`，PR [#58](https://github.com/leezzou/tanuki/pull/58)，不合并、不发布。
 - 实际执行（本 worktree，JDK17、Android SDK、macOS ARM64）：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - 定向 `FileAccessPresentationTest`、`FileTransferPresentationTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
