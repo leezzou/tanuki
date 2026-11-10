@@ -506,8 +506,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
                 OutlinedButton(onClick={currentRelease?.let(c.reinstallDsh)},
                     enabled=currentRelease!=null && s.tanukiIdle && comps.ubuntuInstalled && comps.nodeInstalled,
                     modifier=Modifier.weight(1f).heightIn(min=48.dp),shape=MaterialTheme.shapes.medium) { Text("重新安装") }
-                TextButton(onClick={c.uninstallDsh(null)},enabled=s.tanukiIdle,modifier=Modifier.heightIn(min=48.dp),
-                    colors=ButtonDefaults.textButtonColors(contentColor=MaterialTheme.colorScheme.error)) { Text("卸载") }
+                // 当前使用版本禁止卸载；多余版本统一在“已安装版本”中管理。
+                TextButton(onClick={showInstalledDsh=true},enabled=s.tanukiIdle,modifier=Modifier.heightIn(min=48.dp)) { Text("管理版本") }
             }
             if(currentRelease==null)Caption("重新安装前请先获取官方版本列表。")
         }
@@ -558,9 +558,12 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             }
             OutlinedButton(enabled=selected!=null && s.tanukiIdle && comps.ubuntuInstalled && comps.nodeInstalled,
                 modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),onClick={selected?.let(c.cacheDsh);showVersions=false}) { Text("安装为备用程序") }
-            if(selected!=null && selected.version in comps.installedDshVersions) {
+            if(selected!=null && selected.version in comps.installedDshVersions && selected.version != s.dsh) {
                 TextButton(enabled=s.tanukiIdle,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),
-                    onClick={c.uninstallDsh(selected);showVersions=false}) { Text("卸载所选版本") }
+                    onClick={c.uninstallDsh(selected);showVersions=false}) { Text("卸载该备用版本") }
+            }
+            if(selected!=null && selected.version == s.dsh && selected.version in comps.installedDshVersions) {
+                Caption("当前使用版本不能卸载；如需清理请先在“已安装版本”中切换到其他版本。")
             }
             }
         },

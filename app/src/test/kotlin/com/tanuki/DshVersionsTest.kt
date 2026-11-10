@@ -119,7 +119,7 @@ class DshVersionsTest {
     fun uninstallPolicyOnlyAllowsNonCurrentVersions() {
         assertFalse("当前版本必须在版本管理中禁用卸载", DshVersions.canUninstallFromManager("1.2.0", "1.2.0"))
         assertTrue(DshVersions.canUninstallFromManager("1.3.0", "1.2.0"))
-        assertTrue("元数据缺失时仍可卸载有效备用版本", DshVersions.canUninstallFromManager("1.2.0", ""))
+        assertFalse("当前版本未知时必须禁用卸载，避免误删正在使用的程序", DshVersions.canUninstallFromManager("1.2.0", ""))
         assertFalse(DshVersions.canUninstallFromManager("not-a-version", "1.2.0"))
     }
 

@@ -293,12 +293,28 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         val name=journal.getString("component")
         require(name in setOf("ubuntu","node","dsh"))
         if(journal.optString("action")=="uninstall") {
-            val targets=when(name) {
-                "ubuntu"->listOf(paths.root,paths.stage)
-                "node"->listOf(paths.node,paths.pnpm,paths.nodeCache,File(paths.root,"opt/node"),File(paths.root,"opt/pnpm"))
-                else->{val version=journal.getString("version");require(version.matches(VERSION));listOf(File(paths.engines,version))}
+            if(name=="dsh") {
+                // 只处理版本程序目录与隔离目录；用户数据、项目、快照和共享缓存不在事务删除范围内。
+                val version=journal.getString("version");require(version.matches(VERSION))
+                val target=File(paths.engines,version)
+                val quarantine=File(paths.runtime,"dsh-$version.uninstall")
+                if(journal.optString("phase")=="prepared") {
+                    // 提交前中断：完整隔离目录移回原位置，恢复为未卸载状态。
+                    if(quarantine.exists() && !target.exists()) {
+                        owned(quarantine);owned(target)
+                        check(quarantine.renameTo(target)) { "上次卸载回滚未完成，请保留数据后重试" }
+                    } else if(quarantine.exists()) remove(quarantine)
+                } else {
+                    // 已提交：继续清理目标与隔离目录，不恢复半删程序。
+                    remove(target);remove(quarantine)
+                }
+            } else {
+                val targets=when(name) {
+                    "ubuntu"->listOf(paths.root,paths.stage)
+                    else->listOf(paths.node,paths.pnpm,paths.nodeCache,File(paths.root,"opt/node"),File(paths.root,"opt/pnpm"))
+                }
+                targets.forEach(::remove)
             }
-            targets.forEach(::remove)
         } else {
             val (destination,previous)=swapTargets(name,journal.optString("version").takeIf { it.isNotEmpty() })
             owned(destination);owned(previous)
@@ -438,15 +454,43 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         com.tanuki.storage.L2sStore.collectUnreferenced(paths)
         manager.state.update { it.copy(stage="组件已卸载，项目、会话与其他组件保留",error="",download=null) }
     }
+    /** 更新检查/安装等会写版本元数据的流程；切换或卸载期间必须拒绝。 */
+    private fun updateBusy():Boolean = manager.state.value.update in setOf(
+        UpdateState.CHECKING,UpdateState.STAGING,UpdateState.TESTING,UpdateState.WAITING,
+        UpdateState.BACKUP,UpdateState.SWITCHING,UpdateState.RESTORING,UpdateState.RESTORED_PENDING_CHECK)
+
+    /**
+     * 卸载非当前 DSH 程序版本。先校验当前/运行/更新占用，再走“改名隔离 → 提交日志 → 删除”的两阶段事务；
+     * 失败可回滚，且只删除 `engines/<version>` 与隔离目录，不触碰用户数据、项目、快照和共享缓存。
+     */
     fun uninstallDsh(version: String? = null) = manager.launchExclusive("component-uninstall-dsh") {
-        val selected=version ?: paths.metadata().optString("dsh")
-        require(selected.matches(VERSION)) { "未选择有效 DSH 版本" }
-        val target=File(paths.engines,selected);owned(target)
-        manager.phase("卸载 DSH $selected 程序",EnvironmentState.INSTALLING)
-        paths.atomic("component-transaction",JSONObject().put("component","dsh").put("action","uninstall").put("version",selected).toString())
-        withContext(NonCancellable) { recover();refresh() }
-        com.tanuki.storage.L2sStore.collectUnreferenced(paths)
-        manager.state.update { it.copy(stage="DSH $selected 已卸载；配置、会话、扩展与项目保留",error="") }
+        recover()
+        val selected=version?.trim().orEmpty()
+        val meta=paths.metadata()
+        DshUninstall.requireUninstallable(selected,meta.optString("dsh"),DshVersions.installedVersions(paths.engines),
+            serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
+            updateBusy=updateBusy(),busy=false,liveChild=manager.hasLiveChild)
+        check(manager.versionGate.tryEnter()) { DshVersionGate.BUSY_MESSAGE }
+        try {
+            val target=File(paths.engines,selected)
+            val quarantine=File(paths.runtime,"dsh-$selected.uninstall")
+            owned(target);owned(quarantine)
+            manager.phase("卸载 DSH $selected 程序",EnvironmentState.INSTALLING)
+            var cleanupWarning=""
+            try {
+                DshUninstall.apply(selected,target,quarantine,
+                    journal={phase->paths.atomic("component-transaction",
+                        JSONObject().put("component","dsh").put("action","uninstall").put("version",selected).put("phase",phase).toString())},
+                    clearJournal={File(paths.state,"component-transaction").delete()},
+                    delete={RuntimeManager.deleteTree(it)})
+            } finally { runCatching { refresh(false) } }
+            // 只回收不再被任何目录引用的硬链接载荷；共享 userdata/workspaces/backups 与安装归档不在此删除。
+            runCatching { com.tanuki.storage.L2sStore.collectUnreferenced(paths) }
+                .onFailure { cleanupWarning="；共享缓存回收未完成（用户数据未删除）：${it.message ?: "请稍后重试"}" }
+            refresh()
+            manager.state.update { it.copy(stage="DSH $selected 已卸载；配置、会话、扩展、项目与其他版本保留$cleanupWarning",error="",download=null) }
+            manager.event("DSH $selected 程序已卸载；用户数据、快照与其他已安装版本保留")
+        } finally { manager.versionGate.exit() }
     }
     /**
      * 在已安装程序之间切换当前版本。只改写 installed.json 并保留切换前数据快照；
@@ -455,30 +499,33 @@ class RuntimeComponents(private val manager: RuntimeManager) {
     fun switchDsh(version: String?) = manager.launchExclusive("component-switch-dsh") {
         recover()
         check(manager.state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先处理上次更新恢复，再切换已安装版本" }
-        val target=version?.trim().orEmpty()
-        val meta=paths.metadata()
-        val current=meta.optString("dsh")
-        DshSwitch.requireSwitchable(target,current,DshVersions.installedVersions(paths.engines),
-            targetLockVerified=DshVersions.isLockVerified(paths.engines,target),
-            serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
-            busy=false,liveChild=manager.hasLiveChild)
-        check(installedUbuntuVersion()!=null && installedNodeVersion()!=null &&
-            (File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile)) {
-            "请先安装 Ubuntu 和 Node.js，再切换 DSH 版本"
-        }
-        // 目标可能是在较新 Node 下安装的备用程序；当前 Node 降级后必须在这里拒绝，
-        // 否则切换成功后 start 才失败，而旧版回切又会被数据兼容规则拦住。
-        manager.phase("检查 DSH $target 与当前 Node.js 的兼容性",EnvironmentState.VERIFYING)
-        val snapshot=DshSwitch.apply(meta,target,
-            compatible={checkDshNodeCompatibility(target)},
-            snapshot={
-                manager.phase("保存当前版本的数据快照",EnvironmentState.INSTALLING)
-                com.tanuki.storage.DataSnapshots.create(paths).name
-            },
-            write={paths.atomic("installed.json",it.toString())})
-        refresh()
-        manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",download=null) }
-        manager.event("DSH 已切换到 $target；未重新下载或删除版本，切换前快照 $snapshot 保留")
+        check(manager.versionGate.tryEnter()) { DshVersionGate.BUSY_MESSAGE }
+        try {
+            val target=version?.trim().orEmpty()
+            val meta=paths.metadata()
+            val current=meta.optString("dsh")
+            DshSwitch.requireSwitchable(target,current,DshVersions.installedVersions(paths.engines),
+                targetLockVerified=DshVersions.isLockVerified(paths.engines,target),
+                serviceStopped=manager.state.value.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED),
+                busy=false,liveChild=manager.hasLiveChild,updateBusy=updateBusy())
+            check(installedUbuntuVersion()!=null && installedNodeVersion()!=null &&
+                (File(paths.node,"bin/node").isFile || File(paths.root,"opt/node/bin/node").isFile)) {
+                "请先安装 Ubuntu 和 Node.js，再切换 DSH 版本"
+            }
+            // 目标可能是在较新 Node 下安装的备用程序；当前 Node 降级后必须在这里拒绝，
+            // 否则切换成功后 start 才失败，而旧版回切又会被数据兼容规则拦住。
+            manager.phase("检查 DSH $target 与当前 Node.js 的兼容性",EnvironmentState.VERIFYING)
+            val snapshot=DshSwitch.apply(meta,target,
+                compatible={checkDshNodeCompatibility(target)},
+                snapshot={
+                    manager.phase("保存当前版本的数据快照",EnvironmentState.INSTALLING)
+                    com.tanuki.storage.DataSnapshots.create(paths).name
+                },
+                write={paths.atomic("installed.json",it.toString())})
+            refresh()
+            manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",download=null) }
+            manager.event("DSH 已切换到 $target；未重新下载或删除版本，切换前快照 $snapshot 保留")
+        } finally { manager.versionGate.exit() }
     }
     companion object { private val VERSION=DshVersions.VERSION }
 }

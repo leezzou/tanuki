@@ -720,7 +720,7 @@ class MainActivity : ComponentActivity() {
         "UBUNTU_UNINSTALL" -> "移除 Ubuntu 镜像及其中安装的软件。Node.js 将迁移并保留在独立目录；DSH 程序、配置、会话、快照和项目保留。重新安装 Ubuntu 后才能再次运行 DSH。请先停止服务。"
         "NODE_INSTALL", "NODE_REINSTALL" -> "下载 Node.js ${manager.components.selected(RuntimeComponent.NODE).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。验证该版本压缩包、pnpm 和 DSH 的兼容性后再替换；失败时保留当前 Node。Ubuntu、DSH 程序、配置、会话与项目保留。请先停止服务。"
         "NODE_UNINSTALL" -> "只移除 Node.js 与 pnpm 工具层，保留 Ubuntu、DSH 程序、配置、会话与项目。重新安装 Node.js 后才能再次运行 DSH。请先停止服务。"
-        "DSH_UNINSTALL" -> "卸载 DSH ${release?.version ?: manager.paths.metadata().optString("dsh","当前版本")} 的引擎程序，保留配置、会话、插件、Skill、项目和其他已安装版本。关联快照恢复前需要先重装匹配的引擎。请先停止服务。"
+        "DSH_UNINSTALL" -> "卸载 DSH ${release?.version ?: ""} 的备用程序目录，保留配置、会话、插件、Skill、项目、数据快照和其他已安装版本。当前使用版本不能卸载；卸载失败会回滚并保留原程序。请先停止服务。"
         "DSH_STAGE" -> "下载并安装官方 DSH ${release?.version ?: "所选版本"} 程序，使用隔离目录检查启动；不打开正式会话，不更改当前版本或数据。较旧版本可先安装为备用，再恢复匹配的数据快照。请先停止服务。"
         "DSH_REINSTALL" -> "移除并重新安装当前 DSH ${release?.version ?: ""} 的官方程序与依赖。配置、会话、插件和项目保留；若下载失败，引擎会保持待安装，可重试。请先停止服务。"
         "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。运行中可以导出；发现文件在读取期间变化时会提示重试。整个工作区不是同一时刻的快照，仍需检查源文件中的敏感内容。"

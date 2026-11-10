@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；实现与 JVM/lint 完成，PR/CI/独立 Review/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -15,6 +15,17 @@
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
 - main CI 以 PR #13 合并后的 Actions 结果为准；Android job 使用 `-x buildNativeRuntime` 且仓库不跟踪 `jniLibs`，CI APK 无原生 `.so`，不能用于设备验收。
+
+### DSH 多版本卸载与互斥（android_agent-43，PR 待建）
+
+- 基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`；只读代码与现有交接后实现，未启动设备、未安装/卸载真实 DSH。
+- 清单：版本管理对话框明确显示“当前使用/备用”、占用空间、安装时间、依赖锁/启动校验与总占用；当前版本无卸载入口，当前元数据缺失时禁止切换与卸载并显示中文原因。
+- 卸载策略：新增纯逻辑 `DshUninstall.requireUninstallable`，拒绝当前版本、运行中服务、活动子进程、更新检查/安装占用与无效/未安装版本；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
+- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除失败且目录完整时回滚并保留原程序，已部分删除时保留隔离目录由 `recover()` 继续清理；所有失败给中文原因。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除；L2S 只回收无引用硬链接载荷。
+- 互斥：安装、启动、切换、卸载共用环境 mutation；新增 `DshVersionGate` 供切换/卸载与 `UpdateManager.check()` 共用，锁顺序固定 mutation → versionGate；环境锁被占用时写入中文错误而非只记事件。
+- UI：主界面当前版本“卸载”改为“管理版本”；官方版本列表只对非当前已安装版本显示“卸载该备用版本”；确认框显示版本、占用、安装时间和保留范围。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9、`DshVersionsTest` 7、`DshSwitchTest` 12）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**，详见 [测试报告](TEST-REPORT.md)。
+- 待验证：PR 的 Host/Android CI、独立 Codex High Review；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、进程在 prepared/committed 之间中断后的恢复；未跑 assemble/仪器/真机。
 
 ### 远程主机直连 SSH 切片（android_agent-34，PR #29 待审）
 
@@ -178,6 +189,7 @@
 
 ## 已实现、已验证与待验证
 
+- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9 项：当前版本/运行中/更新占用/缺失元数据拒绝、备用卸载保留共享数据、删除失败回滚、部分删除保留隔离、提交日志失败回滚、并发锁串行、并发卸载只成功一次）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、真机。
 - 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-31 新跑，merge `f5f3bf3` 后）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
@@ -198,13 +210,14 @@
 - 已验证（#13/#15、W8 当时，历史）：宿主 mock/并发回归 19 tests OK（76.760s）；设备门禁脚本 `--help` 与 `bash -n` 通过；main/CI/设备 metadata 只读核对。
 - 已验证（W5 前轮，历史）：24 项门禁离线回归；真实 `gh`/`ao` 只读 CLI 格式核对。
 - 已验证（W2/W3/W1 前轮，历史）：worktree 构建引导、CI/RPC 契约、文档门禁恢复。
-- 待验证：远程主机 PR #29 的真实 sshd/Keystore/token、Cookie 两主机隔离设备路径与 UI；DSH 聊天通知的 Android 13 权限/渠道/group/summary、点击切会话、后台/息屏与 MIUI/其他 ROM、真实 DSH WebSocket 事件；XLSX 真机大表/手势/深色；安全模式真机 rescue/崩溃/低内存/磁盘满；DSH 安装 PR #20、后台更新、视频全屏、F1、设备门禁、0.1.8 与真机/MIUI 仍按原记录待验证。
+- 待验证：DSH 多版本卸载（android_agent-43）的真实设备清单/确认/卸载/回滚/进程中断恢复、更新检查期间禁用与 CI/独立 Review；远程主机 PR #29 的真实 sshd/Keystore/token、Cookie 两主机隔离设备路径与 UI；DSH 聊天通知的 Android 13 权限/渠道/group/summary、点击切会话、后台/息屏与 MIUI/其他 ROM、真实 DSH WebSocket 事件；XLSX 真机大表/手势/深色；安全模式真机 rescue/崩溃/低内存/磁盘满；DSH 安装 PR #20、后台更新、视频全屏、F1、设备门禁、0.1.8 与真机/MIUI 仍按原记录待验证。
 - 待验证：XLSX 原生预览的真机/模拟器双向滚动、冻结区手势、缩放可读性、大表性能、深色主题与真实 Excel/WPS 文件；DSH 聊天通知的真实设备/模拟器权限弹窗、通知展示/group/summary、点击切会话与后台/息屏送达；DSH 冷启动的真实 PRoot 启动/首帧时序与设置开关；PDF 原生阅读的大文档滚动/内存、加密/损坏样本与缩放手感；原生界面的真机/PRoot 切换、通知点击与回退；设备温控/低电/低内存的真机策略与 WorkManager 恢复；DSH 安全模式在真实设备/PRoot 的 rescue 启动、真实崩溃/低内存/磁盘满与插件隔离；DSH 安装 PR #20 的独立 Codex High Review、真实设备/弱网镜像切换与 4000 包规模验收；后台更新检查的真实 WorkManager 调度/通知/网络与设备徽标；视频全屏 PR #17 的设备旋转/恢复验收；F1 的设备手势/PDF/DOCX 验收；DOCX 原生预览的真实设备双指缩放/横向滚动/深色主题/超大文档与真实复杂 Word 样本；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 
 ## 环境与阻塞
 
+- 当前分支：DSH 多版本卸载 `ao/android_agent-43/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`）；实现与 JVM/lint 完成，待提交/PR/CI/独立 Review；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -216,14 +229,15 @@
 
 ## 下一步
 
-1. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
-2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
-3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
-4. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
-5. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
-6. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
-7. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
-8. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
+1. DSH 多版本卸载（android_agent-43）：提交/推送 `ao/android_agent-43/root` 并创建 PR；复跑完整 JVM/lint 与 CI，等待独立 Codex High Review；设备验收另行授权（清单、确认、卸载备用、回滚、更新检查互斥、进程中断恢复）。
+2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
+3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
+4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
+5. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
+6. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
+7. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
+8. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
+9. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
 1. DOCX 预览 PR [#28](https://github.com/leezzou/tanuki/pull/28)：已 merge `main=f5f3bf3`，等待当前完整 SHA 的独立 Codex High Review 与设备 QA（双指缩放、横向滚动、复杂 DOCX、超大文档）；不合并、不触发 AO Review。
 2. 温控 PR [#21](https://github.com/leezzou/tanuki/pull/21) 已合并为 `f5f3bf3`：真机温控/低电/低内存、WorkManager 调度与重启恢复由独立 QA 另行授权。
 3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并为 `d9b4aa2`：真机/PRoot 原生界面切换、通知点击与失败回退验收另行授权。

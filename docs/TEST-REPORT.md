@@ -2,6 +2,15 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## DSH 多版本卸载与互斥验证（2026-11-10，android_agent-43，非设备）
+
+- 范围：已安装 DSH 清单（当前使用/备用、占用、安装时间、校验）、非当前版本卸载确认、当前/运行/更新占用拒绝、两阶段卸载与失败回滚、共享数据保护、切换/卸载与安装/启动/更新检查互斥。基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` → BUILD SUCCESSFUL，28 tests / 0 failures / 0 errors / 0 skipped（卸载 9、版本 7、切换 12）。
+  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m32s），66 个结果文件、**544 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` **0 errors / 94 warnings / 1 hint**。
+- 新增回归 9 项（`DshUninstallTest`）：当前版本卸载被拒；运行中/活动子进程/更新检查/安装占用被拒；当前元数据缺失、非法版本、未安装版本被拒；卸载备用版本后程序目录消失、当前版本与 `userdata`/`workspaces`/`backups`/下载缓存保留、清单重扫只剩当前版本；删除失败且目录完整时回滚原程序；删除已触及 `.installed` 后不回滚半删目录、保留隔离目录；提交日志失败时在删除前回滚；版本窄锁第二次 `tryEnter` 被拒且等待者串行；两个并发卸载同一版本只能成功一个。
+- 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、PR CI 与独立 Review。JVM 与 lint 不能替代设备验收。
+
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
 
 - 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
