@@ -97,14 +97,16 @@ def parse_matrix(text: str) -> tuple[list[dict[str, str]], list[str]]:
     return rows, errors
 
 
-def parse_case_coverage(text: str) -> tuple[dict[str, set[str]], list[str]]:
-    """解析每个验收用例标题后的 `- 覆盖：...` 声明。
+def parse_case_coverage(text: str) -> tuple[dict[str, set[str]], dict[str, str], list[str]]:
+    """解析每个验收用例标题后的 `- 覆盖：...` 与可选 `- 跨域：...`。
 
     覆盖声明是“该用例真的验证了哪些矩阵行”的唯一依据；只写用例编号
-    不再足以通过门禁，避免行引用了不覆盖该行的共享用例。
+    不再足以通过门禁，避免行引用了不覆盖该行的共享用例。跨功能域复用
+    必须用 `- 跨域：` 说明理由，否则视为可疑复用。
     """
     errors: list[str] = []
     coverage: dict[str, set[str]] = {}
+    cross_reasons: dict[str, str] = {}
     seen: set[str] = set()
     current: str | None = None
     for line in text.splitlines():
@@ -120,10 +122,15 @@ def parse_case_coverage(text: str) -> tuple[dict[str, set[str]], list[str]]:
                 for token in re.split(r"[、,，\s]+", raw):
                     if token:
                         coverage[current].add(token)
+            continue
+        if current and line.startswith("- 跨域："):
+            reason = line[len("- 跨域："):].strip()
+            if reason:
+                cross_reasons[current] = reason
             current = None
     for case_id in sorted(set(coverage) - seen):
         errors.append(f"验收用例缺少覆盖声明：{case_id}")
-    return coverage, errors
+    return coverage, cross_reasons, errors
 
 
 def check_paths(text: str, root: Path) -> list[str]:
@@ -146,14 +153,20 @@ def check_paths(text: str, root: Path) -> list[str]:
 
 def validate(text: str, root: Path, check_path_refs: bool = True) -> list[str]:
     rows, errors = parse_matrix(text)
-    coverage, case_errors = parse_case_coverage(text)
+    coverage, cross_reasons, case_errors = parse_case_coverage(text)
     errors.extend(case_errors)
     row_ids = {row["id"] for row in rows}
 
     for case_id, covered in sorted(coverage.items()):
+        domains = sorted({row_id.split("-")[0] for row_id in covered})
         for row_id in sorted(covered):
             if row_id not in row_ids:
                 errors.append(f"{case_id}: 覆盖声明含不存在的矩阵行 {row_id}")
+        if len(domains) > 1 and not cross_reasons.get(case_id, "").strip():
+            errors.append(
+                f"{case_id}: 覆盖多个功能域（{'、'.join(domains)}），"
+                "需拆分或在 `- 跨域：` 说明理由"
+            )
 
     for row in rows:
         refs = sorted(set(CASE_RE.findall(row["cells"][4])))
@@ -368,12 +381,16 @@ def self_test() -> int:
             "| CHAT-02 | Markdown | 有 | 仅官方 | P1 · A-SESS-01 |",
             1,
         )
+        broken = broken + "\n**A-CROSS-01（JVM）**\n- 覆盖：SESS-01、CHAT-01\n"
         broken_errors = validate(broken, root)
         if not broken_errors:
             print("SELF-TEST FAILED（坏样例未被发现）")
             return 1
         if not any("CHAT-02" in error and "覆盖" in error for error in broken_errors):
             print("SELF-TEST FAILED（覆盖错配未被发现）")
+            return 1
+        if not any("A-CROSS-01" in error and "多个功能域" in error for error in broken_errors):
+            print("SELF-TEST FAILED（跨域可疑复用未被发现）")
             return 1
         print(f"SELF-TEST PASS（有效样例通过；坏样例发现 {len(broken_errors)} 个问题）")
         return 0
@@ -403,7 +420,7 @@ def main() -> int:
             print(" -", error)
         return 1
     rows, _ = parse_matrix(text)
-    print(f"PASS: {args.doc} 共 {len(rows)} 行、14 个功能域，ID/状态/优先级/验收引用/覆盖/路径检查通过")
+    print(f"PASS: {args.doc} 共 {len(rows)} 行、14 个功能域，ID/状态/优先级/验收引用/覆盖/跨域/路径检查通过")
     return 0
 
 
