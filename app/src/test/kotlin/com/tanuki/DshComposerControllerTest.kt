@@ -91,13 +91,15 @@ class DshComposerControllerTest {
     private fun controller(
         remote: FakeRemote,
         store: MemoryDshDraftStore = MemoryDshDraftStore(),
-        onSent: (String) -> Unit = {}
+        onSent: (String) -> Unit = {},
+        stopConfirmTimeoutMillis: Long = 4_000L
     ): DshComposerController = DshComposerController(
         client = DshComposerClient(remote),
         drafts = store,
         scope = CoroutineScope(Dispatchers.Unconfined),
         onSent = onSent,
-        timeZoneProvider = { "Asia/Shanghai" }
+        timeZoneProvider = { "Asia/Shanghai" },
+        stopConfirmTimeoutMillis = stopConfirmTimeoutMillis
     )
 
     @Test fun draftIsKeptPerSessionAndFlushedOnSwitch() {
@@ -420,17 +422,39 @@ class DshComposerControllerTest {
         assertTrue(controller.state.value.generationRunning)
 
         controller.requestStop()
-        // accepted 回执只进入“收尾中”，不能立刻隐藏停止入口或宣称已停止。
+        // accepted 后先保持“正在停止”，不能立刻隐藏停止入口或宣称已停止。
         val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
         assertTrue(requested.generationRunning)
-        assertFalse(requested.stopping)
-        assertTrue(requested.notice.orEmpty().contains("停止请求已发送"))
+        assertTrue(requested.stopping)
+        assertTrue(requested.notice.orEmpty().contains("正在停止"))
         assertTrue(remote.calls.any { it.method == "session/cancel" })
 
         controller.setGenerationRunning(false)
         val stopped = awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
         assertFalse(stopped.generationRunning)
+        assertFalse(stopped.stopping)
         assertTrue(stopped.notice.orEmpty().contains("已停止"))
+    }
+
+    @Test fun stopTimeoutReopensStopEntryAndKeepsRequested() {
+        val remote = FakeRemote()
+        val controller = controller(remote, stopConfirmTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+
+        controller.requestStop()
+        awaitState(controller) { it.stopping && it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 官方迟迟未给 idle：超时后停止入口重新可用，但状态仍是“仍在收尾”。
+        val timedOut = awaitState(controller) {
+            !it.stopping && it.stopOutcome == DshStopOutcome.REQUESTED
+        }
+        assertTrue(timedOut.generationRunning)
+        assertTrue(timedOut.notice.orEmpty().contains("仍在收尾"))
+
+        controller.setGenerationRunning(false)
+        awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
     }
 
     @Test fun stopDoesNotCancelDelayedPromptReceipt() {

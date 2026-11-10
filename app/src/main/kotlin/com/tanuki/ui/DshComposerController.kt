@@ -128,7 +128,9 @@ class DshComposerController(
     private val drafts: DshDraftStore,
     private val scope: CoroutineScope,
     private val onSent: (String) -> Unit = {},
-    private val timeZoneProvider: () -> String? = { TimeZone.getDefault().id }
+    private val timeZoneProvider: () -> String? = { TimeZone.getDefault().id },
+    /** accepted 后等待官方 idle 的确认窗口；超时只提示仍在收尾，不伪造已停止。 */
+    private val stopConfirmTimeoutMillis: Long = 4_000L
 ) {
     private val _state = MutableStateFlow(DshComposerState())
     val state: StateFlow<DshComposerState> = _state.asStateFlow()
@@ -140,6 +142,7 @@ class DshComposerController(
     private var uploadJob: Job? = null
     private var sendJob: Job? = null
     private var stopJob: Job? = null
+    private var stopTimeoutJob: Job? = null
     /** 上传串行锁：取消后立即重启 worker 时，旧请求必须结束后新请求才能开始。 */
     private val uploadLock = Mutex()
 
@@ -155,6 +158,7 @@ class DshComposerController(
         uploadJob?.cancel()
         sendJob?.cancel()
         stopJob?.cancel()
+        stopTimeoutJob?.cancel()
         _state.value = DshComposerState(
             sessionId = normalized,
             text = normalized?.let(drafts::read).orEmpty().take(DshComposerProtocol.MAX_TEXT_CHARS)
@@ -478,6 +482,7 @@ class DshComposerController(
             if (running) {
                 if (state.generationRunning) state else state.copy(generationRunning = true)
             } else {
+                stopTimeoutJob?.cancel()
                 val awaitingStop = state.stopping || state.stopOutcome == DshStopOutcome.REQUESTED
                 if (!awaitingStop && !state.generationRunning) return@update state
                 state.copy(
@@ -507,6 +512,8 @@ class DshComposerController(
             _state.update { it.copy(notice = "当前没有运行中的回合") }
             return
         }
+        val requestGeneration = generation
+        stopTimeoutJob?.cancel()
         _state.update {
             it.copy(
                 stopping = true,
@@ -526,18 +533,27 @@ class DshComposerController(
                 // 停止只影响生成；在途 prompt 的回执必须继续走完，不能在这里 cancel sendJob。
                 // 只要回合仍在运行或还有提交回执在途，就不能把 accepted 当成“已停止”。
                 val awaitingOfficial = _state.value.generationRunning || _state.value.sending
-                _state.update {
-                    it.copy(
-                        stopping = false,
-                        stopOutcome = if (awaitingOfficial) {
-                            DshStopOutcome.REQUESTED
-                        } else DshStopOutcome.STOPPED,
-                        notice = if (awaitingOfficial) {
-                            "停止请求已发送，仍在收尾，等待官方确认"
-                        } else "已停止当前回合"
-                    )
+                if (awaitingOfficial) {
+                    _state.update {
+                        it.copy(
+                            // accepted 后先保持“正在停止”，超时再降级为“仍在收尾”。
+                            stopping = true,
+                            stopOutcome = DshStopOutcome.REQUESTED,
+                            notice = "正在停止，等待官方确认"
+                        )
+                    }
+                    scheduleStopTimeout(sessionId, requestGeneration)
+                } else {
+                    _state.update {
+                        it.copy(
+                            stopping = false,
+                            stopOutcome = DshStopOutcome.STOPPED,
+                            notice = "已停止当前回合"
+                        )
+                    }
                 }
             }.onFailure { error ->
+                stopTimeoutJob?.cancel()
                 val stillActive = _state.value.generationRunning || _state.value.sending
                 _state.update {
                     it.copy(
@@ -547,6 +563,20 @@ class DshComposerController(
                         notice = if (stillActive) it.notice else "回合已结束"
                     )
                 }
+            }
+        }
+    }
+
+    /** accepted 后若官方迟迟未给 idle，超时只降级提示并重新开放停止入口，不宣称已停止。 */
+    private fun scheduleStopTimeout(sessionId: String, requestGeneration: Long) {
+        stopTimeoutJob?.cancel()
+        stopTimeoutJob = scope.launch {
+            delay(stopConfirmTimeoutMillis.coerceAtLeast(1L))
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
+            _state.update { state ->
+                if (state.stopping && state.stopOutcome == DshStopOutcome.REQUESTED) {
+                    state.copy(stopping = false, notice = "停止请求已发送，仍在收尾")
+                } else state
             }
         }
     }
@@ -576,6 +606,7 @@ class DshComposerController(
         uploadJob?.cancel()
         sendJob?.cancel()
         stopJob?.cancel()
+        stopTimeoutJob?.cancel()
         client.reset()
         _state.value = DshComposerState()
     }

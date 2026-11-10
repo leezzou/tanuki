@@ -434,15 +434,17 @@ fun DshComposerBar(
             }
             // 停止结果独立显示，避免底部操作行在窄屏把状态文案挤掉。
             state.stopOutcome?.takeIf { state.notice == null }?.let { outcome ->
-                val text = when (outcome) {
-                    DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
-                    DshStopOutcome.STOPPED -> "已停止当前回合"
-                    DshStopOutcome.FAILED -> "停止失败，可重试"
+                val text = when {
+                    state.stopping -> "正在停止，等待官方确认"
+                    outcome == DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
+                    outcome == DshStopOutcome.STOPPED -> "已停止当前回合"
+                    else -> "停止失败，可重试"
                 }
-                val color = when (outcome) {
-                    DshStopOutcome.REQUESTED -> MaterialTheme.colorScheme.onSurfaceVariant
-                    DshStopOutcome.STOPPED -> MaterialTheme.colorScheme.primary
-                    DshStopOutcome.FAILED -> MaterialTheme.colorScheme.error
+                val color = when {
+                    state.stopping || outcome == DshStopOutcome.REQUESTED ->
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    outcome == DshStopOutcome.STOPPED -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
                 }
                 Text(text, style = MaterialTheme.typography.labelMedium, color = color)
             }

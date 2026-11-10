@@ -22,8 +22,8 @@
   - 草稿：沿用按会话 `SharedPreferencesDshDraftStore`；发送时快照文本与附件 id，成功后只清快照，等待期间新编辑保留；跨会话不携带附件。
   - 附件：图片/文件选择、粘贴图片、拖入文件；中文类型/大小/数量提示；上传卡片显示不定进度和“取消”，取消立即移除并阻止晚到响应回写；读取/拖入期间显示“正在读取附件…”。
   - @/斜杠：候选上下键循环、Enter/Tab 插入、Esc 关闭；斜杠候选按名称/描述/参数提示搜索排序；插入只替换当前查询并保留后续参数/换行；查询变化清空过期候选。
-  - 停止：`session/cancel` 客户端与参数；`generationRunning`/`stopping`/`stopOutcome`。accepted 只进入 `REQUESTED`，保留停止入口/运行状态；官方 `running=false` 经 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 回执、不强制清 `sending`。
-- 已验证：定向 53 tests；完整 JVM 806 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 102 warnings / 1 hint；交接检查与发布过滤通过。
+  - 停止：`session/cancel` 客户端与参数；`generationRunning`/`stopping`/`stopOutcome`。accepted 只进入 `REQUESTED` 并保持“正在停止”，保留停止入口/运行状态；超时降级为“仍在收尾”并重新开放停止入口；官方 `running=false` 经 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 回执、不强制清 `sending`。
+- 已验证：定向 54 tests；完整 JVM 807 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 102 warnings / 1 hint；交接检查与发布过滤通过。
 - 待验证：真实设备/模拟器的软键盘避让、输入法组合、焦点、图片/文件选择器、粘贴/拖入、上传取消、候选键盘导航；页面接线后的停止入口与运行状态同步；真实 PRoot DSH；assemble、Android 仪器、真机。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki.modern`；分支 `ao/composer-input/root`；无设备任务。
 
@@ -47,18 +47,18 @@
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**53 tests / 0 failures / 0 errors / 0 skipped**（23 + 9 + 21） | 新增“accepted 仍运行”和“延迟 prompt 回执时停止”回归 |
-| `... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；**806 tests / 90 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**；`DshComposer*` 无新增 lint 项 | 一次运行出现既有无关注册池测试偶发失败，单测重跑与完整重跑均通过；非本切片改动 |
+| `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**54 tests / 0 failures / 0 errors / 0 skipped**（23 + 9 + 22） | 新增“accepted 仍运行”“延迟 prompt 回执停止”“超时仍在收尾”回归 |
+| `... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；**807 tests / 90 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**；`DshComposer*` 无新增 lint 项 | 一次运行出现既有无关注册池测试偶发失败，单测重跑与完整重跑均通过；非本切片改动 |
 | `git diff --check` | 无输出 | 无空白错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-composer-input-polish.md` | Handoff PR check passed | 普通 PR 模式；`AGENT-STATE`/`CURRENT.json` 未修改 |
 | `python3 scripts/check-publication.py --git` | Publication check passed；673 public files / 672 index entries / 0 findings | 未输出匹配值 |
 | `gh pr create --base main --head ao/composer-input/input-polish` | PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建 | 未合并、未发布 |
 | `gh run watch 42798827155 --exit-status` | success；Android build/JVM/lint 7m7s，Host scripts/handoff 39s | head `e4daf58`；仅 CI，不等于设备验证或独立审查 |
 | 同 SHA push 运行 42798815793 | 暴露 `fileUploadsBeforePromptAndUsesReceipt` 测试竞态：先读到 `UPLOADED`、worker 尚未置 `uploadBusy=false` | 产品逻辑无失败；已改为同时等待两个状态 |
-| `... --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；21 tests / 0 failures | 停止两段语义与延迟回执回归 |
+| `... --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；22 tests / 0 failures | 停止两段语义、延迟回执与超时回归 |
 | `... :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL | 胶囊 `BasicTextField`/`onTextLayout`/形变动画 API 编译通过 |
 
-- 哪些是前一轮结果，哪些是本次新验证：53 项目标回归、806 项完整 JVM、lint 均为本分支当前 head 新跑；806 中既有回归不是本切片新增。
+- 哪些是前一轮结果，哪些是本次新验证：54 项目标回归、807 项完整 JVM、lint 均为本分支当前 head 新跑；807 中既有回归不是本切片新增。
 - 未测试、超时、失败和暂未复现的情况：真实设备 UI/输入法/选择器/粘贴/拖入/跨应用临时权限/上传取消/停止、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 焦点/键盘事件没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试。
 
 ## 未完成与暂停项

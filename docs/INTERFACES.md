@@ -253,7 +253,7 @@ HTTP 200..399 或 401 → 存活
 - 发送/停止同键位形变：空闲为发送（↑），生成中为停止（■ 实心主色），同一 36dp 位置/尺寸；禁用态用低对比底色。只对图标做短促的淡入缩放/位移动画，不重建整条输入框。没有真实语音/听写能力，因此不放假入口。
 - `Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
 - `@`/斜杠候选支持上下键循环选择、Enter/Tab 插入、Esc 关闭；斜杠候选按命令名前缀、名称包含、描述/参数提示包含排序。插入只替换当前 `@` 查询或首行命令 token，保留后续参数与换行。
-- 停止生成由 `requestStop()` 调 `session/cancel`。accepted 只进入 `DshStopOutcome.REQUESTED`，保留 `generationRunning` 与停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。
+- 停止生成由 `requestStop()` 调 `session/cancel`。accepted 只进入 `DshStopOutcome.REQUESTED` 并保持“正在停止”，保留 `generationRunning` 与停止入口；超时仍未收到官方 idle 时降级为“停止请求已发送，仍在收尾”并重新开放停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。
 - 文件上传显示不定进度（官方 unary 上传无字节回调，不伪造百分比）；上传中可点“取消”，立即移除本地卡片并使晚到响应失效，不留下本地半成品。官方没有上传取消端点，服务端可能仍完成已发出的请求，界面不把它写成已发送附件。
 - `DshComposerRemote` 是**临时抽象**：只覆盖输入/附件需要的 unary `call(method,args): Any?` 与 `reset()`，不代表第二套传输。42 的 `DshTransport` / `DshNativeComposerRemote(transport)` 定稿后，消费方应改为直接依赖该适配器并删除/收敛这个临时接口；早期 head 的临时 `HttpDshComposerRemote` 已删除，当前分支不自建 HTTP/WS。
 - 本组件 PR 仍不含页面接线；集成方需在 `DshNativeState.running` 变化时调用 `setGenerationRunning(running)`，停止入口才会在官方确认 idle 后隐藏并显示“已停止”。
