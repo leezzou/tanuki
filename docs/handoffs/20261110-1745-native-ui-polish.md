@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-56（AO worker）
 - 时间：2026-11-10 17:45 CST
-- 状态：已完成（待创建 PR；未合并、未发布）
+- 状态：已完成（PR [#49](https://github.com/leezzou/tanuki/pull/49)；未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 ## 用户目标与范围
@@ -15,7 +15,7 @@
 ## 当前状态
 
 - 基线：`origin/main=4f2a3717d6d795fd6b94cdb695878d8119f818c1`（`release: Tanuki 0.1.11 workspacecheck candidate (#44)`）。
-- 分支：`ao/native-ui-polish/ui-adaptivity`，从会话分支 `ao/native-ui-polish/root` 创建；本记录写入时尚未提交/推送。
+- 分支：`ao/native-ui-polish/ui-adaptivity`，从会话分支 `ao/native-ui-polish/root` 创建；提交 `6ef5076` 已推送，PR [#49](https://github.com/leezzou/tanuki/pull/49)。
 - 已实现：导航策略、面板栈、二级页状态、导航历史、原生/官方切换状态；适配断点与 inset 骨架；48dp 触控区与无障碍按钮；三态中文组件；WCAG 对比度工具；冷启动预算；对应 JVM 测试与接线文档。
 - 已验证：见“验证记录”；设备/模拟器未验证。
 - 待验证：页面最终接线后的真实布局、像素、系统栏、输入法和返回栈；设备深色/字体/横屏/360dp。
@@ -82,6 +82,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP 及校验文件：本轮未生成 APK、未打包源码 ZIP；无发布附件。
-- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布、未合并。
+- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布、未合并；PR [#49](https://github.com/leezzou/tanuki/pull/49) 等待独立审查与适用 CI/QA。
 - 过期记录清理：本轮未删除任何旧交接；未发现仅属于本次且已过期的记录。`AGENT-STATE.md` 与 `CURRENT.json` 未修改，由集成维护方统一刷新。
 - 仍需保留的验证/未完成记录：`docs/handoffs/20261110-1636-release-0.1.11.md`（0.1.11 候选与设备未验）、`docs/handoffs/20261110-1233-native-ui-chat.md`（原生聊天切片）等仍有未完成/设备验证事项，保留。
