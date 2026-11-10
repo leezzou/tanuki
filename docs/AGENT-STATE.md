@@ -1,8 +1,8 @@
 # Tanuki 当前状态
 
-当前交接：[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，完整非设备回归通过；PR 待创建，不合并、不发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，PR [#34](https://github.com/leezzou/tanuki/pull/34) 待审；完整非设备回归通过，不合并、不发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)；并行与历史记录保留在 `docs/handoffs/`。
 
-## 文件查看器格式支持扩展（android_agent-41，PR 待创建）
+## 文件查看器格式支持扩展（android_agent-41，PR [#34](https://github.com/leezzou/tanuki/pull/34) 待审）
 
 - 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；未合并、未发布、未创建 tag/Release。
 - 新增纯 Kotlin `FileTypeCatalog` 集中维护扩展名、规范 MIME 与类别：C/C++/头文件（c、h、cpp、cc、cxx、hpp、hh、hxx、inl、ipp、m、mm、cu 等）、Java/Kotlin/Python/JS/TS/Go/Rust/Shell 及多种语言、JSON/XML/YAML/TOML/INI/属性/点号配置、Markdown/纯文本/日志、HTML/CSS/SQL/CSV/TSV、SVG；图片/音频/视频扩展名在缺少系统 MIME 时仍能进入对应查看器；PDF/DOCX/XLSX 保持内置预览，`.doc` 保持旧版提示，`.xls`/`.xlsm`/`.pptx`/`.odt` 等归为不支持并回退。
@@ -10,7 +10,7 @@
 - 文本查看器保留 64 KiB 分页，新增可开关行号（行号与正文同一段文本，自动换行不错位）、当前行范围与已显示字节、单次查看 4 MiB 上限与中文截断提示；仍为等宽字体、只读选择复制、搜索/编码切换。
 - 未知/不支持类型显示“暂不支持内置预览”中文说明，提供“用文本打开”“复制路径”和返回类型说明；读取失败显示错误兜底，不白屏。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 28 tests / 0 failures；完整 `testModernDebugUnitTest` **557 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件，0.1.10 基线 535 + 新增 22）、`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码组合 BUILD SUCCESSFUL（3m30s）。
-- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR 创建与独立 Codex High Review 待办。
+- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR #34 的独立 Codex High Review 待办。
 - 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）

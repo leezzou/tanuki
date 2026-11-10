@@ -14,7 +14,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
 
-- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，未安装、未发布。
+- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，PR [#34](https://github.com/leezzou/tanuki/pull/34)，未安装、未发布。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
   - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m05s），28 tests / 0 failures / 0 errors / 0 skipped。

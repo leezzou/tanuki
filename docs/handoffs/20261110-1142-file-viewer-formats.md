@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-41（DSH Worker）
 - 时间：2026-11-10 11:42 CST
-- 状态：进行中（实现与定向测试完成；完整回归与 PR 交付待完成）
+- 状态：已完成（PR [#34](https://github.com/leezzou/tanuki/pull/34) 待独立审查与设备验证；不合并、不发布）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)（已发布的版本事实保留在 [当前状态](../AGENT-STATE.md) 与 [测试报告](../TEST-REPORT.md)）
 
 ## 用户目标与范围
@@ -17,7 +17,7 @@
 - 已实现：集中式类型目录、文本查看器行号/截断、未知类型回退、MIME 规范化与内容探测边界。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 JVM 回归 28 项通过（`FileTypeCatalogTest` 10、`TextPageLayoutTest` 9、`TextFileReaderTest` 6、`WorkspaceFileKindTest` 3）；完整 `testModernDebugUnitTest` 557 tests / 0 failures / 0 errors / 0 skipped（67 个结果文件），`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码上组合 BUILD SUCCESSFUL（3m30s；优化搜索下标换算前另有一次 6m23s 同结果）。
 - 待验证：真机/模拟器上的行号对齐、自动换行、深色主题、大文件截断提示、未知类型面板与复制路径；Android 仪器测试。
-- 当前目标包名：未构建/安装新 APK；源码分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；无运行中安装/下载/设备任务。
+- 当前目标包名：未构建/安装新 APK；源码分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`，PR [#34](https://github.com/leezzou/tanuki/pull/34)；无运行中安装/下载/设备任务。
 - 关键事实与可定位源码：分类规则在 `app/src/main/kotlin/com/tanuki/storage/FileTypeCatalog.kt`；工作区接入在 `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`；行号/截断策略在 `app/src/main/kotlin/com/tanuki/ui/TextPageLayout.kt`；界面在 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt`。
 
 ## 本次改动
@@ -49,16 +49,15 @@
 
 ## 未完成与暂停项
 
-- 未完成：完整 JVM/lint 最终数字回填、PR 创建、独立 Codex High Review（合并前要求）、真机/模拟器验收、Android 仪器测试。
+- 未完成：独立 Codex High Review（合并前要求）、真机/模拟器验收、Android 仪器测试。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存问题继续暂停；发布/合并需另行授权。
 
 ## 下一步
 
-1. 在会话 worktree 运行完整 `:app:testModernDebugUnitTest :app:lintModernDebug`，把数字回填到本记录与 `docs/TEST-REPORT.md`。
-2. 运行 `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1142-file-viewer-formats.md`、`python3 scripts/check-handoff.py`、`python3 scripts/package-source.py`，核对 `artifacts/SOURCE-SHA256SUMS`。
-3. 以 author/committer `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/file-viewer/formats`，创建 PR（base `main`），不合并、不发布。
-4. 设备验证建议：在 ARM64 测试 AVD 打开合成 `.c`/`.cpp`/`.ts`/`.json`/大日志/未知扩展名文件，检查行号、自动换行、复制、截断提示、深色主题与回退按钮；再补 Android 仪器测试。
+1. 独立 Codex High Review 绑定 PR #34 当前完整 SHA；推送新提交后需重新审查。
+2. 设备验证建议：在 ARM64 测试 AVD 打开合成 `.c`/`.cpp`/`.ts`/`.json`/大日志/未知扩展名文件，检查行号、自动换行、复制、截断提示、深色主题与回退按钮；再补 Android 仪器测试。
+3. 若用户设备上的 `.c`/`.cpp` 仍无法打开，收集文件路径、大小、前几 KB 的字节/编码与 `describe` 显示的类型，再定位是否为特定编码或文件变化检查。
 
 ## 约束与风险
 
@@ -68,7 +67,7 @@
 
 ## 产物与校验
 
-- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建 APK；`scripts/package-source.py` 生成的源码包与 `artifacts/SOURCE-SHA256SUMS` 为工作材料，不提交；PR 以分支 `ao/file-viewer/formats` 交付。
+- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建 APK；`scripts/package-source.py` 生成的源码包与 `artifacts/SOURCE-SHA256SUMS` 为工作材料，不提交；PR [#34](https://github.com/leezzou/tanuki/pull/34) 以分支 `ao/file-viewer/formats` 交付，最终提交 `60889eb`（文档回填后会有新的提交，head 以 PR 页面为准）。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未覆盖、未签名、未发布、未建 tag/Release。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：本轮保留全部既有 `docs/handoffs/` 记录。它们仍分别承载未合并 PR、待验证设备项与历史发布证据，删除会丢失唯一定位信息，且不属于本次任务范围；本次只新增记录并更新 `AGENT-STATE` 最近链接。后续若确认某记录已被 `AGENT-STATE`/专题文档完整替代，再按 AGENTS.md 迁移后删除。
 - 仍需保留的验证/未完成记录：`docs/TEST-REPORT.md` 的 0.1.10 与设备相关历史记录、各 PR 交接记录。
