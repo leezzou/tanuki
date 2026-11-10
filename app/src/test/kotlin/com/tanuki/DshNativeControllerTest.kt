@@ -200,6 +200,26 @@ class DshNativeControllerTest {
         assertEquals("完成", state.tools.single().output)
     }
 
+    @Test fun liveToolCallThenResultKeepsDuration() = runBlocking {
+        val running = toolItem("call-2", DshToolStatus.RUNNING, 8, startedAt = 1_000L)
+        val completed = toolItem(
+            "call-2", DshToolStatus.SUCCESS, 8,
+            output = "完成", startedAt = 0L, finishedAt = 2_500L
+        )
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = "", tools = listOf(running)),
+                DshLiveEvent.Timeline(listOf(completed))
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.tools.singleOrNull()?.status == DshToolStatus.SUCCESS }
+        assertEquals(1_500L, state.tools.single().durationMs)
+    }
+
     @Test fun liveFailureDoesNotForceOfficialFallback() = runBlocking {
         val source = FakeSource(
             listOf(session("A")),
@@ -384,7 +404,9 @@ class DshNativeControllerTest {
         callId: String,
         status: DshToolStatus,
         seq: Int,
-        output: String? = null
+        output: String? = null,
+        startedAt: Long = 0L,
+        finishedAt: Long? = null
     ) = DshToolItem(
         seq = seq,
         time = 1L,
@@ -399,6 +421,8 @@ class DshNativeControllerTest {
         diffs = emptyList(),
         files = emptyList(),
         outputTruncated = false,
-        risk = DshRiskAssessment(DshRiskLevel.LOW, "只读命令")
+        risk = DshRiskAssessment(DshRiskLevel.LOW, "只读命令"),
+        startedAt = startedAt,
+        finishedAt = finishedAt
     )
 }

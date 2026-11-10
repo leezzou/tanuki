@@ -227,7 +227,8 @@ HTTP 200..399 或 401 → 存活
 - 共享 transport：`DshTransport` 冻结 `connection: StateFlow<DshConnectionState>`、`suspend call(method,args): Any?`、`live(sessionId): Flow<DshLiveEvent>`、`reset()`；`DshNativeComposerRemote` 只转发 call/reset。聊天、输入、会话管理共用同一连接/认证，不各自建 HTTP/WS。
 - 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 校验 `Sec-WebSocket-Accept`、客户端帧掩码、拒绝服务端掩码、单帧上限 1 MiB；WebView 同源与 Cookie 策略不变。
 - **临时实现**：`DshWebSocketClient.kt` 是审批切片保留的最小 RFC6455 客户端，`DshApprovalController` 只依赖 `DshApprovalTransport`；后续可替换为 42 的 `DshWebSocket.kt`/transport，不需要改审批 UI。不要再扩展它。
-- 缺口：模型/推理强度、用户提问的完整回答、历史向前分页、自动重连、工具卡与审批的实时关联仍未实现；计划 UI 组件与解析已就绪，但 `DshNativePage`/状态接线由集成方完成；工具卡来自 page/follow 事件，不读取图片字节。
+- 用户提问：`DshQuestionParser.parse(eventId, sessionId, request)` 只解析 `questions[]` 的单选/多选/文本、选项、自定义与必填；`DshQuestionCard` 与 `DshQuestionDraft` 可独立测试。回答 RPC 未确认，`onSubmit` 可空，未接线时界面明确显示“回答入口待协议确认”，不伪造提交。
+- 缺口：模型/推理强度、用户提问的完整回答、历史向前分页、自动重连、工具卡与审批的实时关联仍未实现；计划与提问 UI 组件/解析已就绪，但 `DshNativePage`/状态接线由集成方完成；工具卡来自 page/follow 事件，不读取图片字节。
 
 #### 1.9.1 原生输入与附件组件
 

@@ -1,15 +1,18 @@
 package com.tanuki.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -18,6 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -27,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.tanuki.web.DshApprovalOutcome
 import com.tanuki.web.DshRememberedChoice
 import com.tanuki.web.DshRiskLevel
+import kotlinx.coroutines.delay
 
 /**
  * 审批入口摘要；只在当前会话有待审批、记忆、错误或提示时显示窄条。
@@ -144,8 +153,40 @@ fun DshApprovalSheet(
     }
     if (!hasContent) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scroll = rememberScrollState()
+    var knownPending by remember { mutableIntStateOf(state.pendingFor(sessionId).size) }
+    var arrivalNotice by remember { mutableStateOf(false) }
+    val pendingNow = state.pendingFor(sessionId).size
+    LaunchedEffect(pendingNow) {
+        if (pendingNow > knownPending) {
+            arrivalNotice = true
+            delay(3_000)
+            arrivalNotice = false
+        }
+        knownPending = pendingNow
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .verticalScroll(scroll)
+                .navigationBarsPadding()
+        ) {
+            if (arrivalNotice) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        "有新的审批请求，计数已更新；当前处理项不会跳转。",
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
             DshApprovalPanel(
                 state = state,
                 sessionId = sessionId,
