@@ -231,6 +231,29 @@ HTTP 200..399 或 401 → 存活
 - **临时实现**：`DshWebSocketClient.kt` 是本切片为完成审批功能保留的最小 RFC6455 实现，待收敛到 android_agent-42 的 `DshWebSocket.kt`/transport。它只暴露 `connect(origin, cookie, path)`、`sendText(text): Boolean`、`close()` 与 `Listener.onOpen/onText/onClosed/onFailure`；`DshApprovalController` 只依赖更高层的 `DshApprovalTransport`（`connect()`、`answer(eventId, outcome)`、`close()`），42 可用自己的 transport 实现该接口替换，不需要改审批 UI。不要再扩展这个临时 WebSocket。
 - 缺口：`session/follow`、`session/control`、聊天发送/取消/附件/模型选择仍未实现；工具卡片来自历史页，不提供实时增量流。
 
+#### 1.9.1 原生输入与附件组件
+
+输入/附件组件只调用官方已声明的 Typert Remote 方法，不新增端点、不改官方 npm 包；页面接线由 android_agent-42 负责，本组件 PR 不包含 `DshNativePage`/`MainActivity`：
+
+| 方法 | args 形状 | 用途 |
+|---|---|---|
+| `session/prompt` | `{"request":{"requestId","sessionId","mode":"queue/steer","content":[text/image/file],"clientTimeZone"?}}` | 发送普通提示词；图片为 `{type:"image",mediaType,data(base64),name?}`，文件为 `{type:"file",receiptId}` |
+| `fileUploads/upload` | `{"agentId":sessionId,"request":{"data":base64,"name"?}}` | 普通文件先上传，返回 `receiptId` 与 `file{attachmentId,name,bytes}`；图片随 prompt 发送 |
+| `commands/list` | `{"agentId":sessionId}` | 读取斜杠命令、描述、输入提示与 `input.attachments` |
+| `commands/execute` | `{"agentId":sessionId,"line":"/name ...","submittedAttachments":[image/file]}` | 执行已识别斜杠命令；附件是否允许由 `commands/list` 声明 |
+| `fileReferences/list` | `{"agentId":sessionId,"query"}` | `@` 文件/目录补全；文件插入 `@path`，含空白用 `@"path"`，目录保留 `@"path/` |
+| `sessionReferenceResolver/candidates` | `{"agentId":sessionId,"query"}` | `@` 会话补全；插入官方 `mention`（`@[label](dsh-session:...)`） |
+
+组件边界：
+
+- 图片只接受 PNG/JPEG/WebP/GIF，按实际字节嗅探；宽高、像素、单张字节与每条消息图片数优先采用 `session/projections` 的 `values.imageLimits`。
+- 客户端内存硬上限：单张图片 20 MiB、图片总量 30 MiB、单文件 20 MiB、每条消息最多 5 个文件/10 个附件、附件总量 50 MiB；服务端更小限制仍单独生效。
+- 草稿按会话保存在应用私有 `dsh-composer` 偏好中，只保存文本；附件不跨会话保留。异步选择器/剪贴板/拖入结果用 `DshComposerSessionToken(sessionId, generation)` 拒绝已切换会话。
+- 批量读取在分配字节前执行 `DshAttachmentReadBudget` 的数量/总量/单文件预算；总附件名额与图片/文件类型名额分开，图片只扣总名额与共享字节，不占文件名额。拖入开始用 `mimeTypes()` 判定，`onDrop` 领取并在异步读取结束释放 `requestDragAndDropPermissions`；批次被预算阻断时返回中文提示，不静默丢弃。选择器结果缺少发起 token（含 Activity/进程恢复）直接丢弃并提示。
+- 发送成功只移除本次实际提交的文本/附件，发送期间的新编辑保留；失败保留草稿与附件。
+- `DshComposerRemote` 是**临时抽象**：只覆盖输入/附件需要的 unary `call(method,args): Any?` 与 `reset()`，不代表第二套传输。42 的 `DshTransport` / `DshNativeComposerRemote(transport)` 定稿后，消费方应改为直接依赖该适配器并删除/收敛这个临时接口；早期 head 的临时 `HttpDshComposerRemote` 已删除，当前分支不自建 HTTP/WS。
+- 本组件 PR 不含页面接线；停止/取消（生成中断、附件上传取消）未实现，由后续任务补。
+
 细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
 ## 2. 工具面：Browser RPC
