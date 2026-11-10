@@ -53,6 +53,60 @@ class DshApprovalControllerTest {
         assertEquals(1, transport.answers.size)
     }
 
+    @Test fun approvalLookupUsesRequestSessionAndUpdatesArguments() {
+        val harness = Harness()
+        harness.toolLookupResult = toolItem("c1", """{"command":"rm -rf /workspaces/tmp"}""")
+        harness.controller.start()
+        val transport = harness.transports.single()
+        transport.listener.onApproval(request("e1", sessionId = "session-2"))
+        assertEquals(listOf("session-2" to "c1"), harness.lookupCalls)
+        val item = harness.controller.state.value.pending.single()
+        assertEquals("""{"command":"rm -rf /workspaces/tmp"}""", item.arguments)
+        assertEquals(DshRiskLevel.HIGH, item.risk.level)
+        assertFalse(item.lookupPending)
+    }
+
+    @Test fun approvalFirstThenHistoryUpdatesAndAutoAnswersRemembered() {
+        val harness = Harness()
+        harness.controller.start()
+        val transport = harness.transports.single()
+        // 先建立 bash/HIGH 的本次运行记忆。
+        transport.listener.onApproval(request("e1"))
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE, remember = true)
+        assertEquals(1, harness.controller.state.value.remembered.size)
+
+        // 审批先到、历史尚未包含该 callId：先显示“参数未读取”，不自动放行。
+        harness.toolLookupResult = null
+        transport.listener.onApproval(request("e2"))
+        val pending = harness.controller.state.value.pending.single()
+        assertTrue(pending.lookupError!!.contains("未读取"))
+        assertEquals(1, transport.answers.size)
+
+        // 历史后到，由 42 推送工具调用；参数/风险更新后才按记忆自动回答。
+        harness.controller.updateTool("session-1", toolItem("c1", """{"command":"ls"}"""))
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(2, transport.answers.size)
+        assertEquals("e2" to DshApprovalOutcome.ALLOWED_ONCE, transport.answers[1])
+    }
+
+    @Test fun unknownApprovalCanOnlyBeRejected() {
+        val harness = Harness()
+        harness.controller.start()
+        val transport = harness.transports.single()
+        transport.listener.onApproval(request("e1", toolName = "未知审批", callId = null, unknownTool = true))
+        val pending = harness.controller.state.value.pending.single()
+        assertTrue(pending.request.unknownTool)
+        assertEquals(DshRiskLevel.HIGH, pending.risk.level)
+
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE)
+        assertEquals(0, transport.answers.size)
+        assertTrue(harness.controller.state.value.pending.single().error!!.contains("只能拒绝"))
+
+        harness.controller.answer("e1", DshApprovalOutcome.REJECTED)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), transport.answers)
+    }
+
     @Test fun answerFailureKeepsPendingWithChineseError() {
         val harness = Harness()
         harness.controller.start()
@@ -78,6 +132,29 @@ class DshApprovalControllerTest {
         assertTrue(transport.closed)
     }
 
+    @Test fun disconnectDuringAnswerReleasesMarkerAndAllowsRetryAfterReconnect() {
+        val harness = Harness()
+        harness.controller.start()
+        val first = harness.transports.single()
+        first.listener.onApproval(request("e1"))
+        first.answerBehavior = {
+            first.listener.onDisconnected("审批通道已断开")
+            Result.failure(IOException("审批通道已断开"))
+        }
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE)
+        val item = harness.controller.state.value.pending.single()
+        assertFalse(item.answering)
+        assertTrue(item.error!!.contains("断开"))
+
+        // 重连后同一 eventId 必须还能回答，不能被遗留的 answering 标记吞掉。
+        harness.controller.start()
+        val second = harness.transports[1]
+        assertTrue(harness.controller.state.value.ready)
+        harness.controller.answer("e1", DshApprovalOutcome.REJECTED)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), second.answers)
+    }
+
     @Test fun originChangeReplacesOldTransport() {
         val harness = Harness()
         harness.controller.start()
@@ -100,6 +177,18 @@ class DshApprovalControllerTest {
         assertTrue(state.error!!.contains("断开"))
     }
 
+    @Test fun rememberedChoicesKeepPanelVisibleUntilCleared() {
+        val harness = Harness()
+        harness.controller.start()
+        val transport = harness.transports.single()
+        transport.listener.onApproval(request("e1"))
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE, remember = true)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertTrue(harness.controller.state.value.shouldShowPanel())
+        harness.controller.clearRemembered()
+        assertFalse(harness.controller.state.value.shouldShowPanel())
+    }
+
     @Test fun closeClearsRememberedChoices() {
         val harness = Harness()
         harness.controller.start()
@@ -115,24 +204,32 @@ class DshApprovalControllerTest {
     private fun request(
         eventId: String,
         toolName: String = "bash",
-        callId: String = "c1"
+        callId: String? = "c1",
+        sessionId: String = "session-1",
+        unknownTool: Boolean = false
     ) = DshApprovalRequest(
         eventId = eventId,
-        sessionId = "session-1",
+        sessionId = sessionId,
         toolName = toolName,
         callId = callId,
         reason = "需要权限",
-        displayReason = null
+        displayReason = null,
+        unknownTool = unknownTool
     )
 
     private class Harness {
         var origin = "http://127.0.0.1:1"
         var connectBehavior: ((DshApprovalSession.Listener) -> Unit)? = null
+        var toolLookupResult: DshToolItem? = toolItem("c1")
+        val lookupCalls = mutableListOf<Pair<String, String>>()
         val transports = mutableListOf<FakeTransport>()
         val controller = DshApprovalController(
             endpointProvider = { DshEndpoint(origin, "$origin/?token=t") },
             scope = CoroutineScope(Dispatchers.Unconfined),
-            toolLookup = { callId -> toolItem(callId) },
+            toolLookup = { sessionId, callId ->
+                lookupCalls += sessionId to callId
+                toolLookupResult?.takeIf { it.callId == callId }
+            },
             sessionFactory = { listener ->
                 FakeTransport(listener).also {
                     it.connectBehavior = connectBehavior
@@ -146,12 +243,14 @@ class DshApprovalControllerTest {
     private class FakeTransport(val listener: DshApprovalSession.Listener) : DshApprovalTransport {
         val answers = mutableListOf<Pair<String, DshApprovalOutcome>>()
         var answerError: Throwable? = null
+        var answerBehavior: (() -> Result<Unit>)? = null
         var connectBehavior: ((DshApprovalSession.Listener) -> Unit)? = null
         var closed = false
         override fun connect() {
             connectBehavior?.invoke(listener) ?: listener.onReady()
         }
         override fun answer(eventId: String, outcome: DshApprovalOutcome): Result<Unit> {
+            answerBehavior?.let { return it() }
             answerError?.let { return Result.failure(it) }
             answers += eventId to outcome
             return Result.success(Unit)
@@ -162,12 +261,12 @@ class DshApprovalControllerTest {
     }
 
     private companion object {
-        fun toolItem(callId: String): DshToolItem = DshToolItem(
+        fun toolItem(callId: String, arguments: String = """{"command":"ls"}"""): DshToolItem = DshToolItem(
             seq = 1,
             time = 0L,
             callId = callId,
             name = "bash",
-            arguments = """{"command":"ls"}""",
+            arguments = arguments,
             status = DshToolStatus.RUNNING,
             output = null,
             error = null,

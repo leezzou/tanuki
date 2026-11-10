@@ -3,7 +3,9 @@ package com.tanuki
 import com.tanuki.web.DshApprovalMemory
 import com.tanuki.web.DshApprovalOutcome
 import com.tanuki.web.DshApprovalProtocol
+import com.tanuki.web.DshApiProtocol
 import com.tanuki.web.DshApprovalRisk
+import com.tanuki.web.DshEndpoint
 import com.tanuki.web.DshEventFrame
 import com.tanuki.web.DshRiskLevel
 import org.json.JSONObject
@@ -46,6 +48,19 @@ class DshApprovalProtocolTest {
         assertFalse(request.toString().contains("must-not-be-copied"))
     }
 
+    @Test fun unknownToolNameBecomesRejectOnlyApproval() {
+        val frame = DshApprovalProtocol.parseStreamItem(item(JSONObject()
+            .put("type", "waterfall")
+            .put("event", "approval/request")
+            .put("eventId", "event-1")
+            .put("agentId", "session-1")
+            .put("request", JSONObject().put("toolName", "   ").put("callId", "call-1"))))
+        assertTrue(frame is DshEventFrame.Approval)
+        val request = (frame as DshEventFrame.Approval).request
+        assertTrue(request.unknownTool)
+        assertEquals("未知审批", request.toolName)
+    }
+
     @Test fun ignoresOtherWaterfallsAndMalformedIds() {
         assertTrue(DshApprovalProtocol.parseStreamItem(item(JSONObject()
             .put("type", "waterfall").put("event", "user-questions/request")
@@ -86,6 +101,23 @@ class DshApprovalProtocolTest {
         assertEquals("event-1", args.getString("eventId"))
         assertEquals("result", args.getJSONObject("outcome").getString("kind"))
         assertEquals("allowed-once", args.getJSONObject("outcome").getString("value"))
+    }
+
+    @Test fun approvalConnectUrlUsesAnswerInteractionsAndKeepsToken() {
+        val url = DshApprovalProtocol.connectUrl(
+            DshEndpoint(
+                "http://127.0.0.1:1234",
+                "http://127.0.0.1:1234/?token=secret-token&interactions=none"
+            )
+        )!!
+        assertTrue(url.contains("token=secret-token"))
+        assertTrue(url.contains("interactions=answer"))
+        assertFalse(url.contains("interactions=none"))
+        // 只读列表的既有契约仍是 none；审批不能复用它。
+        val readOnly = DshApiProtocol.connectUrl(
+            DshEndpoint("http://127.0.0.1:1234", "http://127.0.0.1:1234/?token=t")
+        )!!
+        assertTrue(readOnly.contains("interactions=none"))
     }
 
     @Test fun openStreamUsesEventsEndpointAndEmptyArgs() {

@@ -165,7 +165,7 @@ class DshApprovalSessionTest {
                 path.startsWith("/connect") -> {
                     connectCalls.incrementAndGet()
                     assertTrue(path.contains("token=secret-token"))
-                    assertTrue(path.contains("interactions=none"))
+                    assertTrue(path.contains("interactions=answer"))
                     output.write(
                         ("HTTP/1.1 302 Found\r\n" +
                             "Set-Cookie: dsh=api-cookie; Path=/\r\n" +

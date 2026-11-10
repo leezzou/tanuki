@@ -34,11 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.tanuki.web.DshApprovalOutcome
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
-import com.tanuki.web.DshTimelineItem
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -52,11 +50,7 @@ fun DshNativePage(
     controller: DshNativeController,
     modifier: Modifier = Modifier,
     onFallback: (String) -> Unit,
-    onSwitchOfficial: () -> Unit,
-    approvalState: DshApprovalState = DshApprovalState(),
-    onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit = { _, _, _ -> },
-    onApprovalRetry: () -> Unit = {},
-    onClearRemembered: () -> Unit = {}
+    onSwitchOfficial: () -> Unit
 ) {
     val state by controller.state.collectAsState()
     LaunchedEffect(state.unavailableReason) {
@@ -70,10 +64,10 @@ fun DshNativePage(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("原生界面", style = MaterialTheme.typography.titleMedium)
-                    StatusPill("会话只读", true)
+                    StatusPill("只读", true)
                 }
                 Text(
-                    "会话与消息来自官方 DSH 接口；审批只回传官方请求，不修改会话数据",
+                    "会话与消息来自官方 DSH 接口；不修改官方数据",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -104,28 +98,11 @@ fun DshNativePage(
             return@Column
         }
         if (state.sessions.isEmpty()) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                item {
-                    DshApprovalPanel(
-                        state = approvalState,
-                        sessionId = state.selectedId,
-                        onAnswer = onApprovalAnswer,
-                        onRetry = onApprovalRetry,
-                        onClearRemembered = onClearRemembered
-                    )
-                }
-                item {
-                    EmptyNativeState(
-                        title = "官方 DSH 尚无会话",
-                        detail = "在官方界面创建任务后，这里会显示官方会话。原生页不另建会话库。",
-                        onRefresh = controller::refresh
-                    )
-                }
-            }
+            EmptyNativeState(
+                title = "官方 DSH 尚无会话",
+                detail = "在官方界面创建任务后，这里会显示官方会话。原生页不另建会话库。",
+                onRefresh = controller::refresh
+            )
             return@Column
         }
         SessionStrip(state.sessions, state.selectedId, controller::select)
@@ -137,44 +114,24 @@ fun DshNativePage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        val timeline = state.timeline.ifEmpty { state.messages.map { DshTimelineItem.Text(it) } }
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item {
-                DshApprovalPanel(
-                    state = approvalState,
-                    sessionId = state.selectedId,
-                    onAnswer = onApprovalAnswer,
-                    onRetry = onApprovalRetry,
-                    onClearRemembered = onClearRemembered
-                )
-            }
-            if (timeline.isEmpty() && !state.loading && state.error == null) {
+            if (state.messages.isEmpty() && !state.loading && state.error == null) {
                 item {
                     EmptyNativeState(
-                        title = "该会话没有可读事件",
-                        detail = "原生页读取官方 session/page 的文本消息、工具调用与工具结果；附件和图片不在本切片展示。",
+                        title = "该会话没有可读文本消息",
+                        detail = "原生页只读取官方 session/page 的 user/message 与 assistant/message 文本；工具调用、附件和审批不在本切片展示。",
                         onRefresh = { state.selectedId?.let(controller::select) }
                     )
                 }
             }
-            items(timeline, key = { item ->
-                when (item) {
-                    is DshTimelineItem.Text -> "text:${item.seq}"
-                    is DshTimelineItem.Tool -> item.tool.key
-                }
-            }) { item ->
-                when (item) {
-                    is DshTimelineItem.Text -> MessageCard(item.message)
-                    is DshTimelineItem.Tool -> DshToolCard(item.tool)
-                }
-            }
+            items(state.messages, key = { it.seq }) { message -> MessageCard(message) }
             if (state.hasMore) {
                 item {
-                    NativeCaption("仅显示最近一页消息与工具调用；更早历史请在官方界面查看。")
+                    NativeCaption("仅显示最近一页消息；更早历史请在官方界面查看。")
                 }
             }
         }

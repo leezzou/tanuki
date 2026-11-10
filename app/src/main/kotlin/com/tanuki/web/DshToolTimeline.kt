@@ -69,6 +69,7 @@ data class DshToolItem(
 object DshToolTimeline {
     const val MAX_ARGUMENT_CHARS = 8_000
     const val MAX_OUTPUT_CHARS = 12_000
+    const val MAX_MESSAGE_CHARS = 12_000
     const val MAX_DIFF_FILES = 20
     const val MAX_DIFF_TEXT_CHARS = 8_000
     const val MAX_FILE_PATHS = 40
@@ -81,7 +82,7 @@ object DshToolTimeline {
             val type = event.optString("type")
             when (type) {
                 "user/message", "assistant/message" -> {
-                    DshApiProtocol.messageOf(event)?.let { items += DshTimelineItem.Text(it) }
+                    messageOf(event)?.let { items += DshTimelineItem.Text(it) }
                 }
                 "tool/call" -> {
                     val call = parseCall(event) ?: continue
@@ -115,6 +116,40 @@ object DshToolTimeline {
             }
         }
         return items.sortedBy { it.seq }
+    }
+
+
+    /**
+     * 从官方消息事件提取只读文本；这是本切片自带的解析，不依赖 42 独占的
+     * DshNativeApi。只接受 append-origin surface，且 user/message 只认真实用户来源。
+     */
+    private fun messageOf(event: JSONObject): DshMessage? {
+        val role = when (event.optString("type")) {
+            "user/message" -> DshMessageRole.USER
+            "assistant/message" -> DshMessageRole.ASSISTANT
+            else -> return null
+        }
+        if (event.opt("surfaceOp") != "append") return null
+        val data = event.optJSONObject("data") ?: return null
+        if (role == DshMessageRole.USER) {
+            val sourceKind = data.optJSONObject("source")?.optString("kind")
+            if (sourceKind != null && sourceKind != "user") return null
+        }
+        val content = when (role) {
+            DshMessageRole.USER -> data.optJSONArray("content")
+                ?: data.optJSONObject("message")?.optJSONArray("content")
+            DshMessageRole.ASSISTANT -> data.optJSONObject("message")?.optJSONArray("content")
+                ?: data.optJSONArray("content")
+        } ?: return null
+        val text = textOf(content)
+        if (text.isBlank()) return null
+        val bounded = if (text.length <= MAX_MESSAGE_CHARS) text else text.take(MAX_MESSAGE_CHARS) + "…"
+        return DshMessage(
+            seq = event.optInt("seq", 0),
+            role = role,
+            text = bounded,
+            time = event.optLong("time", 0L)
+        )
     }
 
     private fun parseCall(event: JSONObject): PendingTool? {

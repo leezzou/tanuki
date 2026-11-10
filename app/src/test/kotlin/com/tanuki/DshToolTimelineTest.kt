@@ -48,22 +48,43 @@ class DshToolTimelineTest {
         assertEquals("请继续", (timeline[2] as DshTimelineItem.Text).message.text)
     }
 
-    @Test fun parsePageKeepsMessagesAndToolTimelineTogether() {
+    @Test fun timelineKeepsMessagesAndToolCardsTogether() {
         val records = JSONArray()
             .put(userMessage(1, "运行命令"))
             .put(call(2, "c1", "bash", """{"command":"ls"}"""))
             .put(result(3, "c1", "a.txt", isError = false))
-        val body = JSONObject()
-            .put("type", "server-response")
-            .put("rpcId", "rpc-page")
-            .put("result", JSONObject().put("ok", true).put("value", JSONObject()
-                .put("records", records).put("hasMore", false)))
-            .toString()
-        val page = com.tanuki.web.DshApiProtocol.parsePage(body)
-        assertEquals(1, page.messages.size)
-        assertEquals(2, page.timeline.size)
-        assertTrue(page.timeline[1] is DshTimelineItem.Tool)
-        assertEquals("c1", (page.timeline[1] as DshTimelineItem.Tool).tool.callId)
+        val timeline = DshToolTimeline.parse(records)
+        assertEquals(2, timeline.size)
+        assertEquals("运行命令", (timeline[0] as DshTimelineItem.Text).message.text)
+        assertEquals("c1", (timeline[1] as DshTimelineItem.Tool).tool.callId)
+    }
+
+    @Test fun timelineTextOnlyAcceptsAppendOriginAndRealUserSource() {
+        val records = JSONArray()
+            .put(userMessage(1, "真实用户"))
+            .put(event(
+                "user/message", 2,
+                JSONObject()
+                    .put("source", JSONObject().put("kind", "user"))
+                    .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "替换副本"))),
+                JSONObject().put("op", "replace").put("startSeq", 1).put("endSeq", 1)
+            ))
+            .put(event(
+                "user/message", 3,
+                JSONObject()
+                    .put("source", JSONObject().put("kind", "agent"))
+                    .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "注入上下文"))),
+                "append"
+            ))
+            .put(event(
+                "assistant/message", 4,
+                JSONObject().put("message", JSONObject().put(
+                    "content", JSONArray().put(JSONObject().put("type", "text").put("text", "真实回答"))
+                )),
+                "append"
+            ))
+        val texts = DshToolTimeline.parse(records).filterIsInstance<DshTimelineItem.Text>().map { it.message.text }
+        assertEquals(listOf("真实用户", "真实回答"), texts)
     }
 
     @Test fun failedToolResultShowsOfficialReason() {

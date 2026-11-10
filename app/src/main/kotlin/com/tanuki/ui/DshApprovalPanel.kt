@@ -50,7 +50,7 @@ fun DshApprovalPanel(
 ) {
     val pending = state.pendingFor(sessionId)
     val others = state.otherPendingCount(sessionId)
-    if (pending.isEmpty() && others == 0 && state.error == null && !state.connecting) return
+    if (!state.shouldShowPanel()) return
     Column(modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -163,6 +163,20 @@ private fun ApprovalCard(
                 )
                 Text(item.risk.summary, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (item.request.unknownTool) {
+                    Text("官方未提供可识别的工具类型；只能拒绝，不能按记忆自动允许。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                if (item.lookupPending) {
+                    Text("正在按该审批所属会话读取工具参数与风险…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                item.lookupError?.let { lookupError ->
+                    Text(lookupError, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 val arguments = DshToolArguments.pretty(item.arguments)
                 if (arguments != null) {
                     val collapsed = !argumentsExpanded && arguments.length > MAX_COLLAPSED_ARGUMENTS
@@ -194,8 +208,11 @@ private fun ApprovalCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = remember, onCheckedChange = { remember = it },
-                        enabled = ready && !item.answering)
+                    Checkbox(
+                        checked = remember,
+                        onCheckedChange = { remember = it },
+                        enabled = ready && !item.answering && !item.lookupPending && !item.request.unknownTool
+                    )
                     Text("本次运行内记住此工具与风险等级", style = MaterialTheme.typography.labelSmall)
                 }
                 item.error?.let { error ->
@@ -217,7 +234,7 @@ private fun ApprovalCard(
                     onClick = { onAnswer(item.request.eventId, DshApprovalOutcome.REJECTED, remember) }
                 ) { Text("拒绝") }
                 Button(
-                    enabled = ready && !item.answering,
+                    enabled = ready && !item.answering && !item.lookupPending && !item.request.unknownTool,
                     onClick = { onAnswer(item.request.eventId, DshApprovalOutcome.ALLOWED_ONCE, remember) }
                 ) { Text("允许一次") }
             }

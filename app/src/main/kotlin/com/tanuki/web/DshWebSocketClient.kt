@@ -8,6 +8,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -26,7 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DshWebSocketClient(
     private val listener: Listener,
     private val random: SecureRandom = SecureRandom(),
-    private val socketFactory: () -> Socket = { Socket() }
+    private val socketFactory: () -> Socket = { Socket() },
+    private val handshakeTimeoutMs: Int = HANDSHAKE_TIMEOUT_MS
 ) {
     interface Listener {
         fun onOpen()
@@ -38,8 +40,9 @@ class DshWebSocketClient(
     private val closed = AtomicBoolean(false)
     private val failed = AtomicBoolean(false)
     private val writeLock = Any()
-    private var socket: Socket? = null
-    private var output: OutputStream? = null
+    @Volatile private var socket: Socket? = null
+    @Volatile private var output: OutputStream? = null
+    @Volatile private var handshakeComplete = false
     private var reader: Thread? = null
 
     /**
@@ -64,10 +67,15 @@ class DshWebSocketClient(
         val socket = socketFactory()
         try {
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-            socket.soTimeout = 0
+            // 握手阶段必须有界；否则对端接受 TCP 却不返回 Upgrade 头会永久占用 IO 线程。
+            socket.soTimeout = handshakeTimeoutMs
             socket.tcpNoDelay = true
             val input = BufferedInputStream(socket.getInputStream())
             val output = socket.getOutputStream()
+            // 先发布 socket/output，close()/协程取消才能关掉正在握手的连接。
+            this.socket = socket
+            this.output = output
+            this.handshakeComplete = false
             val request = buildString {
                 append("GET ").append(path).append(" HTTP/1.1\r\n")
                 append("Host: ").append(host).append(':').append(port).append("\r\n")
@@ -81,17 +89,21 @@ class DshWebSocketClient(
             }
             output.write(request.toByteArray(Charsets.US_ASCII))
             output.flush()
-            val response = readHeaders(input)
+            val response = readHeaders(input, socket, handshakeTimeoutMs)
             validateHandshake(response, key)
-            this.socket = socket
-            this.output = output
+            this.handshakeComplete = true
+            socket.soTimeout = 0
             listener.onOpen()
             val thread = Thread({ readLoop(input) }, "dsh-approval-stream")
             thread.isDaemon = true
             reader = thread
             thread.start()
         } catch (error: Throwable) {
+            val alreadyClosed = closed.get()
+            close()
             runCatching { socket.close() }
+            if (alreadyClosed) throw IOException("审批通道已关闭")
+            if (error is SocketTimeoutException) throw IOException("DSH 审批通道握手超时")
             if (error is IOException) throw error
             throw IOException("DSH 审批通道连接失败", error)
         }
@@ -99,7 +111,7 @@ class DshWebSocketClient(
 
     /** 发送一条文本帧；连接已关闭或写入失败返回 false，由控制器显示中文错误。 */
     fun sendText(text: String): Boolean {
-        if (closed.get()) return false
+        if (closed.get() || !handshakeComplete) return false
         val payload = text.toByteArray(Charsets.UTF_8)
         if (payload.size > DshApprovalProtocol.MAX_FRAME_BYTES) return false
         val mask = ByteArray(4).also(random::nextBytes)
@@ -120,9 +132,11 @@ class DshWebSocketClient(
     /** 主动关闭；幂等，可在主线程调用，不等待读线程。 */
     fun close() {
         if (!closed.compareAndSet(false, true)) return
+        val wasHandshaking = !handshakeComplete
+        handshakeComplete = false
         runCatching {
             val stream = output
-            if (stream != null) {
+            if (stream != null && !wasHandshaking) {
                 synchronized(writeLock) {
                     stream.write(DshWebSocketFrames.encode(0x8, byteArrayOf(0x03, 0xe8.toByte()), ByteArray(4), fin = true))
                     stream.flush()
@@ -209,11 +223,16 @@ class DshWebSocketClient(
         listener.onFailure(message)
     }
 
-    private fun readHeaders(input: InputStream): String {
+    private fun readHeaders(input: InputStream, socket: Socket, timeoutMs: Int): String {
         val output = ByteArrayOutputStream()
         var matched = 0
         val terminator = byteArrayOf(13, 10, 13, 10)
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
         while (output.size() < MAX_HEADER_BYTES) {
+            // soTimeout 是单次读期限；用总 deadline 防止对端逐字节慢速拖延握手。
+            val remaining = (deadline - System.nanoTime()) / 1_000_000L
+            if (remaining <= 0L) throw SocketTimeoutException("审批通道握手超时")
+            socket.soTimeout = remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val value = input.read()
             if (value < 0) throw EOFException("审批通道握手提前结束")
             output.write(value)
@@ -266,6 +285,7 @@ class DshWebSocketClient(
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 5_000
+        private const val HANDSHAKE_TIMEOUT_MS = 10_000
         private const val MAX_HEADER_BYTES = 8_192
     }
 }

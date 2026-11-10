@@ -59,20 +59,46 @@
 | 文件 | 作用 |
 |---|---|
 | `app/src/main/kotlin/com/tanuki/web/DshUiMode.kt` | 偏好枚举与纯策略：默认官方；只有“用户选原生 + 服务运行 + 无回退原因”才显示原生 |
-| `app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt` | 官方 unary 协议、Cookie 获取、会话/切点/历史解析、`DshNativeClient` |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 原生页状态机；列表失败回退，历史页失败只影响当前会话 |
+| `app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt` | **android_agent-42 独占，本切片不修改**；需要 42 接入 `DshToolTimeline.parse(records)` 与 `timeline` 字段（见下） |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | **android_agent-42 独占，本切片不修改**；需要 42 增加 `timeline` 状态与按 `sessionId+callId` 查询工具的能力 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalProtocol.kt` | 审批帧/回答信封/风险/本次运行记忆的纯协议 |
-| `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | 最小 RFC6455 客户端：loopback、Cookie、Accept 校验、掩码与大小上限 |
+| `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | **临时实现，待收敛到 42 transport**：最小 RFC6455 客户端，loopback、Cookie、Accept 校验、掩码、握手超时与大小上限 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 重认证 |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 审批状态机、连接生命周期、允许/拒绝/记住本次运行 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：状态、命令、diff、文件变更、折叠输出 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 原生页：会话条 + 文本/工具时间线 + 审批面板 + 空态/错误态 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置开关、DSH 页原生/官方切换、回退提示与“重试” |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 偏好持久化、控制器接线、同一 token/同一 DSH 进程 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | **android_agent-42 独占，本切片不修改**；需要 42 挂载 `DshApprovalPanel` 与 `DshToolCard`（见下） |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | **android_agent-44 独占**；设置开关、DSH 页原生/官方切换、回退提示与“重试” |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | **android_agent-42 独占，本切片不修改**；需要 42 创建/释放审批控制器并传入页面（见下） |
 
 偏好文件 `ui`、键 `dsh-ui`，值 `official` / `native`；未知值回到 `official`。设置入口在“设置 → 网页与兼容性 → 界面：官方界面 / 原生界面”。
+
+### 42 接线清单（本切片不修改四个集成文件）
+
+1. `DshNativeApi.kt`
+   - `DshSessionPage` 增加 `timeline: List<DshTimelineItem> = messages.map { DshTimelineItem.Text(it) }`。
+   - `parsePage` 读取 `records` 后调用 `DshToolTimeline.parse(records)`，写入 `timeline`；既有 `messages` 契约不变。
+2. `DshNativeController.kt`
+   - `DshNativeState` 增加 `timeline: List<DshTimelineItem>`；历史成功时 `timeline = page.timeline`，选择/加载/清空时同步清空。
+   - 提供按审批会话读取工具的能力，例如 `suspend fun tool(sessionId: String, callId: String): DshToolItem?`；历史后到时调用 `approvalController.updateTool(sessionId, tool)`。
+3. `DshNativePage.kt`
+   - 增加可选参数：
+     ```kotlin
+     approvalState: DshApprovalState = DshApprovalState(),
+     onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit = { _, _, _ -> },
+     onApprovalRetry: () -> Unit = {},
+     onClearRemembered: () -> Unit = {}
+     ```
+   - 在 `LazyColumn` 首个 `item` 挂 `DshApprovalPanel(state, selectedId, onAnswer, onRetry, onClearRemembered)`。
+   - 时间线 `DshTimelineItem.Text` 渲染 `MessageCard`，`DshTimelineItem.Tool` 渲染 `DshToolCard(tool)`。
+4. `MainActivity.kt`
+   - 复用同一 `endpointProvider` 创建 `DshApprovalController(endpointProvider, lifecycleScope, toolLookup = { sessionId, callId -> ... })`；`toolLookup` 必须按 `sessionId+callId` 查询，不能用当前选中会话的旧快照。
+   - 在原生模式 + 服务 `RUNNING` 时 `start()`；停止/切官方/页面销毁时 `close()`；origin 变化时重建。
+   - 收集 `approvalController.state`，把状态与回调传给 `DshNativePage`。
+5. 通知点击：42 切换 `selectedId` 后，审批面板自然按当前会话过滤；无需新增通知协议。
+
+临时 WebSocket：`DshWebSocketClient.kt` 只作为 `DshApprovalTransport` 的默认实现保留，待 42 的 `DshWebSocket.kt`/transport 可用后替换；不要再扩展它。
 
 ### 切换语义
 
@@ -93,29 +119,31 @@
 - `/connect` 不跟随 302；只从 `Set-Cookie` 取一个 `name=value`，拒绝控制字符。
 - 业务错误只显示短错误码；其他异常经 `Redact.text` 截断；`DshEndpoint.toString()` 显式脱敏 launch URL，避免误日志带出 token。
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
-- 审批 WebSocket 只连 `http://127.0.0.1:<port>/api/remote.mux`，不跟随重定向、不带 `Origin`；握手校验 `Sec-WebSocket-Accept`，客户端帧全部掩码，拒绝服务端掩码帧，单帧/分片消息上限 1 MiB；`error` 帧只显示短错误码。
+- 审批 WebSocket 只连 `http://127.0.0.1:<port>/api/remote.mux`，不跟随重定向、不带 `Origin`；握手校验 `Sec-WebSocket-Accept`，客户端帧全部掩码，拒绝服务端掩码帧，单帧/分片消息上限 1 MiB；握手阶段有总 deadline（默认 10 秒）且先发布可关闭 socket，完成后才切长期流；`error` 帧只显示短错误码。
 - 本地 DSH 重启、远程隧道换端口或安全模式切换会改变 origin：审批控制器检测到 origin 变化会关闭旧连接、清空旧待审批并重建，避免把回答发到错误端点。
 - 请求不带 `Origin` 头；与官方“工具客户端”语义一致。
 
 ## 6. 验证
 
-本轮（android_agent-45，基线 `origin/main=0555c3c`）新跑：
+本轮（android_agent-45，基线 `origin/main=0555c3c`，已合入 `main=533eff4`）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**592 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；基线 535 + 本切片 34 + 合入 PR #34 的 23）。
+- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**602 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；基线 535 + 本切片 44 + 合入 PR #34 的 23）。
 - `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint（既有弃用/可读性告警）。
 - `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（仅打包验证，未安装）。
-- 新增 `DshApprovalProtocolTest` 9 项：ready/waterfall/cancel/error 帧、字段白名单、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆。
-- 新增 `DshToolTimelineTest` 8 项：工具调用与结果配对、失败原因、replace 去重、孤儿结果、长输出截断、diff 行/计数、新建文件、命令/路径参数、`session/page` 文本与工具时间线并存。
-- 新增 `DshWebSocketTest` 5 项：RFC6455 Accept、客户端掩码、拒绝服务端掩码、服务端文本帧、真实 loopback 握手/Cookie/ready/approval/cancel、错误 Accept 拒绝。
-- 新增 `DshApprovalSessionTest` 5 项：`/connect`→`$events`→`$events/result` 全链路、401 重认证一次、HTTP 500 中文错误、缺少端点、非 loopback 拒绝。
-- 新增 `DshApprovalControllerTest` 7 项：允许并记住、同工具/风险自动回答、不同工具/风险不自动、回答失败保留卡片、断线禁用并关闭、连接期间断线不误报已连接、origin 变化重建、关闭清空记忆。
+- 新增 `DshApprovalProtocolTest` 11 项：ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆、未知类型。
+- 新增 `DshToolTimelineTest` 9 项：工具调用与结果配对、失败原因、replace 去重、孤儿结果、长输出截断、diff 行/计数、新建文件、命令/路径参数、文本与工具时间线并存、append-origin/真实用户来源过滤。
+- 新增 `DshWebSocketTest` 7 项：RFC6455 Accept、客户端掩码、拒绝服务端掩码、服务端文本帧、真实 loopback 握手/Cookie/ready/approval/cancel、错误 Accept、握手无响应超时、握手中 close() 解除阻塞。
+- 新增 `DshApprovalSessionTest` 5 项：`/connect`→`$events`→`$events/result` 全链路、401 重认证一次、HTTP 500 中文错误、缺少端点、非 loopback 拒绝；假服务器断言 `interactions=answer`。
+- 新增 `DshApprovalControllerTest` 12 项：允许并记住、同工具/风险自动回答、不同工具/风险不自动、按审批会话取参数、审批先到/历史后到更新并自动回答、未知类型只能拒绝、回答失败保留卡片、断线禁用并关闭、回答中断线后重连仍可回答、连接期间断线不误报已连接、origin 变化重建、记忆存在时面板保持可见、关闭清空记忆。
 - 既有 `DshUiSwitchTest` 10 项、`DshNativeControllerTest` 6 项、`DshNativeApiTest` 12 项继续通过。
+
+Review 修复：审批使用独立 `interactions=answer` Peer；按 `sessionId+callId` 读取参数并支持 `updateTool` 后到更新；记忆存在时保留清除入口；断线按代次释放 answering 标记；握手期有界超时且先发布可关闭 socket；未知审批类型只能拒绝。
 
 未验证：
 
 - 真实 Android 设备/模拟器上的原生页布局、暗色模式、大字体、长参数/长 diff、输出折叠与滚动、全屏与返回。
-- 真实 PRoot 内 DSH `0.2.1-rc.5` 的 `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue。
+- 真实 PRoot 内 DSH `0.2.1-rc.5` 的 `/connect`（answer Peer）、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue。
 - 远程 SSH 隧道后的审批流；通知点击后待审批列表过滤。
 - WebSocket `session/follow`、`session/control`、用户提问；聊天发送、取消、附件、模型选择。
 - 低版本 DSH 缺少 `session/list` 或 `$events` 时的回退只在代码层验证。

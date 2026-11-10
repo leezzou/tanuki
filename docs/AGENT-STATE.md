@@ -15,8 +15,9 @@
 
 ### 原生审批/权限/工具调用切片（android_agent-45，进行中）
 
-- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`；新增官方 `$events` 审批流与 `$events/result` 回答、工具调用时间线/卡片（运行中/成功/失败、命令、diff、文件变更、折叠输出）、本次运行内的“记住选择”（仅内存，不写 DSH 配置）。
-- 已验证：`compileModernDebugKotlin`、合入 `main=533eff4` 后完整 `testModernDebugUnitTest` 592 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 0 errors / 94 warnings；设备、真实 PRoot DSH、远程 SSH 隧道、安全模式 rescue 与 Android 仪器/真机未验证；`assembleModernDebug` 已通过（未安装）。PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；不合并、不发布。详见 [交接](handoffs/20261110-1139-native-approval-tools.md)。
+- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`；新增官方 `$events` 审批流（独立 `interactions=answer` Peer）与 `$events/result` 回答、工具调用时间线/卡片（运行中/成功/失败、命令、diff、文件变更、折叠输出）、本次运行内的“记住选择”（仅内存，不写 DSH 配置）。
+- 归属：`DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`/`MainActivity.kt` 由 android_agent-42 独占，本切片已撤回这四个文件的改动，42 接线清单见 [原生界面文档](NATIVE-UI.md)；`DshWebSocketClient.kt` 为临时实现，待收敛到 42 transport。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 602 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 0 errors / 94 warnings、`assembleModernDebug`（未安装）；5 项 Codex Review（answer Peer、按审批会话取参数、记忆撤回入口、断线代次清理、握手超时）已修复并补回归。设备、真实 PRoot DSH、远程 SSH 隧道、安全模式 rescue 与 Android 仪器/真机未验证。PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；不合并、不发布。详见 [交接](handoffs/20261110-1139-native-approval-tools.md)。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 

@@ -215,7 +215,7 @@ class DshApprovalSession(
     }
 
     private fun exchangeCookie(endpoint: DshEndpoint): String {
-        val url = DshApiProtocol.connectUrl(endpoint) ?: throw IOException("DSH 启动地址无效")
+        val url = DshApprovalProtocol.connectUrl(endpoint) ?: throw IOException("DSH 启动地址无效")
         val connection = try { open(url) } catch (_: IOException) {
             throw IOException("DSH 审批通道认证失败")
         }

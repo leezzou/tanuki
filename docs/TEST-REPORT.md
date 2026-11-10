@@ -125,12 +125,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
 
-- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
-- 新增：`DshApprovalProtocol`（帧/回答信封/风险/本次运行记忆）、`DshWebSocketClient`（最小 RFC6455）、`DshApprovalSession`（`/connect`→`$events`→`$events/result`，401 重认证）、`DshToolTimeline`（工具/命令/diff/文件变更）、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`；`DshNativeApi`/`DshNativeController`/`DshNativePage`/`MainActivity` 只做增量接线。
-- 新增 JVM 回归 34 项：`DshApprovalProtocolTest` 9、`DshToolTimelineTest` 8、`DshWebSocketTest` 5、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 7。覆盖 ready/waterfall/cancel/error 帧、字段白名单、官方回答信封、风险分级、本次运行记忆、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
+- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 归属边界：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 由 android_agent-42 独占，本切片已从这四个文件撤回改动；新增文件为 `DshApprovalProtocol`、`DshWebSocketClient`（临时，待收敛到 42 transport）、`DshApprovalSession`、`DshToolTimeline`、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`。42 接线清单见 [原生界面文档](NATIVE-UI.md)。
+- Review 修复（5 项）：
+  - P1 审批认证改用独立 `interactions=answer` Peer；只读列表继续 `none`；假服务器改为断言 `answer`。
+  - P2 收到审批后按 `request.sessionId + callId` 异步读取该审批所属会话的工具调用；历史后到用 `updateTool(sessionId, tool)` 更新参数/风险，再按本次运行记忆决定自动回答；新增非当前会话与“审批先到、历史后到”回归。
+  - P2 有“记住的选择”时面板保持可见，保留“清除记住的选择”入口；新增纯状态回归。
+  - P2 断线时清空 answering 代次标记；旧回答退出按代次校验，不误伤重连后的卡片；新增回答中断线后重连回答回归。
+  - P2 WebSocket 握手阶段设置可关闭的有界读超时，先发布 socket，握手完成后再切长期流；新增“接受 TCP 但不返回 Upgrade 头”和“握手中 close()”回归。
+  - 额外安全：未知/非法 `toolName` 显示“未知审批”，只能拒绝，不能按记忆自动允许；新增协议与控制器回归。
+- 新增 JVM 回归 44 项：`DshApprovalProtocolTest` 11、`DshToolTimelineTest` 9、`DshWebSocketTest` 7、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 12。覆盖 ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方回答信封、风险分级、本次运行记忆、未知类型拒绝、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/握手超时/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
 - 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：
   - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL。
-  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**592 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；0.1.10 基线 535 + 本切片 34 + 合入 PR #34 的 23）。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**602 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；0.1.10 基线 535 + 本切片 44 + 合入 PR #34 的 23）。
   - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 94 warnings / 1 hint**（存量弃用/可读性告警）。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL（仅打包验证，未安装）。
 - 未验证：真实 Android 设备/模拟器上的原生审批卡片布局、深色主题、大字体、长参数/长 diff、输出折叠与滚动；真实 PRoot 内 DSH `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue；远程 SSH 隧道后的审批流；通知点击后待审批列表过滤；Android 仪器/真机未执行。以上不能计为设备通过。

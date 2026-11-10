@@ -1,6 +1,7 @@
 package com.tanuki.web
 
 import org.json.JSONObject
+import java.net.URI
 import java.util.UUID
 
 /**
@@ -27,7 +28,9 @@ data class DshApprovalRequest(
     val toolName: String,
     val callId: String? = null,
     val reason: String? = null,
-    val displayReason: String? = null
+    val displayReason: String? = null,
+    /** 官方 toolName 缺失/非法；界面只能拒绝，不能按记忆自动允许。 */
+    val unknownTool: Boolean = false
 )
 
 /** `/api/remote.mux` `$events` 流中本切片关心的事件。 */
@@ -58,6 +61,31 @@ object DshApprovalProtocol {
     const val MAX_FRAME_BYTES = 1_048_576
     const val MAX_TOOL_NAME_CHARS = 128
     const val MAX_REASON_CHARS = 2_000
+
+    /**
+     * 审批必须使用 `interactions=answer` 的 API Peer。
+     *
+     * 官方 gateway 的 `$events` 打开与 `$events/result` 回答都会调用
+     * `requireInteractions()`，只接受 `answer`；只读列表继续使用 `none`，
+     * 两者不能共用同一个 `/connect` 结果。
+     */
+    fun connectUrl(endpoint: DshEndpoint): String? = runCatching {
+        if (!DshApiProtocol.validOrigin(endpoint.origin) ||
+            !OriginPolicy.sameOrigin(endpoint.launchUrl, endpoint.origin)
+        ) return null
+        val uri = URI(endpoint.launchUrl)
+        val query = uri.rawQuery ?: return null
+        val parts = query.split('&').filter { it.isNotBlank() }
+        val hasToken = parts.any { part ->
+            part.substringBefore('=').equals("token", ignoreCase = true) &&
+                part.substringAfter('=', "").isNotBlank()
+        }
+        if (!hasToken) return null
+        val withoutInteractions = parts.filterNot {
+            it.substringBefore('=').equals("interactions", ignoreCase = true)
+        }
+        "${endpoint.origin}/connect?${withoutInteractions.joinToString("&")}&interactions=answer"
+    }.getOrNull()
 
     fun newStreamId(): String = UUID.randomUUID().toString()
 
@@ -127,8 +155,8 @@ object DshApprovalProtocol {
         val sessionId = value.optString("agentId")
         if (!safeId(eventId, 128) || !safeId(sessionId, 128)) return DshEventFrame.Ignored
         val request = value.optJSONObject("request") ?: return DshEventFrame.Ignored
-        val toolName = request.optString("toolName").trim()
-        if (toolName.isBlank() || toolName.length > MAX_TOOL_NAME_CHARS) return DshEventFrame.Ignored
+        val rawToolName = request.optString("toolName").trim()
+        val knownTool = rawToolName.isNotBlank() && rawToolName.length <= MAX_TOOL_NAME_CHARS
         // 只读取白名单字段；request 里的其他内容不复制到原生层。
         val callId = request.optString("callId").takeIf { safeId(it, 128) }
         val reason = text(request, "reason")
@@ -137,10 +165,11 @@ object DshApprovalProtocol {
             DshApprovalRequest(
                 eventId = eventId,
                 sessionId = sessionId,
-                toolName = toolName,
+                toolName = if (knownTool) rawToolName else "未知审批",
                 callId = callId,
                 reason = reason,
-                displayReason = displayReason
+                displayReason = displayReason,
+                unknownTool = !knownTool
             )
         )
     }

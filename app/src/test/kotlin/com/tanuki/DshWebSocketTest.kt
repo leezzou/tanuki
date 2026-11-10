@@ -121,6 +121,56 @@ class DshWebSocketTest {
         serverThread.join(2_000)
     }
 
+    @Test fun handshakeTimesOutWhenServerAcceptsButNeverReplies() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val serverThread = thread(name = "fake-ws-silent") {
+            runCatching { server.accept().use { Thread.sleep(1_500) } }
+        }
+        val client = DshWebSocketClient(object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) = Unit
+        }, handshakeTimeoutMs = 300)
+        try {
+            client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+            fail("握手无响应必须超时")
+        } catch (error: IOException) {
+            assertTrue(error.message!!.contains("握手超时"))
+        } finally {
+            client.close()
+            server.close()
+            serverThread.join(2_000)
+        }
+    }
+
+    @Test fun closeDuringHandshakeUnblocksConnect() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val serverThread = thread(name = "fake-ws-silent-close") {
+            runCatching { server.accept().use { Thread.sleep(2_000) } }
+        }
+        val client = DshWebSocketClient(object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) = Unit
+        }, handshakeTimeoutMs = 5_000)
+        val error = AtomicReference<Throwable?>()
+        val connectThread = thread(name = "client-connect") {
+            error.set(runCatching {
+                client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+            }.exceptionOrNull())
+        }
+        Thread.sleep(250)
+        client.close()
+        connectThread.join(2_000)
+        assertFalse("close() 后 connect 仍阻塞", connectThread.isAlive)
+        assertTrue(error.get() is IOException)
+        assertTrue(error.get()!!.message!!.contains("已关闭"))
+        server.close()
+        serverThread.join(2_000)
+    }
+
     @Test fun rejectsHandshakeWithWrongAccept() {
         val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
         val serverThread = thread(name = "fake-ws-bad-accept") {
