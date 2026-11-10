@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.web.DshApprovalOutcome
+import com.tanuki.web.DshRememberedChoice
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
@@ -75,7 +77,9 @@ fun DshNativePage(
     approvalState: DshApprovalState = DshApprovalState(),
     onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit = { _, _, _ -> },
     onApprovalRetry: () -> Unit = {},
-    onClearRemembered: () -> Unit = {}
+    onClearRemembered: () -> Unit = {},
+    onForgetRemembered: (DshRememberedChoice) -> Unit = {},
+    onDismissNotice: () -> Unit = {}
 ) {
     val state by controller.state.collectAsState()
     val composerState by composer.state.collectAsState()
@@ -83,7 +87,7 @@ fun DshNativePage(
     val sendTracker = remember(composer) { DshComposerSendTracker() }
     var composerFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
     var composerPendingText by remember { mutableStateOf("") }
-    var approvalFocusRequest by remember { mutableIntStateOf(0) }
+    var showApprovalSheet by rememberSaveable { mutableStateOf(false) }
     // 输入栏的真实发送链路在 composer；这里只观察其公开状态，失败时保留本次提交原文。
     LaunchedEffect(composerState.sending, composerState.error) {
         if (composerState.sending) {
@@ -130,20 +134,20 @@ fun DshNativePage(
             return@Column
         }
         SessionStrip(state.sessions, state.selectedId, controller::select)
-        ApprovalDockBar(approvalState, state.selectedId) { approvalFocusRequest++ }
+        DshApprovalEntryBar(
+            state = approvalState,
+            sessionId = state.selectedId,
+            onClick = { showApprovalSheet = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+        )
         Box(Modifier.weight(1f)) {
             MessageList(
                 state = state,
-                approvalState = approvalState,
-                onApprovalAnswer = onApprovalAnswer,
-                onApprovalRetry = onApprovalRetry,
-                onClearRemembered = onClearRemembered,
                 onRetryFailed = { scope.launch { controller.retryFailedPrompt() } },
                 onFillFailed = { text -> composer.updateText(text) },
                 composerFailure = composerFailure,
                 composerPendingText = composerPendingText,
                 composerSending = composerState.sending,
-                approvalFocusRequest = approvalFocusRequest,
                 onRetryComposer = { composer.send() },
                 onFillComposer = { text -> composer.updateText(text) }
             )
@@ -172,6 +176,18 @@ fun DshNativePage(
         }
         DshComposerBar(composer, Modifier.fillMaxWidth())
     }
+    DshApprovalSheet(
+        visible = showApprovalSheet,
+        onDismiss = { showApprovalSheet = false },
+        state = approvalState,
+        sessionId = state.selectedId,
+        sessionTitle = state.selectedSession?.displayTitle,
+        onAnswer = onApprovalAnswer,
+        onRetry = onApprovalRetry,
+        onClearRemembered = onClearRemembered,
+        onForgetRemembered = onForgetRemembered,
+        onDismissNotice = onDismissNotice
+    )
 }
 
 @Composable
@@ -202,16 +218,11 @@ private fun Header(state: DshNativeState, onRefresh: () -> Unit, onSwitchOfficia
 @Composable
 private fun MessageList(
     state: DshNativeState,
-    approvalState: DshApprovalState,
-    onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit,
-    onApprovalRetry: () -> Unit,
-    onClearRemembered: () -> Unit,
     onRetryFailed: () -> Unit,
     onFillFailed: (String) -> Unit,
     composerFailure: DshFailedPrompt?,
     composerPendingText: String,
     composerSending: Boolean,
-    approvalFocusRequest: Int,
     onRetryComposer: () -> Unit,
     onFillComposer: (String) -> Unit
 ) {
@@ -250,13 +261,6 @@ private fun MessageList(
         // 用户手势进行中不抢滚动；手势结束后由 followAfterDrag 决定是否恢复。
         if (following && totalItems > 0 && !listState.isScrollInProgress) listState.scrollToBottom()
     }
-    // 审批停靠条固定可见；点击后回到顶部审批面板，并暂停自动跟随，避免又被滚走。
-    LaunchedEffect(approvalFocusRequest) {
-        if (approvalFocusRequest > 0 && listState.layoutInfo.totalItemsCount > 0) {
-            following = false
-            listState.animateScrollToItem(0)
-        }
-    }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -265,15 +269,6 @@ private fun MessageList(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item(key = "approval", contentType = "approval") {
-                DshApprovalPanel(
-                    state = approvalState,
-                    sessionId = state.selectedId,
-                    onAnswer = onApprovalAnswer,
-                    onRetry = onApprovalRetry,
-                    onClearRemembered = onClearRemembered
-                )
-            }
             if (window.hasEarlier) {
                 item(key = "earlier", contentType = "earlier") {
                     EarlierMessagesButton(
@@ -351,39 +346,6 @@ private fun MessageList(
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
             ) { Text("↓ 最新") }
-        }
-    }
-}
-
-@Composable
-private fun ApprovalDockBar(
-    state: DshApprovalState,
-    sessionId: String?,
-    onOpen: () -> Unit
-) {
-    val pending = state.pendingFor(sessionId)
-    val other = state.otherPendingCount(sessionId)
-    val dock = remember(pending, other) {
-        DshApprovalDockPolicy.describe(pending.map { it.request.toolName }, other)
-    } ?: return
-    Surface(
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-    ) {
-        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                dock.text,
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (dock.count > 0) {
-                TextButton(onClick = onOpen) { Text("查看审批") }
-            }
         }
     }
 }

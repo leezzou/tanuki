@@ -1,6 +1,5 @@
 package com.tanuki
 
-import com.tanuki.ui.DshApprovalDockPolicy
 import com.tanuki.ui.DshAttachmentPolicy
 import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.MemoryDshDraftStore
@@ -119,19 +118,6 @@ class DshChatRenderTest {
                 DshImageSampling.fits(dimension, dimension, sample)
             )
         }
-    }
-
-    @Test fun approvalDockSummarizesCurrentAndOtherSessions() {
-        assertEquals(null, DshApprovalDockPolicy.describe(emptyList(), otherCount = 0))
-        val single = DshApprovalDockPolicy.describe(listOf("Bash"), otherCount = 0)!!
-        assertEquals(1, single.count)
-        assertTrue(single.text.contains("Bash"))
-        val multiple = DshApprovalDockPolicy.describe(listOf("Bash", "Write"), otherCount = 2)!!
-        assertEquals(2, multiple.count)
-        assertTrue(multiple.text.contains("2 项"))
-        assertTrue(multiple.text.contains("其他会话 2 项"))
-        val unknown = DshApprovalDockPolicy.describe(listOf(""), otherCount = 0)!!
-        assertTrue(unknown.text.contains("未知工具"))
     }
 
     @Test fun realComposerSendFailureFlowsIntoFailureCardState() = runBlocking {

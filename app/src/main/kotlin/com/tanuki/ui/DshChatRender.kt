@@ -135,27 +135,6 @@ object DshImageSampling {
     }
 }
 
-/** 审批停靠条文案；当前会话有待审批时始终提供可见入口。 */
-data class DshApprovalDock(
-    val count: Int,
-    val otherCount: Int,
-    val text: String
-)
-
-object DshApprovalDockPolicy {
-    fun describe(toolNames: List<String>, otherCount: Int): DshApprovalDock? {
-        if (toolNames.isEmpty()) return null
-        val first = toolNames.first().ifBlank { "未知工具" }
-        val base = if (toolNames.size == 1) {
-            "待审批：$first"
-        } else {
-            "待审批 ${toolNames.size} 项 · 最近：$first"
-        }
-        val text = if (otherCount > 0) "$base；其他会话 $otherCount 项" else base
-        return DshApprovalDock(toolNames.size, otherCount, text)
-    }
-}
-
 /**
  * 输入栏真实发送链路的观察器。
  *

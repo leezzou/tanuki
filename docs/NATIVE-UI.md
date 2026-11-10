@@ -64,7 +64,6 @@
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalProtocol.kt` | 审批帧/回答信封/风险/本次运行记忆的纯协议 |
 | `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | **临时实现，待收敛到 42 transport**：最小 RFC6455 客户端，loopback、Cookie、Accept 校验、掩码、握手超时与大小上限 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 断开重连/独立 Peer |
-| `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 审批状态机、连接生命周期、允许/拒绝/记住本次运行 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：来源、工具名、风险等级、参数摘要/长参数折叠、逐条编号、高风险二次确认、允许/拒绝/记住；记忆列表可逐条撤销/全部清除 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalSheet.kt` | 审批入口窄条 `DshApprovalEntryBar` 与底部抽屉 `DshApprovalSheet`；窄条只显示数量和风险，不把待审批卡片散落在消息流 |
@@ -117,7 +116,7 @@
 - 链接：`http/https/mailto/tel` 点击先弹确认框，确认后才调起系统应用；`javascript/data/intent/file/content` 等直接拒绝并给中文原因，附件/相对路径只提示需要工作区授权。
 - 图片/附件：Markdown 图片显示占位卡片与中文原因；本地/内嵌图片点击后在对话框按尺寸采样解码，失败显示“图片加载失败：文件不可读、已损坏或格式不支持”；远程图片保持不自动联网。附件链接显示占位卡片，可查看地址/复制，不静默读取工作区文件。
 - 发送状态：发送中显示占位气泡与进度圈；失败保留原文、可读原因、“重试/填入输入框/复制内容”；错误 banner 提供中文提示与“复制错误”，不隐藏原始短错误码。
-- 审批入口：待审批时在消息区上方固定显示审批停靠条（条数 + 最近工具 + “查看审批”）；点击回到顶部审批面板并暂停自动跟随，长历史自动滚到底部也不会把允许/拒绝按钮完全藏掉。
+- 审批入口：使用 53 的 `DshApprovalEntryBar` 固定在消息区上方，点击打开 `DshApprovalSheet` 底部抽屉逐条处理；自动滚到底部不影响入口条可见。
 - 发送状态：观察输入栏真实 `DshComposerController` 的 sending/error 变化，发送中显示占位，失败保留本次提交原文并提供重试/回填/复制；不再只依赖控制器内部的发送路径。
 - 评审修复：图片采样只按原始宽高除以 2 的幂采样（8192→4、32768→16）；新流空串重置在帧合并中保留；补图片采样、审批停靠条、composer 失败跟踪与跨 start 流式回归。
 - 未验证：真实设备上的链接点击、文本选择与链接手势冲突、图片解码内存、长代码/表格滚动、深色/大字体、低端机帧率；审批停靠条与 composer 失败卡片的设备界面未验。
@@ -181,6 +180,13 @@
    - 若官方计划审阅是 `user-questions/request` 或独立 waterfall，集成方可调用 `DshPlanParser.fromReviewPayload(seq, id, request)`，默认得到 `review=AWAITING`；解析失败时回退官方界面，不猜计划内容。
    - 真实字段以合成回归为准，未在真实 PRoot DSH 验证。
 
+### 51 接线状态（2026-11-10）
+
+- 已接入 `DshApprovalEntryBar` + `DshApprovalSheet`：入口条固定在消息区上方，点击打开底部抽屉；`onForgetRemembered`/`onDismissNotice` 已从 `MainActivity` 传入。消息流不再直接挂 `DshApprovalPanel`。
+- 已用 `DshToolMerge.merge` 替换 `DshNativeController` 私有 `mergeTools`，并补 startedAt/finishedAt 保留回归。
+- `DshPlanCard`/`DshPlanParser` 组件随 #47 合入，但计划状态解析与审阅 RPC 本次未接线；仍按组件 hook 等待后续集成。
+- 设备上的入口条/抽屉、长历史初始审批、A→B 会话切换与手势未验证。
+
 ### 切换语义
 
 - 默认官方界面；不改变现有 WebView 加载、Cookie、同源策略或 DSH 启动参数。
@@ -209,8 +215,8 @@
 46 渲染质量切片（2026-11-10，基线 `origin/main=4f2a3717`，非设备）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 16 项、`DshNativeControllerTest` 21 项：52 tests / 0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**824 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。
+- 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 15 项、`DshNativeControllerTest` 22 项：52 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**851 tests / 93 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。
 - 覆盖：窗口/底部判定、流式累计/增量/去重/重置、链接协议拒绝、图片/附件分类、错误分类、代码/表格上限、Markdown 块与行内语法、控制器按帧合并/committed 取消/失败重试。
 - 未执行：真实 Android 设备、PRoot DSH、仪器测试、assemble；JVM 与 lint 不能替代设备验收。
 

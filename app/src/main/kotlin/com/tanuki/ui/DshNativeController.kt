@@ -9,7 +9,7 @@ import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshToolItem
-import com.tanuki.web.DshToolStatus
+import com.tanuki.web.DshToolMerge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -333,7 +333,7 @@ class DshNativeController(
                         live = true,
                         liveError = null,
                         messages = mergeMessages(state.messages, event.messages, replace = true),
-                        tools = mergeTools(state.tools, event.tools),
+                        tools = DshToolMerge.merge(state.tools, event.tools),
                         hasMore = event.hasMore,
                         streamingText = event.liveText
                     )
@@ -349,7 +349,7 @@ class DshNativeController(
                 }
             }
             is DshLiveEvent.Timeline -> _state.update { state ->
-                state.copy(tools = mergeTools(state.tools, event.tools))
+                state.copy(tools = DshToolMerge.merge(state.tools, event.tools))
             }
             is DshLiveEvent.Streaming -> scheduleStreaming(event.text)
             is DshLiveEvent.Finished -> {
@@ -444,7 +444,7 @@ class DshNativeController(
                     state.copy(
                         loading = false,
                         messages = mergeMessages(state.messages, page.messages, replace = true),
-                        tools = mergeTools(
+                        tools = DshToolMerge.merge(
                             state.tools,
                             page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
                         ),
@@ -501,34 +501,6 @@ class DshNativeController(
         return page.timeline.filterIsInstance<DshTimelineItem.Tool>()
             .map { it.tool }
             .firstOrNull { it.callId == callId }
-    }
-
-    /** 同一 callId 的 tool/result 回填调用卡片；保留先到的名称/参数，只更新结果字段。 */
-    private fun mergeTools(current: List<DshToolItem>, incoming: List<DshToolItem>): List<DshToolItem> {
-        if (incoming.isEmpty()) return current
-        val merged = LinkedHashMap<String, DshToolItem>()
-        current.forEach { merged[it.callId] = it }
-        incoming.forEach { item ->
-            val previous = merged[item.callId]
-            // 迟到的历史页可能仍是 RUNNING；已经收到终态的卡片不能被回退。
-            if (previous != null && previous.status != DshToolStatus.RUNNING &&
-                item.status == DshToolStatus.RUNNING
-            ) return@forEach
-            merged[item.callId] = if (previous == null) item else previous.copy(
-                name = item.name.takeIf { it.isNotBlank() && it != "未知工具" } ?: previous.name,
-                arguments = item.arguments ?: previous.arguments,
-                status = item.status,
-                output = item.output ?: previous.output,
-                error = item.error ?: previous.error,
-                command = item.command ?: previous.command,
-                cwd = item.cwd ?: previous.cwd,
-                diffs = item.diffs.ifEmpty { previous.diffs },
-                files = item.files.ifEmpty { previous.files },
-                outputTruncated = item.outputTruncated || previous.outputTruncated,
-                risk = item.risk
-            )
-        }
-        return merged.values.sortedBy { it.seq }.takeLast(200)
     }
 
     private fun messageOf(error: Throwable): String = when (error) {

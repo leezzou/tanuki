@@ -606,7 +606,9 @@ class MainActivity : ComponentActivity() {
                                 approvalController.answer(eventId, outcome, remember)
                             },
                             onApprovalRetry = approvalController::retry,
-                            onClearRemembered = approvalController::clearRemembered
+                            onClearRemembered = approvalController::clearRemembered,
+                            onForgetRemembered = approvalController::forgetRemembered,
+                            onDismissNotice = approvalController::dismissNotice
                         )
                     },
                     browserOpenRequest = browserOpenRequest,
