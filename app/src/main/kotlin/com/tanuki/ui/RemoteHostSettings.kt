@@ -33,8 +33,9 @@ import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.RemoteAuthType
 import com.tanuki.runtime.RemoteHostConfig
 import com.tanuki.runtime.RemotePhase
+import com.tanuki.runtime.RemoteRelayPairing
 
-/** 设置页的远程主机入口；只做直连 SSH 隧道，不涉及中继/WebRTC。 */
+/** 设置页的远程主机入口；支持直连 SSH，以及无公网 IP 时经 TLS 中继的反向注册配对。 */
 @Composable
 fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
     var editing by remember { mutableStateOf(false) }
@@ -46,7 +47,7 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
         Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("远程主机", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "通过直连 SSH 把远程 DSH 的 loopback 端口转发到本机；中继与 WebRTC 不在本切片内。",
+                "直连 SSH 或经 TLS 中继把远程 DSH 的 loopback 端口转发到本机；中继只转发 SSH 密文，WebRTC/TURN 不在本切片内。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -79,7 +80,14 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
                     }
                 }
                 if (saved != null) {
-                    RemoteFact("已保存", "${saved.user}@${saved.host}:${saved.sshPort}")
+                    if (saved.relay != null) {
+                        RemoteFact("连接方式", "TLS 中继")
+                        RemoteFact("中继", saved.relay.endpointLabel())
+                        RemoteFact("房间", saved.relay.roomId.take(8) + "…")
+                        RemoteFact("主机", saved.displayName())
+                    } else {
+                        RemoteFact("已保存", "${saved.user}@${saved.host}:${saved.sshPort}")
+                    }
                     RemoteFact("远程 DSH", "127.0.0.1:${saved.remoteDshPort}")
                 }
             }
@@ -119,7 +127,7 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
                     TextButton(onClick = { confirmForget = true }, enabled = !model.remoteBusy) { Text("清除配置与主机密钥") }
                 }
                 Text(
-                    "当前切片支持 RSA/ECDSA 私钥与密码认证；Ed25519 私钥/主机密钥需要额外 BouncyCastle，留待后续。SSH 隧道只转发到远程 127.0.0.1，不开放远程端口到局域网。",
+                    "当前切片支持 RSA/ECDSA 私钥与密码认证；Ed25519 私钥/主机密钥需要额外 BouncyCastle，留待后续。SSH 隧道只转发到远程 127.0.0.1，不开放远程端口到局域网。中继模式仍由本机核对远程 SSH 主机密钥。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -183,20 +191,35 @@ private fun RemoteHostDialog(model: TanukiUiModel, c: TanukiUiCallbacks, onDismi
     var passphrase by remember(initial) { mutableStateOf(initial?.passphrase.orEmpty()) }
     var remoteDshPort by remember(initial) { mutableStateOf(initial?.remoteDshPort?.toString() ?: "3080") }
     var token by remember(initial) { mutableStateOf(initial?.token.orEmpty()) }
+    var relayUri by remember(initial) { mutableStateOf(initial?.relay?.toUri().orEmpty()) }
+    var pairingError by remember { mutableStateOf("") }
     var connecting by remember { mutableStateOf(false) }
     val busy = model.remoteBusy
 
-    fun config(): RemoteHostConfig = RemoteHostConfig(
-        host = host,
-        sshPort = sshPort.toIntOrNull() ?: -1,
-        user = user,
-        auth = auth,
-        password = password,
-        privateKey = privateKey,
-        passphrase = passphrase,
-        remoteDshPort = remoteDshPort.toIntOrNull() ?: -1,
-        token = token
-    )
+    fun config(): RemoteHostConfig? {
+        val trimmed = relayUri.trim()
+        val relay = if (trimmed.isEmpty()) {
+            null
+        } else {
+            RemoteRelayPairing.parse(trimmed).getOrElse {
+                pairingError = it.message ?: "配对链接格式无效"
+                return null
+            }
+        }
+        pairingError = ""
+        return RemoteHostConfig(
+            host = host.trim().ifBlank { relay?.displayName().orEmpty() },
+            sshPort = sshPort.toIntOrNull() ?: -1,
+            user = user,
+            auth = auth,
+            password = password,
+            privateKey = privateKey,
+            passphrase = passphrase,
+            remoteDshPort = remoteDshPort.toIntOrNull() ?: -1,
+            token = token,
+            relay = relay
+        )
+    }
 
     LaunchedEffect(busy, connecting) {
         if (connecting && busy) onDismiss()
@@ -210,7 +233,18 @@ private fun RemoteHostDialog(model: TanukiUiModel, c: TanukiUiCallbacks, onDismi
                 Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedTextField(host, { host = it }, label = { Text("主机（IPv4/IPv6/域名）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    relayUri, { relayUri = it; pairingError = "" },
+                    label = { Text("配对链接（可选，含一次性密钥）") },
+                    minLines = 2, maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "粘贴主机端 agent 生成的 tanuki-relay:// 链接即经 TLS 中继连接；留空使用直连 SSH。链接含一次性配对密钥，不要截图或转发给他人。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(host, { host = it }, label = { Text("主机（直连地址；中继时作展示名，可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(sshPort, { sshPort = it }, label = { Text("SSH 端口") }, singleLine = true, modifier = Modifier.weight(1f))
                     OutlinedTextField(user, { user = it }, label = { Text("用户名") }, singleLine = true, modifier = Modifier.weight(1.4f))
@@ -275,13 +309,15 @@ private fun RemoteHostDialog(model: TanukiUiModel, c: TanukiUiCallbacks, onDismi
                         TextButton(onClick = c.cancelRemoteHostKey, enabled = !busy) { Text("取消") }
                     }
                 }
-                if (model.remoteError.isNotBlank()) {
+                if (pairingError.isNotBlank()) {
+                    Text(pairingError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                } else if (model.remoteError.isNotBlank()) {
                     Text(model.remoteError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 } else if (model.remoteMessage.isNotBlank()) {
                     Text(model.remoteMessage, style = MaterialTheme.typography.bodySmall)
                 }
                 Text(
-                    "直连切片：只建立 SSH 本地端口转发，失败自动回退本地。中继/WebRTC 后续实现。",
+                    "直连或中继都只建立 SSH 本地端口转发，失败自动回退本地；中继/WebRTC 打洞后续实现。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -290,15 +326,17 @@ private fun RemoteHostDialog(model: TanukiUiModel, c: TanukiUiCallbacks, onDismi
         confirmButton = {
             TextButton(
                 onClick = {
-                    c.connectRemoteHost(config())
-                    connecting = true
+                    config()?.let {
+                        c.connectRemoteHost(it)
+                        connecting = true
+                    }
                 },
                 enabled = !busy
             ) { Text("保存并连接") }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { c.testRemoteHost(config()) }, enabled = !busy) { Text("测试连接") }
+                TextButton(onClick = { config()?.let { c.testRemoteHost(it) } }, enabled = !busy) { Text("测试连接") }
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
             }
         }
