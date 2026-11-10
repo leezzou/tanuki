@@ -62,6 +62,14 @@ class TanukiLayoutPolicyTest {
         assertEquals(2, TanukiLayoutPolicy.actionColumns(widthDp = 700, fontScale = 1f))
     }
 
+    @Test fun drawerWidthFitsNarrowScreensWithoutOverflow() {
+        assertEquals(288, TanukiLayoutPolicy.drawerWidthDp(320))
+        assertEquals(324, TanukiLayoutPolicy.drawerWidthDp(360))
+        assertEquals(360, TanukiLayoutPolicy.drawerWidthDp(600))
+        assertTrue(TanukiLayoutPolicy.drawerWidthDp(320) < 320)
+        assertTrue(TanukiLayoutPolicy.drawerWidthDp(360) < 360)
+    }
+
     @Test fun touchTargetGrowsWithFontButNeverShrinks() {
         assertEquals(48, TanukiLayoutPolicy.minimumTouchTargetDp(0.85f))
         assertEquals(48, TanukiLayoutPolicy.minimumTouchTargetDp(1f))

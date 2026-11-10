@@ -29,6 +29,24 @@ class TanukiNavigationPolicyTest {
         assertEquals(TanukiBackAction.CloseOverlay("模型选择"), TanukiBackPolicy.decide(context))
     }
 
+    @Test fun drawerClosesBeforeFullscreenAndPage() {
+        val context = TanukiBackContext(
+            drawerOpen = true,
+            fullscreen = true,
+            webCanGoBack = true,
+            atRootDestination = false,
+        )
+        assertEquals(TanukiBackAction.CloseDrawer, TanukiBackPolicy.decide(context))
+    }
+
+    @Test fun panelClosesBeforeDrawer() {
+        val context = TanukiBackContext(
+            overlays = listOf("会话详情"),
+            drawerOpen = true,
+        )
+        assertEquals(TanukiBackAction.CloseOverlay("会话详情"), TanukiBackPolicy.decide(context))
+    }
+
     @Test fun fullscreenExitsBeforeWebHistory() {
         val context = TanukiBackContext(fullscreen = true, webCanGoBack = true)
         assertEquals(TanukiBackAction.LeaveFullscreen, TanukiBackPolicy.decide(context))

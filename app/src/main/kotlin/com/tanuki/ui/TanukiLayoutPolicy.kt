@@ -92,6 +92,12 @@ object TanukiLayoutPolicy {
     /** 内容页两栏（列表 + 详情）只在大屏启用，窄屏与横屏手机保持单栏。 */
     fun twoPane(widthDp: Int): Boolean = widthDp >= EXPANDED_MIN_WIDTH_DP
 
+    /** 窄屏抽屉宽度：占视口 90%，限制在 240–360dp，避免 320/360dp 溢出。 */
+    fun drawerWidthDp(widthDp: Int): Int {
+        val width = (widthDp.coerceAtLeast(1) * 0.9f).roundToInt()
+        return width.coerceIn(240, 360)
+    }
+
     /** 触控区至少 48dp；大字体时按比例增大，但绝不缩小。 */
     fun minimumTouchTargetDp(fontScale: Float): Int =
         (MIN_TOUCH_TARGET_DP * effectiveFontScale(fontScale)).roundToInt()

@@ -13,9 +13,10 @@ object TanukiListKeys {
 
     fun session(sessionId: String): String = "session:${requireId(sessionId)}"
 
-    fun message(seq: Long): String = "message:${requireSeq(seq)}"
+    fun message(seq: Long): String = "message-${requireSeq(seq)}"
 
-    fun pendingMessage(seq: Long): String = "pending:${requireSeq(seq)}"
+    /** 待发送占位使用控制器的负序号（-1、-2…），与官方 seq 前缀隔离。 */
+    fun pendingMessage(localSeq: Long): String = "pending-${requireLocalSeq(localSeq)}"
 
     fun tool(callId: String): String = "tool:${requireId(callId)}"
 
@@ -34,7 +35,12 @@ object TanukiListKeys {
     }
 
     private fun requireSeq(seq: Long): Long {
-        require(seq >= 0L) { "事件序号不能为负" }
+        require(seq >= 0L) { "官方事件序号不能为负" }
+        return seq
+    }
+
+    private fun requireLocalSeq(seq: Long): Long {
+        require(seq < 0L) { "待发送消息序号必须为负数" }
         return seq
     }
 }

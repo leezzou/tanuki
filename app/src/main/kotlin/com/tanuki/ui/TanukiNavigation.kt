@@ -9,6 +9,8 @@ package com.tanuki.ui
 data class TanukiBackContext(
     /** 从底到顶排列；最后一项是当前最上层面板。 */
     val overlays: List<String> = emptyList(),
+    /** 窄屏抽屉是否打开；抽屉先于全屏和页面退出关闭。 */
+    val drawerOpen: Boolean = false,
     val fullscreen: Boolean = false,
     val webCanGoBack: Boolean = false,
     /** 当前是否已经位于根页；根页再返回才退出应用。 */
@@ -19,6 +21,9 @@ data class TanukiBackContext(
 sealed interface TanukiBackAction {
     /** 先关闭最上层页面。 */
     data class CloseOverlay(val overlayId: String) : TanukiBackAction
+
+    /** 关闭窄屏导航抽屉，保留当前页面与列表位置。 */
+    data object CloseDrawer : TanukiBackAction
 
     /** 退出全屏，保留当前页面与列表位置。 */
     data object LeaveFullscreen : TanukiBackAction
@@ -42,6 +47,7 @@ sealed interface TanukiBackAction {
 object TanukiBackPolicy {
     fun decide(context: TanukiBackContext): TanukiBackAction = when {
         context.overlays.isNotEmpty() -> TanukiBackAction.CloseOverlay(context.overlays.last())
+        context.drawerOpen -> TanukiBackAction.CloseDrawer
         context.fullscreen -> TanukiBackAction.LeaveFullscreen
         context.webCanGoBack -> TanukiBackAction.WebHistoryBack
         !context.atRootDestination -> TanukiBackAction.LeavePage

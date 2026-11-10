@@ -20,14 +20,18 @@ class TanukiListKeysTest {
         assertNotEquals(TanukiListKeys.message(1), TanukiListKeys.message(2))
     }
 
-    @Test fun committedAndPendingMessageWithSameSeqStayDistinct() {
-        assertNotEquals(TanukiListKeys.message(7), TanukiListKeys.pendingMessage(7))
+    @Test fun pendingKeysAcceptControllerNegativeSequences() {
+        assertEquals("pending--1", TanukiListKeys.pendingMessage(-1))
+        assertNotEquals(TanukiListKeys.pendingMessage(-1), TanukiListKeys.pendingMessage(-2))
+        assertNotEquals(TanukiListKeys.message(1), TanukiListKeys.pendingMessage(-1))
     }
 
     @Test fun invalidIdsAreRejected() {
         assertThrows(IllegalArgumentException::class.java) { TanukiListKeys.session("  ") }
         assertThrows(IllegalArgumentException::class.java) { TanukiListKeys.tool("x".repeat(513)) }
         assertThrows(IllegalArgumentException::class.java) { TanukiListKeys.message(-1) }
+        assertThrows(IllegalArgumentException::class.java) { TanukiListKeys.pendingMessage(0) }
+        assertThrows(IllegalArgumentException::class.java) { TanukiListKeys.pendingMessage(1) }
     }
 
     @Test fun duplicateKeysAreRejectedBeforeTheyReachCompose() {

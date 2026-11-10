@@ -15,7 +15,8 @@
 |---|---|---|
 | `app/src/main/kotlin/com/tanuki/ui/TanukiNavigation.kt` | 返回优先级、面板栈、二级页状态、导航历史、原生/官方切换状态 | `TanukiBackPolicy`、`TanukiOverlayStack`、`TanukiSecondaryPagePolicy`、`TanukiTabHistory`、`TanukiDshSwitchPolicy` |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiLayoutPolicy.kt` | 360dp/横屏/大字体/宽屏断点、触控区、内容最大宽度 | 全部 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveComponents.kt` | 自动换行操作区、统一 inset 骨架、布局度量、可保存列表状态 | 依赖 Compose，随编译验证 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveComponents.kt` | 自动换行操作区、统一 inset 骨架、布局度量、按会话的列表滚动 store 与页面宿主 | `TanukiListStateStore` |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveShell.kt` | 宽屏左侧导航 + 内容、窄屏抽屉；列表/详情宽屏并排、窄屏整页详情 | 依赖 Compose，随编译验证 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiAccessibility.kt` | 48dp 触控区、必填 `contentDescription`、不限行关键按钮、图标操作 | `tanukiActionDescription`、触控下限 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiStateViews.kt` | 空态/加载/错误三态统一组件与中文文案 | `TanukiStateText` |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiContrast.kt` | WCAG 相对亮度与对比度阈值 | 全部 |
@@ -25,17 +26,24 @@
 
 ## 3. 接线清单
 
+### 3.0 自适应外壳（P0-1）
+
+- 宽屏 `>=840dp`：`TanukiAdaptiveShell` 用左侧导航栏 + 右侧内容；同一 `navigation`/`content` slot 不写第二套。
+- 窄屏：同一外壳改为 `ModalNavigationDrawer`，内容全宽，`content` 的 `openNavigation` 打开抽屉；返回键先关抽屉。
+- 列表+详情：`TanukiTwoPane` 在宽屏并排、窄屏只显示其中一页；窄屏详情用整页打开，返回键先 `onDetailBack` 回列表。
+- 不再在业务页里写 `if (wide) ... else ...` 两套页面；只把布局差异收敛到这两个容器。
+
 ### 3.1 主壳导航（`TanukiUi.kt`）
 
 1. 用 `TanukiTabHistory` 替代裸 `var tab`，或至少让通知入口走 `openNotificationTarget()`；`BackHandler` 使用 `TanukiBackPolicy.decide(TanukiBackContext(...))`。
-2. `overlays` 放入当前可见的浮动面板、全屏浮层和二级弹层 id；顺序从底到顶。执行 `CloseOverlay` 时只关闭该层，不改 `tab`，也不重置列表。
+2. `overlays` 放入当前可见的浮动面板、全屏浮层和二级弹层 id；顺序从底到顶。执行 `CloseOverlay` 时只关闭该层，不改 `tab`，也不重置列表。窄屏抽屉打开时把 `drawerOpen = true`，返回键先 `CloseDrawer`。
 3. `webCanGoBack` 只在官方 DSH WebView 实际可后退时传 `true`；`atRootDestination = (tab == HOME_TAB)`。
-4. DSH 页切换原生/官方时，用 `TanukiDshSwitchState` 配合 `TanukiDshSwitchStateSaver` 放进 `rememberSaveable`，保存 `selectedSessionId`、列表 `firstVisibleItemIndex/scrollOffset` 和草稿；页面容器用 `SaveableStateProvider("dsh-native")` / `("dsh-official")` 区分。
+4. DSH 页切换原生/官方时，用 `TanukiDshSwitchState` 配合 `TanukiDshSwitchStateSaver` 放进 `rememberSaveable`，保存 `selectedSessionId`、列表位置和草稿；页面容器用稳定位置的 `TanukiPageStateHost(if (native) "dsh-native" else "dsh-official")` 包裹，内部 `rememberTanukiListState("dsh-native:<sessionId>")` 自动按会话保存滚动。
 5. 官方页与原生页共用同一 DSH tab 时，返回键顺序是：关闭面板 → 退出全屏 → 官方 Web 历史 → 离开 DSH 页 → 根页退出。
 
 ### 3.2 原生聊天页（`DshNativePage.kt`，由集成方接线）
 
-1. `LazyColumn` 使用 `rememberTanukiListState("dsh-native:${state.selectedId ?: "none"}")`，切换会话/切官方再回来不丢滚动位置。
+1. 页面根用 `TanukiPageStateHost("dsh-native")`（或原生/官方二选一）包裹；内部 `LazyColumn` 使用 `rememberTanukiListState("dsh-native:${state.selectedId ?: "none"}")`。页面宿主必须位于切换点之外，否则页面移出时 store 也会销毁。
 2. `timeline` 的 key 保持 `message-<seq>`、`tool-<callId>`、`pending-<seq>` 等稳定值；不要用列表下标。会话条改为 `LazyRow` 时同样使用会话 id 作为 key。
 3. 页面没有会话的 `EmptyNativeState` 替换为 `TanukiStateView(EMPTY, subject = "官方会话", ...)`；加载态用 `TanukiStateView(LOADING, ...)`；读取失败用 `TanukiStateView(ERROR, ...)` 并与“重试”接通。
 4. 顶部“刷新/官方界面”等关键图标按钮改用 `TanukiIconAction`；审批/错误面板的“允许一次/拒绝/重试”改用 `TanukiActionButton`，并用 `TanukiResponsiveActionRow` 包裹。这样 360dp、横屏和 1.3x/2x 字体下不会截断或横向溢出。
@@ -72,7 +80,8 @@
 | 竖屏 360dp | 单列，内容宽度不超过视口 | `TanukiLayoutMetrics.isNarrow` | JVM 已验证；设备未验证 |
 | 窄屏 320dp | 单列，不出现负宽度/横向溢出 | `TanukiLayoutMetrics` | JVM 已验证策略；设备未验证 |
 | 手机横屏 800×360 | 两列，不启用两栏详情 | `TanukiLayoutMetrics.isLandscape` | JVM 已验证；设备未验证 |
-| 平板/宽屏 ≥840dp | 正文最大 760dp，可启用列表+详情两栏 | `TanukiLayoutPolicy.twoPane` | JVM 已验证；设备未验证 |
+| 平板/宽屏 ≥840dp | 左侧导航 + 右侧内容；列表/详情可并排 | `TanukiAdaptiveShell`、`TanukiTwoPane` | 编译通过；设备未验证 |
+| 窄屏抽屉 | 导航以抽屉打开，返回先关抽屉 | `TanukiAdaptiveShell`、`TanukiBackPolicy.CloseDrawer` | JVM 策略已验证；设备未验证 |
 | 状态栏/刘海 | 顶部内容不被遮挡 | `TanukiInsetScaffold` + `WindowInsets.safeDrawing` | 编译预期；设备未验证 |
 | 导航栏/手势条 | 底部按钮与列表尾部不被遮挡 | `TanukiInsetScaffold`、`rememberTanukiListState` | 编译预期；设备未验证 |
 | 输入法 | 输入区随 IME 上移，列表尾部可滚到 | `TanukiInsetScaffold` 的 `safeDrawing` + 页面 `imePadding` | 编译预期；设备未验证 |
@@ -97,7 +106,8 @@
 ## 7. 性能
 
 - `TanukiStartupPolicy` 把工作分成首帧前、首帧后、可交互后三档；冷启动到可交互只做状态恢复、主题和轻量偏好。
-- 列表 key 必须稳定：`message-<seq>`、`tool-<callId>`、会话 id；禁止下标 key。`rememberTanukiListState(key)` 的 key 必须包含页面与会话身份。
+- 列表 key 必须稳定：`message-<seq>`、`pending-<负序号>`、`tool-<callId>`、会话 id；禁止下标 key。`TanukiListKeys.requireUnique` 可在开发期做唯一性断言。
+- 滚动位置用 `TanukiPageStateHost` + `rememberTanukiListState(key)` 显式保存；key 必须包含页面与会话身份。不要只用 `rememberSaveable(key)`，key 变化会重置状态。
 - 高频进度流只让进度组件订阅，不在主壳根部 `collectAsState`；避免整页重组。
 - 切换原生/官方或进入二级页时复用已有控制器与列表快照，不重新认证、不重建服务、不重新 `refresh()`。
 - `TanukiStateView` 与按钮均为纯展示组件，不持有业务状态；数据变化只更新传入参数。
@@ -106,15 +116,16 @@
 
 本轮新增 JVM 回归：
 
-- `TanukiNavigationPolicyTest`：面板优先、全屏、Web 历史、根页退出；面板栈 LIFO；关闭二级面板保留列表与滚动；通知从设置进入 DSH 后返回设置；重复通知不增长历史；原生/官方双向切换保留两侧会话、滚动与草稿。
+- `TanukiNavigationPolicyTest`：面板优先、抽屉优先、全屏、Web 历史、根页退出；面板栈 LIFO；关闭二级面板保留列表与滚动；通知从设置进入 DSH 后返回设置；重复通知不增长历史；原生/官方双向切换保留两侧会话、滚动与草稿。
 - `TanukiLayoutPolicyTest`：360dp、320dp、800×360 横屏、1280dp 宽屏、1.3x/2x 字体、触控区、字体缩放上下限。
 - `TanukiStateAndAccessibilityTest`：三态中文文案、默认动作、空主语回退、无障碍描述回退、48dp 下限。
 - `TanukiContrastTest`：黑白 21:1、阈值边界、明暗主题 8 组关键前景/背景组合。
 - `TanukiStartupPolicyTest`：首帧前/首帧后/可交互三档工作预算与单调性。
 - `TanukiListKeysTest`：同一业务 id 稳定、不同 id 不冲突、已落库/待发送消息区分、非法 id 与重复 key 拒绝。
 - `TanukiSaveableStateTest`：原生/官方切换状态与会话二级页状态经 Saver 保存/恢复后完全一致。
+- `TanukiListStateStoreTest`：按会话保存/恢复、页面重进、未设置 key、负值钳制、单 key/全部清理与空 key 拒绝。
 
-本轮实际：`compileModernDebugKotlin` 通过；新增 7 个测试类共 45 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 97 个结果文件、**839 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](handoffs/20261110-1745-native-ui-polish.md)；设备结果不在此列。
+本轮实际：`compileModernDebugKotlin` 通过；新增 8 个测试类共 54 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 98 个结果文件、**848 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](handoffs/20261110-1745-native-ui-polish.md)；设备结果不在此列。
 
 ## 9. 未完成与后续
 

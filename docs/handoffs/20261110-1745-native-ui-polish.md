@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-56（AO worker）
 - 时间：2026-11-10 17:45 CST
-- 状态：已完成（PR [#49](https://github.com/leezzou/tanuki/pull/49)；未合并、未发布）
+- 状态：已完成评审修复，待复审（PR [#49](https://github.com/leezzou/tanuki/pull/49)；未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 ## 用户目标与范围
@@ -30,10 +30,13 @@
 | `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveComponents.kt` | 新增自动换行操作区、统一 safeDrawing inset 骨架、当前视口度量、可保存列表状态。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiAccessibility.kt` | 新增 48dp 触控区扩展、无障碍描述回退、关键按钮/文本按钮/图标按钮组件。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiStateViews.kt` | 新增空态/加载/错误三态组件与中文文案，错误可重试、空态可刷新。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveShell.kt` | 新增宽屏左侧导航+内容、窄屏抽屉外壳，以及宽屏并排/窄屏整页的列表+详情容器；窄屏抽屉宽度钳制在 240–360dp。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiContrast.kt` | 新增 WCAG 相对亮度与 4.5:1/3:1 判定。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiStartupPolicy.kt` | 新增首帧前/首帧后/可交互三档冷启动工作预算。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiListKeys.kt` | 新增会话/消息/工具卡稳定 key 与唯一性断言。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiSaveableState.kt` | 新增原生/官方切换与会话二级页状态的 Bundle Saver。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiAdaptiveComponents.kt` | 新增按会话的 `TanukiListStateStore` 与 `TanukiPageStateHost`，替代会随 key 变化的 `rememberSaveable`。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiNavigation.kt` | 返回上下文增加抽屉态与 `CloseDrawer` 优先级。 |
 | `app/src/test/kotlin/com/tanuki/TanukiNavigationPolicyTest.kt` | 返回优先级、面板 LIFO、二级页保留列表/滚动、通知返回栈、切换保留状态回归。 |
 | `app/src/test/kotlin/com/tanuki/TanukiLayoutPolicyTest.kt` | 320/360/横屏/1280dp、1.3x/2x、触控区与字体钳制回归。 |
 | `app/src/test/kotlin/com/tanuki/TanukiStateAndAccessibilityTest.kt` | 三态中文文案、默认动作、描述回退、48dp 下限回归。 |
@@ -41,6 +44,7 @@
 | `app/src/test/kotlin/com/tanuki/TanukiStartupPolicyTest.kt` | 冷启动三档工作预算与单调性回归。 |
 | `app/src/test/kotlin/com/tanuki/TanukiListKeysTest.kt` | 稳定 key、冲突、非法 id 与重复 key 回归。 |
 | `app/src/test/kotlin/com/tanuki/TanukiSaveableStateTest.kt` | 两个 Saver 的保存/恢复往返回归。 |
+| `app/src/test/kotlin/com/tanuki/TanukiListStateStoreTest.kt` | 按会话 A→B→A、页面重进、负值钳制、清理与空 key 回归。 |
 | `docs/NATIVE-UI-POLISH.md` | 新增组件说明、按页接线清单、适配矩阵、无障碍/三态/性能约束与未验证范围。 |
 | `docs/NATIVE-UI.md` | 增加指向本次专题文档的入口链接。 |
 
@@ -49,10 +53,10 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` | 通过（1m42s；仅既有弃用/可读性告警） | 编译验证，不替代设备 |
-| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.Tanuki*'` | 通过：7 个新测试类、45 tests / 0 failures / 0 errors / 0 skipped | 导航 14、布局 8、三态/无障碍 8、对比度 4、冷启动 4、稳定 key 5、Saver 2 |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 完整套件通过：97 个结果文件、839 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 839 = 基线 794 + 本轮 45；新增文件无 lint 告警 |
+| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.Tanuki*'` | 通过：8 个新测试类、54 tests / 0 failures / 0 errors / 0 skipped | 导航 16、布局 9、三态/无障碍 8、对比度 4、冷启动 4、稳定 key 5、Saver 2、滚动 store 6 |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 完整套件通过：98 个结果文件、848 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 848 = 基线 794 + 本轮 54；新增文件无 lint 告警 |
 | 最终代码 `:app:compileModernDebugKotlin :app:lintModernDebug` | 通过（5m32s）；lint 0 errors / 102 warnings / 1 hint | 改用 `LocalWindowInfo` 后，新文件 4 条 `Configuration.screenWidthDp` 告警已消除 |
-| 最终代码 `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（2m47s，含 lint）：97 个结果文件、839 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 最终 head 复跑；未执行设备/仪器 |
+| 最终代码 `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（3m24s，含 lint）：98 个结果文件、848 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 最终 head 复跑；未执行设备/仪器 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1745-native-ui-polish.md` | 通过 | 共享状态允许落后，集成方统一刷新 |
 | `python3 scripts/check-publication.py --git` | 通过：688 public files / 672 index entries / 0 findings | 未打印匹配到的敏感值 |
 
@@ -61,6 +65,7 @@
 
 ## 未完成与暂停项
 
+- 已修复独立审查两条 P2：滚动状态改为 `TanukiPageStateHost` + `TanukiListStateStore` 显式保存；pending key 接受控制器负序号 `-1/-2`，官方 seq 仍拒绝负值。
 - 未完成：页面接线（`TanukiUi.kt`、`DshNativePage.kt`、`DshSessionManager*`、`DshApproval*`、`MainActivity.kt`）由对应负责人按 [接线清单](../NATIVE-UI-POLISH.md#3-接线清单) 完成；本轮不越界修改。
 - 未完成：Compose UI 仪器测试与设备适配验证。
 - 外部阻塞：无。
