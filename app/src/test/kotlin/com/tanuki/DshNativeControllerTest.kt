@@ -8,6 +8,10 @@ import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshSessionPage
+import com.tanuki.web.DshRiskAssessment
+import com.tanuki.web.DshRiskLevel
+import com.tanuki.web.DshToolItem
+import com.tanuki.web.DshToolStatus
 import com.tanuki.web.DshApproval
 import com.tanuki.web.DshApprovalKind
 import com.tanuki.web.DshChatSource
@@ -178,6 +182,25 @@ class DshNativeControllerTest {
         assertEquals("正在回复", controller.state.value.streamingText)
     }
 
+    @Test fun liveToolSnapshotAndResultAreMergedByCallId() = runBlocking {
+        val running = toolItem("call-1", DshToolStatus.RUNNING, 7)
+        val completed = toolItem("call-1", DshToolStatus.SUCCESS, 7, output = "完成")
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = "", tools = listOf(running)),
+                DshLiveEvent.Timeline(listOf(completed))
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.tools.singleOrNull()?.status == DshToolStatus.SUCCESS }
+        assertEquals("call-1", state.tools.single().callId)
+        assertEquals("Bash", state.tools.single().name)
+        assertEquals("完成", state.tools.single().output)
+    }
+
     @Test fun approvalIsShownAndAnsweredOnlyThroughOfficialChannel() = runBlocking {
         val approval = DshApproval("event-1", "A", DshApprovalKind.APPROVAL, "Bash", "需要执行命令")
         val source = FakeSource(
@@ -337,4 +360,26 @@ class DshNativeControllerTest {
         override fun live(sessionId: String): Flow<DshLiveEvent> =
             if (liveEvents.isEmpty()) emptyFlow() else flowOf(*liveEvents.toTypedArray())
     }
+
+    private fun toolItem(
+        callId: String,
+        status: DshToolStatus,
+        seq: Int,
+        output: String? = null
+    ) = DshToolItem(
+        seq = seq,
+        time = 1L,
+        callId = callId,
+        name = "Bash",
+        arguments = "{\"command\":\"ls\"}",
+        status = status,
+        output = output,
+        error = null,
+        command = "ls",
+        cwd = "/tmp",
+        diffs = emptyList(),
+        files = emptyList(),
+        outputTruncated = false,
+        risk = DshRiskAssessment(DshRiskLevel.LOW, "只读命令")
+    )
 }

@@ -9,8 +9,10 @@ sealed interface DshLiveEvent {
     data class Snapshot(
         val messages: List<DshMessage>,
         val hasMore: Boolean,
-        val liveText: String
+        val liveText: String,
+        val tools: List<DshToolItem> = emptyList()
     ) : DshLiveEvent
+    data class Timeline(val tools: List<DshToolItem>) : DshLiveEvent
     data class Message(val message: DshMessage) : DshLiveEvent
     data class Streaming(val text: String) : DshLiveEvent
     data class Finished(val committed: Boolean) : DshLiveEvent

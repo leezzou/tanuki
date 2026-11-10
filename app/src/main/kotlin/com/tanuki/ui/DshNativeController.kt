@@ -8,6 +8,8 @@ import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
+import com.tanuki.web.DshTimelineItem
+import com.tanuki.web.DshToolItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -41,7 +43,9 @@ data class DshNativeState(
     val actionError: String? = null,
     val notice: String? = null,
     val streamingText: String = "",
-    val approvals: List<DshApproval> = emptyList()
+    val approvals: List<DshApproval> = emptyList(),
+    /** 与文本消息按 seq 交错渲染的工具调用卡片；来自同一官方 session/page 或 follow 事件。 */
+    val tools: List<DshToolItem> = emptyList()
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
     val currentApprovals: List<DshApproval> get() = approvals.filter { it.sessionId == selectedId }
@@ -141,6 +145,7 @@ class DshNativeController(
             it.copy(
                 selectedId = sessionId,
                 messages = emptyList(),
+                tools = emptyList(),
                 error = null,
                 hasMore = false,
                 loading = true,
@@ -322,6 +327,7 @@ class DshNativeController(
                     live = true,
                     liveError = null,
                     messages = mergeMessages(state.messages, event.messages, replace = true),
+                    tools = mergeTools(state.tools, event.tools),
                     hasMore = event.hasMore,
                     streamingText = event.liveText
                 )
@@ -331,6 +337,9 @@ class DshNativeController(
                     messages = mergeMessages(state.messages, listOf(event.message), replace = false),
                     streamingText = if (event.message.role == DshMessageRole.ASSISTANT) "" else state.streamingText
                 )
+            }
+            is DshLiveEvent.Timeline -> _state.update { state ->
+                state.copy(tools = mergeTools(state.tools, event.tools))
             }
             is DshLiveEvent.Streaming -> _state.update { it.copy(streamingText = event.text) }
             is DshLiveEvent.Finished -> _state.update {
@@ -370,6 +379,7 @@ class DshNativeController(
                     state.copy(
                         loading = false,
                         messages = mergeMessages(state.messages, page.messages, replace = true),
+                        tools = page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool },
                         hasMore = page.hasMore
                     )
                 } else {
@@ -407,6 +417,46 @@ class DshNativeController(
         return (durable.values + pending).sortedWith(
             compareBy<DshMessage> { it.pending }.thenBy { if (it.pending) it.time else it.seq.toLong() }
         )
+    }
+
+    /**
+     * 按审批所属会话读取工具调用；优先用当前已加载的工具卡片，否则单独读取该会话历史。
+     * 不能用当前选中会话的旧快照回答另一会话的审批。
+     */
+    suspend fun tool(sessionId: String, callId: String): DshToolItem? {
+        if (sessionId.isBlank() || callId.isBlank()) return null
+        val current = _state.value
+        if (current.selectedId == sessionId) {
+            current.tools.firstOrNull { it.callId == callId }?.let { return it }
+        }
+        val page = client.messages(sessionId).getOrNull() ?: return null
+        return page.timeline.filterIsInstance<DshTimelineItem.Tool>()
+            .map { it.tool }
+            .firstOrNull { it.callId == callId }
+    }
+
+    /** 同一 callId 的 tool/result 回填调用卡片；保留先到的名称/参数，只更新结果字段。 */
+    private fun mergeTools(current: List<DshToolItem>, incoming: List<DshToolItem>): List<DshToolItem> {
+        if (incoming.isEmpty()) return current
+        val merged = LinkedHashMap<String, DshToolItem>()
+        current.forEach { merged[it.callId] = it }
+        incoming.forEach { item ->
+            val previous = merged[item.callId]
+            merged[item.callId] = if (previous == null) item else previous.copy(
+                name = item.name.takeIf { it.isNotBlank() && it != "未知工具" } ?: previous.name,
+                arguments = item.arguments ?: previous.arguments,
+                status = item.status,
+                output = item.output ?: previous.output,
+                error = item.error ?: previous.error,
+                command = item.command ?: previous.command,
+                cwd = item.cwd ?: previous.cwd,
+                diffs = item.diffs.ifEmpty { previous.diffs },
+                files = item.files.ifEmpty { previous.files },
+                outputTruncated = item.outputTruncated || previous.outputTruncated,
+                risk = item.risk
+            )
+        }
+        return merged.values.sortedBy { it.seq }.takeLast(200)
     }
 
     private fun messageOf(error: Throwable): String = when (error) {

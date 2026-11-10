@@ -37,6 +37,7 @@ import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
+import com.tanuki.ui.DshApprovalController
 import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.DshNativeController
 import com.tanuki.ui.DshNativePage
@@ -339,14 +340,21 @@ class MainActivity : ComponentActivity() {
                 }
                 var nativeFallback by remember { mutableStateOf<String?>(null) }
                 var nativeChatRequest by remember { mutableStateOf<String?>(null) }
-                val nativeClient = remember {
-                    DshNativeClient {
-                        val origin = manager.origin
-                        val launchUrl = manager.authenticatedUrl
-                        if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
-                    }
+                val nativeEndpointProvider: () -> DshEndpoint? = {
+                    val origin = manager.origin
+                    val launchUrl = manager.authenticatedUrl
+                    if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
                 }
+                val nativeClient = remember { DshNativeClient(endpointProvider = nativeEndpointProvider) }
                 val nativeController = remember { DshNativeController(nativeClient, lifecycleScope) }
+                val approvalController = remember {
+                    DshApprovalController(
+                        endpointProvider = nativeEndpointProvider,
+                        scope = lifecycleScope,
+                        toolLookup = { sessionId, callId -> nativeController.tool(sessionId, callId) }
+                    )
+                }
+                val approvalState by approvalController.state.collectAsState()
                 val nativeComposer = remember {
                     DshComposerController(
                         client = DshComposerClient(DshNativeComposerRemote(nativeClient)),
@@ -358,12 +366,20 @@ class MainActivity : ComponentActivity() {
                 val nativeState by nativeController.state.collectAsState()
                 DisposableEffect(Unit) {
                     onDispose {
+                        approvalController.close()
                         nativeComposer.close()
                         nativeController.close()
                     }
                 }
                 LaunchedEffect(nativeState.selectedId) {
                     nativeComposer.setSession(nativeState.selectedId)
+                }
+                LaunchedEffect(s.service, nativeUiMode, nativeFallback) {
+                    if (nativeUiMode.isNative && s.service == ServiceState.RUNNING && nativeFallback == null) {
+                        approvalController.start()
+                    } else {
+                        approvalController.close()
+                    }
                 }
                 LaunchedEffect(s.service, nativeUiMode) {
                     nativeFallback = null
@@ -556,7 +572,13 @@ class MainActivity : ComponentActivity() {
                             composer = nativeComposer,
                             modifier = modifier,
                             onFallback = { reason -> nativeFallback = Redact.text(reason) },
-                            onSwitchOfficial = { setNativePreference(false) }
+                            onSwitchOfficial = { setNativePreference(false) },
+                            approvalState = approvalState,
+                            onApprovalAnswer = { eventId, outcome, remember ->
+                                approvalController.answer(eventId, outcome, remember)
+                            },
+                            onApprovalRetry = approvalController::retry,
+                            onClearRemembered = approvalController::clearRemembered
                         )
                     },
                     browserOpenRequest = browserOpenRequest,

@@ -39,8 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.tanuki.web.DshApproval
-import com.tanuki.web.DshApprovalKind
+import com.tanuki.web.DshApprovalOutcome
+import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
@@ -59,7 +59,11 @@ fun DshNativePage(
     composer: DshComposerController,
     modifier: Modifier = Modifier,
     onFallback: (String) -> Unit,
-    onSwitchOfficial: () -> Unit
+    onSwitchOfficial: () -> Unit,
+    approvalState: DshApprovalState = DshApprovalState(),
+    onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit = { _, _, _ -> },
+    onApprovalRetry: () -> Unit = {},
+    onClearRemembered: () -> Unit = {}
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -91,21 +95,8 @@ fun DshNativePage(
             return@Column
         }
         SessionStrip(state.sessions, state.selectedId, controller::select)
-        if (state.currentApprovals.isNotEmpty()) {
-            ApprovalPanel(
-                approvals = state.currentApprovals,
-                onAnswer = { approval, allow -> scope.launch { controller.answerApproval(approval, allow) } },
-                onOfficial = onSwitchOfficial
-            )
-        }
-        if (state.otherApprovalCount > 0) {
-            NativeCaption(
-                "其他会话有 ${state.otherApprovalCount} 个待审批；切换会话后可查看。",
-                Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-            )
-        }
         Box(Modifier.weight(1f)) {
-            MessageList(state)
+            MessageList(state, approvalState, onApprovalAnswer, onApprovalRetry, onClearRemembered)
             if (state.loading && state.messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
@@ -163,65 +154,57 @@ private fun Header(state: DshNativeState, onRefresh: () -> Unit, onSwitchOfficia
 }
 
 @Composable
-private fun ApprovalPanel(
-    approvals: List<DshApproval>,
-    onAnswer: (DshApproval, Boolean) -> Unit,
-    onOfficial: () -> Unit
+private fun MessageList(
+    state: DshNativeState,
+    approvalState: DshApprovalState,
+    onApprovalAnswer: (String, DshApprovalOutcome, Boolean) -> Unit,
+    onApprovalRetry: () -> Unit,
+    onClearRemembered: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-    ) {
-        Column(
-            Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            approvals.forEach { approval ->
-                Text(
-                    if (approval.kind == DshApprovalKind.APPROVAL) "权限请求：${approval.title}"
-                    else "需要确认：${approval.title}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                approval.detail?.let {
-                    SelectionContainer { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (approval.kind == DshApprovalKind.APPROVAL) {
-                        TextButton(onClick = { onAnswer(approval, true) }) { Text("允许一次") }
-                        TextButton(onClick = { onAnswer(approval, false) }) { Text("拒绝") }
-                    }
-                    TextButton(onClick = onOfficial) { Text("去官方处理") }
-                }
-            }
-            if (approvals.size > 1) {
-                NativeCaption("以上请求来自官方审批通道；原生只回传允许一次或拒绝。")
-            }
-        }
-    }
-}
-
-@Composable
-private fun MessageList(state: DshNativeState) {
+    val timeline = (state.messages.map { DshTimelineItem.Text(it) } +
+        state.tools.map { DshTimelineItem.Tool(it) })
+        .sortedWith(
+            compareBy<DshTimelineItem> {
+                if (it is DshTimelineItem.Text && it.message.pending) 1 else 0
+            }.thenBy { it.seq }
+        )
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (state.messages.isEmpty() && !state.loading && state.error == null && state.streamingText.isBlank()) {
+        item(key = "approval") {
+            DshApprovalPanel(
+                state = approvalState,
+                sessionId = state.selectedId,
+                onAnswer = onApprovalAnswer,
+                onRetry = onApprovalRetry,
+                onClearRemembered = onClearRemembered
+            )
+        }
+        if (timeline.isEmpty() && !state.loading && state.error == null && state.streamingText.isBlank()) {
             item {
                 EmptyNativeState(
                     title = "该会话没有可读文本消息",
-                    detail = "原生页读取官方 user/message 与 assistant/message 文本；点击下方输入框即可发送。"
+                    detail = "原生页读取官方 user/message、assistant/message 与工具事件；点击下方输入框即可发送。"
                 )
             }
         }
         items(
-            state.messages,
-            key = { message -> if (message.pending) "pending-${message.seq}" else "message-${message.seq}" }
-        ) { message -> MessageCard(message) }
+            timeline,
+            key = { item ->
+                when (item) {
+                    is DshTimelineItem.Text ->
+                        if (item.message.pending) "pending-${item.message.seq}" else "message-${item.message.seq}"
+                    is DshTimelineItem.Tool -> item.tool.key
+                }
+            }
+        ) { item ->
+            when (item) {
+                is DshTimelineItem.Text -> MessageCard(item.message)
+                is DshTimelineItem.Tool -> DshToolCard(item.tool)
+            }
+        }
         if (state.streamingText.isNotBlank()) {
             item(key = "streaming") { StreamingCard(state.streamingText) }
         } else if (state.running) {

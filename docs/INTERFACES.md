@@ -215,34 +215,20 @@ HTTP 200..399 或 401 → 存活
 
 ### 1.9 可选原生界面的官方 DSH 接口
 
-设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读写会话，不另造聊天协议：
+设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读写会话、发送消息并处理审批，不另造聊天协议：
 
-- 认证：同一启动 token 调 `GET /connect?token=...&interactions=answer`，只取签名 API Cookie；`answer` 是 `$events` 审批 waterfall 所需，不跟随 302。只读场景仍可显式传 `interactions=none`。
-- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；会话读取用 `session/list`、`session/projections`、`session/page`，发送用 `session/prompt`（`mode=queue`，至少一个非空文本块），停止用 `session/cancel`，审批答辩用 `$events/result`。
-- 实时流：`/api/remote.mux` WebSocket 只接受文本帧，客户端帧必须掩码；逻辑流用 `open/item/end/cancel`，下行用 `item/error/end`。原生页打开两个流：`$events`（`{args:{}}`）与 `session/follow`（`request.address.kind=session`、`assistantStream=true`、`maxMessages=120`）。
-- `$events`：`ready` 返回 `clientId`；`waterfall` 只接受 `approval/request`、`user-questions/request`；`cancel` 撤回事件；`emit` 只使用 `api-session/status`/`api-session/error` 的会话 id 与运行状态，不把错误原文或消息正文带入通知/日志。
-- `session/follow`：`snapshot` 给历史窗口与可选 `assistantStream` 基线；`event` 给增量事件；`assistant-stream` 的 `start/chunk/end` 只聚合 `text-delta`，忽略 reasoning/tool-call；`assistant/message` 落盘后替代临时流式气泡。
-- 审批：`approval/request` 只展示 `toolName` 与 `displayReason`/`reason`，不读工具参数；用户选择后以 `{"kind":"result","value":"allowed-once"|"rejected"}` 回答。`user-questions/request` 在原生页只读展示问题与选项，明确跳官方界面处理；不伪造多选答案。
-- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 不发送 `Origin`，只连当前精确 loopback origin；列表失败才回退官方界面，实时流/单次操作失败只提示并保留历史/发送能力。关闭物理 mux 会销毁该 API Peer，Native 客户端同时丢弃 Cookie，下次重新 `/connect`。
+- 认证：同一启动 token 调 `GET /connect?token=...&interactions=...`，只取签名 API Cookie；不跟随 302。聊天/实时/输入共用 `interactions=answer` Peer；审批切片另用独立 `interactions=answer` Peer（`$events`/`$events/result` 要求），两者不共享 Cookie 内存对象。只读列表可显式用 `none`。
+- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；使用 `session/list`、`session/projections`、`session/page`、`session/prompt`（`mode=queue`）、`session/cancel`、`$events/result`，以及输入组件的 `commands/list`、`fileUploads/*`、`fileReferences/list`、`sessionReferenceResolver/*`。
+- 实时流：`/api/remote.mux` WebSocket 逻辑流 `open/item/end/cancel`；聊天打开 `$events`（`{args:{}}`）与 `session/follow`（`request.address.kind=session`、`assistantStream=true`、`maxMessages=120`）。`session/follow` 的 `snapshot` 提供历史窗口、工具事件与 assistant 基线，`event` 提供增量消息/工具，`assistant-stream` 只聚合 `text-delta`，落盘消息替换临时流式气泡。
+- 工具时间线：`session/page`/follow 的 `tool/call` 与 `tool/result` 由 `DshToolTimeline.parse` 合成；`meta.diffs[]` 读取 `FileDiff`；没有结果明确显示“进行中”，不伪造成功。实时工具事件通过 `DshLiveEvent.Timeline` 按 callId 合并。
+- 审批：`$events` 的 `waterfall(approval/request, eventId, agentId, request)`、`cancel(eventId)`、`error(code)`；回答用 `POST /api/$events/result` 的 `allowed-once|rejected`。非审批 waterfall 回 `next`。参数按 `request.sessionId + callId` 查询，不使用当前选中会话旧快照；未知工具只能拒绝；`记住本次运行` 仅内存、按会话+工具+风险复用，不写配置。
+- 输入/附件：复用 `DshComposerBar`/`DshComposerController`；发送前捕获 `sessionId+generation` 的 `DshComposerSessionToken`，附件读取/粘贴/拖入结果返回时校验 token，切换会话后旧结果丢弃；发送成功只清理已提交快照，保留等待期间新编辑；批量读取按剩余数量/累计字节预算限流。
+- 共享 transport：`DshTransport` 冻结 `connection: StateFlow<DshConnectionState>`、`suspend call(method,args): Any?`、`live(sessionId): Flow<DshLiveEvent>`、`reset()`；`DshNativeComposerRemote` 只转发 call/reset。聊天、输入、会话管理共用同一连接/认证，不各自建 HTTP/WS。
+- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 校验 `Sec-WebSocket-Accept`、客户端帧掩码、拒绝服务端掩码、单帧上限 1 MiB；WebView 同源与 Cookie 策略不变。
+- **临时实现**：`DshWebSocketClient.kt` 是审批切片保留的最小 RFC6455 客户端，`DshApprovalController` 只依赖 `DshApprovalTransport`；后续可替换为 42 的 `DshWebSocket.kt`/transport，不需要改审批 UI。不要再扩展它。
+- 缺口：模型/推理强度、用户提问的完整回答、历史向前分页、自动重连、工具卡与审批的实时关联仍未实现；工具卡来自 page/follow 事件，不读取图片字节。
 
-#### 组件 transport 契约
-
-输入、审批、会话管理等原生组件只消费一个 transport，不各自拼 HTTP/WS：
-
-```kotlin
-interface DshTransport {
-    val connection: StateFlow<DshConnectionState> // DISCONNECTED/CONNECTING/CONNECTED/FAILED
-    suspend fun call(method: String, args: JSONObject): Any? // 官方 result.value
-    fun live(sessionId: String): Flow<DshLiveEvent>
-    fun reset()
-}
-```
-
-- `call` 业务失败抛 `DshApiException`（只含短错误码），认证/网络失败抛 `IOException`；不把 token/Cookie/URL 放进异常。
-- `DshNativeComposerRemote` 只把 `call/reset` 转发给 transport，输入组件不读认证信息。
-- `live` 取消时立即关闭底层 socket；发送结果与历史刷新绑定发起时的会话代次，A→B 切换后旧响应不得写新会话。
-- 原生消息渲染支持 Markdown 标题/段落/行内样式/列表/引用/代码块/基础表格；远程图片只显示占位，不自动联网或打开链接。
-- 完整功能清单与缺口见 [原生界面功能对齐清单](NATIVE-PARITY.md)；端点、安全与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
+细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
 ## 2. 工具面：Browser RPC
 

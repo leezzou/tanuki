@@ -8,7 +8,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本 worktree，`-x buildNativeRuntime`）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
   - 目标回归 `DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest`、`DshWebSocketTest`、`DshMarkdownTest`、`DshComposer*` → BUILD SUCCESSFUL，96 tests / 0 failures / 0 errors / 0 skipped。
-  - 合并 `main=bc802cf`（#34/#35/#36/#42/#38）并取 #43 head `66249a1` 的 composer 修复后完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m45s）；82 个结果文件、**716 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 97 warnings / 1 hint**。`check-handoff.py --pr` 通过。
+  - 合并 `main=cb769d9`（#34/#35/#36/#38/#41/#42）并取 #43 head `66249a1` 的 composer 修复后完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（49s，增量）；87 个结果文件、**765 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 97 warnings / 1 hint**。`check-handoff.py --pr` 通过。
 - 新增 45 项回归：
   - `DshMuxProtocolTest` 10 项：mux open/item/end/cancel 形状、非法端点/流 id、下行 item/error/end、`$events` ready/waterfall/cancel/status、审批字段（不泄露工具参数）、提问只读字段、snapshot 过滤 replace/注入并按 seq 排序、`text-delta`/baseline 流式聚合与 committed 替换、append-origin 文本、RFC 握手 accept 与客户端掩码/长帧。
   - `DshNativeLiveTest` 5 项：`session/prompt`/`session/cancel` 请求体与 `interactions=answer`、`accepted=false` 不当成功、合成 mux 的 snapshot/assistant text/status/approval、`$events/result` 的 `clientId/eventId/allowed-once`、未连接审批失败关闭。
@@ -191,6 +191,28 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 通知点击：原生偏好下目标交给 `DshNativeController.openSession()`，不依赖 WebView 是否连接；官方模式仍走现有 WebView 路由。
 - P1/P2 修复：认证网络 I/O 移出 monitor，`reset()` 只短暂持锁并按代次拒绝旧 Cookie 发布；401 重试必须属于当前代次；消息按官方 append-origin 语义过滤。
 - 未执行：assemble、仪器测试、真实设备、真实 PRoot 内 DSH 与 WebSocket/审批/发送。最终 head CI 与独立 Pi Review 以 PR 页面为准。
+
+## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
+
+- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=bc802cf`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 归属边界：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 由 android_agent-42 独占，本切片已从这四个文件撤回改动；新增文件为 `DshApprovalProtocol`、`DshWebSocketClient`（临时，待收敛到 42 transport）、`DshApprovalSession`、`DshToolTimeline`、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`。42 接线清单见 [原生界面文档](NATIVE-UI.md)。
+- Review 修复（8 项）：
+  - P1 审批认证改用独立 `interactions=answer` Peer；只读列表继续 `none`；假服务器改为断言 `answer`。
+  - P2 收到审批后按 `request.sessionId + callId` 异步读取该审批所属会话的工具调用；历史后到用 `updateTool(sessionId, tool)` 更新参数/风险，再按本次运行记忆决定自动回答；新增非当前会话与“审批先到、历史后到”回归。
+  - P2 有“记住的选择”时面板保持可见，保留“清除记住的选择”入口；新增纯状态回归。
+  - P2 断线时清空 answering 代次标记；旧回答退出按代次校验，不误伤重连后的卡片；新增回答中断线后重连回答回归。
+  - P2 WebSocket 握手阶段设置可关闭的有界读超时，先发布 socket，握手完成后再切长期流；新增“接受 TCP 但不返回 Upgrade 头”和“握手中 close()”回归。
+  - 额外安全：未知/非法 `toolName` 显示“未知审批”，只能拒绝，不能按记忆自动允许；新增协议与控制器回归。
+  - P2 认证失效：401/403 不再用新 Cookie 回答旧 clientId；断开并提示重连，由新 `/connect` 创建新 Peer；假服务器按每次连接分配独立 Peer 并校验回答归属。
+  - P2 重连查询：`lookupTokens` 按代次去重，新流就绪/重放同一 eventId 时重启 `lookupPending` 查询；旧结果丢弃，避免永久“正在读取参数”。
+  - P2 非审批 waterfall：`user-questions/request` 等回 `outcome.kind=next`，不产生审批卡片、不静默吞。
+- 新增 JVM 回归 48 项：`DshApprovalProtocolTest` 12、`DshToolTimelineTest` 9、`DshWebSocketTest` 7、`DshApprovalSessionTest` 6、`DshApprovalControllerTest` 14。覆盖 ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方回答信封、风险分级、本次运行记忆、未知类型拒绝、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/握手超时/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序、401 断开重连/独立 Peer 与非审批 waterfall 回 next。
+- 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：
+  - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**691 tests / 0 failures / 0 errors / 0 skipped**（80 个结果文件；0.1.10 基线 535 + 本切片 48 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23 + PR #38 的 43）。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 97 warnings / 1 hint**（存量弃用/可读性告警）。
+  - `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL（仅打包验证，未安装）。
+- 未验证：真实 Android 设备/模拟器上的原生审批卡片布局、深色主题、大字体、长参数/长 diff、输出折叠与滚动；真实 PRoot 内 DSH `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue；远程 SSH 隧道后的审批流；通知点击后待审批列表过滤；Android 仪器/真机未执行。以上不能计为设备通过。
 
 ## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
 

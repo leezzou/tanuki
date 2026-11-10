@@ -1,259 +1,263 @@
 package com.tanuki
 
-import com.tanuki.web.DshWebSocketMuxSocket
-import com.tanuki.web.DshWsCodec
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.junit.Assert.*
+import com.tanuki.web.DshApprovalProtocol
+import com.tanuki.web.DshEventFrame
+import com.tanuki.web.DshWebSocketClient
+import com.tanuki.web.DshWebSocketFrames
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
-import java.io.ByteArrayOutputStream
-import java.io.EOFException
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.io.InputStream
-import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
-import java.net.SocketException
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 class DshWebSocketTest {
-    @Test fun handshakeAcceptsPingPongAndMaskedText() {
-        val server = FakeWebSocketServer()
+    @Test fun rfcAcceptExampleMatchesOfficialAlgorithm() {
+        assertEquals(
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+            DshWebSocketFrames.accept("dGhlIHNhbXBsZSBub25jZQ==")
+        )
+    }
+
+    @Test fun clientFrameIsMaskedAndServerFrameReaderRejectsMasking() {
+        val mask = byteArrayOf(1, 2, 3, 4)
+        val frame = DshWebSocketFrames.encode(0x1, "hi".toByteArray(), mask, fin = true)
+        assertEquals(0x81, frame[0].toInt() and 0xff)
+        assertEquals(0x82, frame[1].toInt() and 0xff)
+        assertEquals(('h'.code xor 1).toByte(), frame[6])
+        assertEquals(('i'.code xor 2).toByte(), frame[7])
         try {
-            val socket = DshWebSocketMuxSocket()
-            runBlocking {
-                socket.connect(server.origin, "dsh-session=abc")
-                socket.send("world")
-                val hello = withTimeout(3_000) { socket.incoming().first() }
-                assertEquals("hello", hello)
-            }
-            assertTrue(server.done.await(3, TimeUnit.SECONDS))
-            server.failure.get()?.let { throw AssertionError("WebSocket 合成服务器异常", it) }
-            socket.close()
-        } finally {
-            server.close()
+            DshWebSocketFrames.read(ByteArrayInputStream(frame), 1024)
+            fail("服务端掩码帧必须被拒绝")
+        } catch (error: IOException) {
+            assertTrue(error.message!!.contains("掩码"))
         }
     }
 
-    @Test fun handshakeRejectsWrongAccept() {
-        val server = FakeWebSocketServer(correctAccept = false)
-        try {
-            val socket = DshWebSocketMuxSocket()
-            val result = runCatching { runBlocking { socket.connect(server.origin, "dsh-session=abc") } }
-            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("握手"))
-            socket.close()
-        } finally {
-            server.close()
-        }
+    @Test fun readsUnmaskedServerTextFrame() {
+        val frame = serverText("""{"type":"item","value":{"type":"ready","clientId":"c1"}}""")
+        val parsed = DshWebSocketFrames.read(ByteArrayInputStream(frame), 1024)
+        assertEquals(0x1, parsed.opcode)
+        assertTrue(parsed.fin)
+        assertTrue(String(parsed.payload, Charsets.UTF_8).contains("\"ready\""))
     }
 
-    @Test fun idleConnectionCancellationClosesSocketAndAllowsSecondConnection() = runBlocking {
-        val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
-        val origin = "http://127.0.0.1:${server.localPort}"
-        val firstHandshake = CountDownLatch(1)
-        val secondHandshake = CountDownLatch(1)
-        val connectionIndex = AtomicInteger()
-        val failure = AtomicReference<Throwable?>(null)
-        val serverThread = Thread {
-            try {
-                while (!server.isClosed) {
-                    val accepted = server.accept()
-                    Thread {
-                        try {
-                            accepted.use { socket ->
-                                socket.soTimeout = 3_000
-                                val input = socket.getInputStream()
-                                val output = socket.getOutputStream()
-                                var key: String? = null
-                                while (true) {
-                                    val line = readLine(input) ?: break
-                                    if (line.isEmpty()) break
-                                    val separator = line.indexOf(':')
-                                    if (separator > 0 && line.substring(0, separator).trim().equals("Sec-WebSocket-Key", true)) {
-                                        key = line.substring(separator + 1).trim()
-                                    }
-                                }
-                                val accept = DshWsCodec.expectedAccept(key ?: "")
-                                output.write(
-                                    ("HTTP/1.1 101 Switching Protocols\r\n" +
-                                        "Upgrade: websocket\r\n" +
-                                        "Connection: Upgrade\r\n" +
-                                        "Sec-WebSocket-Accept: $accept\r\n\r\n").toByteArray(Charsets.US_ASCII)
-                                )
-                                output.flush()
-                                if (connectionIndex.getAndIncrement() == 0) firstHandshake.countDown()
-                                else secondHandshake.countDown()
-                                // 保持空闲 5 秒；客户端取消若不能立即 close，测试会在 2 秒超时。
-                                Thread.sleep(5_000)
-                            }
-                        } catch (_: SocketException) {
-                            // 客户端关闭/测试收尾属正常。
-                        } catch (error: Throwable) {
-                            failure.compareAndSet(null, error)
-                        }
-                    }.apply { isDaemon = true; start() }
+    @Test fun connectsWithCookieAndParsesReadyApprovalCancel() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val request = AtomicReference<String>()
+        val failure = AtomicReference<String?>()
+        val frames = CopyOnWriteArrayList<String>()
+        val latch = CountDownLatch(3)
+        val serverThread = thread(name = "fake-ws-server") {
+            runCatching {
+                server.accept().use { socket ->
+                    val input = BufferedInputStream(socket.getInputStream())
+                    request.set(readHead(input))
+                    val key = Regex("Sec-WebSocket-Key: (.+)", RegexOption.IGNORE_CASE)
+                        .find(request.get())!!.groupValues[1].trim()
+                    val output = socket.getOutputStream()
+                    output.write(
+                        ("HTTP/1.1 101 Switching Protocols\r\n" +
+                            "Upgrade: websocket\r\n" +
+                            "Connection: Upgrade\r\n" +
+                            "Sec-WebSocket-Accept: ${DshWebSocketFrames.accept(key)}\r\n\r\n")
+                            .toByteArray(Charsets.US_ASCII)
+                    )
+                    output.flush()
+                    // 客户端打开 $events 流；读一帧确认是掩码客户端帧。
+                    val open = readClientFrame(input)
+                    assertTrue(String(open, Charsets.UTF_8).contains("\$events"))
+                    output.write(serverText(item(JSONObject()
+                        .put("type", "ready").put("clientId", "client-1"))))
+                    output.write(serverText(item(JSONObject()
+                        .put("type", "waterfall")
+                        .put("event", "approval/request")
+                        .put("eventId", "event-1")
+                        .put("agentId", "session-1")
+                        .put("request", JSONObject().put("toolName", "bash")))))
+                    output.write(serverText(item(JSONObject()
+                        .put("type", "cancel").put("eventId", "event-1"))))
+                    output.flush()
+                    Thread.sleep(300)
                 }
-            } catch (_: SocketException) {
-                // 关闭监听属正常收尾。
-            } catch (error: Throwable) {
-                failure.compareAndSet(null, error)
             }
-        }.apply { isDaemon = true; start() }
-        try {
-            val first = DshWebSocketMuxSocket()
-            first.connect(origin, "dsh-session=abc")
-            val collector = launch(Dispatchers.Default) { first.incoming().collect { } }
-            assertTrue(firstHandshake.await(2, TimeUnit.SECONDS))
-            delay(50)
-            withTimeout(2_000) { collector.cancelAndJoin() }
-            first.close()
+        }
+        val listener = object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) {
+                frames += text
+                latch.countDown()
+            }
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) {
+                failure.set(message)
+            }
+        }
+        val client = DshWebSocketClient(listener)
+        client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+        client.sendText(DshApprovalProtocol.openStreamBody("stream-1"))
+        assertTrue("未收到三条审批帧", latch.await(5, TimeUnit.SECONDS))
+        assertEquals(null, failure.get())
+        val head = request.get()
+        assertTrue(head.contains("Cookie: dsh=api-cookie"))
+        assertFalse(head.contains("\r\nOrigin:"))
+        val parsed = frames.map(DshApprovalProtocol::parseStreamItem)
+        assertTrue(parsed.any { it is DshEventFrame.Ready })
+        assertTrue(parsed.any { it is DshEventFrame.Approval })
+        assertTrue(parsed.any { it is DshEventFrame.Cancelled })
+        client.close()
+        server.close()
+        serverThread.join(2_000)
+    }
 
-            val second = DshWebSocketMuxSocket()
-            second.connect(origin, "dsh-session=def")
-            assertTrue("第二连接未建立", secondHandshake.await(2, TimeUnit.SECONDS))
-            second.close()
+    @Test fun handshakeTimesOutWhenServerAcceptsButNeverReplies() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val serverThread = thread(name = "fake-ws-silent") {
+            runCatching { server.accept().use { Thread.sleep(1_500) } }
+        }
+        val client = DshWebSocketClient(object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) = Unit
+        }, handshakeTimeoutMs = 300)
+        try {
+            client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+            fail("握手无响应必须超时")
+        } catch (error: IOException) {
+            assertTrue(error.message!!.contains("握手超时"))
         } finally {
+            client.close()
             server.close()
             serverThread.join(2_000)
-            failure.get()?.let { throw AssertionError("空闲 WebSocket 合成服务器异常", it) }
         }
     }
 
-    private inner class FakeWebSocketServer(private val correctAccept: Boolean = true) : AutoCloseable {
-        val origin: String
-        val done = CountDownLatch(1)
-        val failure = AtomicReference<Throwable?>(null)
-        private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
-        private val thread: Thread
+    @Test fun closeDuringHandshakeUnblocksConnect() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val serverThread = thread(name = "fake-ws-silent-close") {
+            runCatching { server.accept().use { Thread.sleep(2_000) } }
+        }
+        val client = DshWebSocketClient(object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) = Unit
+        }, handshakeTimeoutMs = 5_000)
+        val error = AtomicReference<Throwable?>()
+        val connectThread = thread(name = "client-connect") {
+            error.set(runCatching {
+                client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+            }.exceptionOrNull())
+        }
+        Thread.sleep(250)
+        client.close()
+        connectThread.join(2_000)
+        assertFalse("close() 后 connect 仍阻塞", connectThread.isAlive)
+        assertTrue(error.get() is IOException)
+        assertTrue(error.get()!!.message!!.contains("已关闭"))
+        server.close()
+        serverThread.join(2_000)
+    }
 
-        init {
-            origin = "http://127.0.0.1:${server.localPort}"
-            thread = Thread {
-                try {
-                    server.accept().use { socket ->
-                        socket.soTimeout = 5_000
-                        val input = socket.getInputStream()
-                        val output = socket.getOutputStream()
-                        var key: String? = null
-                        while (true) {
-                            val line = readLine(input) ?: break
-                            if (line.isEmpty()) break
-                            val separator = line.indexOf(':')
-                            if (separator > 0 && line.substring(0, separator).trim().equals("Sec-WebSocket-Key", true)) {
-                                key = line.substring(separator + 1).trim()
-                            }
-                        }
-                        val accept = DshWsCodec.expectedAccept(key ?: "")
-                        val response = buildString {
-                            append("HTTP/1.1 101 Switching Protocols\r\n")
-                            append("Upgrade: websocket\r\n")
-                            append("Connection: Upgrade\r\n")
-                            append("Sec-WebSocket-Accept: ${if (correctAccept) accept else "wrong"}\r\n")
-                            append("\r\n")
-                        }
-                        output.write(response.toByteArray(Charsets.US_ASCII))
-                        output.flush()
-                        if (correctAccept) {
-                            // 客户端先发送文本；服务器随后 ping，客户端必须回复 pong，最后回 hello。
-                            val text = readFrame(input)
-                            assertEquals(DshWsCodec.OP_TEXT, text.opcode)
-                            assertTrue(text.masked)
-                            assertEquals("world", String(text.payload))
-                            writeFrame(output, DshWsCodec.OP_PING, "p".toByteArray())
-                            val pong = readFrame(input)
-                            assertEquals(DshWsCodec.OP_PONG, pong.opcode)
-                            assertEquals("p", String(pong.payload))
-                            assertTrue(pong.masked)
-                            writeFrame(output, DshWsCodec.OP_TEXT, "hello".toByteArray())
-                            writeFrame(output, DshWsCodec.OP_CLOSE, ByteArray(0))
-                        } else {
-                            Thread.sleep(200)
-                        }
-                    }
-                } catch (_: SocketException) {
-                    // 客户端拒绝握手后关闭连接属正常收尾。
-                } catch (error: Throwable) {
-                    failure.set(error)
-                } finally {
-                    done.countDown()
+    @Test fun rejectsHandshakeWithWrongAccept() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val serverThread = thread(name = "fake-ws-bad-accept") {
+            runCatching {
+                server.accept().use { socket ->
+                    val input = BufferedInputStream(socket.getInputStream())
+                    readHead(input)
+                    socket.getOutputStream().write(
+                        ("HTTP/1.1 101 Switching Protocols\r\n" +
+                            "Upgrade: websocket\r\n" +
+                            "Connection: Upgrade\r\n" +
+                            "Sec-WebSocket-Accept: wrong\r\n\r\n")
+                            .toByteArray(Charsets.US_ASCII)
+                    )
+                    socket.getOutputStream().flush()
                 }
-            }.apply { isDaemon = true; start() }
+            }
         }
-
-        override fun close() {
+        val client = DshWebSocketClient(object : DshWebSocketClient.Listener {
+            override fun onOpen() = Unit
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String?) = Unit
+            override fun onFailure(message: String) = Unit
+        })
+        try {
+            client.connect("http://127.0.0.1:${server.localPort}", "dsh=api-cookie")
+            fail("错误 Accept 必须拒绝")
+        } catch (error: IOException) {
+            assertTrue(error.message!!.contains("握手校验失败"))
+        } finally {
+            client.close()
             server.close()
-            thread.join(2_000)
-            failure.get()?.let { throw AssertionError("WebSocket 合成服务器异常", it) }
+            serverThread.join(2_000)
         }
     }
 
-    private data class Frame(val fin: Boolean, val opcode: Int, val masked: Boolean, val payload: ByteArray)
+    private fun item(value: JSONObject): String = JSONObject()
+        .put("type", "item")
+        .put("streamId", "stream-1")
+        .put("value", value)
+        .toString()
 
-    private fun readLine(input: InputStream): String? {
-        val line = ByteArrayOutputStream()
-        while (true) {
+    private fun serverText(text: String): ByteArray {
+        val payload = text.toByteArray(Charsets.UTF_8)
+        val header = when {
+            payload.size <= 125 -> byteArrayOf(0x81.toByte(), payload.size.toByte())
+            payload.size <= 0xffff -> byteArrayOf(
+                0x81.toByte(), 126, (payload.size ushr 8).toByte(), payload.size.toByte()
+            )
+            else -> throw IllegalArgumentException("测试帧过大")
+        }
+        return header + payload
+    }
+
+    private fun readHead(input: InputStream): String {
+        val output = java.io.ByteArrayOutputStream()
+        var matched = 0
+        val terminator = byteArrayOf(13, 10, 13, 10)
+        while (output.size() < 8192) {
             val value = input.read()
-            if (value < 0) return if (line.size() == 0) null else line.toString("UTF-8")
-            if (value == '\n'.code) break
-            if (value != '\r'.code) line.write(value)
+            if (value < 0) throw IOException("提前结束")
+            output.write(value)
+            if (value.toByte() == terminator[matched]) {
+                matched++
+                if (matched == terminator.size) return output.toString("US-ASCII")
+            } else {
+                matched = if (value.toByte() == terminator[0]) 1 else 0
+            }
         }
-        return line.toString("UTF-8")
+        throw IOException("头部过大")
     }
 
-    private fun readFrame(input: InputStream): Frame {
+    /** 读取一帧客户端掩码文本并解掩码，供测试服务器断言 open 信封。 */
+    private fun readClientFrame(input: InputStream): ByteArray {
         val first = input.read()
         val second = input.read()
-        if (first < 0 || second < 0) throw EOFException("WebSocket 帧头被截断")
-        val fin = first and 0x80 != 0
-        val opcode = first and 0x0f
-        val masked = second and 0x80 != 0
-        var length = (second and 0x7f).toLong()
-        if (length == 126L) {
-            length = ((input.read() shl 8) or input.read()).toLong()
-        } else if (length == 127L) {
-            var value = 0L
-            repeat(8) { value = (value shl 8) or input.read().toLong() }
-            length = value
+        if (first < 0 || second < 0) throw IOException("提前结束")
+        if (second and 0x80 == 0) throw IOException("客户端帧必须掩码")
+        var length = second and 0x7f
+        if (length == 126) {
+            length = (input.read() shl 8) or input.read()
+        } else if (length == 127) {
+            length = 0
+            repeat(8) { length = (length shl 8) or input.read() }
         }
-        val mask = if (masked) ByteArray(4).also { input.read(it) } else null
-        val payload = ByteArray(length.toInt())
-        var read = 0
-        while (read < payload.size) {
-            val count = input.read(payload, read, payload.size - read)
-            if (count < 0) throw EOFException("WebSocket 帧被截断")
-            read += count
-        }
-        if (mask != null) for (index in payload.indices) {
-            payload[index] = (payload[index].toInt() xor mask[index % 4].toInt()).toByte()
-        }
-        return Frame(fin, opcode, masked, payload)
-    }
-
-    private fun writeFrame(output: OutputStream, opcode: Int, payload: ByteArray) {
-        val frame = ByteArrayOutputStream()
-        frame.write(0x80 or (opcode and 0x0f))
-        when {
-            payload.size < 126 -> frame.write(payload.size)
-            payload.size <= 0xffff -> {
-                frame.write(126)
-                frame.write((payload.size ushr 8) and 0xff)
-                frame.write(payload.size and 0xff)
-            }
-            else -> {
-                frame.write(127)
-                repeat(4) { frame.write(0) }
-                repeat(4) { index -> frame.write((payload.size ushr ((3 - index) * 8)) and 0xff) }
-            }
-        }
-        frame.write(payload)
-        output.write(frame.toByteArray())
-        output.flush()
+        val mask = ByteArray(4) { input.read().toByte() }
+        val payload = ByteArray(length) { input.read().toByte() }
+        return ByteArray(length) { index -> (payload[index].toInt() xor mask[index % 4].toInt()).toByte() }
     }
 }

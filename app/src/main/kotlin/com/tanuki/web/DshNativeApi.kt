@@ -53,7 +53,11 @@ data class DshMessage(
     val pending: Boolean = false
 )
 
-data class DshSessionPage(val messages: List<DshMessage>, val hasMore: Boolean)
+data class DshSessionPage(
+    val messages: List<DshMessage>,
+    val hasMore: Boolean,
+    val timeline: List<DshTimelineItem> = messages.map { DshTimelineItem.Text(it) }
+)
 
 /** 官方 Remote 返回的业务错误；只保留短错误码，避免把响应细节带入界面或日志。 */
 class DshApiException(val code: String) : IOException("DSH 接口返回 $code")
@@ -172,9 +176,11 @@ object DshApiProtocol {
 
     fun parsePage(body: String): DshSessionPage {
         val value = successValue(body)?.optJSONObject("value") ?: throw IllegalArgumentException("消息响应格式不正确")
+        val records = value.optJSONArray("records") ?: JSONArray()
         return DshSessionPage(
-            messages = parseRecords(value.optJSONArray("records") ?: JSONArray()),
-            hasMore = value.optBoolean("hasMore", false)
+            messages = parseRecords(records),
+            hasMore = value.optBoolean("hasMore", false),
+            timeline = DshToolTimeline.parse(records)
         )
     }
 
@@ -440,13 +446,22 @@ class DshNativeClient(
                     when (val downlink = DshMuxProtocol.parseDownlink(text)) {
                         is DshMuxDownlink.Item -> when (downlink.streamId) {
                             eventsId -> handleEvent(downlink.value, sessionId)?.let { emit(it) }
-                            followId -> followParser.accept(downlink.value).forEach { frame ->
+                            followId -> {
+                                // 工具事件从同一 follow 事件流增量合成；文本仍交给 follow 解析器。
+                                if (downlink.value.optString("type") == "event") {
+                                    val tools = DshToolTimeline.parse(JSONArray().put(downlink.value))
+                                        .filterIsInstance<DshTimelineItem.Tool>()
+                                        .map { it.tool }
+                                    if (tools.isNotEmpty()) emit(DshLiveEvent.Timeline(tools))
+                                }
+                                followParser.accept(downlink.value).forEach { frame ->
                                 when (frame) {
                                     is DshFollowFrame.Snapshot ->
-                                        emit(DshLiveEvent.Snapshot(frame.messages, frame.hasMore, frame.liveText))
+                                        emit(DshLiveEvent.Snapshot(frame.messages, frame.hasMore, frame.liveText, frame.tools))
                                     is DshFollowFrame.Message -> emit(DshLiveEvent.Message(frame.message))
                                     is DshFollowFrame.Streaming -> emit(DshLiveEvent.Streaming(frame.text))
                                     is DshFollowFrame.Finished -> emit(DshLiveEvent.Finished(frame.committed))
+                                }
                                 }
                             }
                         }
@@ -513,6 +528,7 @@ class DshNativeClient(
                 }
                 else -> null
             }
+            else -> null
         }
     }
 

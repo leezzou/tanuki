@@ -21,7 +21,11 @@ sealed interface DshEventFrame {
         val agentId: String,
         val request: JSONObject
     ) : DshEventFrame
+    data class Approval(val request: DshApprovalRequest) : DshEventFrame
     data class Cancelled(val eventId: String) : DshEventFrame
+    data class StreamError(val code: String) : DshEventFrame
+    data class UnsupportedWaterfall(val eventId: String) : DshEventFrame
+    data object Ignored : DshEventFrame
 }
 
 enum class DshApprovalKind { APPROVAL, QUESTION }
@@ -43,7 +47,8 @@ sealed interface DshFollowFrame {
     data class Snapshot(
         val messages: List<DshMessage>,
         val hasMore: Boolean,
-        val liveText: String
+        val liveText: String,
+        val tools: List<DshToolItem> = emptyList()
     ) : DshFollowFrame
     data class Message(val message: DshMessage) : DshFollowFrame
     data class Streaming(val text: String) : DshFollowFrame
@@ -227,7 +232,10 @@ class DshFollowParser {
                 DshFollowFrame.Snapshot(
                     messages = DshApiProtocol.parseRecords(records),
                     hasMore = value.optBoolean("hasMore", false),
-                    liveText = liveText()
+                    liveText = liveText(),
+                    tools = DshToolTimeline.parse(records)
+                        .filterIsInstance<DshTimelineItem.Tool>()
+                        .map { it.tool }
                 )
             )
         }
