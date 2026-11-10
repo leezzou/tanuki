@@ -242,7 +242,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | FILE-01 | 工作区列表/添加 | 侧栏工作区、目录选择器、添加工作区 | `仅官方`：原生只有固定 `/workspaces` 文件页 | P1 · `workspace/*`、`directoryPicker/*` · 未排期 · A-FILE-05 |
 | FILE-02 | 工作区重命名/删除/重排 | 行菜单、确认、层级拖拽 | `仅官方` | P2 · `workspace/rename`、`delete`、`insertBefore` · 未排期 · A-FILE-05 |
 | FILE-03 | 工作区树形层级 | 按工作区树分组、祖先展开、子级优先 | `仅官方` | P2 · `workspace/follow` · 未排期 · A-FILE-05 |
-| FILE-04 | 文件树/浏览 | 右侧文件树、目录展开、面包屑 | `原生完整`：`WorkspaceFilesPage` 工作区/手机文件、面包屑、列表/网格 | — · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |
+| FILE-04 | 文件树/浏览 | 右侧文件树、目录展开、面包屑 | `原生完整`：`WorkspaceFilesPage` 工作区/手机文件、可横滚面包屑、列表/网格；顶部 56dp 主操作行 | — · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |
 | FILE-05 | 文件预览 | 文本、Markdown、图片、音频、视频、PDF、DOCX、XLSX、HTML | `原生部分`：文本/图片/音视频/PDF/DOCX/XLSX 已支持；`.doc` 明确不支持内置预览；Markdown/HTML 按文本 | P2 · `WorkspaceFileViewer.kt` · android_agent-31/32/35、41、39 · A-FILE-01、A-FILE-02 |
 | FILE-06 | 文本编辑 | 会话内编辑/保存，冲突检测 | `原生部分`：原生文件页可编辑 ≤256 KiB 文本，保存前检查 revision；DSH 运行时禁止写 | P2 · `WorkspaceFilesPage.kt`/`WorkspaceFileManager.kt` · 既有 · A-FILE-02 |
 | FILE-07 | 新建/重命名/复制/移动/删除 | 文件树操作，冲突/链接/非空目录保护 | `原生完整`：原生文件页支持，DSH 运行时只读 | — · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |

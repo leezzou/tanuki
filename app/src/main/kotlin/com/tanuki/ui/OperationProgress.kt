@@ -25,7 +25,7 @@ private data class ProgressItem(val id: String, val title: String, val fraction:
 /** Outside every page's scroll area, including the DSH and browser tabs. */
 @Composable
 internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileTransferProgress>>, onCancel: () -> Unit,
-    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier) {
+    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier, showFileTransfers: Boolean = true) {
     // 只有进度区订阅传输流；复制大文件时不会让整个页面跟着重组。
     val transferItems by transfers.collectAsState()
     val items = buildList {
@@ -39,9 +39,12 @@ internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileT
                 else -> "正在执行，完成后会自动更新"
             }, snapshot.timing))
         }
-        transferItems.forEach { add(ProgressItem("file-${it.id}", it.label,
-            ImportProgress.fraction(it.received, it.total),
-            transferDetail(it.received, it.total), it.timing, it.id)) }
+        // 文件页把传输进度收进右下角浮层；其余页面继续使用顶部进度区。
+        if (showFileTransfers) transferItems.forEach {
+            add(ProgressItem("file-${it.id}", it.label,
+                ImportProgress.fraction(it.received, it.total),
+                transferDetail(it.received, it.total), it.timing, it.id))
+        }
     }
     if (items.isEmpty()) return
     var details by remember { mutableStateOf(false) }
