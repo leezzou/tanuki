@@ -12,8 +12,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本轮新跑）：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
-  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（main 既有 535 + 本次新增 19）。
-  - `:app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 本次新增 19；合入前）。合并 `main=533eff4` 后完整套件由 CI 在新 head 复跑，558（main #34）不与 554 相加宣称为本地结果。
+  - 同一组合运行中 `:app:compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
 - 新增回归 19 项：
   - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
   - `ImportProgressTest` 3 项：空/含未知/含负数大小不产生总量；溢出保持未知；百分比只由正总量产生并限制在 0–1。
@@ -23,6 +23,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - Review P2 修复一：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
 - Review P2 修复二：新开放取消的“保存网页 Blob 文件”“下载网页文件”“导出浏览器文件”在取消/失败时会留下零字节或截断的 SAF 目标；现统一通过 `ExportCleanup` 删除本次 `CreateDocument` 目标，删除失败明确提示，并新增“写入部分数据后取消删除截断目标”的 JVM 回归。
 - 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
+
+## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
+
+- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，PR [#34](https://github.com/leezzou/tanuki/pull/34)，未安装、未发布。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
+  - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m39s），29 tests / 0 failures / 0 errors / 0 skipped。
+  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（2m49s；此前同结果运行 6m23s/3m27s），**558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 95 warnings / 1 hint**。
+- 新增回归 23 项：`FileTypeCatalogTest` 11（C/C++/头文件、`.ts`/`.mts` 与 `video/mp2t` 冲突、常见语言、配置/标记/数据、图片/音频/视频扩展名与 MIME、PDF/DOCX/XLSX/旧版 Office、归档/二进制不探测、无扩展名与已知点号配置、隐藏二进制与 `.env` 前缀媒体、大小写/复合扩展名、纯 MIME 回退）；`TextPageLayoutTest` 9（行号宽度/空文本/末尾换行、关闭行号、搜索下标换算、跨段行号、4 MiB 上限、截断判定、行数统计）；`TextFileReaderTest` 增补 3（64 KiB 页与空文件边界、跨页多字节字符不拆分、UTF-16LE 不完整字符/ISO-8859-1/未知编码）。
+- 覆盖点：分类不依赖 Android `MimeTypeMap`，扩展名优先于 MIME；媒体扩展名在缺少 MIME 时仍进入正确查看器；未知类型只在非明确二进制时做有界 UTF-8 内容探测；行号与正文同一段文本，自动换行不错位；搜索仍以原始文本下标计算，再一次性批量换算为带行号下标（避免单字符搜索数千匹配时退化为 O(n×m)）；截断只在文件超过 4 MiB 且仍有内容时提示。
+- Review P2 修复：点号配置只匹配已知文件名与 `.env`/`.env.*` 变体；`.DS_Store` 明确归为隐藏二进制并跳过内容探测，`.env-image.png` 因媒体扩展名优先按图片处理；新增隐藏二进制/`.env` 前缀媒体回归（`FileTypeCatalogTest` 11 项），完整 JVM 558 tests 通过。
+- 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
+- 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
 
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
 
