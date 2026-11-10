@@ -656,6 +656,8 @@ class MainActivity : ComponentActivity() {
                             phoneWritingAvailable = phoneStorageGranted && s.service == ServiceState.RUNNING,
                             onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
+                            transfers = manager.fileTransfers.state,
+                            onCancelTransfer = { manager.fileTransfers.cancel(it) },
                             previewMaxDimension = deviceCondition.previewMaxDimension,
                             previewMaxPixels = deviceCondition.previewMaxPixels,
                             onExportFile = { files, path, name ->

@@ -2,6 +2,20 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）
+
+- 范围：`WorkspaceFilesPage` 顶部 56dp 主操作行、可横滚面包屑/搜索/选择三态第二行、权限 chip 与底部 sheet、传输悬浮胶囊与详情 sheet、Snackbar 提示、列表满高和固定底部避让；同时让文件页隐藏全局传输 banner，新增权限/传输纯状态与格式化回归。起点 `origin/main=1122d3f`，已 rebase 到最新 `origin/main=811b5d2`；分支 `ao/files-layout/info-hierarchy`，PR [#58](https://github.com/leezzou/tanuki/pull/58)，不合并、不发布。
+- 实际执行（本 worktree，JDK17、Android SDK、macOS ARM64）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
+  - 定向 `FileAccessPresentationTest`、`FileTransferPresentationTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
+  - `./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（26m44s）；**944 tests / 103 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 104 warnings**。
+  - `./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（28m16s）；仅编译，未运行仪器测试。
+- 新增 10 项 JVM 回归：工作区在 DSH 运行时显示只读并可停止、手机存储未授权/已授权/写入可撤销、挂载位置只读说明；传输百分比只由正总量产生、未知总量不显示整体百分比、多任务按字节加权、二进制大小文本、剩余时间估算的可用边界与中文时长。
+- 未执行：模拟器/真机上的深色模式、大字体、360dp 窄屏、触控区实际尺寸、列表滚动锚定、底部 sheet 手势、TalkBack；未安装 APK，未做 Android 仪器测试、独立 Review、合并或发布。编译/JVM/lint 不能替代设备验收。
+- 复审 P2 修复（查看器内传输入口）：`WorkspaceFilesPage` 的 `externalDocument` / `openedEntry` 分支原先在 `FileTransferOverlay` 之前 return，查看器内导出/复制后进度被全局 banner 隐藏且无法取消。现把浮层放进两个查看器分支的共同父 `Box`，Snackbar 仍只在列表分支挂载，避免查看器错误行重复。新增 Compose 仪器回归 `viewerKeepsTransferPillAndCancelAvailable`：在查看器点“导出此文件”，注入 4 MiB 长传输（25%），断言浮层可见、取消后消失。
+- 复审修复后验证：`compileModernDebugKotlin`、`compileModernDebugAndroidTestKotlin`、`lintModernDebug` → BUILD SUCCESSFUL（6m07s），lint 0 errors / 104 warnings；新增仪器用例仅编译，当前无可用测试设备，未运行。
+- 复审 P2 修复（搜索态批量操作）：第二行原以搜索分支优先，搜索中选中文件后批量操作被遮住；关闭搜索又会清空 query，导致“全选”失去过滤。现把选择态提到搜索之前，保留 query 并在操作行显示“筛选：…”，`全选` 仍只作用于 `shown` 匹配结果。新增 Compose 仪器回归 `searchSelectionKeepsBatchActionsAndSelectsOnlyMatches`：搜索 `hello`→选择→断言已选 1、筛选保留、全选后仍为 1、取消选择后 query 仍为 `hello`；仅编译，无可用设备未运行。
+
 ## 文本编码识别与兜底验证（2026-11-10，android_agent-57，非设备）
 
 - 范围：修复 `.txt`/`.cpp` 等文本文件因 UTF-8 解码失败而打不开的问题；只改文本读取/解码与查看器显示层，不改 content:// 直开和共享状态文件。基线 `origin/main=4f2a3717`；先 fetch 发现远端已前进到 `326726c`（仅文档），按用户指定 SHA 建 `ao/text-decoding/text-encoding`。

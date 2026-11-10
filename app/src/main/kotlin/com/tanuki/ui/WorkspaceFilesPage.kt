@@ -1,8 +1,10 @@
 package com.tanuki.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -14,21 +16,29 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.tanuki.runtime.FileTransferProgress
 import com.tanuki.storage.FileLocation
 import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.WorkspaceDocument
@@ -36,12 +46,18 @@ import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+
+/** 页面单独预览时可用的空传输流；真实页面由宿主注入。 */
+private val EMPTY_FILE_TRANSFERS: StateFlow<List<FileTransferProgress>> = MutableStateFlow(emptyList())
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -59,6 +75,8 @@ internal fun WorkspaceFilesPage(
     fullscreen: Boolean = false, onFullscreen: (Boolean) -> Unit = {},
     phoneWriteAllowed: Boolean = false, phoneWritingAvailable: Boolean = false,
     onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {},
+    transfers: StateFlow<List<FileTransferProgress>> = EMPTY_FILE_TRANSFERS,
+    onCancelTransfer: (Long) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
@@ -89,8 +107,26 @@ internal fun WorkspaceFilesPage(
     var menu by remember { mutableStateOf(false) }
     var locations by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    var permissionSheet by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    // chip 的只读/可写是“当前是否可操作”，DSH 运行或手机写入撤销都会立即反映。
+    val access = remember(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable) {
+        FileAccessPresentation.state(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable)
+    }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val searchFocus = remember { FocusRequester() }
+    val notice = if (action == null) error ?: feedback else null
+    LaunchedEffect(notice) {
+        notice?.let {
+            snackbarHostState.showSnackbar(
+                message = it,
+                withDismissAction = true,
+                duration = if (error != null) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+        }
+    }
+    LaunchedEffect(searching) { if (searching) runCatching { searchFocus.requestFocus() } }
     fun report(e: Exception) {
         error = e.message?.takeIf { text -> text.any { it in '\u4e00'..'\u9fff' } }
             ?: "操作失败，请检查文件是否仍存在、空间是否充足，然后重试。"
@@ -155,193 +191,286 @@ internal fun WorkspaceFilesPage(
         dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
         confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
     externalDocument?.let { document ->
-        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
-            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
-            canEdit = false,
-            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
-            onClose = onCloseExternal,
-            onExport = { onExportExternal(document) },
-            onEdit = {},
-            onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
-            onReselect = onReselectExternal)
+        Box(modifier.fillMaxSize()) {
+            WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
+                actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                canEdit = false,
+                previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
+                onClose = onCloseExternal,
+                onExport = { onExportExternal(document) },
+                onEdit = {},
+                onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
+                onReselect = onReselectExternal)
+            // 查看器和列表共用同一个传输浮层；从查看器导出后仍能看到进度并取消。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+        }
         return
     }
     openedEntry?.let { entry ->
         val document = remember(files, entry.path) { WorkspaceDocument(files, entry.path, entry.name) }
-        WorkspaceFileViewer(document = document, modifier = modifier, bottomInset = bottomInset,
-            actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
-            canEdit = location.writable && !runtimeRunning && !entry.linked,
-            previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
-            onClose = { onFullscreen(false); openedEntry = null },
-            onExport = { onExportFile(files, entry.path, entry.name) },
-            onEdit = { runTask {
-                val editable = files.preview(entry.path)
-                check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
-                begin("编辑文本", listOf(entry)); content = editable.text
-                draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
-            } })
+        Box(modifier.fillMaxSize()) {
+            WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
+                actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                canEdit = location.writable && !runtimeRunning && !entry.linked,
+                previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
+                onClose = { onFullscreen(false); openedEntry = null },
+                onExport = { onExportFile(files, entry.path, entry.name) },
+                onEdit = { runTask {
+                    val editable = files.preview(entry.path)
+                    check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
+                    begin("编辑文本", listOf(entry)); content = editable.text
+                    draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
+                } })
+            // 编辑动作会离开查看器；传输浮层保持在当前页面，不因分支切换丢失。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+        }
         return
     }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().imePadding()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Box {
-                        TextButton(onClick = { locations = true }, enabled = !busy) { Text(location.title); Icon(Icons.Default.ArrowDropDown, null) }
-                        DropdownMenu(locations, { locations = false }) {
-                            FileLocation.entries.forEach { area -> DropdownMenuItem(text = { Text(area.title + if (!area.writable) " · 只读" else "") },
-                                onClick = { locations = false; directory = ""; query = ""; location = area }) }
-                        }
-                    }
-                }
-                IconButton(onClick = { searching = !searching; query = "" }, enabled = !busy && canBrowse) { Icon(Icons.Default.Search, "搜索当前文件夹") }
-                IconButton(onClick = { navigate(directory) }, enabled = !busy && canBrowse) { TanukiIcon(TanukiGlyph.Refresh, "刷新文件") }
-                Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.Menu, "排序与显示") }
-                    DropdownMenu(sortMenu, { sortMenu = false }) {
-                        listOf("名称", "最近修改", "文件大小").forEachIndexed { index, label -> DropdownMenuItem(text = { Text((if (sort == index) "✓ " else "") + label) }, onClick = { sort = index; sortMenu = false }) }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text(if (grid) "切换为列表" else "切换为网格") }, onClick = { grid = !grid; sortMenu = false })
-                        DropdownMenuItem(text = { Text(if (hidden) "隐藏点号文件" else "显示隐藏文件") }, onClick = { hidden = !hidden; sortMenu = false })
-                    }
-                }
-                Box {
-                    IconButton(onClick = { menu = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "文件操作") }
-                    DropdownMenu(menu, { menu = false }) {
-                        if (location.writable) {
-                            listOf("新建文件夹", "新建文本文件").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { begin(label) }) }
-                            DropdownMenuItem(text = { Text("导出整个工作区") }, onClick = { menu = false; onExport() })
-                        }
-                        DropdownMenuItem(text = { Text("打开手机/其他应用文件") }, onClick = { menu = false; onOpenExternal() })
-                        DropdownMenuItem(text = { Text("导入文件到工作区") }, onClick = { menu = false; onImport() })
-                        DropdownMenuItem(text = { Text("复制当前目录路径") }, onClick = { menu = false; copyPath(directory) })
-                    }
-                }
-            }
-            if (searching) OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                singleLine = true, shape = MaterialTheme.shapes.extraLarge, label = { Text("搜索当前文件夹") }, trailingIcon = { IconButton(onClick = { query = ""; searching = false }) { Icon(Icons.Default.Close, "关闭搜索") } })
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (directory.isNotEmpty()) IconButton(onClick = { navigate(directory.substringBeforeLast('/', "")) }, enabled = !busy) { TanukiIcon(TanukiGlyph.Back, "返回上一级") }
-                TextButton(onClick = { navigate("") }, enabled = !busy) { Text(location.guestPath) }
-                val parts = directory.split('/').filter { it.isNotEmpty() }
-                parts.forEachIndexed { index, part ->
-                    Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { navigate(parts.take(index + 1).joinToString("/")) }, enabled = !busy) { Text(part, maxLines = 1) }
-                }
-            }
-            if (location == FileLocation.PHONE && phoneStorageGranted) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(if (phoneWriteAllowed) "DSH 已获本次写入权限" else "DSH 默认只读", style = MaterialTheme.typography.titleSmall)
-                    Text("把手机工具路径发给 DSH，通过“手机文件”技能读取。写入需在此单独授权，停止 DSH 后恢复只读。",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (phoneWriteAllowed) OutlinedButton(onClick = onRevokePhoneWrite) { Text("撤销 DSH 写入权限") }
-                    else OutlinedButton(onClick = { writePermissionDialog = true }, enabled = phoneWritingAvailable) { Text("授权 DSH 写入") }
-                    if (!phoneWritingAvailable && !phoneWriteAllowed) Text("启动 DSH 后可单独授权写入。", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            if (runtimeRunning) Surface(
-                Modifier.fillMaxWidth().padding(16.dp),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-            ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("DSH 运行中，可浏览、打开、导入和导出。修改已有文件请先停止 DSH。", style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = onStop) { Text("停止 DSH") }
-                }
-            } else if (!location.writable) Text(if (location == FileLocation.PHONE) "手机共享存储 · 只读浏览，可打开或导出文件" else "只读位置 · 按 Agent 实际挂载路径显示，不修改运行环境", Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            // 固定高度的进度槽：加载/排序开始或结束时列表不会上下位移。
-            Box(Modifier.fillMaxWidth().height(4.dp)) {
-                if (busy || sorting) LinearProgressIndicator(Modifier.fillMaxSize())
-            }
-            if (canBrowse) Text(if (sorting) "正在整理 ${entries.size} 项…" else "显示 ${shown.size} 项 · 共 ${entries.size} 项",
-                Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (action == null) error?.let { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.error) }
-            feedback?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-            if (selected.isNotEmpty()) Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.extraLarge,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            ) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "取消选择") }
-                    Text("已选 ${selected.size}", style = MaterialTheme.typography.labelLarge)
-                    TextButton(onClick = { selected = shown.map { it.path }.toSet() }) { Text("全选") }
-                    if (location.writable) listOf("复制", "移动", "删除").forEach { label -> TextButton(onClick = { begin(label, entries.filter { it.path in selected }) }, enabled = !busy && !runtimeRunning) { Text(label) } }
-                }
-            }
-            val row: @Composable (WorkspaceFileManager.Entry, Boolean) -> Unit = { entry, tile ->
-                var expanded by remember(entry.path) { mutableStateOf(false) }
-                val rowColor by animateColorAsState(
-                    targetValue = if (entry.path in selected) MaterialTheme.colorScheme.primaryContainer
-                        else if (tile) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.background,
-                    label = "fileSelection",
-                )
-                Surface(color = rowColor, shape = RoundedCornerShape(if (tile) 24.dp else 18.dp)) {
-                    Column(Modifier.fillMaxWidth().combinedClickable(enabled = !busy,
-                        onClick = { if (selected.isNotEmpty()) toggle(entry.path) else if (entry.directory) navigate(entry.path)
-                            else openedEntry = entry },
-                        onLongClick = { toggle(entry.path) }).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (selected.isNotEmpty()) Checkbox(checked = entry.path in selected, onCheckedChange = { toggle(entry.path) })
-                            else TanukiIcon(if (entry.directory) TanukiGlyph.Folder else TanukiGlyph.File, modifier = Modifier.size(if (tile) 32.dp else 24.dp),
-                                tint = if (entry.directory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (!tile) {
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) { FileEntryLabel(entry, false) }
-                            } else Spacer(Modifier.weight(1f))
-                            Box {
-                                IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "${entry.name}的操作") }
-                                DropdownMenu(expanded, { expanded = false }) {
-                                    DropdownMenuItem(text = { Text(if (location == FileLocation.PHONE) "复制手机工具路径" else "复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
-                                    if (!entry.directory) DropdownMenuItem(text = { Text("导出此文件") }, onClick = { expanded = false; onExportFile(files, entry.path, entry.name) })
-                                    DropdownMenuItem(text = { Text("选择") }, onClick = { expanded = false; toggle(entry.path) })
-                                    if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { expanded = false; begin(label, listOf(entry)) }) }
-                                }
+        Box(Modifier.fillMaxSize().imePadding()) {
+            Column(Modifier.fillMaxSize()) {
+                // 顶部主操作固定 56dp：位置、权限 chip 与四个图标入口都不参与列表测量。
+                Row(
+                    Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.weight(1f).padding(start = 2.dp)) {
+                        Surface(
+                            onClick = { locations = true },
+                            enabled = !busy,
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(location.title, Modifier.weight(1f), maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
                             }
                         }
-                        if (tile) FileEntryLabel(entry, true)
+                        DropdownMenu(locations, { locations = false }) {
+                            FileLocation.entries.forEach { area ->
+                                DropdownMenuItem(
+                                    text = { Text(area.title + if (!area.writable) " · 只读" else "") },
+                                    onClick = { locations = false; directory = ""; query = ""; location = area },
+                                )
+                            }
+                        }
+                    }
+                    IconButton(
+                        onClick = { searching = !searching; query = "" },
+                        enabled = !busy && canBrowse,
+                        modifier = Modifier.size(48.dp),
+                    ) { Icon(if (searching) Icons.Default.Close else Icons.Default.Search,
+                        if (searching) "关闭搜索" else "搜索当前文件夹") }
+                    IconButton(onClick = { navigate(directory) }, enabled = !busy && canBrowse,
+                        modifier = Modifier.size(48.dp)) { TanukiIcon(TanukiGlyph.Refresh, "刷新文件") }
+                    Box {
+                        IconButton(onClick = { sortMenu = true }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.Menu, "排序与显示")
+                        }
+                        DropdownMenu(sortMenu, { sortMenu = false }) {
+                            listOf("名称", "最近修改", "文件大小").forEachIndexed { index, label ->
+                                DropdownMenuItem(text = { Text((if (sort == index) "✓ " else "") + label) },
+                                    onClick = { sort = index; sortMenu = false })
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text(if (grid) "切换为列表" else "切换为网格") },
+                                onClick = { grid = !grid; sortMenu = false })
+                            DropdownMenuItem(text = { Text(if (hidden) "隐藏点号文件" else "显示隐藏文件") },
+                                onClick = { hidden = !hidden; sortMenu = false })
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.MoreVert, "文件操作")
+                        }
+                        DropdownMenu(menu, { menu = false }) {
+                            if (location.writable) {
+                                listOf("新建文件夹", "新建文本文件").forEach { label ->
+                                    DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning,
+                                        onClick = { begin(label) })
+                                }
+                                DropdownMenuItem(text = { Text("导出整个工作区") },
+                                    onClick = { menu = false; onExport() })
+                            }
+                            DropdownMenuItem(text = { Text("打开手机/其他应用文件") },
+                                onClick = { menu = false; onOpenExternal() })
+                            DropdownMenuItem(text = { Text("导入文件到工作区") },
+                                onClick = { menu = false; onImport() })
+                            DropdownMenuItem(text = { Text("复制当前目录路径") },
+                                onClick = { menu = false; copyPath(directory) })
+                        }
+                    }
+                    PermissionChip(access, onClick = { permissionSheet = true })
+                }
+                // 第二行只承载一种上下文：批量选择优先于搜索，保证选中后操作可达且不丢过滤条件。
+                when {
+                    selected.isNotEmpty() -> Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "取消选择") }
+                        Text("已选 ${selected.size}", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(end = 4.dp))
+                        if (query.isNotEmpty()) Text("筛选：$query", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp))
+                        TextButton(onClick = { selected = shown.map { it.path }.toSet() },
+                            modifier = Modifier.heightIn(min = 48.dp)) { Text("全选") }
+                        if (location.writable) listOf("复制", "移动", "删除").forEach { label ->
+                            TextButton(
+                                onClick = { begin(label, entries.filter { it.path in selected }) },
+                                enabled = !busy && !runtimeRunning,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text(label) }
+                        }
+                    }
+                    searching -> Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.weight(1f).focusRequester(searchFocus),
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.extraLarge,
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            placeholder = { Text("搜索当前文件夹") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            trailingIcon = {
+                                IconButton(onClick = { query = ""; searching = false }) {
+                                    Icon(Icons.Default.Close, "关闭搜索")
+                                }
+                            },
+                        )
+                    }
+                    else -> Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (directory.isNotEmpty()) IconButton(
+                            onClick = { navigate(directory.substringBeforeLast('/', "")) }, enabled = !busy,
+                        ) { TanukiIcon(TanukiGlyph.Back, "返回上一级") }
+                        TextButton(onClick = { navigate("") }, enabled = !busy,
+                            modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(location.guestPath, maxLines = 1)
+                        }
+                        val parts = directory.split('/').filter { it.isNotEmpty() }
+                        parts.forEachIndexed { index, part ->
+                            Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(
+                                onClick = { navigate(parts.take(index + 1).joinToString("/")) },
+                                enabled = !busy,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text(part, maxLines = 1) }
+                        }
+                        Text("${shown.size} 项", Modifier.padding(horizontal = 12.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (!canBrowse) Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset),
-                    verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-                ) {
-                    TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("浏览手机文件", style = MaterialTheme.typography.headlineSmall)
-                    Text("授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。", style = MaterialTheme.typography.bodyMedium)
-                    Button(onClick = onRequestStoragePermission) { Text("授权访问手机文件") }
-                    Text("不授权也可通过文件操作菜单，从系统文件选择器导入文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else if (shown.isEmpty() && !busy && !sorting && error == null) Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 32.dp, end = 32.dp, top = 32.dp, bottom = 32.dp + bottomInset),
-                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                ) {
-                    TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(if (query.isNotEmpty()) "没有匹配的文件" else if (entries.isNotEmpty()) "此处仅有隐藏文件" else "文件夹为空", style = MaterialTheme.typography.headlineSmall)
-                    Text(if (query.isNotEmpty()) "试试更短的文件名，或清除搜索。" else if (entries.isNotEmpty()) "在“排序与显示”中显示隐藏文件。" else if (location.writable) "从右上角菜单新建文件夹、文本文件或导入项目。" else "此位置暂无内容。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else if (grid) LazyVerticalGrid(
-                    GridCells.Adaptive(160.dp),
-                    Modifier.fillMaxSize(),
-                    state = gridState,
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + bottomInset),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    gridItems(shown, key = { it.path }) { entry -> row(entry, true) }
-                } else LazyColumn(
-                    Modifier.fillMaxSize(),
-                    state = listState,
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp + bottomInset),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(shown, key = { it.path }) { entry -> row(entry, false) }
+                val row: @Composable (WorkspaceFileManager.Entry, Boolean) -> Unit = { entry, tile ->
+                    var expanded by remember(entry.path) { mutableStateOf(false) }
+                    val rowColor by animateColorAsState(
+                        targetValue = if (entry.path in selected) MaterialTheme.colorScheme.primaryContainer
+                            else if (tile) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.background,
+                        label = "fileSelection",
+                    )
+                    Surface(color = rowColor, shape = RoundedCornerShape(if (tile) 24.dp else 18.dp)) {
+                        Column(Modifier.fillMaxWidth().combinedClickable(enabled = !busy,
+                            onClick = { if (selected.isNotEmpty()) toggle(entry.path) else if (entry.directory) navigate(entry.path)
+                                else openedEntry = entry },
+                            onLongClick = { toggle(entry.path) }).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (selected.isNotEmpty()) Checkbox(checked = entry.path in selected, onCheckedChange = { toggle(entry.path) })
+                                else TanukiIcon(if (entry.directory) TanukiGlyph.Folder else TanukiGlyph.File, modifier = Modifier.size(if (tile) 32.dp else 24.dp),
+                                    tint = if (entry.directory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (!tile) {
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) { FileEntryLabel(entry, false) }
+                                } else Spacer(Modifier.weight(1f))
+                                Box {
+                                    IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "${entry.name}的操作") }
+                                    DropdownMenu(expanded, { expanded = false }) {
+                                        DropdownMenuItem(text = { Text(if (location == FileLocation.PHONE) "复制手机工具路径" else "复制 Agent 路径") }, onClick = { expanded = false; copyPath(entry.path) })
+                                        if (!entry.directory) DropdownMenuItem(text = { Text("导出此文件") }, onClick = { expanded = false; onExportFile(files, entry.path, entry.name) })
+                                        DropdownMenuItem(text = { Text("选择") }, onClick = { expanded = false; toggle(entry.path) })
+                                        if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { expanded = false; begin(label, listOf(entry)) }) }
+                                    }
+                                }
+                            }
+                            if (tile) FileEntryLabel(entry, true)
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (!canBrowse) Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset),
+                        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                    ) {
+                        TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("浏览手机文件", style = MaterialTheme.typography.headlineSmall)
+                        Text("授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。", style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = onRequestStoragePermission) { Text("授权访问手机文件") }
+                        Text("不授权也可通过文件操作菜单，从系统文件选择器导入文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (shown.isEmpty() && !busy && !sorting && error == null) Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 32.dp, end = 32.dp, top = 32.dp, bottom = 32.dp + bottomInset),
+                        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                    ) {
+                        TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(if (query.isNotEmpty()) "没有匹配的文件" else if (entries.isNotEmpty()) "此处仅有隐藏文件" else "文件夹为空", style = MaterialTheme.typography.headlineSmall)
+                        Text(if (query.isNotEmpty()) "试试更短的文件名，或清除搜索。" else if (entries.isNotEmpty()) "在“排序与显示”中显示隐藏文件。" else if (location.writable) "从右上角菜单新建文件夹、文本文件或导入项目。" else "此位置暂无内容。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (grid) LazyVerticalGrid(
+                        GridCells.Adaptive(160.dp),
+                        Modifier.fillMaxSize(),
+                        state = gridState,
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 72.dp + bottomInset),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        gridItems(shown, key = { it.path }) { entry -> row(entry, true) }
+                    } else LazyColumn(
+                        Modifier.fillMaxSize(),
+                        state = listState,
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 72.dp + bottomInset),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(shown, key = { it.path }) { entry -> row(entry, false) }
+                    }
+                    // 列表加载/排序只叠加 2dp 指示线，不占布局高度，也不会推动列表。
+                    if (busy || sorting) LinearProgressIndicator(
+                        Modifier.align(Alignment.TopCenter).fillMaxWidth().height(2.dp),
+                    )
                 }
             }
+            // 传输流只在 overlay 内订阅；进度帧不会重组列表或改变列表测量。
+            FileTransferOverlay(
+                transfers = transfers,
+                bottomInset = bottomInset,
+                onCancelTransfer = onCancelTransfer,
+                snackbarHostState = snackbarHostState,
+            )
         }
     }
+    if (permissionSheet) PermissionSheet(
+        state = access,
+        location = location,
+        runtimeRunning = runtimeRunning,
+        phoneStorageGranted = phoneStorageGranted,
+        phoneWritingAvailable = phoneWritingAvailable,
+        onDismiss = { permissionSheet = false },
+        onRequestStorage = { permissionSheet = false; onRequestStoragePermission() },
+        onRequestWrite = { permissionSheet = false; writePermissionDialog = true },
+        onRevokeWrite = { permissionSheet = false; onRevokePhoneWrite() },
+        onStopDsh = { permissionSheet = false; onStop() },
+    )
     if (destinationPicker) DirectoryPicker(files, action.orEmpty(), directory, actionEntries.map { it.path }, busy,
         onDismiss = { if (!busy) { destinationPicker = false; action = null } }, onChoose = { target ->
             runTask {
@@ -393,6 +522,298 @@ internal fun WorkspaceFilesPage(
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("放弃未保存的内容？") },
         text = { Text("原文件没有改变，当前草稿将丢失。") }, dismissButton = { TextButton(onClick = { discard = false }) { Text("继续编辑") } },
         confirmButton = { TextButton(onClick = { discard = false; action = null }) { Text("放弃草稿") } })
+}
+
+/** 传输浮层独立订阅进度；列表页只接收稳定布局，不参与每个进度帧的重组。 */
+@Composable
+private fun FileTransferOverlay(
+    transfers: StateFlow<List<FileTransferProgress>>,
+    bottomInset: Dp,
+    onCancelTransfer: (Long) -> Unit,
+    snackbarHostState: SnackbarHostState? = null,
+) {
+    val items by transfers.collectAsState()
+    val summary = FileTransferPresentation.summary(items)
+    var sheet by remember { mutableStateOf(false) }
+    LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) sheet = false }
+    Box(Modifier.fillMaxSize()) {
+        // 查看器内没有 SnackbarHost，避免和查看器自己的错误行重复；列表页仍由此统一呈现提示。
+        snackbarHostState?.let { host ->
+            SnackbarHost(
+                host,
+                Modifier.align(Alignment.BottomCenter).padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = bottomInset + if (summary != null) 76.dp else 16.dp,
+                ),
+            )
+        }
+        summary?.let {
+            TransferPill(
+                summary = it,
+                onOpen = { sheet = true },
+                onCancel = { items.forEach { item -> onCancelTransfer(item.id) } },
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = bottomInset + 12.dp),
+            )
+        }
+    }
+    if (sheet && items.isNotEmpty()) {
+        TransferSheet(
+            transfers = items,
+            onDismiss = { sheet = false },
+            onCancel = onCancelTransfer,
+        )
+    }
+}
+
+@Composable
+private fun PermissionChip(
+    state: FileAccessState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val writable = state.mode == FileAccessMode.WRITABLE
+    val container = if (writable) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest
+    val content = if (writable) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant
+    val dot = if (writable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = container,
+        contentColor = content,
+        modifier = modifier.height(48.dp).widthIn(min = 56.dp, max = 76.dp)
+            .semantics { contentDescription = "权限：${state.label}，点击管理" },
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).background(dot, CircleShape))
+            Spacer(Modifier.width(6.dp))
+            Text(state.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PermissionSheet(
+    state: FileAccessState,
+    location: FileLocation,
+    runtimeRunning: Boolean,
+    phoneStorageGranted: Boolean,
+    phoneWritingAvailable: Boolean,
+    onDismiss: () -> Unit,
+    onRequestStorage: () -> Unit,
+    onRequestWrite: () -> Unit,
+    onRevokeWrite: () -> Unit,
+    onStopDsh: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val writable = state.mode == FileAccessMode.WRITABLE
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())
+                .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Text("权限与写入", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭权限说明") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).background(
+                    if (writable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    CircleShape,
+                ))
+                Spacer(Modifier.width(8.dp))
+                Text("当前：${state.label}", style = MaterialTheme.typography.titleMedium)
+            }
+            Text(state.summary, style = MaterialTheme.typography.titleSmall)
+            Text(state.detail, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            when {
+                state.needsStorageGrant -> Button(
+                    onClick = onRequestStorage,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("授权访问手机文件") }
+                state.canGrantPhoneWrite -> Button(
+                    onClick = onRequestWrite,
+                    enabled = phoneWritingAvailable,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("授权本次 DSH 写入") }
+                state.canRevokePhoneWrite -> OutlinedButton(
+                    onClick = onRevokeWrite,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("撤销 DSH 写入权限") }
+            }
+            if (location == FileLocation.PHONE && phoneStorageGranted &&
+                !state.canGrantPhoneWrite && !state.canRevokePhoneWrite && !state.needsStorageGrant) {
+                Text("授权只在本次 DSH 运行期间有效；停止 DSH 后自动恢复只读。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (state.canStopRuntime) {
+                HorizontalDivider()
+                Text("停止 DSH 后，工作区写入会自动恢复；正在运行的会话也会结束。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(
+                    onClick = onStopDsh,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("停止 DSH") }
+            }
+            if (location == FileLocation.WORKSPACE && !runtimeRunning) {
+                Text("手机存储的写入授权在该位置的权限 chip 中单独管理。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransferPill(
+    summary: FileTransferSummary,
+    onOpen: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val percent = summary.percent
+    val label = percent?.let { "$it%" } ?: "传输中"
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(percent = 50),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 4.dp,
+        modifier = modifier.heightIn(min = 48.dp).widthIn(max = 190.dp)
+            .semantics { contentDescription = "文件传输$label，共 ${summary.count} 项，点击查看详情" },
+    ) {
+        Row(
+            Modifier.height(48.dp).padding(start = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                if (percent != null) CircularProgressIndicator(
+                    progress = { percent / 100f },
+                    modifier = Modifier.fillMaxSize(),
+                    strokeWidth = 2.5.dp,
+                    trackColor = MaterialTheme.colorScheme.primaryContainer,
+                ) else CircularProgressIndicator(
+                    modifier = Modifier.fillMaxSize(),
+                    strokeWidth = 2.5.dp,
+                    trackColor = MaterialTheme.colorScheme.primaryContainer,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+            if (summary.count > 1) {
+                Spacer(Modifier.width(4.dp))
+                Text("· ${summary.count}", maxLines = 1, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onCancel, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Default.Close,
+                    if (summary.count > 1) "取消全部文件传输" else "取消文件传输",
+                    Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TransferSheet(
+    transfers: List<FileTransferProgress>,
+    onDismiss: () -> Unit,
+    onCancel: (Long) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    // sheet 打开期间每秒刷新剩余时间；浮层本身只随真实字节进度重组。
+    LaunchedEffect(transfers.size) {
+        while (transfers.isNotEmpty()) {
+            delay(1000)
+            now = SystemClock.elapsedRealtime()
+        }
+    }
+    LaunchedEffect(transfers.isEmpty()) { if (transfers.isEmpty()) onDismiss() }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())
+                .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("传输进度", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭传输详情") }
+            }
+            FileTransferPresentation.summary(transfers)?.let { summary ->
+                Text(
+                    if (summary.percent != null) "总进度 ${summary.percent}% · ${summary.count} 个文件任务"
+                    else "${summary.count} 个文件任务 · 总大小未知",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            transfers.forEach { item ->
+                key(item.id) {
+                    TransferRow(item = item, now = now, onCancel = { onCancel(item.id) })
+                }
+            }
+            Text("进度按实际复制或下载的字节计算；总大小未知时显示不定进度，不估造百分比。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun TransferRow(
+    item: FileTransferProgress,
+    now: Long,
+    onCancel: () -> Unit,
+) {
+    val percent = FileTransferPresentation.percent(item.received, item.total)
+    val progressModifier = Modifier.fillMaxWidth().semantics {
+        contentDescription = "${item.label}的传输进度"
+        stateDescription = percent?.let { "已完成 $it%" } ?: "总大小未知，进度无法估算"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(item.label, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleSmall)
+            Text(percent?.let { "$it%" } ?: "进行中", maxLines = 1,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (percent != null) LinearProgressIndicator(
+            progress = { percent / 100f },
+            modifier = progressModifier,
+            trackColor = MaterialTheme.colorScheme.primaryContainer,
+        ) else LinearProgressIndicator(
+            modifier = progressModifier,
+            trackColor = MaterialTheme.colorScheme.primaryContainer,
+        )
+        Text(FileTransferPresentation.sizeText(item.received, item.total),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(FileTransferPresentation.remainingText(item, now),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) { Text("取消此文件") }
+    }
+    HorizontalDivider()
 }
 
 @Composable

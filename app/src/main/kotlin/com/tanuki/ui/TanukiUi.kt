@@ -299,6 +299,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         }
                         if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
                             onCancelTransfer = callbacks.cancelTransfer,
+                            showFileTransfers = tab != 2,
                             modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
                                 else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }
