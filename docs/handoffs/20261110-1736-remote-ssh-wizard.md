@@ -137,6 +137,7 @@ if (showRemoteHostSheet) {
 | 评审修复与后续增量：4 个 P2、6 位码、chip 映射、MainActivity 回退 | 通过：924 tests / 0 failures；lint 0 errors / 103 warnings / 1 hint | 合并最新 main 后复验；MainActivity 相对 #52 前基线零 diff |
 | 第三轮 P2：活动副本按 sourceProfileId 归属；迟到私钥读取按请求版本丢弃 | 通过：924 tests / 0 failures | 编辑目标后删除、同服务双 profile、切换认证/进入测试后迟到回调均有回归 |
 | 最终 P1/P2：保留 #52 向导接线；host_agent 默认系统 CA 路径先配 INFO 日志 | 通过：MainActivity 相对 main 零 diff；Python 9 tests | 设置页向导入口不消失；配对码在默认路径可见 |
+| MainActivity 接线恢复提交 | `822ad6f`：保留 12 行，相对 main 零 diff | 设置页向导入口在 51 迁移前保持可用 |
 | `python3 scripts/remote-relay/test_remote_relay.py` | 通过：9 tests（含 6 位码共享向量 308002、默认系统 CA 路径配对码输出） | Python 3.9 标准库回环 |
 | `git diff origin/main -- app/src/main/kotlin/com/tanuki/MainActivity.kt` | 空（MainActivity 相对当前 main 零 diff） | 保留 #52 接线；51 迁移后单独删除重复入口 |
 
