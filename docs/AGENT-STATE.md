@@ -4,7 +4,7 @@
 
 ### 文件复制界面稳定（android_agent-40，PR [#35](https://github.com/leezzou/tanuki/pull/35) 待审）
 
-- 分支 `ao/copy-flicker/root`，基线 `origin/main=0555c3c0`，已合并 `main=533eff4` 解决文档冲突；PR [#35](https://github.com/leezzou/tanuki/pull/35)，独立 worktree，未合并、未发布、未触发 AO Review。
+- 分支 `ao/copy-flicker/root`，基线 `origin/main=0555c3c0`，已合并 `main=533eff4`、`main=1cb7ad9` 解决文档冲突；PR [#35](https://github.com/leezzou/tanuki/pull/35)，独立 worktree，未合并、未发布、未触发 AO Review。
 - 根因：`WorkspaceStorage.importFiles` 每 64 KiB 调 `onProgress`，`MainActivity` 在 `setContent` 根部 collect 传输流，`TanukiUiModel.transfers` 每个分块变化都让整个 `TanukiUi`（含文件列表）重组；导入 `track` 未传总量，只能显示不定进度；`WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，Lazy 列表项数归零使滚动回顶部；`busy/sorting` 的进度条直接插入推动列表。
 - 修复：`FileTransfers` 集中合并中间进度（160ms）、总量变化/最终帧立即发布、同总量丢弃回退分块、新增协作取消与 `onCancel` 登记动作；`BlobDownloads` 等待回包阶段可取消并忽略晚到回包；Blob/URL/浏览器导出取消或失败时通过 `ExportCleanup` 删除未完成 SAF 目标并提示；导入先查询 `DISPLAY_NAME`/`SIZE`，只有全部大小有效才给真实总量；进度流只由 `OperationBanner` collect；`FileListPresentation` 同目录刷新保留旧条目、换目录清空、内容相等复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；固定 4dp 进度槽。
 - 已验证（本轮新跑，合入 main 前）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，554 tests / 0 failures / 0 errors / 0 skipped（0.1.10 基线 535 + 新增 19；main #34 自带 558）；合并后完整套件由 CI 在新 head 复跑；`compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；新增仪器测试 `FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition` 与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport` 仅编译、未运行。
@@ -257,3 +257,7 @@
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+
+## 并发审计记录
+
+- [原生界面与官方网页版功能对齐审计](handoffs/20261110-1140-native-parity-audit.md)（android_agent-47，只读审计 + 验收清单；未改产品代码，待编排器汇总）。

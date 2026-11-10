@@ -12,7 +12,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本轮新跑）：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
-  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 本次新增 19；合入前）。合并 `main=533eff4` 后完整套件由 CI 在新 head 复跑，558（main #34）不与 554 相加宣称为本地结果。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 本次新增 19；合入前）。合并 `main=533eff4`/`1cb7ad9` 后完整套件由 CI 在新 head 复跑，558（main #34）不与 554 相加宣称为本地结果（#32 只加文档/脚本）。
   - 同一组合运行中 `:app:compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
 - 新增回归 19 项：
   - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
