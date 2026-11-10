@@ -2,9 +2,9 @@
 
 - Agent/会话标识：android_agent-55
 - 时间：2026-11-10 17:36（UTC+8）
-- 状态：最终轮已完成（PR #52，head 待本轮提交；MainActivity 零 diff）
+- 状态：后续增量已完成（本地待推送新 PR；MainActivity 相对 #52 前基线零 diff）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
-- PR：[#52](https://github.com/leezzou/tanuki/pull/52)
+- 前置 PR：[#52](https://github.com/leezzou/tanuki/pull/52) 已合并（head `7a13988`）；本文件为后续增量（MainActivity 回退 + 6 位码 + 主机 chip hook）。
 
 > 每任 Agent 创建唯一记录，不覆盖前任。普通 PR 只新增本记录，**不要改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。开始填写目标/范围；结束或中断前补齐证据、未测试范围与可执行下一步。只读 Agent 交回同格式文本，由主 Agent 保存。不要包含真实 Key、Cookie、token、会话/备份或私有原始日志。
 
@@ -19,7 +19,7 @@
 ## 当前状态
 
 - 已实现：六步向导（方式 → 主机账号 → 认证 → 指纹 → 测试 → 完成）；字段级中文校验与示例；阶段化错误（TCP/SSH 握手/认证/端口转发/DSH 探测）+ 下一步建议 + 重试；首次 SHA256 指纹必须显式勾选；命名连接新增/编辑/删除与“上次使用”；密码/私钥/口令/token 继续走 Android Keystore AES-256-GCM；远程/本地状态与切换影响提示；私钥系统文件选择器（64 KiB 上限）。
-- 已验证：Kotlin 编译、完整 JVM 827 tests / 91 文件 / 0 失败、lint 0 errors / 102 warnings / 1 hint；交接/上传检查待提交前最后运行。
+- 已验证：Kotlin 编译、完整 JVM 920 tests / 101 文件 / 0 失败、lint 0 errors / 102 warnings / 1 hint；交接/上传检查待提交前最后运行。
 - 待验证：真实 Android 设备/模拟器 UI、系统文件选择器、真实 sshd/中继/DSH、Android Keystore 真机、弱网/断线、深色/大字体。
 - 当前目标包名：`com.tanuki`（本轮未构建 APK，不涉及安装包）。
 - 关键事实与可定位源码：向导与校验 `runtime/RemoteHostWizard.kt`；阶段模型/错误映射 `runtime/RemoteConnectionError.kt`；命名连接 `runtime/RemoteHostProfiles.kt`；控制器 `runtime/RemoteHostController.kt`；阶段回调 `runtime/SshTransport.kt`、`runtime/RelayTransport.kt`；UI `ui/RemoteHostSettings.kt`。
@@ -127,13 +127,13 @@ if (showRemoteHostSheet) {
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | 通过（BUILD SUCCESSFUL） | JDK17、Android SDK、macOS ARM64；仅编译 |
-| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**827 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**（3m8s） | 含新增 `RemoteWizardTest` 33 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
+| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**920 tests / 101 个结果文件 / 0 failures / 0 errors / 0 skipped**（6m9s） | 合并最新 main 后；含新增 `RemoteWizardTest` 33 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
 | 同上，单独 `--tests com.tanuki.RemoteWizardTest` | 通过：26 tests / 0 failures | 新增回归定向结果 |
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:lintModernDebug -x buildNativeRuntime` | 通过：**0 errors / 102 warnings / 1 hint**（3m58s） | 仅 JVM/lint，不含设备 |
 | 最终自查修复（完成页空配置、隧道断开/存储错误不再误报阶段）后重跑 JVM + lint | 通过：820 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 最终 head `c017488`；本轮修复提交也附带本交接记录更新 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 通过 | 普通 PR 模式 |
 | `python3 scripts/check-publication.py --git` | 通过：677 public files / 672 index entries / 0 findings | 上传检查 |
-| 评审修复：删除连接清理活动副本、私钥 IO 读取、IPv6 规范化、失败重试绑定尝试配置 | 通过：827 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 4 个 P2 评审点 + 6 位码/chip 回归 |
+| 评审修复与后续增量：4 个 P2、6 位码、chip 映射、MainActivity 回退 | 通过：920 tests / 0 failures；lint 0 errors / 103 warnings / 1 hint | 合并最新 main 后复验；MainActivity 相对 #52 前基线零 diff |
 | `python3 scripts/remote-relay/test_remote_relay.py` | 通过：8 tests（含 6 位码共享向量 308002） | Python 3.9 标准库回环 |
 | `git diff origin/main -- app/src/main/kotlin/com/tanuki/MainActivity.kt` | 空（MainActivity 零 diff） | 接线改交 51，hook 清单见上 |
 
@@ -148,7 +148,7 @@ if (showRemoteHostSheet) {
 
 ## 下一步
 
-1. 提交并推送 `ao/remote-ssh-wizard/guided-connect`，创建 PR（目标 `main`），PR 正文写明改动、827 tests、lint、未验证项与不合并/不发布。
+1. 提交并推送 `ao/remote-ssh-wizard/guided-connect`，创建 PR（目标 `main`），PR 正文写明改动、920 tests、lint、未验证项与不合并/不发布。
 2. 由独立 Codex High 对 PR 当前完整 SHA 审查；处理意见后对新 SHA 重跑 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug`。
 3. 设备 QA 需要独立会话：验证六步向导、私钥系统文件选择器、指纹勾选、阶段进度、失败重试、命名连接增删改、远程/本地切换提示；需要真实 sshd/中继/DSH 环境。
 4. 未获明确授权不合并、不打 tag、不创建 Release、不发布 APK/源码 ZIP。
@@ -163,7 +163,7 @@ if (showRemoteHostSheet) {
   - 测试连接继续不切换 origin、不保存配置；只有“保存并连接”才持久化并切换管理页。
 - 失败尝试与避免重复踩坑的结论：
   - 共享 `.git` 在工作区外，Git 写引用/Gradle 编译需要一次完整访问权限；未修改全局 Java，复用主检出 `.build/jdk` 的 JDK17。
-  - `NpmAdaptiveWorkerPoolTest` 存在既有并发时序抖动，本轮未修改；完整套件通过后才记录 827/0，不隐瞒首次失败。
+  - `NpmAdaptiveWorkerPoolTest` 存在既有并发时序抖动，本轮未修改；完整套件通过后才记录 920/0，不隐瞒首次失败。
   - Compose 中函数类型回调不能用 `c::connectRemoteHost` 直接引用，已改为显式 lambda。
 
 ## 产物与校验
