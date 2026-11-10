@@ -8,17 +8,18 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 根因（源码路径，不是设备观测）：
   - `WorkspaceStorage.importFiles` 每 64 KiB 调一次 `onProgress`；`MainActivity` 在 `setContent` 根部 `collectAsState()` 传输列表，`TanukiUiModel.transfers` 随之变化，导致整个 `TanukiUi`（含文件列表）随每个分块重组；导入 `track` 未传总量，进度只能显示不定态。
   - `WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，`LazyColumn/LazyGrid` 项数短暂归零会使 `LazyListState` 回退到顶部；`busy/sorting` 的 `LinearProgressIndicator` 直接插入布局也会推动列表上下位移。
-- 修复要点：`FileTransfers` 集中合并中间进度（默认 160ms）、总量变化/最终帧立即发布、同总量下丢弃回退分块、新增协作取消；导入先读 `DISPLAY_NAME`/`SIZE`，仅当全部大小有效时才显示真实总量；进度流只由 `OperationBanner` 订阅，根组合不再重组；`FileListPresentation` 在同目录刷新时保留旧条目、换目录才清空、内容相等时复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；列表进度槽固定 4dp 高。
+- 修复要点：`FileTransfers` 集中合并中间进度（默认 160ms）、总量变化/最终帧立即发布、同总量下丢弃回退分块、新增协作取消与 `onCancel` 登记动作（用于等待网页回包的 Blob 导出）；导入先读 `DISPLAY_NAME`/`SIZE`，仅当全部大小有效时才显示真实总量；进度流只由 `OperationBanner` 订阅，根组合不再重组；`FileListPresentation` 在同目录刷新时保留旧条目、换目录才清空、内容相等时复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；列表进度槽固定 4dp 高。
 - 实际执行（本轮新跑）：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
-  - `:app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL；68 个结果文件，**550 tests / 0 failures / 0 errors / 0 skipped**（main 既有 535 + 本次新增 15）。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL；68 个结果文件，**551 tests / 0 failures / 0 errors / 0 skipped**（main 既有 535 + 本次新增 16）。
   - `:app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
-- 新增回归 15 项：
-  - `FileTransferProgressTest` 4 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op。
+- 新增回归 16 项：
+  - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
   - `ImportProgressTest` 3 项：空/含未知/含负数大小不产生总量；溢出保持未知；百分比只由正总量产生并限制在 0–1。
   - `FileListPresentationTest` 8 项：同目录刷新保留旧列表、搜索/排序/显示隐藏不闪空、换目录清空旧结果、完成后显示自身条目、内容相等复用条目列表、隐藏/查询/排序规则、文件夹优先与身份稳定、排序方式与来源区分。
-- 新增仪器测试：`FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition`（同目录新增文件后刷新，列表不回到顶部）——仅编译通过，本会话未运行；设备由独立 QA 独占。
+- 新增仪器测试：`FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition`（同目录新增文件后刷新，列表不回到顶部）与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport`（取消等待中的 Blob 后不触发 ready）——均仅编译通过，本会话未运行；设备由独立 QA 独占。
+- Review P2 修复：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
 - 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
 
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）

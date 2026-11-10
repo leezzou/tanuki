@@ -28,6 +28,7 @@ class FileTransfers(
     private class Published(val received: Long, val total: Long, val at: Long)
     private val published = HashMap<Long, Published>()
     private val running = HashMap<Long, Job>()
+    private val cancelActions = HashMap<Long, () -> Unit>()
     private val cancelled = HashSet<Long>()
 
     @Synchronized fun begin(label: String, total: Long = -1): Long {
@@ -69,18 +70,37 @@ class FileTransfers(
     @Synchronized fun finish(id: Long) {
         published.remove(id)
         running.remove(id)
+        cancelActions.remove(id)
         cancelled.remove(id)
         state.value = state.value.filterNot { it.id == id }
     }
 
     /**
-     * 协作取消一次传输。协程在下一个 [ensureActive] 检查点抛出 CancellationException，
-     * 由原调用方的 finally 清理暂存目录；界面只收到 finish 后的稳定状态。
+     * 为不是由 [track] 启动的任务（例如等待网页回包的 Blob 导出）登记取消动作。
+     * 动作在 [cancel] 时执行一次，[finish] 后不再执行，避免重复清理或取消晚到的回包。
      */
-    @Synchronized fun cancel(id: Long) {
+    @Synchronized fun onCancel(id: Long, action: () -> Unit) {
         if (state.value.none { it.id == id }) return
-        cancelled += id
-        running[id]?.cancel()
+        cancelActions[id] = action
+    }
+
+    /**
+     * 协作取消一次传输。协程在下一个 [ensureActive] 检查点抛出 CancellationException，
+     * 由原调用方的 finally 清理暂存目录；非协程任务执行登记过的取消动作。
+     * 界面只收到 finish 后的稳定状态。
+     */
+    fun cancel(id: Long) {
+        var job: Job? = null
+        var action: (() -> Unit)? = null
+        synchronized(this) {
+            if (state.value.none { it.id == id }) return
+            cancelled += id
+            job = running[id]
+            action = cancelActions.remove(id)
+        }
+        // 在锁外执行，允许取消动作同步调用 finish 而不与内部状态锁交叉。
+        job?.cancel()
+        action?.invoke()
     }
 
     suspend fun <T> track(label: String, total: Long = -1, block: suspend (Long) -> T): T = coroutineScope {

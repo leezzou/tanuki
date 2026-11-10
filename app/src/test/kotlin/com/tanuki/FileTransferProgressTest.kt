@@ -92,4 +92,20 @@ class FileTransferProgressTest {
         assertEquals(1, transfers.state.value.size)
         assertEquals(id, transfers.state.value.single().id)
     }
+
+    @Test fun registeredCancelActionRunsOnceAndIsRemovedAfterFinish() = runBlocking {
+        val transfers = FileTransfers { 1_000 }
+        var calls = 0
+        val id = transfers.begin("准备网页 Blob 下载")
+        transfers.onCancel(id) { calls++; transfers.finish(id) }
+        transfers.cancel(id)
+        assertEquals("等待网页回包的任务必须执行登记过的取消动作", 1, calls)
+        assertTrue(transfers.state.value.isEmpty())
+        transfers.cancel(id)
+        assertEquals("已结束的任务不能再执行取消动作", 1, calls)
+        var late = 0
+        transfers.onCancel(id) { late++ }
+        transfers.cancel(id)
+        assertEquals("取消动作不能在 finish 后被重新登记或执行", 0, late)
+    }
 }
