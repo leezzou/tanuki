@@ -67,7 +67,7 @@
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 17；lint 告警数与基线相同，无新增 Error |
 | `python3 scripts/check-handoff.py --record ...` / 无参检查 | 通过；602 public files | 本轮结束刷新印章 |
 | `python3 scripts/check-publication.py --git` | 0 findings | 实际暂存内容检查 |
-| PR #36 修复前 head `67a00e3` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；P1 修复后的新 head CI 待跑 |
+| PR #36 P1 修复提交 `ff8b706` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；代码提交已全绿，后续仅文档提交 |
 | `python3 scripts/package-source.py` | 待执行 | 仅检查源码包，不提交 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只记录上表本轮实际执行；0.1.10 的 535 tests 与旧 PR 结果未复跑，不作为本轮结论。

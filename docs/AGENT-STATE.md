@@ -12,7 +12,7 @@
   - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`（room 不参与，同一服务换房间复用，不同用户/端口隔离）；token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
   - `scripts/remote-relay/`：Python 标准库参考中继、只出站的主机端 agent、0600 配对文件、自签名证书生成脚本、回环端到端自测；共享 HMAC 向量 `app/src/test/resources/relay-protocol-vectors.json`。
 - Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 6 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；完整 JVM + lint BUILD SUCCESSFUL，552 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 95 warnings / 1 hint；PR #36 head `67a00e3` 的 Host/Android CI 均 pass。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 6 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；完整 JVM + lint BUILD SUCCESSFUL，552 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 95 warnings / 1 hint；PR #36 P1 修复提交 `ff8b706` 的 Host/Android CI 均 pass。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
 - 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 

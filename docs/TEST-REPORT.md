@@ -12,7 +12,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m32s）；66 个结果文件，**552 tests / 0 failures / 0 errors / 0 skipped**（既有 535 + 新增 17）；lint **0 errors / 95 warnings / 1 hint**（与基线告警数相同）。
   - PR [#36](https://github.com/leezzou/tanuki/pull/36) head `67a00e3` 的 Host scripts 与 Android build/JVM/lint 两项 CI 均 pass；CI 不替代独立 Review 或设备验收。
 - 新增覆盖：配对链接 IPv4/IPv6/域名往返与未知/重复/非规范字段拒绝；帧编解码/64 KiB/1 KiB/截断/未知类型；共享 HMAC host/client 向量；证书 DER SHA-256 钉扎；指数退避与仅瞬时错误重试；假中继配对 + 早期字节不丢失 + DATA 回声；错误 token；中继稳定 `relay:<hostId>` 身份/Cookie 作用域；token 加密存储/篡改拒绝/切回直连；控制器使用稳定身份跳过首次指纹探测。
-- 复审修复（PR #36 P1）：中继 Cookie 作用域从 `relay:<hostId>` 改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，同一服务换房间复用 Cookie，同一主机不同用户/DSH 端口分别保存，避免切回时把 A 的认证 Cookie 恢复给 B。`DshRemoteIsolationTest` 新增对应用户/端口分区与同服务换 room 回归；`RemoteRelayTest` 更新作用域断言。定向 `DshRemoteIsolationTest` + `RemoteRelayTest` 共 21 tests / 0 failures。
+- 复审修复（PR #36 P1）：中继 Cookie 作用域从 `relay:<hostId>` 改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，同一服务换房间复用 Cookie，同一主机不同用户/DSH 端口分别保存，避免切回时把 A 的认证 Cookie 恢复给 B。`DshRemoteIsolationTest` 新增对应用户/端口分区与同服务换 room 回归；`RemoteRelayTest` 更新作用域断言。定向 `DshRemoteIsolationTest` + `RemoteRelayTest` 共 21 tests / 0 failures；P1 修复提交 `ff8b706` 的 Host/Android CI 均 pass。
 - 未执行：真实 Android 设备到真实中继/sshd/DSH、Android Keystore 真机、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN。JVM/Python 回环不能替代设备或公网验收。
 
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
