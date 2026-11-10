@@ -23,8 +23,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -54,7 +56,8 @@ internal enum class TanukiPillButtonTone {
     Danger,
 }
 
-private data class PillButtonColors(
+/** 胶囊按钮的背景、内容色和可选边框；内容色同时用于文字与 leading 图标。 */
+internal data class TanukiPillButtonColors(
     val background: Long,
     val content: Long,
     val border: Long?,
@@ -77,91 +80,97 @@ internal fun TanukiPillButton(
     leading: (@Composable () -> Unit)? = null,
 ) {
     val tokens = TanukiDesign.tokens
-    val colors = tokens.pillButtonColors(tone, enabled)
+    val colors = tanukiPillButtonColors(tokens.colors, tone, enabled)
     val interaction = remember { MutableInteractionSource() }
     val active = enabled && !loading
-    Row(
-        modifier = modifier
-            .heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp)
-            .clip(TanukiShapeTokens.pill)
-            .background(Color(colors.background))
-            .then(
-                if (colors.border != null) {
-                    Modifier.border(1.dp, Color(colors.border), TanukiShapeTokens.pill)
+    // leading 槽位中的图标默认读取 LocalContentColor；必须与按钮 tone/enabled 同步，
+    // 否则图标会沿用外层页面的颜色，在 Filled/Danger 背景上失去对比度。
+    CompositionLocalProvider(LocalContentColor provides Color(colors.content)) {
+        Row(
+            modifier = modifier
+                .heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp)
+                .clip(TanukiShapeTokens.pill)
+                .background(Color(colors.background))
+                .then(
+                    if (colors.border != null) {
+                        Modifier.border(1.dp, Color(colors.border), TanukiShapeTokens.pill)
+                    } else {
+                        Modifier
+                    },
+                )
+                .clickable(
+                    enabled = active,
+                    role = Role.Button,
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
+                    onClick = onClick,
+                )
+                .semantics(mergeDescendants = true) {
+                    if (loading) stateDescription = "处理中"
+                }
+                .padding(horizontal = TanukiSpace.XL_DP.dp, vertical = TanukiSpace.MD_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp, Alignment.CenterHorizontally),
+        ) {
+            if (loading) {
+                if (tokens.reducedMotion) {
+                    Text(
+                        text = "…",
+                        color = Color(colors.content),
+                        style = tokens.type.captionLarge,
+                    )
                 } else {
-                    Modifier
-                },
-            )
-            .clickable(
-                enabled = active,
-                role = Role.Button,
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                onClick = onClick,
-            )
-            .semantics(mergeDescendants = true) {
-                if (loading) stateDescription = "处理中"
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color(colors.content),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            } else if (leading != null) {
+                leading()
             }
-            .padding(horizontal = TanukiSpace.XL_DP.dp, vertical = TanukiSpace.MD_DP.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp, Alignment.CenterHorizontally),
-    ) {
-        if (loading) {
-            if (tokens.reducedMotion) {
-                Text(
-                    text = "…",
-                    color = Color(colors.content),
-                    style = tokens.type.captionLarge,
-                )
-            } else {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    color = Color(colors.content),
-                    strokeWidth = 2.dp,
-                )
-            }
-        } else if (leading != null) {
-            leading()
+            Text(
+                text = text,
+                color = Color(colors.content),
+                style = tokens.type.captionLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Text(
-            text = text,
-            color = Color(colors.content),
-            style = tokens.type.captionLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
-private fun TanukiDesignTokens.pillButtonColors(
+/** 按钮颜色解析保持为纯函数，便于 JVM 锁定 light/dark、tone 与停用态。 */
+internal fun tanukiPillButtonColors(
+    colors: TanukiColorTokens,
     tone: TanukiPillButtonTone,
     enabled: Boolean,
-): PillButtonColors {
+): TanukiPillButtonColors {
     if (!enabled) {
-        return PillButtonColors(
+        return TanukiPillButtonColors(
             background = colors.surfaceMuted,
             content = colors.textDisabled,
             border = null,
         )
     }
     return when (tone) {
-        TanukiPillButtonTone.Filled -> PillButtonColors(colors.primary, colors.onPrimary, null)
-        TanukiPillButtonTone.Tonal -> PillButtonColors(
+        TanukiPillButtonTone.Filled -> TanukiPillButtonColors(colors.primary, colors.onPrimary, null)
+        TanukiPillButtonTone.Tonal -> TanukiPillButtonColors(
             colors.primaryContainer,
             colors.onPrimaryContainer,
             null,
         )
-        TanukiPillButtonTone.Outline -> PillButtonColors(
+        TanukiPillButtonTone.Outline -> TanukiPillButtonColors(
             background = colors.surface,
             content = colors.textPrimary,
             border = colors.outlineStrong,
         )
-        TanukiPillButtonTone.Ghost -> PillButtonColors(
+        TanukiPillButtonTone.Ghost -> TanukiPillButtonColors(
             background = 0x00000000L,
             content = colors.textPrimary,
             border = null,
         )
-        TanukiPillButtonTone.Danger -> PillButtonColors(colors.danger, colors.onDanger, null)
+        TanukiPillButtonTone.Danger -> TanukiPillButtonColors(colors.danger, colors.onDanger, null)
     }
 }
 

@@ -161,7 +161,7 @@
 
 | 组件 | 关键参数 | 行为与边界 |
 |---|---|---|
-| `TanukiPillButton` | `text, onClick, tone, enabled, loading, leading` | 五种语气 `Filled/Tonal/Outline/Ghost/Danger`；至少 48dp；加载时禁用点击并保留宽度 |
+| `TanukiPillButton` | `text, onClick, tone, enabled, loading, leading` | 五种语气 `Filled/Tonal/Outline/Ghost/Danger`；至少 48dp；加载时禁用点击并保留宽度；leading 图标继承当前 tone/enabled 的内容色 |
 | `TanukiStatusDot` | `tone, pulse, diameter, decorative` | 8dp 状态点；默认静态；可选的 2.4s 呼吸；装饰模式不产生重复无障碍节点 |
 | `TanukiStatusChip` | `tone, label, onClick, enabled, pulse` | 容器色 + 容器正文；默认 28dp；可点击时扩展到 48dp |
 | `TanukiGlassSurface` | `layer, backdrop, shape` | 四层通用玻璃/海拔表面；无背板时退化为半透明底色 |
@@ -204,7 +204,7 @@
 
 ## 9. 对比度校验
 
-审计代码在 `TanukiContrastAudit`，每个主题 28 项，共 56 项；正文/容器正文最低 4.5:1，停用文字/图标/状态点最低 3.0:1。测试结果：**18 tests / 0 failures / 0 errors / 0 skipped**。
+审计代码在 `TanukiContrastAudit`，每个主题 28 项，共 56 项；正文/容器正文最低 4.5:1，停用文字/图标/状态点最低 3.0:1。测试结果：**19 tests / 0 failures / 0 errors / 0 skipped**。
 
 关键实测值：
 
@@ -240,7 +240,7 @@
   :app:lintModernDebug -x buildNativeRuntime
 ```
 
-结果：编译通过；定向 JVM 18 tests / 0 failures / 0 errors / 0 skipped；完整 JVM 951 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped；lint `BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint，新增的 `ui/design` 文件没有 lint 告警；assemble 通过。该 APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。未执行：完整原生构建、Android 仪器测试、模拟器/真机视觉验收。页面尚未接入，因此本轮不能宣称任何业务页面的最终视觉已经验收。
+结果：编译通过；定向 JVM 19 tests / 0 failures / 0 errors / 0 skipped；完整 JVM 952 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped；lint `BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint，新增的 `ui/design` 文件没有 lint 告警；assemble 通过。该 APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。未执行：完整原生构建、Android 仪器测试、模拟器/真机视觉验收。页面尚未接入，因此本轮不能宣称任何业务页面的最终视觉已经验收。
 
 ## 11. 文件清单
 

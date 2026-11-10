@@ -292,4 +292,29 @@ class TanukiDesignTokensTest {
                 }
         }
     }
+
+    @Test
+    fun `胶囊按钮 leading 图标继承正确内容色`() {
+        val states = listOf(
+            Triple(TanukiPillButtonTone.Filled, true, 4.5),
+            Triple(TanukiPillButtonTone.Danger, true, 4.5),
+            Triple(TanukiPillButtonTone.Filled, false, 3.0),
+            Triple(TanukiPillButtonTone.Danger, false, 3.0),
+        )
+        for (tokens in listOf(TanukiColorTokens.Light, TanukiColorTokens.Dark)) {
+            for ((tone, enabled, minimum) in states) {
+                val colors = tanukiPillButtonColors(tokens, tone, enabled)
+                val label = "${if (tokens.isDark) "深色" else "浅色"}/$tone/enabled=$enabled"
+                val expected = when {
+                    !enabled -> tokens.textDisabled
+                    tone == TanukiPillButtonTone.Danger -> tokens.onDanger
+                    else -> tokens.onPrimary
+                }
+                assertEquals("$label 图标内容色", expected, colors.content)
+                assertNotEquals("$label 不能沿用外层正文色", tokens.textPrimary, colors.content)
+                val ratio = TanukiColorMath.contrastRatio(colors.content, colors.background)
+                assertTrue("$label 图标对比度 $ratio 低于 $minimum", ratio >= minimum)
+            }
+        }
+    }
 }
