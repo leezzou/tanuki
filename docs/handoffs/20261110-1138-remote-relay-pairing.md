@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-48（Tanuki DSH Worker）
 - 时间：2026-11-10 11:38 Asia/Shanghai（开始）；结束时间见下方验证
-- 状态：进行中（方案/契约/最小切片已完成，等待完整 JVM/lint、PR 与独立验收）
+- 状态：已完成（PR [#36](https://github.com/leezzou/tanuki/pull/36) 待审；未合并、未发布）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)（android_agent-32）；远程主机直连切片见 [远程主机 SSH](20261109-1810-remote-host-ssh.md)（android_agent-34）
 
 ## 用户目标与范围
@@ -21,7 +21,7 @@
   - Python 参考实现 6 项回环端到端自测 OK。
   - 完整 JVM/lint：BUILD SUCCESSFUL（3m28s）；551 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；独立 Codex High Review、合并/发布未授权。
-- 当前目标包名、分支/无 Git 状态、是否有运行中任务：分支 `ao/tanuki-remote/relay-pairing`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；无运行中任务；PR 待创建。
+- 当前目标包名、分支/无 Git 状态、是否有运行中任务：分支 `ao/tanuki-remote/relay-pairing`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#36](https://github.com/leezzou/tanuki/pull/36) 已创建，base `main`；无运行中任务。
 - 关键事实与可定位源码/公共文档：方案/资源/流程见 `docs/REMOTE-CONNECT.md`；契约见 `docs/INTERFACES.md` 1.6；实现见 `app/src/main/kotlin/com/tanuki/runtime/{RemoteRelay,RelayTransport,RemoteHost,RemoteHostStorage,RemoteHostController}.kt`；参考中继/agent 见 `scripts/remote-relay/`；JVM 回归见 `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt`。
 
 ## 本次改动
@@ -65,13 +65,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建、独立 Codex High Review、真实设备/公网中继 QA。
+- 未完成：PR #36 的当前 head CI 与独立 Codex High Review、真实设备/公网中继 QA。
 - 外部阻塞：真实公网中继与 Android 设备需用户/独立 QA 提供资源与授权。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续按既有要求等待授权/恢复；不合并、不发布、不触发 AO Review。
 
 ## 下一步
 
-1. 等完整 JVM/lint 完成后回填本记录与 `docs/TEST-REPORT.md`，提交并创建 PR（base `main`），不合并、不发布。
+1. PR [#36](https://github.com/leezzou/tanuki/pull/36) 已创建，base `main`；以 PR 页面最终 head/CI 为准，不合并、不发布。
 2. 由 Orchestrator 安排当前 head 的独立 Codex High Review；真实设备/公网中继 QA 需独立 QA session、明确中继地址/证书和 APK/SHA。
 
 ## 约束与风险
@@ -86,6 +86,7 @@
 
 ## 产物与校验
 
+- PR [#36](https://github.com/leezzou/tanuki/pull/36)，base `main`，head 以 PR 页面为准。
 - 新/旧 APK、源码 ZIP 及校验文件：本轮不生成 APK/ZIP 发布附件；只创建 PR。
 - 是否覆盖安装/签名范围/未发布事项：不安装、不覆盖、不发布。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：本轮未删除旧交接；现有记录仍含未完成 Review/QA 或历史验证依据，未判定为可安全删除。若后续确认过期，应先迁移结论到 `AGENT-STATE`/`TEST-REPORT`/专题文档，再删除并修复引用。

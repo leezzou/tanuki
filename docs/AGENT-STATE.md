@@ -1,10 +1,10 @@
 # Tanuki 当前状态
 
-当前交接：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，基线 `main=0555c3c0`，进行中）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；远程主机直连切片见 [远程主机 SSH](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34）；历史记录保留在 `docs/handoffs/`。
+当前交接：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，基线 `main=0555c3c0`，PR [#36](https://github.com/leezzou/tanuki/pull/36) 待审）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；远程主机直连切片见 [远程主机 SSH](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34）；历史记录保留在 `docs/handoffs/`。
 
-## 无公网 IP 远程连接中继切片（android_agent-48，进行中）
+## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
 
-- 基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），未合并、未发布、未触发 AO Review。
+- 基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
 - 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
 - 已实现：
   - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
@@ -229,7 +229,7 @@
 
 ## 下一步
 
-1. 无公网 IP 中继切片：完成完整 JVM/lint、交接印章与 PR；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
+1. 无公网 IP 中继切片 PR [#36](https://github.com/leezzou/tanuki/pull/36)：以最终 head/CI 为准，等待独立 Review；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
