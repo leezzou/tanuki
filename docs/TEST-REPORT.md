@@ -4,7 +4,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 文件复制界面稳定验证（2026-11-10，android_agent-40，非设备）
 
-- 范围：从手机/SAF 多选「导入文件到工作区」（写入新独立项目）的进度与列表稳定性。基线 `origin/main=0555c3c0`，分支 `ao/copy-flicker/root`；不合并、不发布。
+- 范围：从手机/SAF 多选「导入文件到工作区」（写入新独立项目）的进度与列表稳定性。基线 `origin/main=0555c3c0`，分支 `ao/copy-flicker/root`；PR [#35](https://github.com/leezzou/tanuki/pull/35)，不合并、不发布。
 - 根因（源码路径，不是设备观测）：
   - `WorkspaceStorage.importFiles` 每 64 KiB 调一次 `onProgress`；`MainActivity` 在 `setContent` 根部 `collectAsState()` 传输列表，`TanukiUiModel.transfers` 随之变化，导致整个 `TanukiUi`（含文件列表）随每个分块重组；导入 `track` 未传总量，进度只能显示不定态。
   - `WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，`LazyColumn/LazyGrid` 项数短暂归零会使 `LazyListState` 回退到顶部；`busy/sorting` 的 `LinearProgressIndicator` 直接插入布局也会推动列表上下位移。
