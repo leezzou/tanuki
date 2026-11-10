@@ -2,9 +2,10 @@
 
 - Agent/会话标识：android_agent-55
 - 时间：2026-11-10 17:36（UTC+8）
-- 状态：后续增量已完成（本地待推送新 PR；MainActivity 相对 #52 前基线零 diff）
+- 状态：后续增量已完成（PR [#57](https://github.com/leezzou/tanuki/pull/57)；MainActivity 相对 #52 前基线零 diff）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
-- 前置 PR：[#52](https://github.com/leezzou/tanuki/pull/52) 已合并（head `7a13988`）；本文件为后续增量（MainActivity 回退 + 6 位码 + 主机 chip hook）。
+- 前置 PR：[#52](https://github.com/leezzou/tanuki/pull/52) 已合并（head `7a13988`）。
+- 后续 PR：[#57](https://github.com/leezzou/tanuki/pull/57)（MainActivity 回退 + 6 位码 + 主机 chip hook）。
 
 > 每任 Agent 创建唯一记录，不覆盖前任。普通 PR 只新增本记录，**不要改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。开始填写目标/范围；结束或中断前补齐证据、未测试范围与可执行下一步。只读 Agent 交回同格式文本，由主 Agent 保存。不要包含真实 Key、Cookie、token、会话/备份或私有原始日志。
 
