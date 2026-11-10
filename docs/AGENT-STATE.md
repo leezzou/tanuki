@@ -1,18 +1,25 @@
 # Tanuki 当前状态
 
-当前交接：[原生界面对齐：非聊天主链路](handoffs/20261110-1226-native-parity-non-chat.md)（android_agent-44，PR [#38](https://github.com/leezzou/tanuki/pull/38)，基线 `main=0555c3c0`，第一批会话管理/模型权限/Skills 命令切片）。并行已合并记录：[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，PR #34 已合并为 `533eff4`）；0.1.10 与历史记录保留在 `docs/handoffs/`。
+当前交接：[原生界面对齐：非聊天主链路](handoffs/20261110-1226-native-parity-non-chat.md)（android_agent-44，PR [#38](https://github.com/leezzou/tanuki/pull/38)，基线 `main=0555c3c0`，第一批会话管理/模型权限/Skills 命令切片）。并行已合并记录：[文件复制界面稳定](handoffs/20261110-0330-copy-flicker.md)（android_agent-40，PR #35 已合并为 `2a4a050`）、[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，PR #34 已合并为 `533eff4`）；0.1.10 与历史记录保留在 `docs/handoffs/`。
 
 ### 原生界面对齐：非聊天主链路（android_agent-44，PR #38 待审）
 
-- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）与 `origin/main=1cb7ad9`（原生对齐审计矩阵）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
+- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）、`1cb7ad9`（原生对齐审计矩阵）与 `2a4a050`（文件复制稳定）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
 - 已实现：会话列表/标题过滤/官方内容搜索/新建/重命名/归档/本机未读/运行状态；会话级模型选择与权限模式（完全权限二次确认）；Skills 与斜杠命令只读目录；安全模式只读；远程 SSH 隧道 origin 复用；设置 → 网页与兼容性 → 原生会话管理。
 - 官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`，不直接改 `userdata/dsh`；归档恢复列表需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；新增 `DshSessionAdminApiTest` 7 项与 `DshSessionManagerControllerTest` 14 项；预合并完整 `testModernDebugUnitTest` 556/0/0/0；合并 `origin/main=533eff4` 后 **69 个结果文件、579 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 95 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；新增 `DshSessionAdminApiTest` 7 项与 `DshSessionManagerControllerTest` 14 项；预合并完整 `testModernDebugUnitTest` 556/0/0/0；合并 `533eff4`/`1cb7ad9`/`2a4a050` 后 **73 个结果文件、598 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 96 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。
 - 待验证：真实 Android/PRoot DSH 的 `/connect`、会话新建/重命名/搜索/归档、`/permission` 命令、模型目录；设备 UI/深色/大字体；远程 SSH 端点；Android 仪器。
 - 未完成/后续：独立审查/合并授权、工作区全局搜索/diff、插件列表与启用、斜杠命令执行、应用内语言/主题、归档列表恢复。
 
-## 文件查看器格式支持扩展（android_agent-41，PR #34 已合并为 `533eff4`）
+### 文件复制界面稳定（android_agent-40，PR #35 已合并为 `2a4a050`）
 
+- 分支 `ao/copy-flicker/root`，基线 `origin/main=0555c3c0`，已合并 `main=533eff4`、`main=1cb7ad9` 解决文档冲突；PR [#35](https://github.com/leezzou/tanuki/pull/35) 已合并为 `2a4a050`，未发布、未触发 AO Review。
+- 根因：`WorkspaceStorage.importFiles` 每 64 KiB 调 `onProgress`，`MainActivity` 在 `setContent` 根部 collect 传输流，`TanukiUiModel.transfers` 每个分块变化都让整个 `TanukiUi`（含文件列表）重组；导入 `track` 未传总量，只能显示不定进度；`WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，Lazy 列表项数归零使滚动回顶部；`busy/sorting` 的进度条直接插入推动列表。
+- 修复：`FileTransfers` 集中合并中间进度（160ms）、总量变化/最终帧立即发布、同总量丢弃回退分块、新增协作取消与 `onCancel` 登记动作；`BlobDownloads` 等待回包阶段可取消并忽略晚到回包；Blob/URL/浏览器导出取消或失败时通过 `ExportCleanup` 删除未完成 SAF 目标并提示；导入先查询 `DISPLAY_NAME`/`SIZE`，只有全部大小有效才给真实总量；进度流只由 `OperationBanner` collect；`FileListPresentation` 同目录刷新保留旧条目、换目录清空、内容相等复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；固定 4dp 进度槽。
+- 已验证（本轮新跑，合入 main 前）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，554 tests / 0 failures / 0 errors / 0 skipped（0.1.10 基线 535 + 新增 19；main #34 自带 558）；合并后完整套件由 CI 在新 head 复跑；`compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；新增仪器测试 `FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition` 与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport` 仅编译、未运行。
+- 待验证：真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；设备由独立 QA 独占。
+
+## 文件查看器格式支持扩展（android_agent-41，PR #34 已合并为 `533eff4`）
 - 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR #34 已合并为 `533eff4`，未发布、未创建 tag/Release。
 - 新增纯 Kotlin `FileTypeCatalog` 集中维护扩展名、规范 MIME 与类别：C/C++/头文件（c、h、cpp、cc、cxx、hpp、hh、hxx、inl、ipp、m、mm、cu 等）、Java/Kotlin/Python/JS/TS/Go/Rust/Shell 及多种语言、JSON/XML/YAML/TOML/INI/属性/`.env` 等已知点号配置、Markdown/纯文本/日志、HTML/CSS/SQL/CSV/TSV、SVG；点号配置只匹配已知名称与 `.env`/`.env.*`，`.DS_Store` 归为隐藏二进制、`.env-image.png` 按媒体扩展名处理；图片/音频/视频扩展名在缺少系统 MIME 时仍能进入对应查看器；PDF/DOCX/XLSX 保持内置预览，`.doc` 保持旧版提示，`.xls`/`.xlsm`/`.pptx`/`.odt` 等归为不支持并回退。
 - 分类改为扩展名优先于 MIME，修复 `.ts` 在 Android 上可能被 `video/mp2t` 当成视频的问题；未知类型仅在非明确二进制/归档/旧版 Office 时做有界 UTF-8 内容探测，避免误判。

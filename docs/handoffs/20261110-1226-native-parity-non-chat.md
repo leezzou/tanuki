@@ -17,7 +17,7 @@
 - 已实现：`DshSessionAdminApi` 官方一元协议与纯解析；`DshSessionManagerController` 状态机；`DshSessionManagerPage` Compose 页；`DshSessionManagerActivity` 独立入口；设置 → 网页与兼容性 → 原生会话管理；安全模式只读；远程 DSH 连接可用。
 - 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`（556 tests / 0 failures）、`lintModernDebug --rerun-tasks`（BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint）、`assembleModernDebug`（BUILD SUCCESSFUL，未安装设备）、PR #38 的 Host 与 Android CI 全绿。
 - 待验证：真实 Android/PRoot DSH 的 `/connect`、`session/create|rename|search`、`workspace/archiveSession`、模型/权限命令；设备 UI/深色/大字体；远程 SSH 端点；Android 仪器测试。
-- 当前分支：`ao/native-parity/session-admin`，基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）与 `origin/main=1cb7ad9`（原生界面对齐审计矩阵；审计明确 44 只读核对、不写矩阵）；PR [#38](https://github.com/leezzou/tanuki/pull/38)，代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并、未发布、未触发 AO Review。
+- 当前分支：`ao/native-parity/session-admin`，基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）、`1cb7ad9`（原生界面对齐审计矩阵；审计明确 44 只读核对、不写矩阵）与 `2a4a050`（文件复制稳定）；PR [#38](https://github.com/leezzou/tanuki/pull/38)，代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并、未发布、未触发 AO Review。
 - 关键事实：官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`；归档恢复需要 `workspace/follow` 流，未实现；未读是本机 `updatedAt` 比较。
 
 ## 本次改动
@@ -49,8 +49,8 @@
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint | 无新增 Error；告警为既有弃用/可读性 |
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime --rerun-tasks` | BUILD SUCCESSFUL（3m33s，28 tasks executed），0 errors / 95 warnings / 1 hint | 最终源码强制重跑，不是缓存结果 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m29s，40 tasks） | 只验证 APK 打包与清单，未安装设备、未签名发布 |
-| 合并 `origin/main=533eff4` 后完整 JVM | BUILD SUCCESSFUL，69 个结果文件、579 tests / 0 failures / 0 errors / 0 skipped | 含文件查看器 23 项；无设备 |
-| 合并后 `lintModernDebug` / `assembleModernDebug` | BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint；打包成功 | 未安装设备 |
+| 合并 `533eff4`/`1cb7ad9`/`2a4a050` 后完整 JVM | BUILD SUCCESSFUL，73 个结果文件、598 tests / 0 failures / 0 errors / 0 skipped | 含文件查看器 23 项、文件复制 19 项；无设备 |
+| 合并后 `lintModernDebug` / `assembleModernDebug` | BUILD SUCCESSFUL，0 errors / 96 warnings / 1 hint；打包成功 | 新增 1 条 main 既有 BlobDownloads 条件告警；未安装设备 |
 | 再合并 `origin/main=1cb7ad9` 审计矩阵 | 只读文档/CI 脚本，不改产品代码；`scripts/check-native-parity.py` 保持通过 | 44 不写矩阵，状态由矩阵属主更新 |
 | PR #38 Host / Android CI（代码 head `1e40b33`） | 全部 pass | Host handoff 检查 + Android build/JVM/lint；最终文档提交由同一工作流校验 |
 

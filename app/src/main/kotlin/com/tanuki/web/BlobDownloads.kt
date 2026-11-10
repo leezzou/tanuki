@@ -70,7 +70,18 @@ class BlobDownloads(private val context: Context, private val view: WebView,
         if(pending!=null || transfer?.isActive==true){error("请先完成当前文件下载");return}
         val nonce=ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString(""){"%02x".format(it)}
         pending=Pending(nonce,File(name).name)
-        progressId=progress?.begin("准备网页 Blob 下载")
+        val ledger=progress
+        val id=ledger?.begin("准备网页 Blob 下载")
+        progressId=id
+        // 等待网页回包不是协程传输，必须登记取消动作：清掉 pending 后晚到的回包会被忽略，
+        // 已进入解码阶段则取消协程并立即移除进度，避免仍打开系统导出选择器。
+        if(id!=null && ledger!=null) ledger.onCancel(id) {
+            if(pending?.nonce==nonce){ clear() }
+            else {
+                transfer?.cancel()
+                if(progressId==id){ ledger.finish(id);progressId=null }
+            }
+        }
         handler.postDelayed(timeout,30000)
         val literal=JSONObject.quote(url)
         val ticket=JSONObject.quote(nonce)
