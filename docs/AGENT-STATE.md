@@ -21,7 +21,7 @@
 - 基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`；只读代码与现有交接后实现，未启动设备、未安装/卸载真实 DSH。
 - 清单：版本管理对话框明确显示“当前使用/备用”、占用空间、安装时间、依赖锁/启动校验与总占用；当前版本无卸载入口，当前元数据缺失时禁止切换与卸载并显示中文原因。
 - 卸载策略：新增纯逻辑 `DshUninstall.requireUninstallable`，拒绝当前版本、运行中服务、活动子进程、更新检查/安装占用与无效/未安装版本；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。Review 修复：删除开始后一律不回滚（标记文件不能证明目录完整），回滚 move 失败保留 prepared 日志。
-- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除开始后不再回滚，隔离目录与 committed 日志由 `recover()` 清理；提交日志失败只有移回成功才清 prepared 日志，回滚失败保留记录。新增 `DshUninstallRecovery`：prepared 移回隔离目录，committed 只清理隔离目录、保留 engines 中可能重装的 target，旧协议无 phase 仍删除 target。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除。
+- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除开始后不再回滚，隔离目录与 committed 日志由 `recover()` 清理；提交日志失败只有移回成功才清 prepared 日志，回滚失败保留记录。新增 `DshUninstallRecovery`：prepared 移回隔离目录，committed 只清理隔离目录、保留 engines 中可能重装的 target，旧协议无 phase 仍删除 target。`replace()` 写新组件事务前先 `recover()`，避免 DSH 安装/重装覆盖待恢复的卸载日志。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除。
 - 互斥：安装、启动、切换、卸载共用环境 mutation；新增 `DshVersionGate` 供切换/卸载与 `UpdateManager.check()` 共用，锁顺序固定 mutation → versionGate；环境锁被占用时写入中文错误而非只记事件。
 - UI：主界面当前版本“卸载”改为“管理版本”；官方版本列表只对非当前已安装版本显示“卸载该备用版本”；确认框显示版本、占用、安装时间和保留范围。
 - 恢复：组件事务日志改用 `AtomicFile.delete()`，避免只删主文件留下 `.bak` 导致下次启动恢复已完成的卸载/替换事务。
@@ -190,7 +190,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 33 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 14 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、并发锁与并发卸载）；完整 JVM **549 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、真机。
+- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 34 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 15 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、并发锁与并发卸载）；完整 JVM **550 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、真机。
 - 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-31 新跑，merge `f5f3bf3` 后）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。

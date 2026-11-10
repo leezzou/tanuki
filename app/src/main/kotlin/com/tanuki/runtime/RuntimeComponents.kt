@@ -338,6 +338,9 @@ class RuntimeComponents(private val manager: RuntimeManager) {
     }
     internal suspend fun replaceEngine(version:String,block:suspend ()->Unit) = replace("dsh",version,block)
     private suspend fun replace(name: String, version:String?=null, block: suspend ()->Unit) {
+        // 安装/重装会重写 component-transaction；必须先恢复待处理的卸载或其他中断事务，
+        // 否则未完成的隔离目录会失去唯一恢复记录，重启后无法清理或回滚。
+        recover()
         val (destination,previous)=swapTargets(name,version)
         owned(destination);owned(previous)
         check(!previous.exists()) { "存在待恢复的组件，请重新打开应用完成恢复" }

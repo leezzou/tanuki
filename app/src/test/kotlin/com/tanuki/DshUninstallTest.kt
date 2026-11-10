@@ -277,6 +277,26 @@ class DshUninstallTest {
     }
 
     @Test
+    fun committedRecoveryAfterReinstallingDifferentVersionKeepsCurrentProgram() {
+        val engines = temporary.newFolder("engines")
+        // 当前使用 B；A 卸载部分失败留下 committed 日志与隔离目录，之后又重装了 B。
+        val current = seed(engines, "1.2.0")
+        val quarantine = seed(File(temporary.root, "runtime"), "dsh-1.3.0.uninstall")
+        File(quarantine, "partial").writeText("half deleted")
+
+        DshUninstallRecovery.apply(
+            phase = "committed",
+            target = File(engines, "1.3.0"),
+            quarantine = quarantine,
+            deleteFile = { it.deleteRecursively() }
+        )
+
+        assertTrue("重装后的当前版本不能被卸载恢复删除", current.isDirectory)
+        assertTrue(DshVersions.isInstalled(engines, "1.2.0"))
+        assertFalse(quarantine.exists())
+    }
+
+    @Test
     fun preparedRecoveryRestoresQuarantineAfterRollbackInterrupted() {
         val engines = temporary.newFolder("engines")
         val target = File(engines, "1.3.0")
