@@ -17,7 +17,6 @@ sealed interface DshLiveEvent {
     data class Streaming(val text: String) : DshLiveEvent
     data class Finished(val committed: Boolean) : DshLiveEvent
     data class Running(val running: Boolean) : DshLiveEvent
-    data class Approvals(val approvals: List<DshApproval>) : DshLiveEvent
     data class Failure(val message: String) : DshLiveEvent
 }
 
@@ -28,6 +27,5 @@ sealed interface DshLiveEvent {
 interface DshChatSource : DshSessionSource {
     suspend fun send(sessionId: String, text: String): Result<Unit>
     suspend fun cancel(sessionId: String): Result<Unit>
-    suspend fun answer(eventId: String, allow: Boolean): Result<Unit>
     fun live(sessionId: String): Flow<DshLiveEvent>
 }

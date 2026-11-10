@@ -12,8 +12,6 @@ import com.tanuki.web.DshRiskAssessment
 import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolStatus
-import com.tanuki.web.DshApproval
-import com.tanuki.web.DshApprovalKind
 import com.tanuki.web.DshChatSource
 import com.tanuki.web.DshLiveEvent
 import kotlinx.coroutines.flow.Flow
@@ -201,21 +199,6 @@ class DshNativeControllerTest {
         assertEquals("完成", state.tools.single().output)
     }
 
-    @Test fun approvalIsShownAndAnsweredOnlyThroughOfficialChannel() = runBlocking {
-        val approval = DshApproval("event-1", "A", DshApprovalKind.APPROVAL, "Bash", "需要执行命令")
-        val source = FakeSource(
-            listOf(session("A")),
-            liveEvents = listOf(DshLiveEvent.Connected, DshLiveEvent.Approvals(listOf(approval)))
-        )
-        val controller = controller(source)
-        controller.refresh()
-        val state = awaitState(controller) { it.currentApprovals.isNotEmpty() }
-        assertEquals("Bash", state.currentApprovals.single().title)
-        assertTrue(controller.answerApproval(approval, allow = true))
-        assertTrue(controller.state.value.approvals.isEmpty())
-        assertTrue(controller.state.value.notice!!.contains("允许"))
-    }
-
     @Test fun liveFailureDoesNotForceOfficialFallback() = runBlocking {
         val source = FakeSource(
             listOf(session("A")),
@@ -354,8 +337,6 @@ class DshNativeControllerTest {
         }
 
         override suspend fun cancel(sessionId: String): Result<Unit> = Result.success(Unit)
-
-        override suspend fun answer(eventId: String, allow: Boolean): Result<Unit> = Result.success(Unit)
 
         override fun live(sessionId: String): Flow<DshLiveEvent> =
             if (liveEvents.isEmpty()) emptyFlow() else flowOf(*liveEvents.toTypedArray())

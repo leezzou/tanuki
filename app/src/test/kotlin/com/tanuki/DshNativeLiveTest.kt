@@ -172,7 +172,6 @@ class DshNativeLiveTest {
             assertEquals("请检查登录", snapshot.messages.single().text)
             assertTrue(events.filterIsInstance<DshLiveEvent.Streaming>().any { it.text == "正在回复" })
             assertEquals("最终回复", events.filterIsInstance<DshLiveEvent.Message>().single().message.text)
-            assertEquals("Bash", events.filterIsInstance<DshLiveEvent.Approvals>().first().approvals.single().title)
             assertTrue(events.filterIsInstance<DshLiveEvent.Running>().single().running)
 
             val opens = socket.sent.map(::JSONObject).filter { it.optString("type") == "open" }
@@ -184,7 +183,7 @@ class DshNativeLiveTest {
         }
     }
 
-    @Test fun approvalAnswerPostsClientIdEventIdAndClosedOutcome() = runBlocking {
+    @Test fun chatPeerForwardsWaterfallNextInsteadOfShowingApproval() = runBlocking {
         val requests = CopyOnWriteArrayList<TestRequest>()
         TestServer { request ->
             requests += request
@@ -202,8 +201,7 @@ class DshNativeLiveTest {
                 else -> TestResponse(404, emptyList(), "not found")
             }
         }.use { server ->
-            lateinit var socket: ScriptedMuxSocket
-            socket = ScriptedMuxSocket { current, endpoint, streamId ->
+            val socket = ScriptedMuxSocket { current, endpoint, streamId ->
                 if (endpoint == DshMuxProtocol.EVENTS_ENDPOINT) {
                     current.emit(item(streamId, JSONObject().put("type", "ready").put("clientId", "client-1")))
                     current.emit(
@@ -223,38 +221,80 @@ class DshNativeLiveTest {
                 socketFactory = { socket },
                 endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
             )
-            val scope = CoroutineScope(Dispatchers.Default)
-            val collector = scope.launch { client.live("s1").collect { } }
-            var result: Result<Unit>? = null
+            val collector = CoroutineScope(Dispatchers.Default).launch { client.live("s1").collect { } }
             withTimeout(3_000) {
-                while (result?.isSuccess != true) {
-                    val attempt = client.answer("event-1", allow = true)
-                    result = attempt
-                    if (!attempt.isSuccess) delay(20)
-                }
+                while (requests.none { it.target == "/api/\$events/result" }) delay(20)
             }
-            val finalResult = requireNotNull(result)
-            assertTrue(finalResult.exceptionOrNull()?.toString(), finalResult.isSuccess)
             collector.cancelAndJoin()
 
-            val answer = requests.first { it.target == "/api/\$events/result" }
-            val args = JSONObject(answer.body).getJSONObject("payload").getJSONObject("args")
+            val forwarded = requests.first { it.target == "/api/\$events/result" }
+            val args = JSONObject(forwarded.body).getJSONObject("payload").getJSONObject("args")
             assertEquals("client-1", args.getString("clientId"))
             assertEquals("event-1", args.getString("eventId"))
-            assertEquals("result", args.getJSONObject("outcome").getString("kind"))
-            assertEquals("allowed-once", args.getJSONObject("outcome").getString("value"))
-            assertFalse(answer.body.contains("top-secret"))
+            assertEquals("next", args.getJSONObject("outcome").getString("kind"))
+            assertFalse(args.getJSONObject("outcome").has("value"))
+            assertFalse(forwarded.body.contains("top-secret"))
         }
     }
 
-    @Test fun answerWithoutLiveChannelFailsClosed() = runBlocking {
-        val client = DshNativeClient(
-            socketFactory = { error("no socket expected") },
-            endpointProvider = { DshEndpoint("http://127.0.0.1:1", "http://127.0.0.1:1/?token=x") }
-        )
-        val result = client.answer("event-1", allow = false)
-        assertTrue(result.isFailure)
-        assertTrue(result.exceptionOrNull()!!.message.orEmpty().contains("审批"))
+    @Test fun chatPeerForwardsNextAfterReconnect() = runBlocking {
+        val requests = CopyOnWriteArrayList<TestRequest>()
+        TestServer { request ->
+            requests += request
+            when {
+                request.target.startsWith("/connect?") -> connectResponse()
+                request.target == "/api/\$events/result" -> TestResponse(
+                    200,
+                    emptyList(),
+                    JSONObject()
+                        .put("type", "server-response")
+                        .put("rpcId", JSONObject(request.body).getString("rpcId"))
+                        .put("result", JSONObject().put("ok", true))
+                        .toString()
+                )
+                else -> TestResponse(404, emptyList(), "not found")
+            }
+        }.use { server ->
+            fun socket() = ScriptedMuxSocket { current, endpoint, streamId ->
+                if (endpoint == DshMuxProtocol.EVENTS_ENDPOINT) {
+                    current.emit(item(streamId, JSONObject().put("type", "ready").put("clientId", "client-1")))
+                    current.emit(
+                        item(
+                            streamId,
+                            JSONObject()
+                                .put("type", "waterfall")
+                                .put("event", "approval/request")
+                                .put("eventId", "event-1")
+                                .put("agentId", "s1")
+                                .put("request", JSONObject().put("toolName", "Bash"))
+                        )
+                    )
+                }
+            }
+            val sockets = mutableListOf(socket(), socket())
+            val client = DshNativeClient(
+                socketFactory = { sockets.removeAt(0) },
+                endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            )
+            fun collectUntilForwarded(expected: Int) = runBlocking {
+                val collector = CoroutineScope(Dispatchers.Default).launch { client.live("s1").collect { } }
+                withTimeout(3_000) {
+                    while (requests.count { it.target == "/api/\$events/result" } < expected) delay(20)
+                }
+                collector.cancelAndJoin()
+            }
+            collectUntilForwarded(1)
+            client.reset()
+            collectUntilForwarded(2)
+
+            val forwarded = requests.filter { it.target == "/api/\$events/result" }
+            assertEquals(2, forwarded.size)
+            forwarded.forEach { request ->
+                val outcome = JSONObject(request.body)
+                    .getJSONObject("payload").getJSONObject("args").getJSONObject("outcome")
+                assertEquals("next", outcome.getString("kind"))
+            }
+        }
     }
 
     private fun connectResponse(): TestResponse = TestResponse(

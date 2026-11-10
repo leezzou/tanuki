@@ -295,7 +295,6 @@ class DshNativeClient(
     private var muxGeneration = 0L
     private var activeSocket: DshMuxSocket? = null
     private var eventsClientId: String? = null
-    private val pendingApprovals = LinkedHashMap<String, DshApproval>()
     private val _connection = MutableStateFlow(DshConnectionState.DISCONNECTED)
     override val connection: StateFlow<DshConnectionState> = _connection.asStateFlow()
 
@@ -309,7 +308,6 @@ class DshNativeClient(
             boundOrigin = null
             boundLaunchUrl = null
             eventsClientId = null
-            pendingApprovals.clear()
             socket = activeSocket
             activeSocket = null
             _connection.value = DshConnectionState.DISCONNECTED
@@ -385,35 +383,6 @@ class DshNativeClient(
      * 通过官方 `$events/result` 回答审批。value 只使用官方闭集 `allowed-once`/`rejected`，
      * 不读取或回传审批请求里的工具参数。
      */
-    override suspend fun answer(eventId: String, allow: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            if (!DshMuxProtocol.validEventId(eventId)) throw IOException("审批事件标识无效")
-            val clientId = synchronized(stateLock) { eventsClientId }
-                ?: throw IOException("实时审批通道尚未连接")
-            val body = callEnvelope(
-                DshMuxProtocol.EVENTS_RESULT_ENDPOINT,
-                JSONObject()
-                    .put("clientId", clientId)
-                    .put("eventId", eventId)
-                    .put(
-                        "outcome",
-                        JSONObject()
-                            .put("kind", "result")
-                            .put("value", if (allow) "allowed-once" else "rejected")
-                    )
-            )
-            DshApiProtocol.checkSuccess(body)
-            removeApproval(eventId)
-            Unit
-        }
-    }
-
-    /**
-     * 打开官方 `$events` 与 `session/follow` 两个逻辑流，持续输出实时事件。
-     *
-     * 物理连接只有一条；关闭它会销毁该 API Peer，因此 finally 同时清空 Cookie，
-     * 下次发送或重连会重新 `/connect`。同一时刻只保留一个 live 收集器。
-     */
     override fun live(sessionId: String): Flow<DshLiveEvent> = flow {
         require(sessionId.isNotBlank()) { "会话标识为空" }
         muxLock.withLock {
@@ -433,7 +402,6 @@ class DshNativeClient(
                     if (generation != muxGeneration) throw IOException("实时连接已取消")
                     activeSocket = opened
                     eventsClientId = null
-                    pendingApprovals.clear()
                     _connection.value = DshConnectionState.CONNECTED
                 }
                 val eventsId = "events-${UUID.randomUUID()}"
@@ -490,8 +458,7 @@ class DshNativeClient(
                     if (generation != 0L && generation == muxGeneration) {
                         activeSocket = null
                         eventsClientId = null
-                        pendingApprovals.clear()
-                        // 关闭物理 socket 会销毁该 API Peer，旧 Cookie 不可再用于 HTTP。
+                            // 关闭物理 socket 会销毁该 API Peer，旧 Cookie 不可再用于 HTTP。
                         cookie = null
                         boundOrigin = null
                         boundLaunchUrl = null
@@ -504,7 +471,7 @@ class DshNativeClient(
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun handleEvent(value: JSONObject, sessionId: String): DshLiveEvent? {
+    private suspend fun handleEvent(value: JSONObject, sessionId: String): DshLiveEvent? {
         val frame = DshMuxProtocol.parseEventFrame(value) ?: return null
         return when (frame) {
             is DshEventFrame.Ready -> {
@@ -512,10 +479,11 @@ class DshNativeClient(
                 null
             }
             is DshEventFrame.Waterfall -> {
-                val approval = DshMuxProtocol.approvalOf(frame) ?: return null
-                DshLiveEvent.Approvals(publishApproval(approval))
+                // 聊天 Peer 不展示/回答审批；明确转交 next，让 Host 交给独立审批 Peer。
+                forwardWaterfallNext(frame.eventId)
+                null
             }
-            is DshEventFrame.Cancelled -> DshLiveEvent.Approvals(removeApproval(frame.eventId))
+            is DshEventFrame.Cancelled -> null
             is DshEventFrame.Emit -> when (frame.event) {
                 "api-session/status" -> {
                     if (frame.args.length() < 2 || frame.args.optString(0) != sessionId) return null
@@ -532,14 +500,18 @@ class DshNativeClient(
         }
     }
 
-    private fun publishApproval(approval: DshApproval): List<DshApproval> = synchronized(stateLock) {
-        pendingApprovals[approval.eventId] = approval
-        pendingApprovals.values.toList()
-    }
-
-    private fun removeApproval(eventId: String): List<DshApproval> = synchronized(stateLock) {
-        pendingApprovals.remove(eventId)
-        pendingApprovals.values.toList()
+    /** 不负责审批 UI 的 Peer 只回 next；失败不打断聊天流，审批 Peer 仍可回答。 */
+    private suspend fun forwardWaterfallNext(eventId: String) {
+        val clientId = synchronized(stateLock) { eventsClientId } ?: return
+        runCatching {
+            call(
+                DshApprovalProtocol.RESULT_ENDPOINT,
+                JSONObject()
+                    .put("clientId", clientId)
+                    .put("eventId", eventId)
+                    .put("outcome", JSONObject().put("kind", "next"))
+            )
+        }
     }
 
     private fun liveFailure(error: Throwable): String = when (error) {

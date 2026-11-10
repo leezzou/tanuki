@@ -2,7 +2,6 @@ package com.tanuki.ui
 
 import com.tanuki.runtime.Redact
 import com.tanuki.web.DshApiException
-import com.tanuki.web.DshApproval
 import com.tanuki.web.DshChatSource
 import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
@@ -43,13 +42,10 @@ data class DshNativeState(
     val actionError: String? = null,
     val notice: String? = null,
     val streamingText: String = "",
-    val approvals: List<DshApproval> = emptyList(),
     /** 与文本消息按 seq 交错渲染的工具调用卡片；来自同一官方 session/page 或 follow 事件。 */
     val tools: List<DshToolItem> = emptyList()
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
-    val currentApprovals: List<DshApproval> get() = approvals.filter { it.sessionId == selectedId }
-    val otherApprovalCount: Int get() = approvals.count { it.sessionId != selectedId }
 }
 
 /**
@@ -254,27 +250,6 @@ class DshNativeController(
         return ok
     }
 
-    /** 审批只回官方闭集结果；失败保留卡片，避免把未送达的裁决当成已处理。 */
-    suspend fun answerApproval(approval: DshApproval, allow: Boolean): Boolean {
-        val ok = client.answer(approval.eventId, allow).fold(
-            onSuccess = {
-                _state.update { state ->
-                    state.copy(
-                        approvals = state.approvals.filterNot { it.eventId == approval.eventId },
-                        actionError = null,
-                        notice = if (allow) "已允许一次" else "已拒绝"
-                    )
-                }
-                true
-            },
-            onFailure = { error ->
-                _state.update { it.copy(actionError = messageOf(error)) }
-                false
-            }
-        )
-        return ok
-    }
-
     fun clear() {
         generation++
         pageJob?.cancel()
@@ -319,7 +294,7 @@ class DshNativeController(
         when (event) {
             // 新 mux 连接会重新收到仍待处理的审批；先清掉上一连接的旧卡片，避免幽灵按钮。
             DshLiveEvent.Connected -> _state.update {
-                it.copy(live = true, liveError = null, approvals = emptyList())
+                it.copy(live = true, liveError = null)
             }
             is DshLiveEvent.Snapshot -> _state.update { state ->
                 state.copy(
@@ -355,7 +330,6 @@ class DshNativeController(
                     }
                 )
             }
-            is DshLiveEvent.Approvals -> _state.update { it.copy(approvals = event.approvals) }
             is DshLiveEvent.Failure -> _state.update { it.copy(liveError = event.message) }
         }
     }
