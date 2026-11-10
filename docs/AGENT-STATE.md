@@ -1,8 +1,17 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[pi reviewer 重新接入与 0.1.10 发布登记](handoffs/20261110-1017-pi-reviewer-verify.md)（android_agent-36，基线 `main=0555c3c0`；仅文档，作为 pi reviewer 通路验证载体）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
 
-## 0.1.10 Pre-release（最终发布准备，本地候选）
+## 0.1.10 已发布与 pi reviewer 重新接入（2026-11-10）
+
+- **0.1.10 已发布**为 Pre-release：tag `v0.1.10`，2026-11-09T16:19:30Z，6 个附件；`app-update.json` 为 `versionName=0.1.10`、`versionCode=12`、APK SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`、11,485,978 字节、证书 `371dc301…`；对应 `main=0555c3c0`（PR #30 合并）。
+- **AO 已升级 0.14.10**：`0.14.10 commit 033d597032e4`；daemon 于 2026-11-10T02:10:41Z 重启。
+- **pi reviewer 重新接入**：系统 tmux `3.5a` 位于 `/opt/homebrew/bin/tmux`（1,608,176 字节，SHA-256 `e9abdde0…ab98`，与 AO 自带 tmux 同源）；AO 按固定路径表（`/opt/homebrew/bin`、`/usr/local/bin`、`/opt/local/bin`）识别系统 tmux，不校验 Homebrew receipt；项目 reviewers 为 `harness=pi`、`effort=high`。
+- **待修正**：reviewers 的 model 仍为 `openai/gpt-6-astra`（`ao project get` 复核），目标 `codex/gpt-6-astra` 尚未落盘；pi 本机目录仅 `magpie` 一个 provider，astra 的合法 id 为 `codex/gpt-6-astra`。
+- **已合并会话已归档**：`android_agent-24`、`-27` 至 `-35` 共 10 个会话已于 2026-11-10 02:14Z 前后终止；当前活跃 `android_agent-36`、`-37`。
+- **未验证**：重启后尚未触发过 pi review（02:10Z 后无 `review_run`），通路待编排器用最新 SHA 触发确认。
+
+## 0.1.10 Pre-release（已发布 2026-11-09；以下为发布前准备记录）
 
 - 版本 `versionName=0.1.10`、`versionCode=12`、`channel=workspacecheck`（开发证书、non-debuggable、ARM64、minSdk26/targetSdk34）；最终基线 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95`，分支 `ao/xlsx-preview/release-0.1.10`。
 - 本版包含 9 个已合并 PR：PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
