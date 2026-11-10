@@ -159,8 +159,9 @@ class DshComposerControllerTest {
             ),
             controller.captureSessionToken()
         )
+        // 上传成功与 worker 收尾是两个状态更新，必须一起等待，避免 CI 上读到中间态。
         val uploaded = awaitState(controller) {
-            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADED
+            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADED && !it.uploadBusy
         }
         assertEquals("receipt-1", uploaded.attachments.single().receiptId)
         assertFalse(uploaded.uploadBusy)
