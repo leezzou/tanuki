@@ -884,6 +884,51 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun legacyActiveCopyWithoutSourceClearsForSameHostDifferentAccount() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val alice = profileStore.save(
+            "alice",
+            config(host = "a.example.test", user = "alice", auth = RemoteAuthType.PASSWORD, password = "alice-secret")
+        )
+        profileStore.save(
+            "bob",
+            config(host = "a.example.test", user = "bob", auth = RemoteAuthType.PASSWORD, password = "bob-secret")
+        )
+        assertTrue(controller.attempt(alice.config, keepTunnel = true, profileId = alice.id) is RemoteAttemptResult.Success)
+
+        // 模拟从旧版本升级：活动副本存在，但没有 sourceProfileId。
+        fixture.storage.save(alice.config)
+        assertNull(fixture.storage.sourceProfileId())
+
+        controller.deleteProfile(alice.id)
+        withTimeout(5_000) {
+            while (controller.ui.value.profiles.any { it.id == alice.id }) delay(10)
+        }
+        assertNull("同主机不同账号不能阻止删除方清理自己的活动凭据", fixture.storage.load())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
+        // bob 仍共享同一主机密钥信任，但 alice 的凭据副本已被清理。
+        assertNotNull(fixture.storage.knownFingerprint("a.example.test", 22))
+        assertTrue(controller.ui.value.profiles.any { it.name == "bob" })
+    }
+
+    @Test
     fun failedAttemptConfigKeepsRetryOnFailedHostInsteadOfPreviousSavedHost() = runBlocking {
         val fixture = Fixture()
         fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")

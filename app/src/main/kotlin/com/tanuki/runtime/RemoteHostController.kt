@@ -144,7 +144,9 @@ class RemoteHostController(
             val activeCopy = runCatching { storage.load() }.getOrNull() ?: mutableUi.value.saved
             val legacyMatch = sourceId == null && removed != null && activeCopy != null &&
                 sameRemoteService(activeCopy, removed.config) &&
-                !(removed.config.hostIdentity()?.let { store.identityUsedByOthers(it, id) } ?: false)
+                // known_hosts 可以按主机身份共享，但活动凭据必须按完整服务归属判断；
+                // 同主机不同账号/DSH 端口不能阻止删除方清理自己的密码/私钥。
+                !store.serviceUsedByOthers(removed.config, id)
             val removeActiveCopy = removed != null && (sourceId == id || legacyMatch)
             val activeCleared = if (removeActiveCopy) {
                 runCatching { storage.clearConfig() }.isSuccess
@@ -629,9 +631,7 @@ class RemoteHostController(
 
     /** 判断两份配置是否指向同一远程 DSH 服务；用于删除命名连接时定位活动配置副本。 */
     private fun sameRemoteService(first: RemoteHostConfig, second: RemoteHostConfig): Boolean =
-        first.hostIdentity() == second.hostIdentity() &&
-            first.user == second.user &&
-            first.remoteDshPort == second.remoteDshPort
+        first.sameServiceAs(second)
 
     private data class PendingConnection(
         val config: RemoteHostConfig,

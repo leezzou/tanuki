@@ -20,7 +20,7 @@
 ## 当前状态
 
 - 已实现：六步向导（方式 → 主机账号 → 认证 → 指纹 → 测试 → 完成）；字段级中文校验与示例；阶段化错误（TCP/SSH 握手/认证/端口转发/DSH 探测）+ 下一步建议 + 重试；首次 SHA256 指纹必须显式勾选；命名连接新增/编辑/删除与“上次使用”；密码/私钥/口令/token 继续走 Android Keystore AES-256-GCM；远程/本地状态与切换影响提示；私钥系统文件选择器（64 KiB 上限）。
-- 已验证：Kotlin 编译、完整 JVM 927 tests / 101 文件 / 0 失败、lint 0 errors / 103 warnings / 1 hint；交接/上传检查待提交前最后运行。
+- 已验证：Kotlin 编译、完整 JVM 928 tests / 101 文件 / 0 失败、lint 0 errors / 103 warnings / 1 hint；交接/上传检查待提交前最后运行。
 - 待验证：真实 Android 设备/模拟器 UI、系统文件选择器、真实 sshd/中继/DSH、Android Keystore 真机、弱网/断线、深色/大字体。
 - 当前目标包名：`com.tanuki`（本轮未构建 APK，不涉及安装包）。
 - 关键事实与可定位源码：向导与校验 `runtime/RemoteHostWizard.kt`；阶段模型/错误映射 `runtime/RemoteConnectionError.kt`；命名连接 `runtime/RemoteHostProfiles.kt`；控制器 `runtime/RemoteHostController.kt`；阶段回调 `runtime/SshTransport.kt`、`runtime/RelayTransport.kt`；UI `ui/RemoteHostSettings.kt`。
@@ -41,7 +41,7 @@
 | `app/src/main/kotlin/com/tanuki/runtime/RemotePairingCode.kt` | 新增配对链接的 6 位人工核对码（SHA-256 前 8 字节 mod 1e6），与 Python 参考主机端共享向量 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` 中的 `RemoteHostSwitchChip`/`RemoteHostSwitchSheet` | 提供给 DshNativePage 头部的主机切换组件与 sheet；本 PR 不接线，见 hook 清单 |
 | `scripts/remote-relay/protocol.py`、`host_agent.py`、`test_remote_relay.py` | 主机端输出 6 位配对码并新增共享向量回归 |
-| `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt` | 新增 40 项 JVM 回归：状态机、校验、错误映射、命名连接、控制器阶段、来源 profile ID 清理、迟到私钥读取、重试归属、6 位码、chip 展示 |
+| `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt` | 新增 41 项 JVM 回归：状态机、校验、错误映射、命名连接、控制器阶段、来源 profile ID 清理、迟到私钥读取、重试归属、6 位码、chip 展示 |
 | `docs/REMOTE-HOST.md`、`docs/REMOTE-CONNECT.md`、`docs/INTERFACES.md` | 同步向导流程、阶段错误语义与命名连接契约；按普通 PR 规则不修改 `docs/TEST-REPORT.md` |
 | `docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 本轮唯一交接记录；未改 `AGENT-STATE.md`/`CURRENT.json` |
 
@@ -128,18 +128,19 @@ if (showRemoteHostSheet) {
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | 通过（BUILD SUCCESSFUL） | JDK17、Android SDK、macOS ARM64；仅编译 |
-| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**927 tests / 101 个结果文件 / 0 failures / 0 errors / 0 skipped**（1m4s） | 含新增 `RemoteWizardTest` 40 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
+| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**928 tests / 101 个结果文件 / 0 failures / 0 errors / 0 skipped**（33m50s） | 含新增 `RemoteWizardTest` 41 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
 | 同上，单独 `--tests com.tanuki.RemoteWizardTest` | 通过：26 tests / 0 failures | 新增回归定向结果 |
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:lintModernDebug -x buildNativeRuntime` | 通过：**0 errors / 102 warnings / 1 hint**（3m58s） | 仅 JVM/lint，不含设备 |
 | 最终自查修复（完成页空配置、隧道断开/存储错误不再误报阶段）后重跑 JVM + lint | 通过：820 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 最终 head `c017488`；本轮修复提交也附带本交接记录更新 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 通过 | 普通 PR 模式 |
 | `python3 scripts/check-publication.py --git` | 通过：677 public files / 672 index entries / 0 findings | 上传检查 |
-| 评审修复与后续增量：4 个 P2、6 位码、chip 映射、MainActivity 回退 | 通过：927 tests / 0 failures；lint 0 errors / 103 warnings / 1 hint | 合并最新 main 后复验；MainActivity 保留接线、相对 main 零 diff |
+| 评审修复与后续增量：4 个 P2、6 位码、chip 映射、MainActivity 回退 | 通过：928 tests / 0 failures；lint 0 errors / 103 warnings / 1 hint | 合并最新 main 后复验；MainActivity 保留接线、相对 main 零 diff |
 | 第三轮 P2：活动副本按 sourceProfileId 归属；迟到私钥读取按请求版本丢弃 | 通过：924 tests / 0 failures | 编辑目标后删除、同服务双 profile、切换认证/进入测试后迟到回调均有回归 |
 | 最终 P1/P2：保留 #52 向导接线；host_agent 默认系统 CA 路径先配 INFO 日志 | 通过：MainActivity 相对 main 零 diff；Python 9 tests | 设置页向导入口不消失；配对码在默认路径可见 |
 | MainActivity 接线恢复提交 | `822ad6f`：保留 12 行，相对 main 零 diff | 设置页向导入口在 51 迁移前保持可用 |
 | 控制器→向导状态回归 | 通过：`RemoteWizardTest` 40 项；成功进入 DONE、失败退出 busy 并停 AUTHENTICATION | 覆盖 MainActivity 真实模型接线后的成功/失败路径 |
-| 公开重连来源保留 P2 | 通过：`RemoteWizardTest` 40 项 | `connect(config)` 重连/重试恢复 sourceProfileId；新手工配置不继承；编辑目标后删除仍清理 |
+| 公开重连来源保留 P2 | 通过：`RemoteWizardTest` 41 项 | `connect(config)` 重连/重试恢复 sourceProfileId；新手工配置不继承；编辑目标后删除仍清理 |
+| legacy 同主机不同账号清理 P2 | 通过：`RemoteWizardTest` 41 项 | 活动凭据归属与 known_hosts 主机身份分离；alice/bob 同主机删除 alice 仍清理，bob 的主机密钥信任保留 |
 | `python3 scripts/remote-relay/test_remote_relay.py` | 通过：9 tests（含 6 位码共享向量 308002、默认系统 CA 路径配对码输出） | Python 3.9 标准库回环 |
 | `git diff origin/main -- app/src/main/kotlin/com/tanuki/MainActivity.kt` | 空（MainActivity 相对当前 main 零 diff） | 保留 #52 接线；51 迁移后单独删除重复入口 |
 
@@ -169,7 +170,7 @@ if (showRemoteHostSheet) {
   - 测试连接继续不切换 origin、不保存配置；只有“保存并连接”才持久化并切换管理页。
 - 失败尝试与避免重复踩坑的结论：
   - 共享 `.git` 在工作区外，Git 写引用/Gradle 编译需要一次完整访问权限；未修改全局 Java，复用主检出 `.build/jdk` 的 JDK17。
-  - `NpmAdaptiveWorkerPoolTest` 存在既有并发时序抖动，本轮未修改；完整套件通过后才记录 927/0，不隐瞒首次失败。
+  - `NpmAdaptiveWorkerPoolTest` 存在既有并发时序抖动，本轮未修改；完整套件通过后才记录 928/0，不隐瞒首次失败。
   - Compose 中函数类型回调不能用 `c::connectRemoteHost` 直接引用，已改为显式 lambda。
 
 ## 产物与校验

@@ -83,6 +83,12 @@ data class RemoteHostConfig(
         return null
     }
 
+    /** 是否指向同一远程 DSH 服务（主机身份 + SSH 用户 + 远程 DSH 端口）。 */
+    fun sameServiceAs(other: RemoteHostConfig): Boolean =
+        hostIdentity() == other.hostIdentity() &&
+            user == other.user &&
+            remoteDshPort == other.remoteDshPort
+
     /** 连接身份用于 known_hosts 查询；中继模式用稳定 hostId，换房间仍沿用同一主机密钥信任。 */
     fun hostIdentity(): String? =
         relay?.let { "relay:${it.hostId}" } ?: normalizedHost()?.let { "$it:$sshPort" }
