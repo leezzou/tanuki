@@ -45,6 +45,7 @@ import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
 import com.tanuki.ui.DshApprovalController
 import com.tanuki.ui.DshComposerController
+import com.tanuki.ui.DshComposerSendRecorder
 import com.tanuki.ui.DshNativeController
 import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.DshSessionManagerActivity
@@ -383,9 +384,12 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 val approvalState by approvalController.state.collectAsState()
+                val composerRecorder = remember {
+                    DshComposerSendRecorder(DshNativeComposerRemote(nativeClient))
+                }
                 val nativeComposer = remember {
                     DshComposerController(
-                        client = DshComposerClient(DshNativeComposerRemote(nativeClient)),
+                        client = DshComposerClient(composerRecorder),
                         drafts = SharedPreferencesDshDraftStore(this@MainActivity),
                         scope = lifecycleScope,
                         onSent = { id -> nativeController.select(id, force = true) }
@@ -618,7 +622,10 @@ class MainActivity : ComponentActivity() {
                                 approvalController.answer(eventId, outcome, remember)
                             },
                             onApprovalRetry = approvalController::retry,
-                            onClearRemembered = approvalController::clearRemembered
+                            onClearRemembered = approvalController::clearRemembered,
+                            onForgetRemembered = approvalController::forgetRemembered,
+                            onDismissNotice = approvalController::dismissNotice,
+                            composerSendFailures = composerRecorder.failures
                         )
                     },
                     browserOpenRequest = browserOpenRequest,

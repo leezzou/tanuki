@@ -176,9 +176,95 @@ class DshNativeControllerTest {
         )
         val controller = controller(source)
         controller.refresh()
-        val state = awaitState(controller) { it.messages.any { m -> m.text == "已收到" } }
+        // 流式文本按帧合并，断言最终发布的完整文本而不是某一次中间事件。
+        val state = awaitState(controller) { it.streamingText == "正在回复" }
         assertEquals("已收到", state.messages.last().text)
         assertEquals("正在回复", controller.state.value.streamingText)
+    }
+
+    @Test fun collapsingManyStreamingDeltasKeepsOnlyLatestFrame() = runBlocking {
+        val events = ArrayList<DshLiveEvent>()
+        events += DshLiveEvent.Connected
+        events += DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = "")
+        for (index in 1..200) events += DshLiveEvent.Streaming("增量".repeat(index))
+        val source = FakeSource(listOf(session("A")), liveEvents = events)
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.streamingText == "增量".repeat(200) }
+        assertEquals("增量".repeat(200), state.streamingText)
+        assertEquals(400, state.streamingText.length)
+    }
+
+    @Test fun newStreamResetWithinOneFrameDropsSnapshotPrefix() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = "历史前缀"),
+                DshLiveEvent.Streaming(""),
+                DshLiveEvent.Streaming("回答")
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.streamingText == "回答" }
+        assertEquals("回答", state.streamingText)
+        assertFalse(state.streamingText.contains("历史前缀"))
+    }
+
+    @Test fun committedAssistantMessageCancelsPendingStreamFlush() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = ""),
+                DshLiveEvent.Streaming("最终回复"),
+                DshLiveEvent.Message(DshMessage(9, DshMessageRole.ASSISTANT, "最终回复", 2L))
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.messages.any { message -> message.text == "最终回复" } }
+        assertEquals(1, state.messages.size)
+        assertEquals("", state.streamingText)
+        // 给延迟刷新的旧任务留出时间；它不能把已落盘消息再插入成流式气泡。
+        kotlinx.coroutines.delay(120)
+        assertEquals("", controller.state.value.streamingText)
+        assertEquals(1, controller.state.value.messages.size)
+    }
+
+    @Test fun sendFailureKeepsPromptForRetryAndCopy() = runBlocking {
+        val source = FakeSource(listOf(session("A")))
+        source.setSendFailure(com.tanuki.web.DshApiException("session/agent-busy"))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertFalse(controller.send("需要重试的原文"))
+        val failed = controller.state.value.failedPrompt
+        assertTrue(failed != null)
+        assertEquals("需要重试的原文", failed!!.text)
+        assertTrue(failed.reason.contains("session/agent-busy"))
+        assertFalse(controller.state.value.messages.any { it.pending })
+
+        source.setSendFailure(null)
+        assertTrue(controller.retryFailedPrompt())
+        assertNull(controller.state.value.failedPrompt)
+        // 重发成功后官方落盘前仍保留“发送中”占位，由 follow/历史页替换。
+        assertTrue(controller.state.value.messages.any { it.pending })
+    }
+
+    @Test fun switchingSessionClearsFailedPromptCard() = runBlocking {
+        val source = FakeSource(listOf(session("A"), session("B")))
+        source.setSendFailure(com.tanuki.web.DshApiException("session/agent-busy"))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertFalse(controller.send("失败内容"))
+        assertTrue(controller.state.value.failedPrompt != null)
+        controller.select("B", force = true)
+        val state = awaitSelection(controller, "B")
+        assertNull(state.failedPrompt)
+        assertNull(state.sendError)
     }
 
     @Test fun liveToolSnapshotAndResultAreMergedByCallId() = runBlocking {
@@ -200,11 +286,11 @@ class DshNativeControllerTest {
         assertEquals("完成", state.tools.single().output)
     }
 
-    @Test fun liveToolCallThenResultKeepsDuration() = runBlocking {
-        val running = toolItem("call-2", DshToolStatus.RUNNING, 8, startedAt = 1_000L)
+    @Test fun liveToolMergeKeepsStartedAndFinishedTimestamps() = runBlocking {
+        val running = toolItem("call-time", DshToolStatus.RUNNING, 7, startedAt = 100L)
         val completed = toolItem(
-            "call-2", DshToolStatus.SUCCESS, 8,
-            output = "完成", startedAt = 0L, finishedAt = 2_500L
+            "call-time", DshToolStatus.SUCCESS, 7,
+            output = "完成", startedAt = 0L, finishedAt = 250L
         )
         val source = FakeSource(
             listOf(session("A")),
@@ -216,8 +302,10 @@ class DshNativeControllerTest {
         )
         val controller = controller(source)
         controller.refresh()
-        val state = awaitState(controller) { it.tools.singleOrNull()?.status == DshToolStatus.SUCCESS }
-        assertEquals(1_500L, state.tools.single().durationMs)
+        val state = awaitState(controller) { it.tools.singleOrNull()?.finishedAt == 250L }
+        assertEquals(100L, state.tools.single().startedAt)
+        assertEquals(250L, state.tools.single().finishedAt)
+        assertEquals(150L, state.tools.single().durationMs)
     }
 
     @Test fun liveFailureDoesNotForceOfficialFallback() = runBlocking {
@@ -326,7 +414,7 @@ class DshNativeControllerTest {
         private val failSessions: Boolean = false,
         messages: Map<String, String> = emptyMap(),
         private val liveEvents: List<DshLiveEvent> = emptyList(),
-        private val sendFailure: Throwable? = null,
+        private var sendFailure: Throwable? = null,
         private val sendGate: CompletableDeferred<Unit>? = null,
         private val pageGate: CompletableDeferred<Unit>? = null,
         private val timelines: Map<String, List<DshTimelineItem>> = emptyMap()
@@ -335,6 +423,10 @@ class DshNativeControllerTest {
 
         fun setMessage(sessionId: String, text: String) {
             current[sessionId] = text
+        }
+
+        fun setSendFailure(error: Throwable?) {
+            sendFailure = error
         }
 
         override suspend fun sessions(): Result<List<DshSession>> =
