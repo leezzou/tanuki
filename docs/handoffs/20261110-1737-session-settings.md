@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-54（DSH Worker）
 - 时间：2026-11-10 17:37 CST（开始），2026-11-10 18:20 CST（收尾）
-- 状态：已完成（本地实现、JVM 与 lint 已验证；待提交/PR 与设备验收）
+- 状态：已完成（本地实现、JVM 与 lint 已验证；PR #50 已创建，待独立审查与设备 QA；未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -37,7 +37,7 @@
   - 定向 `DshSessionManagerControllerTest` 27 tests + `TanukiThemeModeTest` 4 tests，0 失败。
   - `:app:lintModernDebug` BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint；改动文件仅有既有 `UseKtx`、`ModifierParameter`、`LocalClipboardManager` 等告警。
 - 待验证：真机/模拟器布局、下拉刷新手势、长列表滚动、深色/大字体、完全权限确认交互、真实 PRoot DSH 的列表/模型/权限接口；未跑 Android 仪器、assemble/APK。
-- 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`；分支 `ao/session-settings/root`；基线 `4f2a3717d6d795fd6b94cdb695878d8119f818c1`；无运行中的构建/设备任务。任务给出基线后远端 `origin/main` 已前进到 `326726c`（仅文档 #45），本次按用户指定的 `4f2a3717` 交付，未 rebase。
+- 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`；分支 `ao/session-settings/root`；提交 `c34b672fba79d2af781da543f5e0803162b9f660`；PR https://github.com/leezzou/tanuki/pull/50 ；基线 `4f2a3717d6d795fd6b94cdb695878d8119f818c1`；无运行中的构建/设备任务。任务给出基线后远端 `origin/main` 已前进到 `326726c`（仅文档 #45），本次按用户指定的 `4f2a3717` 交付，未 rebase。
 - 关键事实与可定位源码/公共文档：控制器 `DshSessionManagerController.kt`；页面 `DshSessionManagerPage.kt`；活动与偏好 `DshSessionManagerActivity.kt`；纯展示 `DshSessionPresentation.kt`；主题偏好 `TanukiThemeMode.kt`/`TanukiDesign.kt`；设置入口 `TanukiUi.kt`；协议 `DshSessionAdminApi.kt`；能力矩阵 `docs/NATIVE-PARITY.md`。
 
 ## 本次改动
@@ -78,15 +78,14 @@
   - 会话硬删除：当前 `DshSessionAdminSource`/官方协议没有硬删除端点，只做明确说明，未实现假删除。
   - 归档撤销：官方未在本切片接入 `unarchiveSession`，归档确认文案明确“不提供本页撤销”。
   - 语言切换：原生界面仅简体中文，未接入资源化语言切换，设置页如实说明而不放假开关。
-  - 设备/仪器/assemble 验证与 PR 提交（本记录写完后再执行）。
+  - 设备/仪器/assemble 验证与独立审查未执行；PR #50 已创建，等待审查与设备 QA。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收；未获合并/发布授权不合并、不发布。
 
 ## 下一步
 
-1. 运行 `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-session-settings.md`、`python3 scripts/check-publication.py --git`，检查暂存范围后以 `leezzou <115924933+leezzou@users.noreply.github.com>` 为 author/committer 提交。
-2. 推送 `ao/session-settings/root` 并创建 PR（目标 `main`，不合并、不发布），PR 正文写明本记录中的测试、未验证范围与删除/语言限制。
-3. 由独立 reviewer 审查当前 head；设备 QA 由独立 QA 在真实 DSH 上补做下拉刷新、长列表、模型/权限切换与完全权限确认。
+1. 由独立 reviewer 审查 PR #50 当前 head `c34b672`；设备 QA 由独立 QA 在真实 DSH 上补做下拉刷新、长列表、模型/权限切换与完全权限确认。
+2. 按审查意见修改后重新验证并推送；未获明确授权不合并、不发布。PR 正文见 https://github.com/leezzou/tanuki/pull/50 。
 
 ## 约束与风险
 
@@ -102,6 +101,7 @@
 ## 产物与校验
 
 - 新/旧APK、源码ZIP及校验文件，哪些确实更新：本次不构建 APK/源码 ZIP，不更新发布产物。
+- 交付 PR：https://github.com/leezzou/tanuki/pull/50 （head `c34b672`，目标 `main`；未合并、未发布）。
 - 是否覆盖安装 / 签名范围 / 未发布事项：不覆盖安装、不签名、不发布。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置；仍需保留的验证/未完成记录：本次未删除任何历史交接；旧记录的结论仍由 `docs/AGENT-STATE.md` 与各专题文档承载。保留本记录作为本轮证据。
 - 普通 PR 不刷新共享状态/印章；集成维护方在批量合并后统一运行 `--integrate`。文档或脚本变化后重新生成源码 ZIP；不要把源码 ZIP 自身哈希写回归档内形成循环。
