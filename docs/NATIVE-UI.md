@@ -128,8 +128,8 @@
 本轮（android_agent-45，基线 `origin/main=0555c3c`，已合入 `main=533eff4`）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**602 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；基线 535 + 本切片 44 + 合入 PR #34 的 23）。
-- `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint（既有弃用/可读性告警）。
+- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**621 tests / 0 failures / 0 errors / 0 skipped**（76 个结果文件；基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19）。
+- `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint（既有弃用/可读性告警）。
 - `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（仅打包验证，未安装）。
 - 新增 `DshApprovalProtocolTest` 11 项：ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆、未知类型。
 - 新增 `DshToolTimelineTest` 9 项：工具调用与结果配对、失败原因、replace 去重、孤儿结果、长输出截断、diff 行/计数、新建文件、命令/路径参数、文本与工具时间线并存、append-origin/真实用户来源过滤。

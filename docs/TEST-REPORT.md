@@ -159,8 +159,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 新增 JVM 回归 44 项：`DshApprovalProtocolTest` 11、`DshToolTimelineTest` 9、`DshWebSocketTest` 7、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 12。覆盖 ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方回答信封、风险分级、本次运行记忆、未知类型拒绝、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/握手超时/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
 - 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：
   - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL。
-  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**602 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件；0.1.10 基线 535 + 本切片 44 + 合入 PR #34 的 23）。
-  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 94 warnings / 1 hint**（存量弃用/可读性告警）。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**621 tests / 0 failures / 0 errors / 0 skipped**（76 个结果文件；0.1.10 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19）。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**（存量弃用/可读性告警）。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL（仅打包验证，未安装）。
 - 未验证：真实 Android 设备/模拟器上的原生审批卡片布局、深色主题、大字体、长参数/长 diff、输出折叠与滚动；真实 PRoot 内 DSH `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue；远程 SSH 隧道后的审批流；通知点击后待审批列表过滤；Android 仪器/真机未执行。以上不能计为设备通过。
 

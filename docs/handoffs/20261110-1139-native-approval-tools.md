@@ -24,7 +24,7 @@
 ## 当前状态
 
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、5 项 Review 修复、文档与回归。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 602/0/0/0、`lintModernDebug` 0 errors / 94 warnings、`assembleModernDebug` 通过（未安装）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 621/0/0/0、`lintModernDebug` 0 errors / 95 warnings、`assembleModernDebug` 通过（未安装）。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`（answer Peer）/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、Android 仪器/真机。
 - 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=2a4a050`；无运行中安装/设备任务。
 - 四文件归属：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 已恢复为 `origin/main` 内容，本切片不再修改；42 接线清单见 [NATIVE-UI](../NATIVE-UI.md)。
@@ -72,7 +72,7 @@
 | `docs/INTERFACES.md` | 更新 1.7：answer Peer、`$events`/`$events/result`、参数后到、未知类型、临时 WebSocket 收敛说明。 |
 | `docs/NATIVE-UI.md` | 更新归属边界、42 接线清单、文件表、安全边界与验证/未验证。 |
 | `docs/TEST-REPORT.md` | 新增本切片验证与 5 项 Review 修复记录。 |
-| `docs/AGENT-STATE.md` | 更新当前切片状态、602 项验证与 42 归属。 |
+| `docs/AGENT-STATE.md` | 更新当前切片状态、621 项验证与 42 归属。 |
 | `docs/handoffs/CURRENT.json` | 刷新交接印章。 |
 
 ## 5 项 Review 修复
@@ -89,8 +89,8 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh` + `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | JDK17 worktree 环境 |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；72 个结果文件，602 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 44 + 合入 PR #34 的 23 |
-| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 94 warnings / 1 hint | 存量弃用/可读性告警 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；76 个结果文件，621 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 |
+| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 95 warnings / 1 hint | 存量弃用/可读性告警 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | 仅打包验证，未安装 |
 | 目标回归 44 项：Protocol 11、Timeline 9、WebSocket 7、Session 5、Controller 12 | 44/44 通过 | 本地合成 HTTP+WebSocket 服务器；不代表真实 DSH |
 | 既有 `DshNativeApiTest` 12、`DshNativeControllerTest` 6、`DshUiSwitchTest` 10 | 通过 | 四文件已恢复 main，旧契约不受影响 |
