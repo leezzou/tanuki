@@ -238,6 +238,25 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun ipv6WizardConfigPassesDownstreamValidation() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.LAN)
+        wizard.next()
+        wizard.updateDraft {
+            it.copy(host = "[2001:db8::10]", sshPort = "22", user = "tanuki", remoteDshPort = "3080")
+        }
+        wizard.next()
+        wizard.setAuth(RemoteAuthType.PASSWORD)
+        wizard.updateDraft { it.copy(password = "synthetic-password") }
+        wizard.next()
+
+        val config = wizard.buildConfig()!!
+        assertEquals("2001:db8::10", config.normalizedHost())
+        assertNull("向导生成的 IPv6 配置必须能被控制器再次校验", config.validationError())
+        assertNull(RemoteWizardValidation.host("2001:db8::10"))
+    }
+
+    @Test
     fun portAndUserValidationExplainsRangeAndExamples() {
         assertTrue(RemoteWizardValidation.port("", "SSH 端口", "22")!!.contains("示例"))
         assertTrue(RemoteWizardValidation.port("abc", "SSH 端口", "22")!!.contains("数字"))
@@ -536,6 +555,88 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun deletingProfileClearsActiveCopyButKeepsEstablishedTunnel() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val profile = profileStore.save("家里电脑", config(auth = RemoteAuthType.PASSWORD, password = "synthetic-password"))
+
+        assertTrue(controller.attempt(profile.config, keepTunnel = true) is RemoteAttemptResult.Success)
+        assertNotNull(fixture.storage.load())
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+
+        controller.deleteProfile(profile.id)
+
+        assertNull("删除命名连接后不得留下活动配置副本", fixture.storage.load())
+        assertNull(controller.ui.value.saved)
+        assertTrue(controller.ui.value.profiles.isEmpty())
+        assertFalse("已建立的隧道不应因删除保存记录而被关闭", tunnel.closed)
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+    }
+
+    @Test
+    fun failedAttemptConfigKeepsRetryOnFailedHostInsteadOfPreviousSavedHost() = runBlocking {
+        val fixture = Fixture()
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        fixture.storage.trustFingerprint("b.example.test", 22, "SHA256:staged")
+        val transport = StagedFakeTransport(
+            stages = listOf(
+                RemoteConnectionStage.TCP,
+                RemoteConnectionStage.SSH_HANDSHAKE,
+                RemoteConnectionStage.AUTHENTICATION
+            ),
+            openError = IOException("Auth fail"),
+            openErrorHost = "b.example.test"
+        )
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val controller = controller(fixture, transport, machine)
+
+        assertTrue(controller.attempt(config(host = "a.example.test"), keepTunnel = true) is RemoteAttemptResult.Success)
+        assertEquals("a.example.test", controller.ui.value.saved?.host)
+
+        val failed = controller.attempt(config(host = "b.example.test"), keepTunnel = true)
+        assertTrue(failed is RemoteAttemptResult.Failure)
+        assertEquals("b.example.test", controller.ui.value.attemptConfig?.host)
+        assertEquals("a.example.test", controller.ui.value.saved?.host)
+        assertEquals(RemoteFailureKind.AUTHENTICATION, controller.ui.value.failure?.kind)
+    }
+
+    @Test
+    fun firstConnectionFailureStillRetainsRetryConfig() = runBlocking {
+        val fixture = Fixture()
+        fixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val transport = StagedFakeTransport(
+            stages = listOf(
+                RemoteConnectionStage.TCP,
+                RemoteConnectionStage.SSH_HANDSHAKE,
+                RemoteConnectionStage.AUTHENTICATION
+            ),
+            openError = IOException("Auth fail")
+        )
+        val controller = controller(fixture, transport, RemoteHostMachine())
+
+        assertTrue(controller.attempt(config(), keepTunnel = false) is RemoteAttemptResult.Failure)
+        assertNull(controller.ui.value.saved)
+        assertEquals("dev.example.test", controller.ui.value.attemptConfig?.host)
+        assertEquals(RemoteFailureKind.AUTHENTICATION, controller.ui.value.failure?.kind)
+    }
+
+    @Test
     fun savedProfilesAreVisibleToControllerAndCanBeDeleted() = runBlocking {
         val fixture = Fixture()
         val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
@@ -624,6 +725,8 @@ class RemoteWizardTest {
         private val fingerprint: String = "SHA256:staged",
         private val stages: List<RemoteConnectionStage> = RemoteConnectionStage.testStages,
         private val openError: Throwable? = null,
+        /** 只让指定主机的 open 失败，用于“A 成功、B 失败”的重试归属回归。 */
+        private val openErrorHost: String? = null,
         private val tunnel: FakeTunnel = FakeTunnel()
     ) : StagedSshTransport {
         var probeCalls = 0
@@ -652,7 +755,9 @@ class RemoteWizardTest {
             openCalls++
             assertEquals(fingerprint, expectedFingerprint)
             stages.forEach(onStage)
-            openError?.let { throw it }
+            openError?.let {
+                if (openErrorHost == null || config.host == openErrorHost) throw it
+            }
             return tunnel
         }
     }

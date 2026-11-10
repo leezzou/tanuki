@@ -161,6 +161,14 @@ internal object RemoteHostAddress {
             if (inner.contains(":::")) return null
             return inner.lowercase()
         }
+        // 同时接受不带方括号的 IPv6，保证 normalize(normalize(x)) 幂等；
+        // 单冒号仍视为“主机:端口”拒绝，避免把端口拼进主机名。
+        if (text.count { it == ':' } >= 2) {
+            if (text.length !in 2..45) return null
+            if (!text.matches(Regex("[0-9A-Fa-f:.]+"))) return null
+            if (text.contains(":::")) return null
+            return text.lowercase()
+        }
         if (text.length > 253) return null
         if (!text.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?"))) return null
         if (text.contains("..")) return null

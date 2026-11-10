@@ -19,7 +19,7 @@
 ## 当前状态
 
 - 已实现：六步向导（方式 → 主机账号 → 认证 → 指纹 → 测试 → 完成）；字段级中文校验与示例；阶段化错误（TCP/SSH 握手/认证/端口转发/DSH 探测）+ 下一步建议 + 重试；首次 SHA256 指纹必须显式勾选；命名连接新增/编辑/删除与“上次使用”；密码/私钥/口令/token 继续走 Android Keystore AES-256-GCM；远程/本地状态与切换影响提示；私钥系统文件选择器（64 KiB 上限）。
-- 已验证：Kotlin 编译、完整 JVM 820 tests / 91 文件 / 0 失败、lint 0 errors / 102 warnings / 1 hint；交接/上传检查待提交前最后运行。
+- 已验证：Kotlin 编译、完整 JVM 824 tests / 91 文件 / 0 失败、lint 0 errors / 102 warnings / 1 hint；交接/上传检查待提交前最后运行。
 - 待验证：真实 Android 设备/模拟器 UI、系统文件选择器、真实 sshd/中继/DSH、Android Keystore 真机、弱网/断线、深色/大字体。
 - 当前目标包名：`com.tanuki`（本轮未构建 APK，不涉及安装包）。
 - 关键事实与可定位源码：向导与校验 `runtime/RemoteHostWizard.kt`；阶段模型/错误映射 `runtime/RemoteConnectionError.kt`；命名连接 `runtime/RemoteHostProfiles.kt`；控制器 `runtime/RemoteHostController.kt`；阶段回调 `runtime/SshTransport.kt`、`runtime/RelayTransport.kt`；UI `ui/RemoteHostSettings.kt`。
@@ -37,8 +37,8 @@
 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt` | 注入命名连接库 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` | 重做设置页：状态/影响、命名连接列表、全屏六步向导、阶段进度、失败面板、私钥文件选择与口令 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt`、`MainActivity.kt` | 透传命名连接、阶段、失败、测试成功/本地端口与保存/删除/连接回调 |
-| `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt` | 新增 26 项 JVM 回归：状态机、校验、错误映射、命名连接、控制器阶段 |
-| `docs/REMOTE-HOST.md`、`docs/REMOTE-CONNECT.md`、`docs/INTERFACES.md`、`docs/TEST-REPORT.md` | 同步向导流程、阶段错误语义、命名连接契约与本轮验证结果 |
+| `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt` | 新增 30 项 JVM 回归：状态机、校验、错误映射、命名连接、控制器阶段、删除清理与重试归属 |
+| `docs/REMOTE-HOST.md`、`docs/REMOTE-CONNECT.md`、`docs/INTERFACES.md` | 同步向导流程、阶段错误语义与命名连接契约；按普通 PR 规则不修改 `docs/TEST-REPORT.md` |
 | `docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 本轮唯一交接记录；未改 `AGENT-STATE.md`/`CURRENT.json` |
 
 ## 验证记录
@@ -46,12 +46,13 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | 通过（BUILD SUCCESSFUL） | JDK17、Android SDK、macOS ARM64；仅编译 |
-| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**820 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**（1m22s） | 含新增 `RemoteWizardTest` 26 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
+| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**824 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**（1m22s） | 含新增 `RemoteWizardTest` 30 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
 | 同上，单独 `--tests com.tanuki.RemoteWizardTest` | 通过：26 tests / 0 failures | 新增回归定向结果 |
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:lintModernDebug -x buildNativeRuntime` | 通过：**0 errors / 102 warnings / 1 hint**（3m58s） | 仅 JVM/lint，不含设备 |
 | 最终自查修复（完成页空配置、隧道断开/存储错误不再误报阶段）后重跑 JVM + lint | 通过：820 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 最终 head `c017488`；本轮修复提交也附带本交接记录更新 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 通过 | 普通 PR 模式 |
 | `python3 scripts/check-publication.py --git` | 通过：677 public files / 672 index entries / 0 findings | 上传检查 |
+| 评审修复：删除连接清理活动副本、私钥 IO 读取、IPv6 规范化、失败重试绑定尝试配置 | 通过：824 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 4 个 P2 评审点，新增 4 项定向回归 |
 
 - 哪些是前一轮结果，哪些是本次新验证：以上编译/JVM/lint 均为本次新验证；前一轮 0.1.11 的 794 tests 不应与新数字混算。
 - 未测试、超时、失败和暂未复现的情况：`NpmAdaptiveWorkerPoolTest` 在首次完整套件和单独复跑时曾出现一次 8/9 并发时序失败；随后完整套件通过，未修改该测试，不能据此宣称该测试稳定。真实设备/真实 SSH/中继/DSH、系统文件选择器、Keystore 真机、弱网/断线、深色/大字体均未执行。

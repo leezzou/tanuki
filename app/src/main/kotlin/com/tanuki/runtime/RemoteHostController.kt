@@ -27,7 +27,10 @@ data class RemoteHostUiState(
     val completedStages: Set<RemoteConnectionStage> = emptySet(),
     val failure: RemoteFailureInfo? = null,
     val attemptSucceeded: Boolean = false,
-    val localPort: Int? = null
+    val localPort: Int? = null,
+    /** 最近一次尝试使用的配置；失败后“重试/返回修改”必须用它，而不是上一次成功的 saved。 */
+    val attemptConfig: RemoteHostConfig? = null,
+    val attemptProfileId: String? = null
 )
 
 sealed interface RemoteAttemptResult {
@@ -75,14 +78,15 @@ class RemoteHostController(
 
     fun test(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = false)
 
-    fun connect(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = true)
+    fun connect(config: RemoteHostConfig, profileId: String? = null) =
+        launchAttempt(config, keepTunnel = true, profileId = profileId)
 
     /** 连接命名连接：先标记“上次使用”，再走与手动配置相同的严格流程。 */
     fun connectProfile(profile: RemoteHostProfile) {
         scope.launch {
             runCatching { profileStore?.activate(profile.id) }
             refreshProfiles()
-            connect(profile.config)
+            connect(profile.config, profile.id)
         }
     }
 
@@ -112,7 +116,7 @@ class RemoteHostController(
                     activeProfileId = profile.id
                 )
             }
-            if (connect) connect(config)
+            if (connect) connect(config, profile.id)
         }
     }
 
@@ -130,11 +134,34 @@ class RemoteHostController(
                 // 只有没有其他连接复用同一主机身份时才清理信任指纹，避免误伤。
                 runCatching { storage.forgetFingerprint(identity) }
             }
+            // 成功连接会把同一份凭据复制到活动配置存储；删除命名连接时必须同步清掉这份副本，
+            // 否则重启后仍可通过“连接当前配置”使用已被删除的凭据。只清活动配置，不动 known_hosts。
+            val activeCopy = runCatching { storage.load() }.getOrNull() ?: mutableUi.value.saved
+            val removeActiveCopy = removed != null && activeCopy != null &&
+                sameRemoteService(activeCopy, removed.config)
+            val activeCleared = if (removeActiveCopy) {
+                runCatching { storage.clearConfig() }.isSuccess
+            } else {
+                false
+            }
             refreshProfiles()
             mutableUi.update {
                 it.copy(
+                    saved = if (removeActiveCopy && activeCleared) null else it.saved,
+                    attemptConfig = if (removed != null && it.attemptConfig != null &&
+                        sameRemoteService(it.attemptConfig, removed.config)
+                    ) {
+                        null
+                    } else {
+                        it.attemptConfig
+                    },
+                    attemptProfileId = if (it.attemptProfileId == id) null else it.attemptProfileId,
                     message = "已删除连接${removed?.name?.let { name -> "“$name”" } ?: ""}；当前远程会话不受影响",
-                    error = ""
+                    error = if (removeActiveCopy && !activeCleared) {
+                        "已删除连接，但活动配置副本清理失败；请使用“清除当前活动配置”"
+                    } else {
+                        ""
+                    }
                 )
             }
         }
@@ -165,13 +192,13 @@ class RemoteHostController(
                 completedStages = emptySet()
             )
         }
-        if (value != null && !value.keepTunnel && machine.remoteActive) {
+        if (!value.keepTunnel && machine.remoteActive) {
             // 测试连接不改变活动端点；取消测试必须保留原来的远程 A。
-            publish(machine.status, message = "已取消连接测试，继续使用当前远程连接")
+            publish(machine.status, message = "已取消连接测试，继续使用当前远程连接", clearAttempt = true)
             return
         }
         machine.remoteDisconnected("已取消首次主机密钥确认，继续使用本地运行时")
-        publish(machine.status, message = machine.status.message)
+        publish(machine.status, message = machine.status.message, clearAttempt = true)
     }
 
     fun disconnect() {
@@ -185,7 +212,8 @@ class RemoteHostController(
         publish(
             machine.status.copy(error = cookieError.orEmpty()),
             message = machine.status.message,
-            error = cookieError.orEmpty()
+            error = cookieError.orEmpty(),
+            clearAttempt = true
         )
     }
 
@@ -205,7 +233,8 @@ class RemoteHostController(
             machine.status.copy(error = cookieError.orEmpty()),
             message = machine.status.message,
             saved = if (cleared) null else mutableUi.value.saved,
-            error = cookieError ?: if (cleared) "" else "远程主机配置清除失败，请重试"
+            error = cookieError ?: if (cleared) "" else "远程主机配置清除失败，请重试",
+            clearAttempt = true
         )
     }
 
@@ -216,7 +245,7 @@ class RemoteHostController(
         tunnel = null
     }
 
-    private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean) {
+    private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean, profileId: String? = null) {
         if (mutableUi.value.busy) return
         mutableUi.update {
             it.copy(
@@ -229,7 +258,9 @@ class RemoteHostController(
                 completedStages = emptySet(),
                 failure = null,
                 attemptSucceeded = false,
-                localPort = null
+                localPort = null,
+                attemptConfig = config,
+                attemptProfileId = profileId
             )
         }
         scope.launch { attempt(config, keepTunnel) }
@@ -241,6 +272,8 @@ class RemoteHostController(
         forcedFingerprint: String? = null
     ): RemoteAttemptResult = mutex.withLock {
         pending = null
+        // 直接调用 attempt 的测试/内部路径也要记录本次配置，保证失败后的重试不会回到旧主机。
+        mutableUi.update { it.copy(attemptConfig = config) }
         val problem = config.validationError()
         // 配置本身无效时不要拆掉已经连着的远程隧道。
         if (problem != null) return failWith(RemoteConnectionErrors.validation(problem), keepTunnel = false)
@@ -495,7 +528,8 @@ class RemoteHostController(
         stage: RemoteConnectionStage? = null,
         completedStages: Set<RemoteConnectionStage> = emptySet(),
         attemptSucceeded: Boolean = false,
-        localPort: Int? = null
+        localPort: Int? = null,
+        clearAttempt: Boolean = false
     ) {
         mutableUi.update {
             it.copy(
@@ -510,7 +544,9 @@ class RemoteHostController(
                 stage = stage,
                 completedStages = completedStages,
                 attemptSucceeded = attemptSucceeded,
-                localPort = localPort
+                localPort = localPort,
+                attemptConfig = if (clearAttempt) null else it.attemptConfig,
+                attemptProfileId = if (clearAttempt) null else it.attemptProfileId
             )
         }
         onStatus(status)
@@ -564,6 +600,12 @@ class RemoteHostController(
     private fun friendlyStorage(error: Throwable): String =
         error.message?.takeIf { it.startsWith("连接") || it.startsWith("中继") || it.startsWith("已保存") }
             ?: "请重试，或删除本机远程配置后重新添加"
+
+    /** 判断两份配置是否指向同一远程 DSH 服务；用于删除命名连接时定位活动配置副本。 */
+    private fun sameRemoteService(first: RemoteHostConfig, second: RemoteHostConfig): Boolean =
+        first.hostIdentity() == second.hostIdentity() &&
+            first.user == second.user &&
+            first.remoteDshPort == second.remoteDshPort
 
     private data class PendingConnection(
         val config: RemoteHostConfig,

@@ -2,17 +2,6 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
-## 远程连接向导验证（2026-11-10，android_agent-55，非设备）
-
-- 范围：把远程主机/SSH 配置重做为六步向导（方式 → 主机账号 → 认证 → 指纹 → 分阶段测试 → 完成），新增字段级校验、阶段化中文错误与下一步建议、可重试失败、命名连接库（新增/编辑/删除）、私钥文件选择与口令、远程/本地切换影响提示；不改 SSH/TLS 校验边界。
-- 实际执行：
-  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest` → BUILD SUCCESSFUL（1m22s），**820 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**（JDK17、Android SDK、macOS ARM64）。
-  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:lintModernDebug` → BUILD SUCCESSFUL（3m58s），**0 errors / 102 warnings / 1 hint**。
-  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
-- 新增回归 `RemoteWizardTest` 26 项：步骤不可跳过、完整流程与配置构建、指纹未勾选不可信任、返回保留草稿、失败停在阶段/重试重置、主机密钥变化不可重试、阶段只前进；host/端口/用户名/密码/私钥/口令/token/配对链接/名称校验；DNS/拒绝/超时/认证/转发/DSH/主机密钥变化的阶段映射与文案不泄露；命名连接新增/编辑/删除/活动标记/密文无明文；控制器测试连接全阶段完成且不切 origin、认证失败保留阶段、未知主机停在指纹、DSH 失败关闭隧道、命名连接可删除。
-- 既有远程回归：`RemoteHostTest`、`RemoteRelayTest`、`DshRemoteIsolationTest` 全部通过。期间 `NpmAdaptiveWorkerPoolTest` 曾单独复现一次 8/9 并发时序失败；随后完整套件通过，未修改该测试。
-- 未执行：真实 Android 设备/模拟器 UI、系统文件选择器、真实 sshd/中继/DSH、Android Keystore 真机、弱网/断线、深色/大字体；JVM 与 lint 不能替代设备验收。
-
 ## 0.1.11 发布准备验证（2026-11-10，android_agent-49，非设备）
 
 - 范围：`0.1.11/code13` workspacecheck 候选准备，最终基线 `main=1f7222d0e4ac`（#40 已合并）；同步版本/发布/取包/更新/兼容性文档，精简 `AGENT-STATE`，修正 #38 交接断链并重建印章。不改产品代码/协议。

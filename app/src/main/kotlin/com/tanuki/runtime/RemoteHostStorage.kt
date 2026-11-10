@@ -219,8 +219,16 @@ class RemoteHostStorage(
     }
 
     fun clear() {
-        config.clear()
+        clearConfig()
         knownHosts.clear()
+    }
+
+    /**
+     * 只清理活动配置与加密凭据，保留 known_hosts 中其他连接的信任。
+     * 删除某条命名连接时使用，避免误删其他主机/连接的指纹。
+     */
+    fun clearConfig() {
+        config.clear()
         listOf(SECRET_PASSWORD, SECRET_PRIVATE_KEY, SECRET_PASSPHRASE, SECRET_TOKEN, SECRET_RELAY_TOKEN).forEach {
             runCatching { vault.remove(it) }
         }

@@ -116,6 +116,8 @@ data class TanukiUiModel(
     val remoteFailure: RemoteFailureInfo? = null,
     val remoteAttemptSucceeded: Boolean = false,
     val remoteLocalPort: Int? = null,
+    val remoteAttemptConfig: RemoteHostConfig? = null,
+    val remoteAttemptProfileId: String? = null,
     val cookieReady: Boolean = true,
     val deviceCondition: DeviceConditionState = DeviceConditionState(),
     val earlyStart: Boolean = true,

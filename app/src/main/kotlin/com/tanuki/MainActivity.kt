@@ -490,6 +490,8 @@ class MainActivity : ComponentActivity() {
                         remoteFailure=remoteHost.failure,
                         remoteAttemptSucceeded=remoteHost.attemptSucceeded,
                         remoteLocalPort=remoteHost.localPort,
+                        remoteAttemptConfig=remoteHost.attemptConfig,
+                        remoteAttemptProfileId=remoteHost.attemptProfileId,
                         cookieReady=manager.cookieReady(),
                         chatNotifications=chatStatus,
                         nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,

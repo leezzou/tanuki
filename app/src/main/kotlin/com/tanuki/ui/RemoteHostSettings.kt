@@ -44,6 +44,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +67,9 @@ import com.tanuki.runtime.RemoteWizardField
 import com.tanuki.runtime.RemoteWizardStep
 import com.tanuki.runtime.RemoteWizardValidation
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 设置页的远程主机入口：状态、命名连接库和分步向导。 */
 @Composable
@@ -77,6 +81,16 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
     val status = model.remote
     val saved = model.remoteHost
     val savedProfile = saved?.let { config ->
+        model.remoteProfiles.firstOrNull {
+            it.config.hostIdentity() == config.hostIdentity() &&
+                it.config.user == config.user &&
+                it.config.remoteDshPort == config.remoteDshPort
+        }
+    }
+    val failedConfig = model.remoteAttemptConfig
+    val failedProfile = model.remoteAttemptProfileId?.let { id ->
+        model.remoteProfiles.firstOrNull { it.id == id }
+    } ?: failedConfig?.let { config ->
         model.remoteProfiles.firstOrNull {
             it.config.hostIdentity() == config.hostIdentity() &&
                 it.config.user == config.user &&
@@ -100,7 +114,12 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
             onEdit = { saved?.let { wizard = WizardSession(it, savedProfile?.name.orEmpty(), savedProfile?.id) } },
             onForget = { confirmForget = true },
             onConnectSaved = { saved?.let { c.connectRemoteHost(it) } },
-            onRetry = { saved?.let { c.connectRemoteHost(it) } }
+            onEditFailed = {
+                failedConfig?.let {
+                    wizard = WizardSession(it, failedProfile?.name.orEmpty(), failedProfile?.id)
+                }
+            },
+            onRetry = { (failedConfig ?: saved)?.let { c.connectRemoteHost(it) } }
         )
 
         if (model.remotePendingFingerprint != null && wizard == null) {
@@ -188,6 +207,7 @@ private fun StatusCard(
     onEdit: () -> Unit,
     onForget: () -> Unit,
     onConnectSaved: () -> Unit,
+    onEditFailed: () -> Unit,
     onRetry: () -> Unit
 ) {
     val status = model.remote
@@ -239,7 +259,7 @@ private fun StatusCard(
                 FailurePanel(
                     info = model.remoteFailure,
                     onRetry = if (model.remoteFailure.retryable) onRetry else null,
-                    onEdit = onEdit
+                    onEdit = onEditFailed
                 )
             } else if (model.remoteError.isNotBlank()) {
                 SelectionContainer {
@@ -378,19 +398,26 @@ private fun RemoteWizardDialog(
 ) {
     val state by session.machine.state.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var keyLoading by remember { mutableStateOf(false) }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching { readPrivateKey(context, uri) }
-            .onSuccess { picked ->
+        keyLoading = true
+        scope.launch {
+            // 云盘/慢速 DocumentsProvider 的 query/open/read 都不能在主线程做；
+            // 64 KiB 只限制读取量，不限制 provider 的等待时间。
+            val result = withContext(Dispatchers.IO) { runCatching { readPrivateKey(context, uri) } }
+            keyLoading = false
+            result.onSuccess { picked ->
                 session.machine.setAuth(RemoteAuthType.PRIVATE_KEY)
                 session.machine.updateDraft {
                     it.copy(privateKey = picked.text, privateKeyFileName = picked.name)
                 }
                 session.machine.setNotice("已选择私钥文件：${picked.name}（内容不会显示）")
-            }
-            .onFailure { error ->
+            }.onFailure { error ->
                 session.machine.setNotice(error.message ?: "无法读取私钥文件，请重新选择")
             }
+        }
     }
 
     // 控制器是唯一连接执行者；向导只把阶段/指纹/结果转成步骤状态。
@@ -505,6 +532,7 @@ private fun RemoteWizardDialog(
                         RemoteWizardStep.AUTHENTICATION -> StepAuthentication(
                             session = session,
                             state = state,
+                            keyLoading = keyLoading,
                             onPickKey = { keyPicker.launch(arrayOf("*/*")) }
                         )
                         RemoteWizardStep.FINGERPRINT -> StepFingerprint(session, state)
@@ -748,6 +776,7 @@ private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.Re
 private fun StepAuthentication(
     session: WizardSession,
     state: com.tanuki.runtime.RemoteWizardState,
+    keyLoading: Boolean,
     onPickKey: () -> Unit
 ) {
     Text(
@@ -786,13 +815,19 @@ private fun StepAuthentication(
     } else {
         Text("私钥文件", style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onPickKey) { Text("选择私钥文件") }
+            OutlinedButton(onClick = onPickKey, enabled = !keyLoading) { Text("选择私钥文件") }
             Text(
                 state.draft.privateKeyFileName.ifBlank { "未选择文件" },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
+        }
+        if (keyLoading) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("正在读取私钥文件…", style = MaterialTheme.typography.bodySmall)
+            }
         }
         OutlinedTextField(
             value = state.draft.privateKey,
