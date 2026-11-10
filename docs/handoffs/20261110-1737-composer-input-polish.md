@@ -81,7 +81,7 @@
 
 ## 产物与校验
 
-- PR：https://github.com/leezzou/tanuki/pull/48（head `2a41f1c77e3e134e4e250a3c0327ba24cfcf9f6e`，后续文档提交会刷新 head）。
+- PR：https://github.com/leezzou/tanuki/pull/48（代码 head `0b5283c`；本记录提交后以 PR 当前 head 为准）。
 - 新/旧APK、源码ZIP及校验文件：本轮未生成 APK、源码 ZIP 或发布附件；只改源码/测试/文档。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布、未合并。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：普通 PR 只新增本记录，不改共享状态。
