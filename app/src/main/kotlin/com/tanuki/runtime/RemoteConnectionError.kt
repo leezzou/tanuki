@@ -48,7 +48,7 @@ data class RemoteFailureInfo(
     val suggestion: String,
     val retryable: Boolean = true
 ) {
-    val stageLabel: String get() = stage?.label ?: "准备连接"
+    val stageLabel: String get() = stage?.label ?: "连接"
 
     val message: String get() = "$reason；$suggestion"
 }
@@ -105,6 +105,17 @@ object RemoteConnectionErrors {
                     kind = RemoteFailureKind.RELAY,
                     reason = message,
                     suggestion = "确认中继地址可达、配对链接未过期；必要时重新生成配对链接"
+                )
+            }
+            if (message.contains("凭据") || message.contains("Cookie") || message.contains("信任记录") ||
+                message.contains("隧道端口")
+            ) {
+                // 这些是收尾/本机存储问题，不应误报成 TCP 或 SSH 阶段失败。
+                return RemoteFailureInfo(
+                    stage = null,
+                    kind = RemoteFailureKind.UNKNOWN,
+                    reason = message,
+                    suggestion = "请重试；若持续失败，重启应用后重新配置，仍失败请保留错误阶段信息反馈"
                 )
             }
             return forStage(stage, message)

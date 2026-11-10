@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -415,7 +414,14 @@ private fun RemoteWizardDialog(
     }
 
     fun testNow() {
-        session.machine.buildConfig()?.let(c.testRemoteHost)
+        val config = session.machine.buildConfig()
+        if (config == null) {
+            session.machine.onFailure(
+                com.tanuki.runtime.RemoteConnectionErrors.validation("连接配置不完整，请返回上一步检查主机、账号和认证信息")
+            )
+        } else {
+            c.testRemoteHost(config)
+        }
     }
 
     fun startNext() {
