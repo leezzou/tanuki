@@ -50,17 +50,24 @@ class DshSessionManagerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val requestedSession = intent?.getStringExtra(EXTRA_SESSION_ID)
-        val themeMode = TanukiThemePreference.load(this)
         setContent {
-            TanukiTheme(themeMode) {
+            TanukiTheme {
                 val snapshot by runtime.state.collectAsState()
+                val remoteUi by runtime.remoteHost.ui.collectAsState()
                 // 远程 DSH 由 SSH 隧道提供 origin 时本地服务可以已停止，仍应可用。
-                val running = snapshot.service == ServiceState.RUNNING || snapshot.remote.connected
+                val running = snapshot.service == ServiceState.RUNNING || remoteUi.status.connected
                 // 远程端点有自己的恢复状态；本地安全模式只约束本地会话。
-                val readOnly = !snapshot.remote.connected && snapshot.recovery.mode != RecoveryMode.NORMAL
+                val readOnly = !remoteUi.status.connected && snapshot.recovery.mode != RecoveryMode.NORMAL
                 // origin 是端点身份：远程断开回退本地时端口会变化，必须清空旧目录缓存。
                 val endpoint = runtime.origin
-                LaunchedEffect(running, readOnly, snapshot.remote.connected, endpoint, resumeTick) {
+                val hosts = DshSessionHosts.list(
+                    localRunning = snapshot.service == ServiceState.RUNNING,
+                    saved = remoteUi.saved,
+                    status = remoteUi.status,
+                    busy = remoteUi.busy,
+                    pendingHostKey = remoteUi.pendingFingerprint != null
+                )
+                LaunchedEffect(running, readOnly, remoteUi.status.connected, endpoint, resumeTick) {
                     controller.setReadOnly(readOnly)
                     controller.onEndpointChanged(endpoint)
                     if (running) controller.refresh() else controller.clearForStopped()
@@ -71,8 +78,16 @@ class DshSessionManagerActivity : ComponentActivity() {
                 DshSessionManagerPage(
                     controller = controller,
                     running = running,
-                    remote = snapshot.remote.connected,
+                    remote = remoteUi.status.connected,
                     readOnly = readOnly,
+                    hosts = hosts,
+                    hostBusy = remoteUi.busy,
+                    onSelectHost = { id ->
+                        when (id) {
+                            DshSessionHosts.LOCAL_ID -> if (remoteUi.status.connected) runtime.remoteHost.disconnect()
+                            DshSessionHosts.REMOTE_ID -> remoteUi.saved?.let(runtime.remoteHost::connect)
+                        }
+                    },
                     onBack = { finish() }
                 )
             }

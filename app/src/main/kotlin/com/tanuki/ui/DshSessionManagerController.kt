@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
 
+/** 单次批量归档上限；超过上限时只处理前 200 个，避免一次点击制造不可控的串行网络请求。 */
+private const val MAX_BATCH_ARCHIVE = 200
+
 /** 会话列表筛选；未读是本机记录，不是官方字段。 */
 enum class DshSessionFilter(val label: String) {
     ALL("全部"), RUNNING("运行中"), UNREAD("未读")
@@ -77,6 +80,9 @@ object NoopDshSessionPinStore : DshSessionPinStore {
     override fun setPinned(sessionId: String, pinned: Boolean) = Unit
 }
 
+/** 模型/权限切换失败；绑定发起会话，避免延迟失败串到其他会话面板。 */
+data class DshSelectionFailure(val sessionId: String, val message: String)
+
 data class DshSessionManagerState(
     val available: Boolean = false,
     val loading: Boolean = false,
@@ -88,6 +94,9 @@ data class DshSessionManagerState(
     val unreadIds: Set<String> = emptySet(),
     /** 本机置顶；排序时优先，刷新后保留。 */
     val pinnedIds: Set<String> = emptySet(),
+    /** 批量归档进度；为 0 时表示没有进行中的批量操作。 */
+    val batchDone: Int = 0,
+    val batchTotal: Int = 0,
     val contentHits: List<DshSessionSearchHit> = emptyList(),
     val contentHasMore: Boolean = false,
     val contentSearching: Boolean = false,
@@ -102,13 +111,13 @@ data class DshSessionManagerState(
     val models: DshModelCatalog? = null,
     val modelsLoading: Boolean = false,
     val modelsError: String? = null,
-    /** 模型切换失败的中文原因，只在模型面板展示。 */
-    val modelSelectionError: String? = null,
+    /** 模型切换失败的中文原因，只在对应会话的模型面板展示。 */
+    val modelSelectionError: DshSelectionFailure? = null,
     val permissions: DshPermissionCatalog? = null,
     val permissionsLoading: Boolean = false,
     val permissionsError: String? = null,
-    /** 权限切换失败的中文原因，只在权限面板展示。 */
-    val permissionSelectionError: String? = null,
+    /** 权限切换失败的中文原因，只在对应会话的权限面板展示。 */
+    val permissionSelectionError: DshSelectionFailure? = null,
     val skills: List<DshSkill> = emptyList(),
     val commands: List<DshCommand> = emptyList(),
     val catalogLoading: Boolean = false,
@@ -367,6 +376,45 @@ class DshSessionManagerController(
         }
     }
 
+    /**
+     * 批量归档。
+     *
+     * 官方没有批量端点，因此逐个提交 `workspace/archiveSession`；运行中的会话在
+     * `stopRunning=true` 时先请求停止。部分失败不回滚已成功的归档，列表刷新后
+     * 保留未归档项，并给出失败数量与短原因。硬删除没有端点，本方法不伪造删除。
+     */
+    fun archiveSessions(sessionIds: Collection<String>, stopRunning: Boolean) {
+        val ids = sessionIds.filter(::validId).distinct().take(MAX_BATCH_ARCHIVE)
+        if (ids.isEmpty()) return
+        if (!beginAction()) return
+        val runningById = _state.value.sessions.associate { it.id to it.running }
+        _state.update { it.copy(batchDone = 0, batchTotal = ids.size) }
+        actionJob = scope.launch {
+            val archived = LinkedHashSet<String>()
+            val failures = mutableListOf<String>()
+            ids.forEachIndexed { index, id ->
+                val stop = stopRunning && runningById[id] == true
+                source.archiveSession(id, stop).fold(
+                    onSuccess = { result -> archived += result.ifEmpty { listOf(id) } },
+                    onFailure = { failures += "${id.take(8)}：${messageOf(it)}" }
+                )
+                _state.update { it.copy(batchDone = index + 1) }
+            }
+            val notice = if (failures.isEmpty()) {
+                "已归档 ${archived.size} 个会话"
+            } else {
+                "已归档 ${archived.size} 个会话，${failures.size} 个失败"
+            }
+            loadAfterAction(selectedId = null, notice = notice, excludeIds = archived)
+            _state.update { it.copy(batchDone = 0, batchTotal = 0) }
+            if (failures.isNotEmpty()) {
+                val summary = failures.take(3).joinToString("；")
+                val suffix = if (failures.size > 3) "…" else ""
+                _state.update { it.copy(error = "未归档：$summary$suffix") }
+            }
+        }
+    }
+
     fun searchContent() {
         val query = _state.value.query.trim()
         if (query.isEmpty()) {
@@ -484,12 +532,15 @@ class DshSessionManagerController(
             source.selectModel(sessionId, selection).fold(
                 onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换模型") },
                 onFailure = { error ->
+                    val message = messageOf(error)
                     _state.update {
                         it.copy(
                             busy = false,
                             loading = false,
                             refreshing = false,
-                            modelSelectionError = messageOf(error)
+                            modelSelectionError = DshSelectionFailure(sessionId, message),
+                            // 面板可能已关闭或切到别的会话；全局提示仍绑定发起会话。
+                            error = "会话 ${sessionId.take(8)} 模型切换失败：$message"
                         )
                     }
                 }
@@ -516,12 +567,15 @@ class DshSessionManagerController(
             source.selectPermission(sessionId, preset).fold(
                 onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换权限模式") },
                 onFailure = { error ->
+                    val message = messageOf(error)
                     _state.update {
                         it.copy(
                             busy = false,
                             loading = false,
                             refreshing = false,
-                            permissionSelectionError = messageOf(error)
+                            permissionSelectionError = DshSelectionFailure(sessionId, message),
+                            // 面板可能已关闭或切到别的会话；全局提示仍绑定发起会话。
+                            error = "会话 ${sessionId.take(8)} 权限切换失败：$message"
                         )
                     }
                 }
@@ -557,6 +611,8 @@ class DshSessionManagerController(
                 loading = false,
                 refreshing = false,
                 busy = false,
+                batchDone = 0,
+                batchTotal = 0,
                 contentSearching = false,
                 modelsLoading = false,
                 permissionsLoading = false,
@@ -591,6 +647,8 @@ class DshSessionManagerController(
                 loading = false,
                 refreshing = false,
                 busy = false,
+                batchDone = 0,
+                batchTotal = 0,
                 sessions = emptyList(),
                 unreadIds = emptySet(),
                 selectedId = null,
@@ -628,12 +686,12 @@ class DshSessionManagerController(
         listJob?.cancel()
         actionJob?.cancel()
         // 已取消的列表读取不能继续显示加载态，否则失败后刷新按钮会被永久禁用。
-        _state.update { it.copy(busy = true, loading = false, refreshing = false, error = null, notice = null) }
+        _state.update { it.copy(busy = true, loading = false, refreshing = false, batchDone = 0, batchTotal = 0, error = null, notice = null) }
         return true
     }
 
     private fun failAction(error: Throwable) {
-        _state.update { it.copy(busy = false, loading = false, refreshing = false, error = messageOf(error)) }
+        _state.update { it.copy(busy = false, loading = false, refreshing = false, batchDone = 0, batchTotal = 0, error = messageOf(error)) }
     }
 
     private suspend fun loadAfterAction(

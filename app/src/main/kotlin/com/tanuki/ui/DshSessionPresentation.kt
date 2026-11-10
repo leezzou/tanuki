@@ -1,7 +1,124 @@
 package com.tanuki.ui
 
+import com.tanuki.runtime.RemoteHostConfig
+import com.tanuki.runtime.RemoteHostStatus
+import com.tanuki.runtime.RemotePhase
+import com.tanuki.web.DshAdminSession
 import com.tanuki.web.DshModelCatalog
 import com.tanuki.web.DshModelSelection
+
+/** 会话管理页可切换的数据源主机；只描述展示状态，不持有连接或凭据。 */
+data class DshSessionHost(
+    val id: String,
+    val label: String,
+    val detail: String,
+    val active: Boolean,
+    val available: Boolean,
+    val busy: Boolean = false
+)
+
+/**
+ * 把本机运行状态与已保存远程主机状态整理成主机选择列表。
+ *
+ * 当前运行时只保存一个远程配置，所以列表固定为“本机 + 已保存远程主机”；
+ * 没有配置时远程项明确不可选，不生成第二个假主机。
+ */
+object DshSessionHosts {
+    const val LOCAL_ID = "local"
+    const val REMOTE_ID = "remote"
+
+    fun list(
+        localRunning: Boolean,
+        saved: RemoteHostConfig?,
+        status: RemoteHostStatus,
+        busy: Boolean,
+        pendingHostKey: Boolean = false
+    ): List<DshSessionHost> = listOf(
+        local(localRunning, status.connected),
+        remote(saved, status, busy, pendingHostKey)
+    )
+
+    fun local(running: Boolean, remoteConnected: Boolean): DshSessionHost = DshSessionHost(
+        id = LOCAL_ID,
+        label = "本机",
+        detail = if (running) "运行中" else "未运行",
+        active = !remoteConnected,
+        available = running
+    )
+
+    fun remote(
+        saved: RemoteHostConfig?,
+        status: RemoteHostStatus,
+        busy: Boolean,
+        pendingHostKey: Boolean = false
+    ): DshSessionHost {
+        val label = saved?.displayName()?.takeIf { it.isNotBlank() } ?: "远程主机"
+        val detail = when {
+            saved == null -> "未保存配置"
+            pendingHostKey -> "等待主机密钥确认"
+            status.phase == RemotePhase.CONNECTING || busy -> "连接中"
+            status.phase == RemotePhase.REMOTE -> "已连接"
+            status.phase == RemotePhase.FALLBACK -> "连接失败，已回退本地"
+            else -> "未连接"
+        }
+        return DshSessionHost(
+            id = REMOTE_ID,
+            label = label,
+            detail = detail,
+            active = status.connected,
+            available = saved != null && !busy && status.phase != RemotePhase.CONNECTING && !pendingHostKey,
+            busy = busy || status.phase == RemotePhase.CONNECTING || pendingHostKey
+        )
+    }
+}
+
+/** 一个会话文件夹分组；key 是官方 cwd，空表示官方没有返回工作目录。 */
+data class DshSessionGroup(
+    val key: String,
+    val title: String,
+    val detail: String,
+    val sessions: List<DshAdminSession>
+)
+
+/**
+ * 按官方 `cwd` 把会话分组。
+ *
+ * 只做展示分组，不把工作目录写回官方；同一目录内的会话保持调用方传入的顺序
+ * （通常已按置顶与更新时间排序）。空目录统一归入“未分组”。
+ */
+object DshSessionGrouping {
+    fun groups(sessions: List<DshAdminSession>): List<DshSessionGroup> {
+        if (sessions.isEmpty()) return emptyList()
+        val grouped = LinkedHashMap<String, MutableList<DshAdminSession>>()
+        sessions.forEach { session ->
+            grouped.getOrPut(folderKey(session.cwd)) { mutableListOf() } += session
+        }
+        return grouped.map { (key, items) ->
+            DshSessionGroup(
+                key = key,
+                title = folderTitle(key),
+                detail = key.ifBlank { "官方未返回工作目录" },
+                sessions = items
+            )
+        }.sortedWith(
+            compareBy<DshSessionGroup> { it.key.isBlank() }
+                .thenBy { it.title.lowercase() }
+        )
+    }
+
+    fun folderKey(cwd: String?): String {
+        val clean = cwd?.trim().orEmpty()
+        if (clean.isEmpty()) return ""
+        return clean.trimEnd('/').ifBlank { "/" }
+    }
+
+    fun folderTitle(cwd: String?): String {
+        val key = folderKey(cwd)
+        if (key.isBlank()) return "未分组"
+        return key.substringAfterLast('/').ifBlank { key }
+    }
+}
+
 
 /**
  * 会话管理页的纯展示文案与能力判断。

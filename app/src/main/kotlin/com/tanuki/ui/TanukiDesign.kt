@@ -1,6 +1,5 @@
 package com.tanuki.ui
 
-import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -94,27 +93,10 @@ object TanukiSpacing {
 
 internal fun tanukiColorScheme(dark: Boolean) = if (dark) DarkScheme else LightScheme
 
-/** 原生界面主题偏好的持久化；只保存 Tanuki 自己的 Compose 主题，不碰官方页面。 */
-object TanukiThemePreference {
-    const val FILE = "tanuki-appearance"
-    const val KEY = "theme-mode"
-
-    fun load(context: Context): TanukiThemeMode = TanukiThemeMode.parse(
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY, null)
-    )
-
-    fun save(context: Context, mode: TanukiThemeMode) {
-        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY, mode.storageValue)
-            .apply()
-    }
-}
-
 @Composable
-fun TanukiTheme(mode: TanukiThemeMode = TanukiThemeMode.SYSTEM, content: @Composable () -> Unit) {
+fun TanukiTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = tanukiColorScheme(mode.isDark(isSystemInDarkTheme())),
+        colorScheme = tanukiColorScheme(isSystemInDarkTheme()),
         typography = TanukiTypography,
         shapes = TanukiShapes,
         content = content,

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -53,9 +54,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -92,6 +95,14 @@ import java.util.Locale
 /** 详情面板内部页面；同一时间只显示一层，返回键回到详情首页。 */
 private enum class DshDetailMode { DETAIL, MODELS, PERMISSIONS, CATALOG }
 
+/** 会话详情内的分页；概览之外只展示已接入或明确不支持的能力。 */
+private enum class DshDetailTab(val label: String) {
+    OVERVIEW("概览"),
+    PROGRESS("进度"),
+    ARTIFACTS("产物"),
+    FILES("文件")
+}
+
 /**
  * 原生会话管理页。
  *
@@ -106,7 +117,10 @@ fun DshSessionManagerPage(
     readOnly: Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    remote: Boolean = false
+    remote: Boolean = false,
+    hosts: List<DshSessionHost> = emptyList(),
+    hostBusy: Boolean = false,
+    onSelectHost: (String) -> Unit = {}
 ) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
@@ -115,17 +129,37 @@ fun DshSessionManagerPage(
     var createTitle by remember { mutableStateOf("") }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var detailModeName by rememberSaveable { mutableStateOf(DshDetailMode.DETAIL.name) }
+    var detailTabName by rememberSaveable { mutableStateOf(DshDetailTab.OVERVIEW.name) }
     var renameTarget by remember { mutableStateOf<DshAdminSession?>(null) }
     var renameTitle by remember { mutableStateOf("") }
     var archiveTarget by remember { mutableStateOf<DshAdminSession?>(null) }
     var fullAccess by remember { mutableStateOf<Pair<String, String>?>(null) }
     var fullAccessAcknowledged by remember { mutableStateOf(false) }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var batchArchiveConfirm by remember { mutableStateOf(false) }
+    var hostSheet by remember { mutableStateOf(false) }
 
     val detailMode = runCatching { DshDetailMode.valueOf(detailModeName) }.getOrDefault(DshDetailMode.DETAIL)
+    val detailTab = runCatching { DshDetailTab.valueOf(detailTabName) }.getOrDefault(DshDetailTab.OVERVIEW)
     val session = detailId?.let { id -> state.sessions.firstOrNull { it.id == id } }
+    val currentHost = hosts.firstOrNull { it.active } ?: hosts.firstOrNull()
     // 过滤与排序只在输入/数据变化时计算；输入过程中列表保持旧顺序，不会闪空。
     val visibleSessions = remember(state.sessions, state.query, state.filter, state.unreadIds, state.pinnedIds) {
         state.visibleSessions
+    }
+    val visibleGroups = remember(visibleSessions) { DshSessionGrouping.groups(visibleSessions) }
+    val selectedIdSet = selectedIds.toSet()
+    val selectedSessions = state.sessions.filter { it.id in selectedIdSet }
+
+    LaunchedEffect(state.sessions) {
+        // 归档/刷新后移除已不存在的选择，避免批量操作命中过期 ID。
+        val existing = state.sessions.mapTo(HashSet()) { it.id }
+        selectedIds = selectedIds.filter { it in existing }
+        if (state.sessions.isEmpty()) {
+            selectionMode = false
+            selectedIds = emptyList()
+        }
     }
 
     LaunchedEffect(state.selectedId, detailId, state.hasLoaded, state.loading) {
@@ -133,6 +167,7 @@ fun DshSessionManagerPage(
         if (detailId != null && state.hasLoaded && !state.loading && state.selectedId == null) {
             detailId = null
             detailModeName = DshDetailMode.DETAIL.name
+            detailTabName = DshDetailTab.OVERVIEW.name
         }
     }
     LaunchedEffect(detailMode, detailId) {
@@ -159,6 +194,14 @@ fun DshSessionManagerPage(
                 runningCount = state.sessions.count { it.running },
                 loading = state.loading || state.refreshing,
                 busy = state.busy,
+                selectionMode = selectionMode,
+                hasSessions = state.sessions.isNotEmpty(),
+                host = currentHost,
+                onHostClick = { if (hosts.isNotEmpty() && !hostBusy) hostSheet = true },
+                onToggleSelectionMode = {
+                    selectionMode = !selectionMode
+                    if (!selectionMode) selectedIds = emptyList()
+                },
                 onBack = onBack,
                 onRefresh = controller::refresh
             )
@@ -202,6 +245,22 @@ fun DshSessionManagerPage(
             }
             state.notice?.let { message ->
                 ManagerBanner(message, error = false, onClose = controller::clearMessages)
+            }
+            if (selectionMode) {
+                SelectionBar(
+                    selectedCount = selectedIdSet.size,
+                    runningCount = selectedSessions.count { it.running },
+                    busy = state.busy || state.batchTotal > 0,
+                    batchDone = state.batchDone,
+                    batchTotal = state.batchTotal,
+                    onArchive = {
+                        if (selectedIdSet.isNotEmpty() && !state.busy) batchArchiveConfirm = true
+                    },
+                    onCancel = {
+                        selectionMode = false
+                        selectedIds = emptyList()
+                    }
+                )
             }
             Box(Modifier.weight(1f)) {
                 when {
@@ -251,6 +310,7 @@ fun DshSessionManagerPage(
                                             controller.clearMessages()
                                             detailId = hit.sessionId
                                             detailModeName = DshDetailMode.DETAIL.name
+                                            detailTabName = DshDetailTab.OVERVIEW.name
                                             controller.openSession(hit.sessionId)
                                         },
                                         onClear = controller::clearContentSearch
@@ -276,25 +336,52 @@ fun DshSessionManagerPage(
                                     )
                                 }
                             }
-                            items(visibleSessions, key = { it.id }, contentType = { "session" }) { item ->
-                                SessionRow(
-                                    session = item,
-                                    unread = item.id in state.unreadIds,
-                                    pinned = item.id in state.pinnedIds,
-                                    onTogglePin = { controller.togglePinned(item.id) },
-                                    onClick = {
-                                        controller.clearMessages()
-                                        detailId = item.id
-                                        detailModeName = DshDetailMode.DETAIL.name
-                                        controller.openSession(item.id)
-                                    }
-                                )
+                            visibleGroups.forEach { group ->
+                                item(key = "group:${group.key}", contentType = "group") {
+                                    SessionGroupHeader(group)
+                                }
+                                items(group.sessions, key = { it.id }, contentType = { "session" }) { item ->
+                                    SessionRow(
+                                        session = item,
+                                        unread = item.id in state.unreadIds,
+                                        pinned = item.id in state.pinnedIds,
+                                        selectionMode = selectionMode,
+                                        selected = item.id in selectedIdSet,
+                                        onTogglePin = { controller.togglePinned(item.id) },
+                                        onToggleSelect = {
+                                            selectedIds = if (item.id in selectedIdSet) {
+                                                selectedIds - item.id
+                                            } else {
+                                                selectedIds + item.id
+                                            }
+                                        },
+                                        onClick = {
+                                            controller.clearMessages()
+                                            detailId = item.id
+                                            detailModeName = DshDetailMode.DETAIL.name
+                                            detailTabName = DshDetailTab.OVERVIEW.name
+                                            controller.openSession(item.id)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (hostSheet) {
+        HostPickerSheet(
+            hosts = hosts,
+            busy = hostBusy,
+            onDismiss = { hostSheet = false },
+            onSelect = { id ->
+                hostSheet = false
+                onSelectHost(id)
+            }
+        )
     }
 
     if (createDialog) {
@@ -381,6 +468,41 @@ fun DshSessionManagerPage(
         )
     }
 
+    if (batchArchiveConfirm) {
+        val ids = selectedIdSet.toList()
+        val running = selectedSessions.count { it.running }
+        AlertDialog(
+            onDismissRequest = { batchArchiveConfirm = false },
+            title = { Text("批量归档 ${ids.size} 个会话") },
+            text = {
+                Text(
+                    buildString {
+                        append("已选择 ${ids.size} 个会话")
+                        if (running > 0) append("，其中 $running 个正在运行")
+                        append("。归档会逐个调用官方归档接口")
+                        if (running > 0) append("，并先请求停止运行中的会话")
+                        append("；会话会从列表移除，项目文件不会删除。")
+                        append("官方没有会话硬删除端点，本页不提供批量删除，也不提供撤销按钮。")
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { batchArchiveConfirm = false }) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        batchArchiveConfirm = false
+                        selectionMode = false
+                        selectedIds = emptyList()
+                        controller.archiveSessions(ids, stopRunning = true)
+                    },
+                    enabled = ids.isNotEmpty() && !state.busy
+                ) { Text(if (running > 0) "停止并归档" else "归档") }
+            }
+        )
+    }
+
     fullAccess?.let { (sessionId, preset) ->
         AlertDialog(
             onDismissRequest = { fullAccess = null },
@@ -434,6 +556,7 @@ fun DshSessionManagerPage(
             onDismissRequest = {
                 detailId = null
                 detailModeName = DshDetailMode.DETAIL.name
+                detailTabName = DshDetailTab.OVERVIEW.name
                 controller.closeDetail()
             },
             sheetState = sheetState
@@ -449,6 +572,7 @@ fun DshSessionManagerPage(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (detailMode != DshDetailMode.DETAIL) {
                         IconButton(onClick = { detailModeName = DshDetailMode.DETAIL.name }) {
+                        detailTabName = DshDetailTab.OVERVIEW.name
                             Icon(Icons.Default.ArrowBack, "返回会话详情")
                         }
                     }
@@ -465,40 +589,63 @@ fun DshSessionManagerPage(
                     IconButton(onClick = {
                         detailId = null
                         detailModeName = DshDetailMode.DETAIL.name
+                        detailTabName = DshDetailTab.OVERVIEW.name
                         controller.closeDetail()
                     }) { Icon(Icons.Default.Close, "关闭详情") }
                 }
                 state.error?.let { SelectionErrorCard("操作未完成", it) }
                 state.notice?.let { SelectionNoticeCard(it) }
-                when (detailMode) {
-                    DshDetailMode.DETAIL -> DetailHome(
-                        session = session,
-                        catalog = state.models,
-                        pinned = session.id in state.pinnedIds,
-                        readOnly = readOnly,
-                        onTogglePin = { controller.togglePinned(session.id) },
-                        onModels = {
-                            controller.clearMessages()
-                            detailModeName = DshDetailMode.MODELS.name
-                        },
-                        onPermissions = {
-                            controller.clearMessages()
-                            detailModeName = DshDetailMode.PERMISSIONS.name
-                        },
-                        onCatalog = {
-                            controller.clearMessages()
-                            detailModeName = DshDetailMode.CATALOG.name
-                        },
-                        onRename = {
-                            renameTitle = session.displayTitle
-                            renameTarget = session
-                        },
-                        onArchive = { archiveTarget = session },
-                        onCopyId = {
-                            clipboard.setText(AnnotatedString(session.id))
-                            Toast.makeText(context, "已复制会话 ID", Toast.LENGTH_SHORT).show()
+                if (detailMode == DshDetailMode.DETAIL) {
+                    PrimaryTabRow(selectedTabIndex = detailTab.ordinal) {
+                        DshDetailTab.entries.forEach { tab ->
+                            Tab(
+                                selected = detailTab == tab,
+                                onClick = { detailTabName = tab.name },
+                                text = { Text(tab.label) }
+                            )
                         }
-                    )
+                    }
+                }
+                when (detailMode) {
+                    DshDetailMode.DETAIL -> when (detailTab) {
+                        DshDetailTab.OVERVIEW -> DetailHome(
+                            session = session,
+                            catalog = state.models,
+                            pinned = session.id in state.pinnedIds,
+                            readOnly = readOnly,
+                            onTogglePin = { controller.togglePinned(session.id) },
+                            onModels = {
+                                controller.clearMessages()
+                                detailModeName = DshDetailMode.MODELS.name
+                            },
+                            onPermissions = {
+                                controller.clearMessages()
+                                detailModeName = DshDetailMode.PERMISSIONS.name
+                            },
+                            onCatalog = {
+                                controller.clearMessages()
+                                detailModeName = DshDetailMode.CATALOG.name
+                            },
+                            onRename = {
+                                renameTitle = session.displayTitle
+                                renameTarget = session
+                            },
+                            onArchive = { archiveTarget = session },
+                            onCopyId = {
+                                clipboard.setText(AnnotatedString(session.id))
+                                Toast.makeText(context, "已复制会话 ID", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DshDetailTab.PROGRESS -> DetailProgressTab(session)
+                        DshDetailTab.ARTIFACTS -> DetailArtifactsTab()
+                        DshDetailTab.FILES -> DetailFilesTab(
+                            session = session,
+                            onCopyPath = { path ->
+                                clipboard.setText(AnnotatedString(path))
+                                Toast.makeText(context, "已复制工作目录", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                     DshDetailMode.MODELS -> ModelsPane(
                         state = state,
                         session = session,
@@ -536,6 +683,11 @@ private fun ManagerHeader(
     runningCount: Int,
     loading: Boolean,
     busy: Boolean,
+    selectionMode: Boolean,
+    hasSessions: Boolean,
+    host: DshSessionHost?,
+    onHostClick: () -> Unit,
+    onToggleSelectionMode: () -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -547,21 +699,122 @@ private fun ManagerHeader(
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
             Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
                 Text("原生会话", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    when {
-                        !running -> "DSH 未运行"
-                        readOnly -> "安全模式 · 只读"
-                        remote -> "远程 DSH · 已连接"
-                        runningCount > 0 -> "$runningCount 个会话运行中"
-                        else -> "已连接官方 DSH"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (host != null) {
+                    HostChip(host = host, onClick = onHostClick)
+                } else {
+                    Text(
+                        when {
+                            !running -> "DSH 未运行"
+                            readOnly -> "安全模式 · 只读"
+                            remote -> "远程 DSH · 已连接"
+                            runningCount > 0 -> "$runningCount 个会话运行中"
+                            else -> "已连接官方 DSH"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             IconButton(onClick = onRefresh, enabled = running && !loading && !busy) {
                 Icon(Icons.Default.Refresh, "刷新官方会话")
             }
+            if (running && hasSessions && !readOnly) {
+                TextButton(onClick = onToggleSelectionMode, enabled = !busy) {
+                    Text(if (selectionMode) "取消选择" else "选择")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HostChip(host: DshSessionHost, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Box(
+                Modifier.size(7.dp).background(
+                    if (host.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    CircleShape
+                )
+            )
+            Text("${host.label} · ${host.detail}", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Icon(Icons.Default.KeyboardArrowDown, "切换主机", Modifier.size(14.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HostPickerSheet(
+    hosts: List<DshSessionHost>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("切换主机", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "会话列表、模型与权限会读取当前选中主机的 DSH；切换不会删除本地或远程的会话与项目文件。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            hosts.forEach { host ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (host.active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth().clickable(
+                        enabled = !busy && host.available && !host.active
+                    ) { onSelect(host.id) }
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = host.active, onClick = null, enabled = host.available && !busy)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(
+                                    Modifier.size(7.dp).background(
+                                        if (host.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        CircleShape
+                                    )
+                                )
+                                Text(host.label, style = MaterialTheme.typography.labelLarge)
+                                if (host.active) Pill("当前", strong = true)
+                            }
+                            Text(
+                                host.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (!host.available && !host.active) {
+                                Text(
+                                    if (host.id == DshSessionHosts.REMOTE_ID) "请先在设置 → 远程主机保存并测试连接。" else "当前不可用。",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        if (host.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+            Text(
+                "远程连接失败会自动回退本机；切回本机不会自动停止远程正在运行的任务。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
         }
     }
 }
@@ -642,22 +895,39 @@ private fun SessionRow(
     session: DshAdminSession,
     unread: Boolean,
     pinned: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
     onTogglePin: () -> Unit,
+    onToggleSelect: () -> Unit,
     onClick: () -> Unit
 ) {
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = if (pinned) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+        color = when {
+            selected -> MaterialTheme.colorScheme.primaryContainer
+            pinned -> MaterialTheme.colorScheme.surfaceContainerHigh
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        modifier = Modifier.fillMaxWidth().clickable {
+            if (selectionMode) onToggleSelect() else onClick()
+        }
     ) {
         Column(Modifier.padding(start = 6.dp, end = 14.dp, top = 10.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                IconButton(onClick = onTogglePin, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Default.Star,
-                        if (pinned) "取消置顶" else "置顶",
-                        tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                if (selectionMode) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = null,
+                        modifier = Modifier.size(40.dp)
                     )
+                } else {
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Default.Star,
+                            if (pinned) "取消置顶" else "置顶",
+                            tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 if (unread) {
                     Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
@@ -694,6 +964,70 @@ private fun SessionRow(
                 session.model?.let { Pill(it.label) }
                 if (session.agentAvailable && !session.running) Pill("Agent 在线")
             }
+        }
+    }
+}
+
+@Composable
+private fun SessionGroupHeader(group: DshSessionGroup) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(group.title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                group.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Pill(group.sessions.size.toString())
+    }
+}
+
+@Composable
+private fun SelectionBar(
+    selectedCount: Int,
+    runningCount: Int,
+    busy: Boolean,
+    batchDone: Int,
+    batchTotal: Int,
+    onArchive: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    buildString {
+                        append("已选 $selectedCount 个")
+                        if (runningCount > 0) append(" · $runningCount 个运行中")
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                TextButton(onClick = onArchive, enabled = selectedCount > 0 && !busy) {
+                    Text(if (runningCount > 0) "停止并归档" else "归档")
+                }
+                TextButton(onClick = onCancel, enabled = !busy) { Text("取消") }
+            }
+            if (batchTotal > 0) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("正在归档 $batchDone / $batchTotal", style = MaterialTheme.typography.labelSmall)
+            }
+            Text(
+                "删除：官方无会话硬删除端点，暂不支持；归档只从列表移除，不删除项目文件。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
         }
     }
 }
@@ -972,6 +1306,79 @@ private fun DetailInfo(
 }
 
 @Composable
+private fun DetailProgressTab(session: DshAdminSession) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("运行状态", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (session.running) "运行中" else "空闲", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (session.agentAvailable) "Agent 在线" else "Agent 不在线",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+    DetailUnavailable(
+        title = "待办与目标暂不支持",
+        detail = "官方 goals/todos 协议尚未接入原生会话管理；本页不会伪造进度百分比或待办数量。需要查看目标与待办时请使用官方 DSH 页面。"
+    )
+}
+
+@Composable
+private fun DetailArtifactsTab() {
+    DetailUnavailable(
+        title = "产物列表与预览暂不支持",
+        detail = "官方 artifacts/workspaceFiles 契约尚未接入原生会话管理；本页不会生成假产物或空预览。项目文件仍保存在工作区，可在文件页查看。"
+    )
+}
+
+@Composable
+private fun DetailFilesTab(session: DshAdminSession, onCopyPath: (String) -> Unit) {
+    val cwd = session.cwd?.takeIf { it.isNotBlank() }
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("工作目录", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(cwd ?: "官方未返回工作目录", style = MaterialTheme.typography.bodyMedium)
+            if (cwd != null) {
+                TextButton(onClick = { onCopyPath(cwd) }) { Text("复制工作目录") }
+            }
+        }
+    }
+    DetailUnavailable(
+        title = "文件浏览与预览暂不支持",
+        detail = "会话详情内的文件列表、只读预览与产物打开需要 workspaceFiles 接口；当前未接入，因此不提供假文件树。请使用文件页查看本机工作区。"
+    )
+}
+
+/** 明确展示未接入能力，不生成可点击的假操作。 */
+@Composable
+private fun DetailUnavailable(title: String, detail: String) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Default.Info, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge)
+                Text(detail, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelsPane(
     state: DshSessionManagerState,
     session: DshAdminSession,
@@ -995,7 +1402,9 @@ private fun ModelsPane(
             )
         }
     }
-    state.modelSelectionError?.let { SelectionErrorCard("模型切换失败", it) }
+    state.modelSelectionError?.takeIf { it.sessionId == session.id }?.let {
+        SelectionErrorCard("模型切换失败", it.message)
+    }
     if (state.modelsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
     state.modelsError?.let { message ->
         SelectionErrorCard("模型目录读取失败", message)
@@ -1173,7 +1582,9 @@ private fun PermissionsPane(
             )
         }
     }
-    state.permissionSelectionError?.let { SelectionErrorCard("权限切换失败", it) }
+    state.permissionSelectionError?.takeIf { it.sessionId == session.id }?.let {
+        SelectionErrorCard("权限切换失败", it.message)
+    }
     if (state.permissionsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
     state.permissionsError?.let { message ->
         SelectionErrorCard("权限目录读取失败", message)

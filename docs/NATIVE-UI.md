@@ -69,13 +69,12 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：状态、命令、diff、文件变更、折叠输出 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 42 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、写操作与中文错误 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 会话列表、详情、模型/权限面板与确认交互 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立会话管理页入口与本机未读/置顶偏好 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 权限人话说明、删除能力与模型强度展示的纯函数 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiThemeMode.kt` | 原生主题偏好（跟随系统/浅色/深色）与纯解析 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置入口、官方/原生 DSH 切换、回退提示、外观/语言/通知/存储入口 |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面；54 接线主题偏好 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、单个与批量归档、写操作与中文错误 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 按 cwd 分组的会话列表、多选批量归档、主机切换、详情分页、模型/权限面板与确认交互 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立会话管理页入口、本机未读/置顶偏好与本机/远程主机切换 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 权限人话说明、删除能力、模型强度、cwd 分组与主机摘要的纯函数 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置入口、官方/原生 DSH 切换、回退提示与按域分组的设置页 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面；54 不改此文件 |
 
 偏好文件 `ui`、键 `dsh-ui`，值 `official` / `native`；未知值回到 `official`。设置入口在“设置 → 网页与兼容性 → 界面：官方界面 / 原生界面”。
 
@@ -123,11 +122,14 @@
 原生会话管理页把官方 `session/*`、`workspace/archiveSession`、`permissionPresets/catalog` 与 `commands/execute "/permission <preset>"` 组合成一个独立界面；所有会话数据仍来自当前 DSH 实例，不建立第二套会话库。
 
 - 列表：首次读取显示骨架加载态；读取失败且无旧数据时显示可重试错误态；有旧数据时保留列表并提示刷新失败。搜索对标题/会话 ID 即时过滤，消息内容搜索仍需显式点击搜索图标。未读与置顶都是本机偏好：未读按本机最后查看的 `updatedAt` 计算，置顶只改变本页顺序并保存在应用私有偏好中，不写回官方会话。运行中标识来自官方 `running` 字段。
+- 分组与多选：按官方 `cwd` 把会话归入文件夹（空目录为“未分组”），组内保持置顶/更新时间顺序；顶部“选择”进入多选，可批量归档并显示逐个进度。官方没有会话硬删除端点，批量删除只显示不可用说明，不伪造删除。
+- 主机切换：列表头部 chip 显示当前主机与状态（本机运行中/未运行、远程已连接/连接中/未保存配置），点开底部 sheet 可在“本机 + 当前已保存远程主机”之间切换；切换只改变会话管理页的数据源，不删除本地/远程会话或项目文件。当前运行时只保存一个远程配置，多主机列表需共享 runtime 类型扩展。
 - 刷新：已有列表时使用下拉刷新，不再清空列表；首次读取才显示整页加载态。
 - 操作：新建、重命名、归档都有确认或明确的输入/后果说明；归档运行中会话会请求官方先停止当前回合、子代理、后台任务与提醒。官方当前没有会话硬删除端点，详情页只展示“删除会话（官方接口不支持）”，不提供假按钮；归档也没有本页撤销按钮。
+- 详情分页：概览、进度、产物、文件四个 tab。概览保留真实会话信息与设置入口；进度/产物/文件中的待办、目标、产物预览和文件树需要 `goals/*`、`artifacts`、`workspaceFiles/*` 契约，当前未接入，因此明确显示“暂不支持”并提供真实工作目录复制，不生成假进度、假产物或假文件树。
 - 模型与推理强度：展示官方模型目录、当前选择、模型默认推理强度和每个模型的强度选项；切换失败保留原选择并在面板内显示中文原因（如“所选模型不可用”）。
 - 权限模式：标准预设使用人话说明，并同时展示官方说明；`custom` 只展示、不能切换。`danger-full-access` 需要二次确认对话框、逐条风险说明和勾选确认后才提交，Tanuki 不会自动切换。
-- 设置：新增「外观与语言」入口。主题可选跟随系统/浅色/深色并持久化，只影响 Tanuki Compose 界面；官方 DSH 网页主题仍由 DSH 控制。语言如实显示“仅简体中文”，不提供未实现的切换开关。通知与存储沿用真实能力：聊天通知受系统权限和用户开关约束，存储入口读取真实容量/目录占用。
+- 设置：按「外观与语言 / 通知与后台 / 存储与空间 / 引擎与更新 / 远程主机 / 关于与诊断」六域分组；未接入的手动主题切换、语言切换、独立字号等明确写“暂不支持”，通知与存储沿用真实能力。
 
 ## 5. 安全边界
 

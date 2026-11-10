@@ -1,116 +1,105 @@
 # 交接：20261110-1737-session-settings
 
 - Agent/会话标识：android_agent-54（DSH Worker）
-- 时间：2026-11-10 17:37 CST（开始），2026-11-10 18:20 CST（收尾）
-- 状态：已完成（本地实现、JVM 与 lint 已验证；PR #50 已创建，待独立审查与设备 QA；未合并、未发布）
+- 时间：2026-11-10 17:37 CST（开始），2026-11-10 19:20 CST（追加 P0/P1 本地实现）
+- 状态：进行中（AO review 已对旧 head `30da86d` 返回 changes_requested；P2 已修复，新 P0/P1 已本地实现并通过完整 JVM/lint，准备提交新 head 并复审；P0-2 真实数据仍依赖公共协议决策）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
 
 ## 用户目标与范围
 
-- 用户本次实际要求：把原生会话管理与设置做成好用的一等界面。基于 `origin/main=4f2a3717` 建分支；主改 `DshSessionManager*` 与 `TanukiUi` 的设置部分；不改 `DshNativeApi`、`DshNativeController`、`DshNativePage`（归集成方）。
-- 交互范围：
-  1. 会话列表的加载/空/错误态，实时搜索，置顶/未读/运行中标识，长列表滚动与下拉刷新。
-  2. 新建、重命名、归档、删除；删除协议不支持时明确说明，不放假按钮；操作有确认与明确后果。
-  3. 模型与推理强度：可用模型、当前选择、切换失败的中文原因。
-  4. 权限模式：预设说明人话化；完全权限二次确认并说明风险。
-  5. 设置页：主题、语言、通知、存储占用；只保留真实能力，不放假开关。
-  6. 补 JVM 回归；中文注释；提交作者/提交者 `leezzou`；PR 交付，不合并、不发布。
-- 本次包含 / 不包含：包含原生会话管理页、详情操作、模型/权限面板、设置页外观/语言/通知/存储入口、主题偏好接线与 JVM 回归；不包含 `DshNativeApi`/`DshNativeController`/`DshNativePage` 改动，不包含设备/仪器测试、真实 DSH 联调、assemble/APK、合并与发布。
-- 用户改变或暂停的要求（需保留）：API Key 保存、真实模型/账号验收、真机验收仍暂停；未获授权不得合并或发布。
+- 用户最初要求：把原生会话管理与设置做成好用的一等界面；基于 `origin/main=4f2a3717`；主改 `DshSessionManager*` 与 `TanukiUi` 设置段；不改 `DshNativeApi`、`DshNativeController`、`DshNativePage`。
+- 编排追加要求（2026-11-10 消息）：
+  1. 文件属主：`android_agent-54` 只改 `DshSessionManager*`、`TanukiUi` 设置段与测试；**不改 MainActivity**（归 51），主题等通用 UI 归 56。
+  2. P0-1 会话抽屉：按文件夹分组；顶部筛选（全部/运行中/未读）；多选批量归档/删除；删除确认并说明后果；会话项显示标题、相对时间、运行状态点、未读点。
+  3. P0-2 详情分页：进度（待办/目标）、产物、文件拆 tab；产物可直接预览。
+  4. P0-3 主机切换：头部 chip 显示当前主机与状态；sheet 列出本机与已保存远程主机；选中即切换并说明影响。
+  5. P1 设置按域分组：外观/通知/存储/引擎/远程/关于；没有实现的能力写“暂不支持”，不放假开关。
+  6. 不写 AGENT-STATE/CURRENT/TEST-REPORT；文档/注释/提交信息不出现外部参考实现名称或链接；评审期间不推新提交。
+- 本次包含 / 不包含：包含 P0-1 分组/筛选/多选批量归档、P0-3 本机+已保存远程切换、P1 六域设置、P0-2 四 tab 结构（未接入协议处如实“暂不支持”）；不包含 MainActivity/通用主题改动、真实 goals/artifacts/workspaceFiles 协议、批量硬删除、设备/仪器/assemble。
+- 用户暂停：API Key 保存、真实模型/账号验收、真机验收；未获合并/发布授权不合并、不发布。
 
 ## 当前状态
 
-- 已实现：
-  - 会话列表：首次读取骨架加载态；无会话/筛选无结果空态；无旧数据时读取失败错误态 + 重试；有旧数据时保留列表并提示“刷新失败，仍显示上次结果”。
-  - 搜索：标题/会话 ID 随输入即时本地过滤；过滤结果用 `remember` 只在数据或条件变化时计算；消息内容搜索仍需显式点击图标，不再因输入查询词而插入/移除卡片导致列表跳动。
-  - 标识：运行中来自官方 `running`；未读按本机最后查看 `updatedAt`；置顶为应用私有偏好，置顶优先排序并持久化。
-  - 列表：`LazyColumn` 稳定 key + contentType，支持长列表；已有内容时使用 Material3 `PullToRefreshBox` 下拉刷新，首次读取才整页加载。
-  - 操作：新建（FAB/空态）、重命名、归档均有输入/确认和后果说明；删除在详情中以“删除会话（官方接口不支持）”说明，不可点击；归档明确提示无本页撤销、不删除项目文件。
-  - 模型：展示当前选择（含推理强度名称）、官方默认、分组模型、每个模型的强度选项与说明；切换失败保留原选择并在面板内显示中文原因。
-  - 权限：标准预设显示人话说明 + 官方说明；`custom` 只展示不可切换；`danger-full-access` 打开二次确认对话框，逐条列出风险并要求勾选确认，未勾选不能提交。
-  - 设置：新增「外观与语言」入口；主题真实支持跟随系统/浅色/深色并持久化，只影响 Tanuki Compose 界面；语言如实显示“简体中文”，不提供未实现开关；通知拆成真实开关/系统权限；存储入口指向真实容量与目录占用。
-- 已验证：
-  - `:app:compileModernDebugKotlin` BUILD SUCCESSFUL。
-  - 完整 `:app:testModernDebugUnitTest`：807 tests / 91 文件 / 0 failures / 0 errors / 0 skipped（最终主体改动后）。
-  - 定向 `DshSessionManagerControllerTest` 27 tests + `TanukiThemeModeTest` 4 tests，0 失败。
-  - `:app:lintModernDebug` BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint；改动文件仅有既有 `UseKtx`、`ModifierParameter`、`LocalClipboardManager` 等告警。
-- 待验证：真机/模拟器布局、下拉刷新手势、长列表滚动、深色/大字体、完全权限确认交互、真实 PRoot DSH 的列表/模型/权限接口；未跑 Android 仪器、assemble/APK。
-- 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`；分支 `ao/session-settings/root`；提交 `c34b672fba79d2af781da543f5e0803162b9f660`；PR https://github.com/leezzou/tanuki/pull/50 ；基线 `4f2a3717d6d795fd6b94cdb695878d8119f818c1`；无运行中的构建/设备任务。任务给出基线后远端 `origin/main` 已前进到 `326726c`（仅文档 #45），本次按用户指定的 `4f2a3717` 交付，未 rebase。
-- 关键事实与可定位源码/公共文档：控制器 `DshSessionManagerController.kt`；页面 `DshSessionManagerPage.kt`；活动与偏好 `DshSessionManagerActivity.kt`；纯展示 `DshSessionPresentation.kt`；主题偏好 `TanukiThemeMode.kt`/`TanukiDesign.kt`；设置入口 `TanukiUi.kt`；协议 `DshSessionAdminApi.kt`；能力矩阵 `docs/NATIVE-PARITY.md`。
+- 已实现（本地工作区，**尚未推送**）：
+  - 回退上一版越界改动：`MainActivity.kt`、`TanukiDesign.kt` 恢复为基线；删除 `TanukiThemeMode.kt`/`TanukiThemeModeTest.kt`；设置页主题改为“跟随系统，手动切换暂不支持”。
+  - P0-1：按官方 `cwd` 分组（空目录“未分组”）；筛选条保留全部/运行中/未读；顶部“选择”进入多选，可批量归档并显示 `batchDone/batchTotal` 进度；批量删除明确“官方无硬删除端点，暂不支持”；会话项保留标题、更新时间、运行中/未读/置顶标识。
+  - P0-3：会话页头部 host chip 显示本机/远程状态；底部 sheet 列出本机与当前已保存远程主机，选中本机断开远程、选中远程连接已保存配置；说明切换影响。当前 runtime 只保存一个远程配置，多主机列表未做。
+  - P1：设置根页改为六域：外观与语言、通知与后台、存储与空间、引擎与更新、远程主机、关于与诊断；各域复用真实设置项；手动主题/语言/独立字号明确“暂不支持”。
+  - P0-2：详情 sheet 增加概览/进度/产物/文件四 tab；进度/产物/文件在协议未接入处明确“暂不支持”，文件 tab 展示真实 `cwd` 并支持复制，不生成假进度/假产物/假文件树。
+- 已验证（本地）：
+  - `:app:compileModernDebugKotlin` 成功（新增 host/tab/分组代码后）。
+  - 定向 `DshSessionManagerControllerTest`：34 tests / 0 failures / 0 errors；新增“延迟模型/权限失败在关闭详情后仍可见且绑定会话”回归。
+  - 完整 `:app:testModernDebugUnitTest`：810 tests / 90 文件 / 0 failures / 0 errors / 0 skipped。
+  - `:app:lintModernDebug`：BUILD SUCCESSFUL，0 errors / 93 warnings / 1 hint。
+  - 旧 head `30da86d` 的 GitHub CI 两个 run 均 success（不含本轮新改动）。
+- 待验证：新 head CI、Android 仪器/真机、真实 DSH 的 cwd 分组/批量归档/主机切换/模型权限。
+- 当前分支/提交/PR：`ao/session-settings/root`；已推送 head `30da86d`（PR #50）；本轮新改动已通过本地验证，准备提交新 head 并重新评审；未合并、未发布。
+- 基线：`4f2a3717d6d795fd6b94cdb695878d8119f818c1`；远端 `origin/main` 已到 `326726c`（仅文档 #45），未 rebase。
 
 ## 本次改动
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 增加 `refreshing`、`loadError`、本机置顶、模型/权限切换专用错误；置顶排序与持久化；刷新不再清空旧列表；错误码补充中文映射。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 重做列表状态、搜索头、置顶/未读/运行中标识、下拉刷新、骨架/空/错误态；详情增加置顶、删除能力说明；模型/权限面板展示当前选择、失败原因、人话预设与完全权限二次确认。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 接入本机置顶 `SharedPreferences`；会话管理页读取同一主题偏好。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 新增纯展示函数：权限预设人话说明、完全权限风险点、删除能力、模型推理强度标签。 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiThemeMode.kt` | 新增主题枚举、存储值、未知值回退与深浅色解析。 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiDesign.kt` | `TanukiTheme` 支持显式主题偏好；新增 `TanukiThemePreference` 持久化。 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 新增「外观与语言」设置、主题选择、语言真实能力说明；通知拆分为“通知”“后台与启动”；模型加入 `themeMode`，回调加入 `setThemeMode`。 |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 读取/保存主题偏好，主题切换即时生效并同步系统栏；按偏好计算深浅色。 |
-| `app/src/test/kotlin/com/tanuki/DshSessionManagerControllerTest.kt` | 新增置顶排序/持久化、置顶存储失败、刷新态、首次加载错误态、模型/权限切换失败、权限文案、推理强度标签、删除能力等回归。 |
-| `app/src/test/kotlin/com/tanuki/TanukiThemeModeTest.kt` | 新增主题解析、未知值回退、深浅色解析、存储值稳定性回归。 |
-| `docs/NATIVE-UI.md` | 增加原生会话管理与设置切片说明；更新文件职责表。 |
-| `docs/COMPONENTS.md` | 更新主题说明：原生界面可手动选择跟随系统/浅色/深色，官方网页主题仍由 DSH 控制。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 增加批量归档 `archiveSessions`、进度字段、失败聚合；保留单个归档/模型/权限/刷新状态。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 按 cwd 分组、多选批量归档 bar/dialog、host chip + 主机 sheet、详情四 tab、删除不可用说明。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 读取 `runtime.remoteHost.ui`，构造本机/远程 host 列表并接线切换；不改 MainActivity。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 新增 cwd 分组 `DshSessionGrouping`、主机摘要 `DshSessionHosts`；保留权限/模型/删除纯函数。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置页改为六域分组；外观页只展示真实能力（跟随系统/简体中文/系统字号），未实现项写“暂不支持”。 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 恢复为任务基线，未保留主题接线（属主 51）。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiDesign.kt` | 恢复为任务基线，未保留主题偏好（通用主题属主 56）。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiThemeMode.kt` | 删除；主题手动切换不在本 PR 实现。 |
+| `app/src/test/kotlin/com/tanuki/DshSessionManagerControllerTest.kt` | 新增 cwd 分组、批量归档部分失败、安全模式拒绝、主机摘要状态回归。 |
+| `app/src/test/kotlin/com/tanuki/TanukiThemeModeTest.kt` | 删除；主题实现撤回。 |
+| `docs/NATIVE-UI.md` | 更新会话管理/设置切片：分组、多选、host、四 tab、六域设置与协议缺口。 |
+| `docs/COMPONENTS.md` | 主题说明恢复为跟随系统，手动切换暂不支持。 |
 
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `source scripts/ao-worktree-env.sh` | 通过；worktree 本地 Gradle/JDK/SDK 环境就绪 | 未写全局 `~/.gradle`/`~/.android` |
-| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime --offline` | BUILD SUCCESSFUL | Kotlin 编译通过；未构建原生运行时 |
-| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshSessionManagerControllerTest' --tests 'com.tanuki.TanukiThemeModeTest' -x buildNativeRuntime --offline` | BUILD SUCCESSFUL；27 + 4 tests，0 失败 | 定向回归 |
-| `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --offline` | BUILD SUCCESSFUL；807 tests / 91 文件 / 0 failures / 0 errors / 0 skipped | 最终主体改动后的完整 JVM 结果 |
-| `./gradlew ... :app:lintModernDebug -x buildNativeRuntime --offline` | BUILD SUCCESSFUL；0 errors / 94 warnings / 1 hint | 未跑 assemble；警告为既有/工具链提示 |
-| `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-session-settings.md` | 通过 | 见命令输出 |
-| `python3 scripts/check-publication.py --git` | 通过 | 见命令输出 |
+| `source scripts/ao-worktree-env.sh` | 通过 | worktree 本地 Gradle/JDK/SDK |
+| `:app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 新增分组/host/tab 后编译通过 |
+| `:app:testModernDebugUnitTest --tests com.tanuki.DshSessionManagerControllerTest` | BUILD SUCCESSFUL；34 tests / 0 failures / 0 errors | 含延迟失败回归 |
+| `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL；810 tests / 90 文件 / 0 failures / 0 errors / 0 skipped | 本轮新改动 |
+| `:app:lintModernDebug` | BUILD SUCCESSFUL；0 errors / 93 warnings / 1 hint | 警告为既有/工具链提示 |
+| 旧 head `30da86d` PR CI | pull_request + push 两个 run 均 success | 旧 head 结果，不能替代新 head |
+| `python3 scripts/check-handoff.py --pr`、`check-publication.py --git` | 本轮最终改动后重跑 | 见收尾输出 |
 
-- 哪些是前一轮结果，哪些是本次新验证：807 tests 与 lint 为本次新跑；上一轮 794 tests/90 文件为历史基线，不混算。
-- 未测试、超时、失败和暂未复现的情况（不能抹掉）：未跑 Android 仪器/真机/模拟器、assemble/APK、真实 DSH `/connect` 与 `session/modelCatalog`、`permissionPresets/catalog`、`workspace/archiveSession`；未验证下拉刷新与完全权限确认在真实触摸/无障碍服务下的表现。
+- 哪些是前一轮结果，哪些是本次新验证：旧 head CI 为已推送版本；本轮 34 定向 tests、810 全量 JVM、lint 与主题撤回为新验证。
+- 未测试、超时、失败和暂未复现：新 head CI、Android 仪器/真机、真实 DSH 的 goals/workspaceFiles/artifacts、主机切换失败回退、批量归档部分失败的真实官方行为。
 
 ## 未完成与暂停项
 
-- 未完成：
-  - 会话硬删除：当前 `DshSessionAdminSource`/官方协议没有硬删除端点，只做明确说明，未实现假删除。
-  - 归档撤销：官方未在本切片接入 `unarchiveSession`，归档确认文案明确“不提供本页撤销”。
-  - 语言切换：原生界面仅简体中文，未接入资源化语言切换，设置页如实说明而不放假开关。
-  - 设备/仪器/assemble 验证与独立审查未执行；PR #50 已创建，等待审查与设备 QA。
+- 阻塞/待协调：
+  - AO review 已对 `30da86d` 返回 changes_requested（P2 延迟失败反馈），本轮已修复；新 head 尚未推送、需重新评审。
+  - P0-2 真实数据需要公共协议扩展：`DshSessionAdminSource` 目前没有 `goals/*`、`artifacts`、`workspaceFiles/*` 的字段契约；docs 只有方法名。未获协调前只能保留“暂不支持”tab。
+  - 多远程主机列表需要共享 runtime 类型扩展；当前只支持“本机 + 一个已保存远程”。
+- 未完成：批量硬删除（官方无端点）、归档撤销、语言切换、手动主题切换（归通用主题属主）、设备/仪器/assemble 验证、新 head 推送与复审。
 - 外部阻塞：无。
-- 用户暂停：API Key 保存、真实模型/账号验收、真机验收；未获合并/发布授权不合并、不发布。
+- 用户暂停：API Key、真实模型/账号、真机验收；不合并、不发布。
 
 ## 下一步
 
-1. 由独立 reviewer 审查 PR #50 当前 head `c34b672`；设备 QA 由独立 QA 在真实 DSH 上补做下拉刷新、长列表、模型/权限切换与完全权限确认。
-2. 按审查意见修改后重新验证并推送；未获明确授权不合并、不发布。PR 正文见 https://github.com/leezzou/tanuki/pull/50 。
+1. 提交并推送本轮新 head（含 P2 修复、P0-1/P0-3/P1 与 P0-2 如实占位），运行新 head CI 并重新触发独立评审。
+2. 等待编排对公共协议扩展的决定：若获批，扩展 `DshSessionAdminSource`/`DshSessionAdminApi`（goals/artifacts/workspaceFiles）并替换 P0-2 的“暂不支持”内容；若未获批，保留如实说明并在 PR 标注边界。
+3. 由独立 QA 补设备/真实 DSH 验证；未获合并/发布授权不合并、不发布。
 
 ## 约束与风险
 
 - 数据/设备/权限边界：不读取/输出真实 Key、Cookie、token、会话或备份；不跑设备任务；不合并、不发布；不自动切换 `danger-full-access`。
-- 关键决策及理由：
-  - 置顶采用本机偏好而非官方写操作：官方 `workspace/pinSession` 未在本切片接入，避免伪造协议；UI 明确“仅本机”。
-  - 删除只展示能力说明：`DshSessionAdminSource` 没有删除端点，按用户要求不放假按钮。
-  - 语言不做开关：当前无多语言资源，假开关会误导；只显示真实能力。
-  - 主题只作用于 Tanuki Compose：官方 WebView 主题由 DSH 控制，避免注入/改写官方页面。
-  - `auto` 预设文案保持保守，不推断官方审批细节。
-- 失败尝试与避免重复踩坑的结论：首次直接运行 `./gradlew` 被沙箱拒绝写 `~/.gradle` 锁；按 `docs/AO-WORKTREE-BUILD.md` source `scripts/ao-worktree-env.sh` 后通过。
+- 关键决策：
+  - 置顶/未读为本机偏好；文件夹分组只读官方 `cwd`，不写回。
+  - 批量归档逐个调用官方接口，部分失败不回滚已成功项；硬删除没有端点，只说明不伪造。
+  - 主机切换复用共享 `RemoteHostController`；只支持当前一个已保存远程配置，多主机明确列为后续。
+  - 详情进度/产物/文件 tab 在协议缺失时只显示“暂不支持”，不造数据。
+  - 回退 MainActivity/主题改动，避免违反属主；设置页对未实现能力写“暂不支持”。
+- 失败尝试/注意事项：直接 `./gradlew` 被沙箱拒绝写全局缓存，使用 `scripts/ao-worktree-env.sh`；Git 元数据在主仓库，提交/推送需要一次性 wider access。
 
 ## 产物与校验
 
-- 新/旧APK、源码ZIP及校验文件，哪些确实更新：本次不构建 APK/源码 ZIP，不更新发布产物。
-- 交付 PR：https://github.com/leezzou/tanuki/pull/50 （head `c34b672`，目标 `main`；未合并、未发布）。
-- 是否覆盖安装 / 签名范围 / 未发布事项：不覆盖安装、不签名、不发布。
-- 提交/推送前清理的过期记录、删除理由和必要结论的保留位置；仍需保留的验证/未完成记录：本次未删除任何历史交接；旧记录的结论仍由 `docs/AGENT-STATE.md` 与各专题文档承载。保留本记录作为本轮证据。
-- 普通 PR 不刷新共享状态/印章；集成维护方在批量合并后统一运行 `--integrate`。文档或脚本变化后重新生成源码 ZIP；不要把源码 ZIP 自身哈希写回归档内形成循环。
-
-结束前：
-
-```bash
-# 普通 PR：只校验本记录，共享状态允许落后
-python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-session-settings.md
-# 集成/发布由集成维护方执行，普通 PR 不运行写印章的命令
-python3 scripts/package-source.py
-```
+- 新/旧 APK、源码 ZIP：本轮不构建、不更新。
+- PR：https://github.com/leezzou/tanuki/pull/50 （已推送旧 head `30da86d`；本轮新 head 待推送；未合并、未发布）。
+- 过期记录：未删除历史交接；本记录保留本轮证据。
+- 普通 PR 不刷新共享状态/印章；集成维护方批量合并后统一 `--integrate`。
