@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[原生审批/权限/工具调用切片](handoffs/20261110-1139-native-approval-tools.md)（android_agent-45，基线 `main=0555c3c0`，分支 `ao/tool-approval/root`，PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；已合入 `main=533eff4`，完整非设备回归通过，不合并、不发布）。上一记录：[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，PR [#34](https://github.com/leezzou/tanuki/pull/34) 已合并 `main=533eff4`）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[原生审批/权限/工具调用切片](handoffs/20261110-1139-native-approval-tools.md)（android_agent-45，基线 `main=0555c3c0`，分支 `ao/tool-approval/root`，PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；已合入 `main=1cb7ad9`，完整非设备回归通过，不合并、不发布）。上一记录：[原生界面与官方网页版功能对齐审计](handoffs/20261110-1140-native-parity-audit.md)（android_agent-47，PR [#32](https://github.com/leezzou/tanuki/pull/32) 已合并 `main=1cb7ad9`）；并行与历史记录保留在 `docs/handoffs/`。
 
 ## 文件查看器格式支持扩展（android_agent-41，PR [#34](https://github.com/leezzou/tanuki/pull/34) 待审）
 
@@ -255,3 +255,7 @@
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+
+## 并发审计记录
+
+- [原生界面与官方网页版功能对齐审计](handoffs/20261110-1140-native-parity-audit.md)（android_agent-47，只读审计 + 验收清单；未改产品代码，待编排器汇总）。

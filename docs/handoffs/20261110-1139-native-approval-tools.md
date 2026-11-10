@@ -19,14 +19,14 @@
 
 ## 合并说明
 
-- 已合入 `origin/main=533eff4`（PR #34 文件查看器格式扩展）。代码无重叠；仅 `docs/handoffs/CURRENT.json` 冲突，已保留本切片为当前交接、PR #34 为上一记录，并刷新交接印章。
+- 已合入 `origin/main=1cb7ad9`（PR #32 parity audit；此前已合入 PR #34 文件查看器格式扩展）。代码无重叠；仅 `docs/handoffs/CURRENT.json` 冲突，已保留本切片为当前交接、parity audit 为上一记录，并刷新交接印章。
 
 ## 当前状态
 
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、5 项 Review 修复、文档与回归。
 - 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 602/0/0/0、`lintModernDebug` 0 errors / 94 warnings、`assembleModernDebug` 通过（未安装）。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`（answer Peer）/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、Android 仪器/真机。
-- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`；无运行中安装/设备任务。
+- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=1cb7ad9`；无运行中安装/设备任务。
 - 四文件归属：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 已恢复为 `origin/main` 内容，本切片不再修改；42 接线清单见 [NATIVE-UI](../NATIVE-UI.md)。
 
 ## 42 接线清单
