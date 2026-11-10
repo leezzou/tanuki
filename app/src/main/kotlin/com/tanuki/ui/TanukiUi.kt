@@ -171,7 +171,9 @@ data class TanukiUiCallbacks(
     val toggleChatNotifications: (Boolean) -> Unit = {},
     val toggleNativeDsh: (Boolean) -> Unit = {},
     val retryNativeDsh: () -> Unit = {},
-    val cancelTransfer: (Long) -> Unit = {}
+    val cancelTransfer: (Long) -> Unit = {},
+    /** 打开发送独立原生会话管理页；不改变官方/原生 DSH 页选择。 */
+    val openSessionManager: () -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -707,6 +709,8 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {
         ToggleRow("界面：官方界面 / 原生界面", model.nativeDshPreferred, c.toggleNativeDsh)
         Caption("关闭为官方 DSH 界面；开启后显示原生会话列表与只读消息。接口不可用时自动回退官方界面，切换不重启服务。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ActionRow("原生会话管理", "列表、搜索、新建、重命名、归档、模型与权限", onClick = c.openSessionManager)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("官方更新入口", "当前 WebView ${model.support.version}", enabled = s.tanukiIdle, onClick = c.updateWebView)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
