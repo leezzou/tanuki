@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -893,13 +894,13 @@ class SetupPresentationTest {
             val after=nodes().first { it.text?.startsWith("已用 ")==true }.text.toString()
             assertNotEquals("clock must keep responding while bytes are unchanged",before,after)
             instrumentation.runOnMainSync { state.value=state.value.copy(snapshot=Snapshot(environment=EnvironmentState.READY),
-                transfers=listOf(FileTransferProgress(1,"下载网页文件",2048,-1,OperationTiming(now,now)),
-                    FileTransferProgress(2,"准备网页 Blob 下载",0,-1,OperationTiming(now,now)))) }
+                transfers=MutableStateFlow(listOf(FileTransferProgress(1,"下载网页文件",2048,-1,OperationTiming(now,now)),
+                    FileTransferProgress(2,"准备网页 Blob 下载",0,-1,OperationTiming(now,now))))) }
             find("下载网页文件");assertEquals("进行中，无法估算百分比",find("操作进度").stateDescription?.toString())
             click("进度 · 2");find("准备网页 Blob 下载");find("已传输 2.0 KB · 总大小未知")
             screenshot("progress-unknown-transfers.png").recycle()
             click("收起")
-            instrumentation.runOnMainSync { state.value=state.value.copy(transfers=emptyList()) }
+            instrumentation.runOnMainSync { state.value=state.value.copy(transfers=MutableStateFlow(emptyList())) }
             SystemClock.sleep(200);assertFalse(nodes().any { matches(it,"操作进度") })
         } finally { cleanup(activity) }
     }

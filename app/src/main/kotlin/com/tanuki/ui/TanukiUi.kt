@@ -62,7 +62,12 @@ import com.tanuki.web.WebViewSupport
 import com.tanuki.web.WebViewSupportState
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
+
+/** 未持有传输时共用的空流；模型在每次重组时构造，不能为默认值新建实例。 */
+private val EMPTY_TRANSFERS: StateFlow<List<FileTransferProgress>> = MutableStateFlow(emptyList())
 
 /** Presentation only. The host owns permissions, confirmations, jobs and WebView lifetime. */
 data class TanukiUiModel(
@@ -88,7 +93,8 @@ data class TanukiUiModel(
     val npmSelection: NpmSourceSelection = NpmSourceSelection(),
     val npmSources: List<RuntimeSource> = emptyList(),
     val npmSpeed: SourceSpeedSnapshot = SourceSpeedSnapshot(),
-    val transfers: List<FileTransferProgress> = emptyList(),
+    // 只传递流，不在根组合里 collect：进度更新只重组进度条，不重排整页列表。
+    val transfers: StateFlow<List<FileTransferProgress>> = EMPTY_TRANSFERS,
     val liveLogs: kotlinx.coroutines.flow.StateFlow<List<String>>? = null,
     val appUpdate: com.tanuki.update.AppUpdateState = com.tanuki.update.AppUpdateState(),
     val appInstallAllowed: Boolean = false,
@@ -164,7 +170,8 @@ data class TanukiUiCallbacks(
     val chatNotifications: () -> Unit = {},
     val toggleChatNotifications: (Boolean) -> Unit = {},
     val toggleNativeDsh: (Boolean) -> Unit = {},
-    val retryNativeDsh: () -> Unit = {}
+    val retryNativeDsh: () -> Unit = {},
+    val cancelTransfer: (Long) -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -275,6 +282,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             }
                         }
                         if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
+                            onCancelTransfer = callbacks.cancelTransfer,
                             modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
                                 else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }
