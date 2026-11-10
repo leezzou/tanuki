@@ -408,6 +408,7 @@ private fun RemoteWizardDialog(
     var keyLoading by remember { mutableStateOf(false) }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        val request = session.machine.beginPrivateKeyRead()
         keyLoading = true
         scope.launch {
             // 云盘/慢速 DocumentsProvider 的 query/open/read 都不能在主线程做；
@@ -415,11 +416,12 @@ private fun RemoteWizardDialog(
             val result = withContext(Dispatchers.IO) { runCatching { readPrivateKey(context, uri) } }
             keyLoading = false
             result.onSuccess { picked ->
-                session.machine.setAuth(RemoteAuthType.PRIVATE_KEY)
-                session.machine.updateDraft {
-                    it.copy(privateKey = picked.text, privateKeyFileName = picked.name)
+                // 版本/步骤/认证方式任一变化都丢弃迟到结果，避免覆盖已开始测试的草稿。
+                if (session.machine.applyPrivateKeyRead(request, picked.name, picked.text)) {
+                    session.machine.setNotice("已选择私钥文件：${picked.name}（内容不会显示）")
+                } else {
+                    session.machine.setNotice("私钥读取完成，但草稿或步骤已变化，未应用；请重新选择")
                 }
-                session.machine.setNotice("已选择私钥文件：${picked.name}（内容不会显示）")
             }.onFailure { error ->
                 session.machine.setNotice(error.message ?: "无法读取私钥文件，请重新选择")
             }
@@ -447,6 +449,10 @@ private fun RemoteWizardDialog(
     }
 
     fun testNow() {
+        if (keyLoading) {
+            session.machine.setNotice("正在读取私钥文件，请稍候再开始测试")
+            return
+        }
         val config = session.machine.buildConfig()
         if (config == null) {
             session.machine.onFailure(
@@ -458,6 +464,10 @@ private fun RemoteWizardDialog(
     }
 
     fun startNext() {
+        if (keyLoading) {
+            session.machine.setNotice("正在读取私钥文件，请稍候再继续")
+            return
+        }
         val before = session.machine.state.value.step
         if (!session.machine.next()) return
         val after = session.machine.state.value
@@ -467,6 +477,8 @@ private fun RemoteWizardDialog(
     }
 
     fun goBack() {
+        session.machine.cancelPrivateKeyRead()
+        keyLoading = false
         if (session.machine.state.value.step == RemoteWizardStep.FINGERPRINT) c.cancelRemoteHostKey()
         session.machine.back()
     }
@@ -539,7 +551,12 @@ private fun RemoteWizardDialog(
                             session = session,
                             state = state,
                             keyLoading = keyLoading,
-                            onPickKey = { keyPicker.launch(arrayOf("*/*")) }
+                            onPickKey = { keyPicker.launch(arrayOf("*/*")) },
+                            onSelectAuth = { auth ->
+                                session.machine.cancelPrivateKeyRead()
+                                keyLoading = false
+                                session.machine.setAuth(auth)
+                            }
                         )
                         RemoteWizardStep.FINGERPRINT -> StepFingerprint(session, state)
                         RemoteWizardStep.TEST -> StepTest(session, state)
@@ -571,7 +588,11 @@ private fun RemoteWizardDialog(
                         }
                         RemoteWizardStep.AUTHENTICATION -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = ::goBack) { Text("上一步") }
-                            Button(onClick = ::startNext, modifier = Modifier.weight(1f)) { Text("开始测试连接") }
+                            Button(
+                                onClick = ::startNext,
+                                enabled = !keyLoading,
+                                modifier = Modifier.weight(1f)
+                            ) { Text(if (keyLoading) "正在读取私钥…" else "开始测试连接") }
                         }
                         RemoteWizardStep.FINGERPRINT -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = ::goBack) { Text("返回修改") }
@@ -799,7 +820,8 @@ private fun StepAuthentication(
     session: WizardSession,
     state: com.tanuki.runtime.RemoteWizardState,
     keyLoading: Boolean,
-    onPickKey: () -> Unit
+    onPickKey: () -> Unit,
+    onSelectAuth: (RemoteAuthType) -> Unit
 ) {
     Text(
         "选择 SSH 认证方式。密码和私钥只会传给 SSH，并加密保存在本机。",
@@ -808,12 +830,14 @@ private fun StepAuthentication(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = state.draft.auth == RemoteAuthType.PRIVATE_KEY,
-            onClick = { session.machine.setAuth(RemoteAuthType.PRIVATE_KEY) },
+            onClick = { onSelectAuth(RemoteAuthType.PRIVATE_KEY) },
+            enabled = !keyLoading,
             label = { Text("私钥") }
         )
         FilterChip(
             selected = state.draft.auth == RemoteAuthType.PASSWORD,
-            onClick = { session.machine.setAuth(RemoteAuthType.PASSWORD) },
+            onClick = { onSelectAuth(RemoteAuthType.PASSWORD) },
+            enabled = !keyLoading,
             label = { Text("密码") }
         )
     }
@@ -854,6 +878,7 @@ private fun StepAuthentication(
         OutlinedTextField(
             value = state.draft.privateKey,
             onValueChange = { value -> session.machine.updateDraft { it.copy(privateKey = value) } },
+            enabled = !keyLoading,
             label = { Text("或粘贴 OpenSSH/PEM 私钥全文") },
             minLines = 3,
             maxLines = 6,
@@ -865,6 +890,7 @@ private fun StepAuthentication(
         OutlinedTextField(
             value = state.draft.passphrase,
             onValueChange = { value -> session.machine.updateDraft { it.copy(passphrase = value) } },
+            enabled = !keyLoading,
             label = { Text("私钥口令（可选）") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),

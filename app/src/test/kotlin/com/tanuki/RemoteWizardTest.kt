@@ -227,6 +227,38 @@ class RemoteWizardTest {
         assertEquals(RemoteStageStatus.ACTIVE, wizard.stageStatus(RemoteConnectionStage.PORT_FORWARD))
     }
 
+    @Test
+    fun latePrivateKeyReadIsDiscardedAfterAuthSwitch() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
+        wizard.next()
+        wizard.updateDraft { it.copy(host = "dev.example.test", user = "tanuki") }
+        wizard.next()
+        wizard.setAuth(RemoteAuthType.PRIVATE_KEY)
+        val request = wizard.beginPrivateKeyRead()
+        wizard.setAuth(RemoteAuthType.PASSWORD)
+        assertFalse(wizard.applyPrivateKeyRead(request, "id_rsa", SYNTHETIC_KEY))
+        assertEquals("", wizard.state.value.draft.privateKey)
+    }
+
+    @Test
+    fun latePrivateKeyReadIsDiscardedAfterTestStarts() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
+        wizard.next()
+        wizard.updateDraft { it.copy(host = "dev.example.test", user = "tanuki") }
+        wizard.next()
+        wizard.setAuth(RemoteAuthType.PRIVATE_KEY)
+        wizard.updateDraft { it.copy(privateKey = SYNTHETIC_KEY) }
+        val request = wizard.beginPrivateKeyRead()
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.TEST, wizard.state.value.step)
+
+        assertFalse(wizard.applyPrivateKeyRead(request, "new-key", "-----BEGIN NEW-----"))
+        assertEquals(SYNTHETIC_KEY, wizard.state.value.draft.privateKey)
+        assertEquals(RemoteWizardStep.TEST, wizard.state.value.step)
+    }
+
     // ---------- 字段校验 ----------
 
     @Test
@@ -645,8 +677,9 @@ class RemoteWizardTest {
         )
         val profile = profileStore.save("家里电脑", config(auth = RemoteAuthType.PASSWORD, password = "synthetic-password"))
 
-        assertTrue(controller.attempt(profile.config, keepTunnel = true) is RemoteAttemptResult.Success)
+        assertTrue(controller.attempt(profile.config, keepTunnel = true, profileId = profile.id) is RemoteAttemptResult.Success)
         assertNotNull(fixture.storage.load())
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
         assertEquals(RemotePhase.REMOTE, machine.status.phase)
 
         controller.deleteProfile(profile.id)
@@ -656,6 +689,84 @@ class RemoteWizardTest {
         assertTrue(controller.ui.value.profiles.isEmpty())
         assertFalse("已建立的隧道不应因删除保存记录而被关闭", tunnel.closed)
         assertEquals(RemotePhase.REMOTE, machine.status.phase)
+    }
+
+    @Test
+    fun editingProfileTargetThenDeletingStillClearsOldActiveCopy() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        assertTrue(controller.attempt(profile.config, keepTunnel = true, profileId = profile.id) is RemoteAttemptResult.Success)
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 只编辑目标并保存，不连接：活动存储仍是 A，但 profile 已变成 B。
+        profileStore.save(
+            "家里电脑",
+            config(host = "b.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-b"),
+            profile.id
+        )
+        assertEquals("a.example.test", fixture.storage.load()?.host)
+
+        controller.deleteProfile(profile.id)
+        assertNull(fixture.storage.load())
+        assertNull(fixture.storage.sourceProfileId())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+    }
+
+    @Test
+    fun deletingOneOfTwoProfilesWithSameServiceKeepsActiveCopyOfOther() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val value = config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        val first = profileStore.save("家里电脑", value)
+        val second = profileStore.save("同一台电脑（备用）", value)
+        assertTrue(controller.attempt(value, keepTunnel = true, profileId = first.id) is RemoteAttemptResult.Success)
+
+        controller.deleteProfile(second.id)
+        assertNotNull("删除同服务的另一条 profile 不应清除活动副本", fixture.storage.load())
+        assertEquals(first.id, fixture.storage.sourceProfileId())
+        assertEquals("a.example.test", controller.ui.value.saved?.host)
+        assertFalse(tunnel.closed)
+
+        controller.deleteProfile(first.id)
+        assertNull(fixture.storage.load())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
     }
 
     @Test

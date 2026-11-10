@@ -310,6 +310,9 @@ class RemoteHostWizard(
     private val _state = MutableStateFlow(initialState(initialConfig, initialName, initialProfileId))
     val state: StateFlow<RemoteWizardState> = _state.asStateFlow()
 
+    /** 私钥读取请求版本；步骤/认证/导航变化或新读取都会让旧回调失效。 */
+    private var keyReadRequest = 0
+
     fun selectMethod(method: RemoteConnectionMethod) {
         _state.update {
             it.copy(
@@ -324,12 +327,46 @@ class RemoteHostWizard(
     }
 
     fun setAuth(auth: RemoteAuthType) {
+        if (_state.value.draft.auth != auth) keyReadRequest++
         _state.update {
             it.copy(
                 draft = it.draft.copy(auth = auth),
                 fieldErrors = it.fieldErrors - RemoteWizardField.PASSWORD - RemoteWizardField.PRIVATE_KEY
             )
         }
+    }
+
+    /** 开始一次异步私钥读取；返回的版本号必须原样交回 [applyPrivateKeyRead]。 */
+    fun beginPrivateKeyRead(): Int {
+        keyReadRequest++
+        return keyReadRequest
+    }
+
+    /**
+     * 应用私钥读取结果。
+     *
+     * 只有请求仍是最新、当前仍在认证步骤且仍选择私钥时才写入；
+     * 否则丢弃迟到结果，避免把 TEST/DONE 中已测试的草稿改成未测试的私钥。
+     */
+    fun applyPrivateKeyRead(request: Int, fileName: String, privateKey: String): Boolean {
+        val current = _state.value
+        if (request != keyReadRequest) return false
+        if (current.step != RemoteWizardStep.AUTHENTICATION) return false
+        if (current.draft.auth != RemoteAuthType.PRIVATE_KEY) return false
+        _state.update {
+            it.copy(
+                draft = it.draft.copy(privateKey = privateKey, privateKeyFileName = fileName),
+                fieldErrors = emptyMap(),
+                tested = false,
+                failure = null
+            )
+        }
+        return true
+    }
+
+    /** 用户放弃/切换读取时让回调失效。 */
+    fun cancelPrivateKeyRead() {
+        keyReadRequest++
     }
 
     fun setName(value: String) {
@@ -344,6 +381,7 @@ class RemoteHostWizard(
     fun next(): Boolean {
         val current = _state.value
         if (current.busy) return false
+        keyReadRequest++
         val errors = RemoteWizardValidation.forStep(current)
         if (errors.isNotEmpty()) {
             _state.update { it.copy(fieldErrors = errors) }
@@ -375,6 +413,7 @@ class RemoteHostWizard(
     fun back(): Boolean {
         val current = _state.value
         if (current.busy) return false
+        keyReadRequest++
         val previous = when (current.step) {
             RemoteWizardStep.METHOD -> return false
             RemoteWizardStep.HOST_ACCOUNT -> RemoteWizardStep.METHOD
@@ -397,6 +436,7 @@ class RemoteHostWizard(
 
     /** 进入测试阶段；控制器随后会收到 test/connect 调用。 */
     fun beginTest() {
+        keyReadRequest++
         _state.update {
             it.copy(
                 step = RemoteWizardStep.TEST,

@@ -180,7 +180,7 @@ class RemoteHostStorage(
         )
     }
 
-    fun save(value: RemoteHostConfig) {
+    fun save(value: RemoteHostConfig, sourceProfileId: String? = null) {
         // 先写凭据再写非敏感配置，最后写 mode 作为提交标记；load() 不会把半成品当成可连接配置。
         vault.put(SECRET_TOKEN, value.token)
         when (value.auth) {
@@ -216,7 +216,17 @@ class RemoteHostStorage(
             config.putString(KEY_RELAY_PIN, relay.certPin)
             config.putString(KEY_MODE, MODE_RELAY)
         }
+        // 记录生成这份活动副本的稳定 profile ID；编辑连接目标后仍能按来源清理，
+        // 避免用可变的 host/user/端口误判或误删另一条同服务连接。
+        if (sourceProfileId.isNullOrBlank()) {
+            config.remove(KEY_SOURCE_PROFILE)
+        } else {
+            config.putString(KEY_SOURCE_PROFILE, sourceProfileId)
+        }
     }
+
+    /** 生成当前活动配置副本的 profile ID；旧版本可能没有记录。 */
+    fun sourceProfileId(): String? = config.getString(KEY_SOURCE_PROFILE)
 
     fun clear() {
         clearConfig()
@@ -259,6 +269,7 @@ class RemoteHostStorage(
         private const val KEY_AUTH = "auth"
         private const val KEY_REMOTE_DSH_PORT = "remoteDshPort"
         private const val KEY_MODE = "mode"
+        private const val KEY_SOURCE_PROFILE = "sourceProfileId"
         private const val KEY_RELAY_HOST = "relayHost"
         private const val KEY_RELAY_PORT = "relayPort"
         private const val KEY_RELAY_ROOM = "relayRoom"

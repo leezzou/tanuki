@@ -158,6 +158,7 @@ HTTP 200..399 或 401 → 存活
 | 阶段进度 | `TCP → SSH_HANDSHAKE → AUTHENTICATION → PORT_FORWARD → DSH_PROBE → COMPLETE`；只前进不后退；控制器通过可选 `StagedSshTransport` 报告，未实现阶段回调的测试假传输退化为粗粒度 |
 | 错误契约 | `RemoteFailureInfo(stage, kind, reason, suggestion, retryable)`；中文原因 + 下一步建议；主机密钥变化 `retryable=false`；错误文案只使用固定中文或领域异常，不回显密码/私钥/token |
 | 命名连接 | 最多 50 条，名称 1-64 字符；非敏感字段与应用私有配置分离，密码/私钥/口令/token 只经 Android Keystore AES-256-GCM 保存；删除一条不影响其他连接；同一时间仍只允许一个活动远程连接 |
+| 活动副本归属 | 成功连接时在活动配置存储写入稳定的 `sourceProfileId`；删除命名连接按来源 ID 清理对应活动副本（编辑目标后仍正确），同服务的其他 profile 不被误删；已建立隧道保持到用户断开 |
 | 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文阶段化错误并关闭隧道；不自动重试、不静默降级为明文 |
 | 未实现 | 中继/WebRTC、远程 DSH 启停、多台远程主机同时连接、Ed25519 私钥/主机密钥；均标注为后续切片 |
 
