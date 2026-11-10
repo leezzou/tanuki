@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-53（AO worker）
 - 时间：2026-11-10 17:54 CST
-- 状态：已完成（组件/JVM/lint/文档）；分支待提交推送并创建 PR；未合并、未发布
+- 状态：已完成（组件/JVM/lint/文档）；PR [#47](https://github.com/leezzou/tanuki/pull/47) 待审；未合并、未发布
 - 前一记录：[原生界面可交互切片](20261110-1233-native-ui-chat.md)（PR #40 已合并 `main=1f7222d`）；当前基线 `origin/main=4f2a3717`
 
 ## 用户目标与范围
@@ -65,7 +65,7 @@
 ## 下一步
 
 1. 已完成完整 JVM/lint、`git diff --check`、`check-handoff.py --pr`、`check-publication.py --git`。
-2. 以 `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/native-approval-ui/root`，创建不合并的 PR；PR 正文列测试、未验证范围与 hook 清单。
+2. 已以 `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/native-approval-ui/root`；PR [#47](https://github.com/leezzou/tanuki/pull/47) 已创建，待 CI/独立审查，不合并。
 3. 集成方按 `docs/NATIVE-UI.md` 第 4 节 hook 接入：审批面板 `sessionTitle`/`onForgetRemembered`，计划卡 `latest`/`planCallIds`，并补真实计划审阅事件映射；设备验收另行授权。
 
 ## 约束与风险
@@ -79,4 +79,5 @@
 - 新/旧 APK、源码 ZIP 及校验文件：本轮未生成 APK/源码 ZIP；未安装、未发布。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装；未发布；不合并。
 - 提交/推送前清理的过期记录：本轮未删除历史记录；仅新增本记录，结论在 `NATIVE-UI`/`INTERFACES`/`NATIVE-PARITY`/`TEST-REPORT` 可定位。
+- PR：[https://github.com/leezzou/tanuki/pull/47](https://github.com/leezzou/tanuki/pull/47)，head 以最终推送 SHA 为准。
 - 普通 PR 不刷新共享状态/印章；集成维护方在批量合并后统一处理。
