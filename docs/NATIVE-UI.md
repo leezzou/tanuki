@@ -69,7 +69,7 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshComposerDraftStore.kt` | 私有偏好按会话保存文本草稿 |
 | `app/src/main/kotlin/com/tanuki/ui/DshAttachmentReader.kt` | 文档 URI、剪贴板图片与拖入内容读取 |
 | `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt` | 官方 prompt/upload/commands/引用协议与附件策略 |
-| `app/src/main/kotlin/com/tanuki/web/DshComposerClient.kt` | 输入/附件 Remote 客户端与 loopback HTTP 传输 |
+| `app/src/main/kotlin/com/tanuki/web/DshComposerClient.kt` | 输入/附件 Remote 客户端；依赖 42 提供的 `DshComposerRemote` transport 适配，不自建 HTTP/WS |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置开关、DSH 页原生/官方切换、回退提示与“重试” |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 偏好持久化、控制器接线、同一 token/同一 DSH 进程与输入栏 endpoint |
 
@@ -102,7 +102,7 @@
 
 - 启动 token 只从 `RuntimeManager.authenticatedUrl` 读取，只用于当前精确 origin 的 `/connect`；不写偏好、日志、状态或错误文本。
 - 认证网络 I/O 不持对象 monitor；`reset()/close()` 只递增代次并清状态，主线程不会等待 `/connect` 超时；旧请求不能重新发布 Cookie。
-- API Cookie 只保存在 `DshNativeClient` 与 `HttpDshComposerRemote` 内存中；请求前校验 origin 为 `http://127.0.0.1:<port>`，且只拼 `/api/<method>`；不跟随重定向。
+- API Cookie 只保存在 `DshNativeClient` 与 42 提供的 transport 内存中；输入/附件客户端只依赖 `DshComposerRemote` 小接口，不自行读取 token/Cookie 或拼 URL。
 - `/connect` 不跟随 302；只从 `Set-Cookie` 取一个 `name=value`，拒绝控制字符。
 - 业务错误只显示短错误码；其他异常经 `Redact.text` 截断；`DshEndpoint.toString()` 显式脱敏 launch URL，避免误日志带出 token。
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
@@ -113,11 +113,10 @@
 本轮（android_agent-46，基线 `0555c3c0`）新跑：
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL（`-x buildNativeRuntime`）。
-- 输入/附件目标回归 37 项：`DshComposerProtocolTest` 15、`DshComposerClientTest` 8、`DshComposerControllerTest` 11、`DshComposerHttpTest` 3；0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，69 个结果文件、**572 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 37）。
+- 输入/附件目标回归 34 项（不含 transport 认证/HTTP；该层等待 42 统一接线）：`DshComposerProtocolTest` 15、`DshComposerClientTest` 8、`DshComposerControllerTest` 11；0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，68 个结果文件、**569 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 34）。
 - `:app:lintModernDebug`：BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
-- 覆盖：官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 参数与返回解析；图片类型嗅探与 PNG/JPEG/GIF/WebP 尺寸；图片字节/数量/总量/宽高/像素限制中文错误；文件 20 MiB/5 个/50 MiB 限制；@ 引号/目录/邮箱式文本；斜杠命令识别；按会话草稿；图片+文本发送；文件先上传后 receipt；命令附件策略；上传失败/发送失败保留草稿；官方附件错误码中文化；合成 loopback 服务验证 Cookie 只发 `/api`、`rpcId` 关联、401 单次重试、reset 重连、token 不进入请求体/错误。
-- 新增 `DshComposerHttpTest` 使用合成 loopback 服务，不读取真实 DSH 会话、Cookie 或设备文档。
+- 覆盖：官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 参数与返回解析；图片类型嗅探与 PNG/JPEG/GIF/WebP 尺寸；图片字节/数量/总量/宽高/像素限制中文错误；文件 20 MiB/5 个/50 MiB 限制；@ 引号/目录/邮箱式文本；斜杠命令识别；按会话草稿；图片+文本发送；文件先上传后 receipt；命令附件策略；上传失败/发送失败保留草稿；官方附件错误码中文化。
 
 未验证：
 

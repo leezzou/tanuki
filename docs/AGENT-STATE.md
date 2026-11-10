@@ -1,14 +1,14 @@
 # Tanuki 当前状态
 
-当前交接：[原生输入与附件切片](handoffs/20261110-1142-input-attachments.md)（android_agent-46，基线 `main=0555c3c0`，实现与本地 JVM/lint 完成，PR 待创建；不合并、不发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成）。并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[原生输入与附件切片](handoffs/20261110-1142-input-attachments.md)（android_agent-46，基线 `main=0555c3c0`，实现与本地 JVM/lint 完成，PR #39 等待 42 接线与独立 Review；不合并、不发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成）。并行与历史记录保留在 `docs/handoffs/`。
 
-## 原生输入与附件（android_agent-46，PR 待创建）
+## 原生输入与附件（android_agent-46，PR #39 待 42 接线）
 
-- 分支 `ao/input-attachments/root`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；在独立 worktree 验证，不改 `DshNativeApi.kt`/`DshNativeController.kt` 的消息解析与渲染，避免与 42 抢文件。
+- 分支 `ao/input-attachments/root`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；在独立 worktree 验证。按编排器边界，`DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`/`MainActivity.kt` 由 android_agent-42 独占，本分支不改这四文件；仅交付新文件与 42 接线 hook。
 - 新增 `DshComposerProtocol`/`DshComposerClient`/`DshComposerController`/`DshComposerBar`/`DshComposerDraftStore`/`DshAttachmentReader`：官方 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates`；多行输入、按会话文本草稿、`Ctrl/⌘+Enter`、@ 会话/文件、斜杠命令、图片/文件选择与预览、文件 receipt、图片 base64、粘贴图片、拖入文件、大小/类型限制中文错误；附件不跨会话保留。
-- `DshNativePage` 只加底部输入栏插槽与 endpointProvider；`MainActivity` 只传复用 `manager.origin/authenticatedUrl` 的 provider；通知点击仍由现有 `DshNativeController.openSession()` 选择会话，输入栏随 `selectedId` 切换草稿。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 37 项；完整 `testModernDebugUnitTest` **572 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` **0 errors / 95 warnings / 1 hint**，新增文件无 lint 告警。
-- 待验证：真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机；独立 Review、CI、PR 创建与合并未完成。
+- 需要 42 接线：在 `DshNativePage` 底部挂载 `DshComposerBar(controller)`；创建/释放 `DshComposerController`，随 `selectedId` 调 `setSession`；发送成功回调转 `DshNativeController.select(sessionId, force=true)`；`DshComposerClient` 依赖 42 transport 实现的 `DshComposerRemote.call(method,args)`/`reset()`。详细签名见交接与 PR 说明。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 34 项；完整 `testModernDebugUnitTest` **569 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` **0 errors / 95 warnings / 1 hint**，新增文件无 lint 告警。
+- 待验证：42 接线后的真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机；独立 Review、CI 与合并未完成。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
