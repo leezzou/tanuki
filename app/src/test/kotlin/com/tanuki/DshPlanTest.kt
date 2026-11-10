@@ -149,6 +149,20 @@ class DshPlanTest {
         assertEquals(DshPlanStepStatus.SKIPPED, plan.steps[2].status)
     }
 
+    @Test fun firstStepInProgressWithZeroCompletedIsNotClaimedNotStarted() {
+        val plan = DshPlanParser.extract(
+            JSONArray().put(
+                call(
+                    1, "c1", "update_plan",
+                    """{"steps":[{"title":"分析","status":"in_progress"},{"title":"验证","status":"pending"}]}"""
+                )
+            )
+        ).latest!!
+        assertEquals(0, plan.completed)
+        assertEquals("分析", plan.currentStepTitle)
+        assertEquals("执行中", plan.statusLabel)
+    }
+
     @Test fun truncatedPlanDoesNotClaimCompletionForHiddenSteps() {
         val steps = JSONArray()
         for (index in 0 until 20) {
