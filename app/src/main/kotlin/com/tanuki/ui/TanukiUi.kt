@@ -171,7 +171,9 @@ data class TanukiUiCallbacks(
     val toggleChatNotifications: (Boolean) -> Unit = {},
     val toggleNativeDsh: (Boolean) -> Unit = {},
     val retryNativeDsh: () -> Unit = {},
-    val cancelTransfer: (Long) -> Unit = {}
+    val cancelTransfer: (Long) -> Unit = {},
+    /** 打开发送独立原生会话管理页；不改变官方/原生 DSH 页选择。 */
+    val openSessionManager: () -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -514,8 +516,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
                 OutlinedButton(onClick={currentRelease?.let(c.reinstallDsh)},
                     enabled=currentRelease!=null && s.tanukiIdle && comps.ubuntuInstalled && comps.nodeInstalled,
                     modifier=Modifier.weight(1f).heightIn(min=48.dp),shape=MaterialTheme.shapes.medium) { Text("重新安装") }
-                TextButton(onClick={c.uninstallDsh(null)},enabled=s.tanukiIdle,modifier=Modifier.heightIn(min=48.dp),
-                    colors=ButtonDefaults.textButtonColors(contentColor=MaterialTheme.colorScheme.error)) { Text("卸载") }
+                // 当前使用版本禁止卸载；多余版本统一在“已安装版本”中管理。
+                TextButton(onClick={showInstalledDsh=true},enabled=s.tanukiIdle,modifier=Modifier.heightIn(min=48.dp)) { Text("管理版本") }
             }
             if(currentRelease==null)Caption("重新安装前请先获取官方版本列表。")
         }
@@ -566,9 +568,12 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             }
             OutlinedButton(enabled=selected!=null && s.tanukiIdle && comps.ubuntuInstalled && comps.nodeInstalled,
                 modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),onClick={selected?.let(c.cacheDsh);showVersions=false}) { Text("安装为备用程序") }
-            if(selected!=null && selected.version in comps.installedDshVersions) {
+            if(selected!=null && selected.version in comps.installedDshVersions && selected.version != s.dsh) {
                 TextButton(enabled=s.tanukiIdle,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp),
-                    onClick={c.uninstallDsh(selected);showVersions=false}) { Text("卸载所选版本") }
+                    onClick={c.uninstallDsh(selected);showVersions=false}) { Text("卸载该备用版本") }
+            }
+            if(selected!=null && selected.version == s.dsh && selected.version in comps.installedDshVersions) {
+                Caption("当前使用版本不能卸载；如需清理请先在“已安装版本”中切换到其他版本。")
             }
             }
         },
@@ -704,6 +709,8 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {
         ToggleRow("界面：官方界面 / 原生界面", model.nativeDshPreferred, c.toggleNativeDsh)
         Caption("关闭为官方 DSH 界面；开启后显示原生会话列表与只读消息。接口不可用时自动回退官方界面，切换不重启服务。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ActionRow("原生会话管理", "列表、搜索、新建、重命名、归档、模型与权限", onClick = c.openSessionManager)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("官方更新入口", "当前 WebView ${model.support.version}", enabled = s.tanukiIdle, onClick = c.updateWebView)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

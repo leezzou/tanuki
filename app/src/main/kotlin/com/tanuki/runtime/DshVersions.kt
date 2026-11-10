@@ -1,6 +1,8 @@
 package com.tanuki.runtime
 
 import com.tanuki.update.VersionOrder
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -89,9 +91,12 @@ object DshVersions {
     fun isOlder(candidate: String, current: String): Boolean =
         candidate.matches(VERSION) && current.matches(VERSION) && VersionOrder.compare(candidate, current) < 0
 
-    /** 版本管理只允许卸载非当前的有效版本；主界面原有当前版本卸载入口不受此限制。 */
+    /**
+     * 版本管理只允许卸载非当前的有效版本。
+     * 当前版本未知（元数据缺失/损坏）时一律禁用卸载，避免把正在使用的程序删掉。
+     */
     fun canUninstallFromManager(version: String, activeVersion: String): Boolean =
-        version.matches(VERSION) && version != activeVersion
+        version.matches(VERSION) && activeVersion.matches(VERSION) && version != activeVersion
 
     /**
      * 切换前只复核依赖锁与 .installed；缺少 .web-verified 只代表没有本机启动记录，
@@ -172,6 +177,182 @@ object DshVersions {
     }
 }
 
+/**
+ * 版本元数据窄锁：切换、卸载与更新检查共用同一实例。
+ *
+ * 调用方仍须先持有环境 mutation（保证与安装/启动的锁顺序固定为 mutation → 本锁），
+ * 再用 [withLock] 串行化版本元数据操作；[tryEnter] 供需要快速拒绝的路径使用。
+ * 纯 Kotlin 实现，JVM 回归可直接验证并发拒绝与串行等待。
+ */
+class DshVersionGate {
+    companion object {
+        const val BUSY_MESSAGE = "更新检查或安装正在进行，请稍后再操作 DSH 版本"
+    }
+
+    private val mutex = Mutex()
+
+    fun tryEnter(): Boolean = mutex.tryLock()
+
+    fun exit() {
+        mutex.unlock()
+    }
+
+    suspend fun <T> withLock(block: suspend () -> T): T = mutex.withLock { block() }
+}
+
+/**
+ * 卸载前的本机状态校验与两阶段目录事务；与 Android API 解耦，便于 JVM 覆盖拒绝与回滚分支。
+ *
+ * 只接收 `engines/<版本>` 程序目录与 `runtime/dsh-<版本>.uninstall` 隔离目录，
+ * 不读取或删除 userdata、workspaces、backups、共享下载缓存与数据快照。
+ */
+object DshUninstall {
+    const val CURRENT_MESSAGE = "正在使用的 DSH 版本不能卸载；请先切换到其他版本"
+    const val RUNNING_MESSAGE = "DSH 正在运行，请先停止服务再卸载版本"
+    const val UPDATE_MESSAGE = "更新检查或安装正在进行，请稍后再卸载版本"
+    private const val BUSY_MESSAGE = "请等待当前操作完成并停止 DSH 后再卸载版本"
+    private const val MISSING_CURRENT_MESSAGE = "当前安装元数据缺少有效 DSH 版本，无法确认正在使用的版本；已拒绝卸载"
+
+    fun requireUninstallable(
+        version: String,
+        current: String,
+        installed: Set<String>,
+        serviceStopped: Boolean,
+        updateBusy: Boolean,
+        busy: Boolean,
+        liveChild: Boolean
+    ) {
+        check(!busy && !liveChild) { BUSY_MESSAGE }
+        check(!updateBusy) { UPDATE_MESSAGE }
+        check(serviceStopped) { RUNNING_MESSAGE }
+        require(version.matches(DshVersions.VERSION)) { "DSH 版本格式无效" }
+        require(current.matches(DshVersions.VERSION)) { MISSING_CURRENT_MESSAGE }
+        require(version != current) { CURRENT_MESSAGE }
+        require(version in installed) { "DSH $version 未安装或程序目录不完整" }
+    }
+
+    /**
+     * 先把目标版本原子改名到隔离目录，改写提交日志后再删除。
+     *
+     * 提交日志阶段：`prepared` 表示尚未确认提交，进程中断时可由 recover 把完整隔离目录移回；
+     * `committed` 表示用户已确认卸载，中断后由 recover 继续清理。
+     * 删除失败时仅在隔离目录仍完整（`.installed` 尚在）时回滚；已部分删除的目录不回滚，
+     * 避免把半删程序重新当成可安装版本。任何失败都抛出带中文原因和当前保留位置的异常。
+     */
+    suspend fun apply(
+        version: String,
+        target: File,
+        quarantine: File,
+        journal: (String) -> Unit,
+        clearJournal: () -> Unit,
+        delete: (File) -> Unit,
+        move: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
+    ) {
+        require(version.matches(DshVersions.VERSION)) { "DSH 版本格式无效" }
+        check(target.isDirectory) { "DSH $version 未安装或程序目录不完整" }
+        check(!quarantine.exists()) { "上次卸载的残留目录尚未清理，请重新打开应用完成恢复" }
+        quarantine.parentFile?.let { parent ->
+            check(parent.isDirectory || parent.mkdirs()) { "无法创建卸载隔离目录；原版本已保留" }
+        }
+        try {
+            journal("prepared")
+        } catch (error: Throwable) {
+            throw IllegalStateException("无法开始卸载 DSH $version；原版本未改动：${reason(error)}", error)
+        }
+        if (!move(target, quarantine)) {
+            runCatching { clearJournal() }
+            throw IllegalStateException("无法移出 DSH $version 程序目录；原版本已保留")
+        }
+        try {
+            journal("committed")
+        } catch (error: Throwable) {
+            // 无法记录提交就不能继续删除；完整目录必须移回原位。
+            val restored = move(quarantine, target)
+            if (restored) {
+                runCatching { clearJournal() }
+                throw IllegalStateException("卸载 DSH $version 未能写入事务记录，已回滚并保留原版本：${reason(error)}", error)
+            }
+            // 回滚失败时必须保留 prepared 记录，下次启动的 recover 才能把隔离目录移回。
+            throw IllegalStateException(
+                "卸载 DSH $version 未能写入事务记录，且回滚未完成；已保留恢复记录，程序在 ${quarantine.name}，请重新打开应用完成恢复：${reason(error)}",
+                error
+            )
+        }
+        try {
+            delete(quarantine)
+        } catch (error: Throwable) {
+            // 删除一旦开始就无法证明目录仍完整：即使 .installed 和入口还在，也可能已删掉某个依赖。
+            // 因此不再把隔离目录移回 engines；保留 committed 日志，由 recover 继续清理。
+            throw IllegalStateException(
+                "卸载 DSH $version 失败，程序目录已隔离且残留清理未完成；请重新打开应用完成清理，用户数据未删除：${reason(error)}",
+                error
+            )
+        }
+        runCatching { clearJournal() }
+    }
+
+    private fun reason(error: Throwable): String = error.message ?: error.javaClass.simpleName
+}
+
+/** 卸载事务在进程重启后的恢复动作；与 Android API 解耦，便于 JVM 验证各阶段。 */
+enum class DshUninstallRecoveryStep {
+    /** prepared：提交前中断，把完整隔离目录移回 engines。 */
+    RESTORE_QUARANTINE,
+    /** 只清理隔离目录，不碰 engines 中可能已经重装的有效版本。 */
+    REMOVE_QUARANTINE,
+    /** 旧协议（无 phase）：日志表示卸载已提交，删除原目标目录。 */
+    REMOVE_TARGET
+}
+
+object DshUninstallRecovery {
+    /**
+     * 新协议的 committed 只代表“可以删除隔离目录”，不再代表 target 属于本次事务：
+     * 回滚后清日志失败、或用户在同进程重装同版本，都可能让 engines 中重新出现有效 target。
+     * 因此 committed 绝不能删除 target；只有旧协议无 phase 的日志才继续删除 target。
+     */
+    fun plan(phase: String?, targetExists: Boolean, quarantineExists: Boolean): List<DshUninstallRecoveryStep> = when (phase) {
+        "prepared" -> when {
+            quarantineExists && !targetExists -> listOf(DshUninstallRecoveryStep.RESTORE_QUARANTINE)
+            quarantineExists -> listOf(DshUninstallRecoveryStep.REMOVE_QUARANTINE)
+            else -> emptyList()
+        }
+        "committed" -> if (quarantineExists) listOf(DshUninstallRecoveryStep.REMOVE_QUARANTINE) else emptyList()
+        else -> buildList {
+            if (targetExists) add(DshUninstallRecoveryStep.REMOVE_TARGET)
+            if (quarantineExists) add(DshUninstallRecoveryStep.REMOVE_QUARANTINE)
+        }
+    }
+
+    /** 执行恢复动作；失败时抛出中文异常，保留事务日志供下次重试。 */
+    fun apply(
+        phase: String?,
+        target: File,
+        quarantine: File,
+        deleteFile: (File) -> Unit,
+        move: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
+    ) {
+        for (step in plan(phase, target.exists(), quarantine.exists())) {
+            when (step) {
+                DshUninstallRecoveryStep.RESTORE_QUARANTINE ->
+                    check(move(quarantine, target)) { "上次卸载回滚未完成，请保留数据后重试" }
+                DshUninstallRecoveryStep.REMOVE_QUARANTINE -> if (quarantine.exists()) deleteFile(quarantine)
+                DshUninstallRecoveryStep.REMOVE_TARGET -> deleteFile(target)
+            }
+        }
+    }
+}
+
+/**
+ * 组件事务日志写入栅栏：安装/重装必须先恢复未完成事务。
+ * 恢复抛错时不再执行写入，避免覆盖待清理的卸载日志；抽成纯 Kotlin 便于 JVM 验证顺序。
+ */
+internal object DshComponentJournal {
+    suspend fun <T> recoverThenWrite(recover: () -> Unit, write: suspend () -> T): T {
+        recover()
+        return write()
+    }
+}
+
 /** 切换前的本机状态与数据兼容规则；与文件系统解耦，便于 JVM 覆盖各拒绝分支。 */
 object DshSwitch {
     fun requireSwitchable(
@@ -181,9 +362,11 @@ object DshSwitch {
         targetLockVerified: Boolean,
         serviceStopped: Boolean,
         busy: Boolean,
-        liveChild: Boolean
+        liveChild: Boolean,
+        updateBusy: Boolean = false
     ) {
         check(!busy && !liveChild) { "请等待当前操作完成并停止 DSH 后再切换版本" }
+        check(!updateBusy) { DshUninstall.UPDATE_MESSAGE }
         check(serviceStopped) { "请先停止 DSH 服务再切换版本" }
         require(target.matches(DshVersions.VERSION)) { "DSH 版本格式无效" }
         require(current.matches(DshVersions.VERSION)) { "当前安装元数据缺少有效 DSH 版本；请先恢复匹配的数据快照" }
