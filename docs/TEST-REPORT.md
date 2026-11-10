@@ -2,25 +2,37 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
-## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
+## 文件复制界面稳定验证（2026-11-10，android_agent-40，非设备）
 
-- 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
-- 实际执行：
-  - `source scripts/env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m07s），**535 tests / 0 failures / 0 errors / 0 skipped**。
-  - `python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --channel workspacecheck` → BUILD SUCCESSFUL（2m05s）；正式 APK 实核 `com.tanuki.modern.workspacecheck`、0.1.10/code12、minSdk26、证书 `371dc301...`、11,485,978 字节、SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`；旧 `d9b4aa21` 候选作废。
-  - `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` → 通过。
-- 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
-- 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
+- 范围：从手机/SAF 多选「导入文件到工作区」（写入新独立项目）的进度与列表稳定性。基线 `origin/main=0555c3c0`，分支 `ao/copy-flicker/root`；PR [#35](https://github.com/leezzou/tanuki/pull/35)，不合并、不发布。
+- 根因（源码路径，不是设备观测）：
+  - `WorkspaceStorage.importFiles` 每 64 KiB 调一次 `onProgress`；`MainActivity` 在 `setContent` 根部 `collectAsState()` 传输列表，`TanukiUiModel.transfers` 随之变化，导致整个 `TanukiUi`（含文件列表）随每个分块重组；导入 `track` 未传总量，进度只能显示不定态。
+  - `WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，`LazyColumn/LazyGrid` 项数短暂归零会使 `LazyListState` 回退到顶部；`busy/sorting` 的 `LinearProgressIndicator` 直接插入布局也会推动列表上下位移。
+- 修复要点：`FileTransfers` 集中合并中间进度（默认 160ms）、总量变化/最终帧立即发布、同总量下丢弃回退分块、新增协作取消与 `onCancel` 登记动作（用于等待网页回包的 Blob 导出）；导入先读 `DISPLAY_NAME`/`SIZE`，仅当全部大小有效时才显示真实总量；进度流只由 `OperationBanner` 订阅，根组合不再重组；`FileListPresentation` 在同目录刷新时保留旧条目、换目录才清空、内容相等时复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；列表进度槽固定 4dp 高。
+- 实际执行（本轮新跑）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
+  - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 本次新增 19；合入前）。合并 `main=533eff4`/`1cb7ad9` 后完整套件由 CI 在新 head 复跑，558（main #34）不与 554 相加宣称为本地结果（#32 只加文档/脚本）。
+  - 同一组合运行中 `:app:compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
+- 新增回归 19 项：
+  - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
+  - `ImportProgressTest` 3 项：空/含未知/含负数大小不产生总量；溢出保持未知；百分比只由正总量产生并限制在 0–1。
+  - `FileListPresentationTest` 8 项：同目录刷新保留旧列表、搜索/排序/显示隐藏不闪空、换目录清空旧结果、完成后显示自身条目、内容相等复用条目列表、隐藏/查询/排序规则、文件夹优先与身份稳定、排序方式与来源区分。
+  - `ExportCleanupTest` 3 项：删除成功/失败/异常、取消与失败提示不假装已删除、写入 128 KiB 部分数据后取消会删除截断目标并清空进度。
+- 新增仪器测试：`FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition`（同目录新增文件后刷新，列表不回到顶部）与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport`（取消等待中的 Blob 后不触发 ready）——均仅编译通过，本会话未运行；设备由独立 QA 独占。
+- Review P2 修复一：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
+- Review P2 修复二：新开放取消的“保存网页 Blob 文件”“下载网页文件”“导出浏览器文件”在取消/失败时会留下零字节或截断的 SAF 目标；现统一通过 `ExportCleanup` 删除本次 `CreateDocument` 目标，删除失败明确提示，并新增“写入部分数据后取消删除截断目标”的 JVM 回归。
+- 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
 
 ## 原生输入与附件验证（2026-11-10，android_agent-46，非设备）
 
 - 范围：新增原生输入栏组件与输入/附件协议层（不接线 42 独占的 `DshNativePage`/`MainActivity`）；多行输入、按会话文本草稿、`Ctrl/⌘+Enter` 发送、@ 文件/会话补全、斜杠命令目录/补全/执行；图片/文件选择、图片缩略图与大图预览、普通文件上传换 receipt、粘贴图片、拖入文件；官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 协议；图片/文件大小与类型限制中文错误。基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`，分支 `ao/input-attachments/root`。
 - 实际执行（`source scripts/ao-worktree-env.sh`，`-x buildNativeRuntime`）：
   - `:app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
-  - `:app:testModernDebugUnitTest --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` → BUILD SUCCESSFUL，**34 tests / 0 failures / 0 errors / 0 skipped**。
-  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 本切片 34）。
-  - `:app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
-- 新增回归：`DshComposerProtocolTest` 15 项（prompt/upload/commands/引用参数、图片上限解析、命令/文件/会话候选解析、PNG/JPEG/GIF/WebP 嗅探与尺寸、图片/文件限制、@ 引号/目录/跨行/邮箱式文本、斜杠识别、文件名清洗、字节格式化）；`DshComposerClientTest` 8 项（projection/commands/引用端点、上传 receipt/base64、prompt accepted、命令成功/业务失败/未解析、reset、非法输入、远程 loopback 协议）；`DshComposerControllerTest` 11 项（按会话草稿、图片+文本发送、文件先上传、命令附件策略、图片超限中文错误、@ 双来源候选、发送失败/官方拒绝保留草稿、官方附件错误码中文化、onSent 会话）。
+  - `:app:testModernDebugUnitTest --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` → BUILD SUCCESSFUL，**38 tests / 0 failures / 0 errors / 0 skipped**。
+  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，74 个结果文件、**615 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 文件复制 19 + 本切片 38）。
+  - `:app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 96 warnings / 1 hint**；新增文件无 lint 告警。
+- 新增回归：`DshComposerProtocolTest` 17 项（prompt/upload/commands/引用参数、图片上限解析、命令/文件/会话候选解析、PNG/JPEG/GIF/WebP 嗅探与尺寸、图片/文件限制、@ 引号/目录/跨行/邮箱式文本、斜杠识别、文件名清洗、字节格式化）；`DshComposerClientTest` 8 项（projection/commands/引用端点、上传 receipt/base64、prompt accepted、命令成功/业务失败/未解析、reset、非法输入、远程 loopback 协议）；`DshComposerControllerTest` 13 项（按会话草稿、图片+文本发送、文件先上传、命令附件策略、图片超限中文错误、@ 双来源候选、发送失败/官方拒绝保留草稿、官方附件错误码中文化、onSent 会话）。
 - 未执行：真实 Android 设备/模拟器上的输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴、拖入、附件上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机。transport 认证/HTTP 由 42 统一接线，本分支未实现、未测试。JVM 测试不能替代设备/真实 DSH 验收。
 - 已知边界：附件不跨会话保留，只持久化文本草稿；普通文件串行上传；图片在发送时 base64 编码；历史附件仍不在原生消息区展示；未实现流式跟随、取消、审批/提问与模型选择。
 
@@ -30,12 +42,22 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
   - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m39s），29 tests / 0 failures / 0 errors / 0 skipped。
-  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（2m49s；此前同结果运行 6m23s/3m27s），**558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 95 warnings / 1 hint**。
+  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（2m49s；此前同结果运行 6m23s/3m27s），**558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 96 warnings / 1 hint**。
 - 新增回归 23 项：`FileTypeCatalogTest` 11（C/C++/头文件、`.ts`/`.mts` 与 `video/mp2t` 冲突、常见语言、配置/标记/数据、图片/音频/视频扩展名与 MIME、PDF/DOCX/XLSX/旧版 Office、归档/二进制不探测、无扩展名与已知点号配置、隐藏二进制与 `.env` 前缀媒体、大小写/复合扩展名、纯 MIME 回退）；`TextPageLayoutTest` 9（行号宽度/空文本/末尾换行、关闭行号、搜索下标换算、跨段行号、4 MiB 上限、截断判定、行数统计）；`TextFileReaderTest` 增补 3（64 KiB 页与空文件边界、跨页多字节字符不拆分、UTF-16LE 不完整字符/ISO-8859-1/未知编码）。
 - 覆盖点：分类不依赖 Android `MimeTypeMap`，扩展名优先于 MIME；媒体扩展名在缺少 MIME 时仍进入正确查看器；未知类型只在非明确二进制时做有界 UTF-8 内容探测；行号与正文同一段文本，自动换行不错位；搜索仍以原始文本下标计算，再一次性批量换算为带行号下标（避免单字符搜索数千匹配时退化为 O(n×m)）；截断只在文件超过 4 MiB 且仍有内容时提示。
 - Review P2 修复：点号配置只匹配已知文件名与 `.env`/`.env.*` 变体；`.DS_Store` 明确归为隐藏二进制并跳过内容探测，`.env-image.png` 因媒体扩展名优先按图片处理；新增隐藏二进制/`.env` 前缀媒体回归（`FileTypeCatalogTest` 11 项），完整 JVM 558 tests 通过。
 - 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
 - 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
+
+## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
+
+- 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
+- 实际执行：
+  - `source scripts/env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m07s），**535 tests / 0 failures / 0 errors / 0 skipped**。
+  - `python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --channel workspacecheck` → BUILD SUCCESSFUL（2m05s）；正式 APK 实核 `com.tanuki.modern.workspacecheck`、0.1.10/code12、minSdk26、证书 `371dc301...`、11,485,978 字节、SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`；旧 `d9b4aa21` 候选作废。
+  - `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` → 通过。
+- 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
+- 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
 
 
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）

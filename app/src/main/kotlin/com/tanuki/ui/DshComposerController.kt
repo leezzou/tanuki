@@ -58,6 +58,9 @@ data class DshPickedAttachment(
     val previewUri: String? = null
 )
 
+/** 一次输入/附件操作的会话代次快照；异步读取返回时必须仍属于同一会话。 */
+data class DshComposerSessionToken(val sessionId: String?, val generation: Long)
+
 sealed interface DshMentionCandidate {
     val title: String
     val subtitle: String?
@@ -141,6 +144,13 @@ class DshComposerController(
         loadCommands(normalized, generation)
     }
 
+    /** 在启动选择器/剪贴板/拖入读取前捕获；结果返回时用它拒绝已切换会话的旧结果。 */
+    fun captureSessionToken(): DshComposerSessionToken =
+        DshComposerSessionToken(_state.value.sessionId, generation)
+
+    fun isCurrentSession(token: DshComposerSessionToken): Boolean =
+        token.generation == generation && token.sessionId == _state.value.sessionId
+
     fun updateText(text: String, cursor: Int = text.length) {
         val bounded = text.take(DshComposerProtocol.MAX_TEXT_CHARS)
         val safeCursor = cursor.coerceIn(0, bounded.length)
@@ -171,11 +181,13 @@ class DshComposerController(
         _state.update { it.copy(commandCandidates = emptyList()) }
     }
 
-    fun addImages(items: List<DshPickedAttachment>) {
+    fun addImages(items: List<DshPickedAttachment>, token: DshComposerSessionToken? = null) {
+        if (token != null && !isCurrentSession(token)) return
         addAttachments(items, DshAttachmentKind.IMAGE)
     }
 
-    fun addFiles(items: List<DshPickedAttachment>) {
+    fun addFiles(items: List<DshPickedAttachment>, token: DshComposerSessionToken? = null) {
+        if (token != null && !isCurrentSession(token)) return
         addAttachments(items, DshAttachmentKind.FILE)
     }
 
@@ -313,6 +325,8 @@ class DshComposerController(
             return
         }
         val attachments = current.attachments
+        val submittedText = current.text
+        val submittedAttachmentIds = attachments.map { it.id }.toSet()
         val requestGeneration = generation
         _state.update { it.copy(sending = true, error = null, notice = null) }
         sendJob?.cancel()
@@ -360,16 +374,22 @@ class DshComposerController(
             }
             if (requestGeneration != generation) return@launch
             result.onSuccess {
-                drafts.clear(sessionId)
+                // 发送期间仍可继续编辑；只移除本次实际提交的文本/附件，保留之后的新输入。
+                val latest = _state.value
+                val keepText = if (latest.text == submittedText) "" else latest.text
+                val keepAttachments = latest.attachments.filterNot { it.id in submittedAttachmentIds }
+                if (keepText.isBlank() && keepAttachments.isEmpty()) drafts.clear(sessionId)
+                else drafts.write(sessionId, keepText)
+                val keptEdits = keepText.isNotBlank() || keepAttachments.isNotEmpty()
                 _state.update {
                     it.copy(
-                        text = "",
-                        attachments = emptyList(),
+                        text = keepText,
+                        attachments = keepAttachments,
                         sending = false,
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
-                        notice = "已发送"
+                        notice = if (keptEdits) "已发送；发送期间的新编辑已保留" else "已发送"
                     )
                 }
                 onSent(sessionId)

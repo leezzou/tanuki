@@ -97,6 +97,10 @@
 - 限制：单张图片 20 MiB、图片总量 30 MiB、单文件 20 MiB、每条消息最多 5 个文件/10 个附件、附件总量 50 MiB；服务端更小限制优先。错误为中文，失败保留草稿与附件。
 - 粘贴/拖入：剪贴板读取 `content://` 图片或受限 `data:image/...;base64`；Compose `dragAndDropTarget` 接收其他应用拖入的 `content://` 文件。只接受可读 `content://`，不接受 `file://`/App 私有文件。
 - 兼容：输入栏复用同一 `DshEndpoint`（本地或远程 SSH 转发的 loopback origin）与启动 token；通知点击仍由 `DshNativeController.openSession()` 选择会话，输入栏随 `selectedId` 切换草稿。发送成功后只调用现有 `select(force=true)` 重读历史，不接管流式/消息渲染。
+- transport：本切片只依赖 `DshComposerRemote.call(method,args)`/`reset()`；42 的 `DshNativeComposerRemote(transport)` 转发到冻结的 `DshTransport`，认证/Cookie/URL/超时/脱敏均在 transport 内。早期 head 的临时 HTTP 实现已删除。
+- 会话代次：选择器打开、粘贴、拖入读取前捕获 `DshComposerSessionToken`，返回时拒绝已切换会话的旧结果；发送成功只移除本次提交的文本/附件，发送期间的新编辑保留。
+- 批量预算：附件读取在分配字节前按剩余数量、剩余总量和单文件上限执行预算；拖入开始时用 `mimeTypes()` 判定，`onDrop` 领取并释放临时读权限。
+- 当前 head 尚未挂载到 `DshNativePage`（42 独占文件 + transport 待接），因此不能把发送/附件/@/斜杠/草稿写成端到端已可用；停止/取消未实现。
 
 ## 5. 安全边界
 
@@ -113,9 +117,9 @@
 本轮（android_agent-46，基线 `0555c3c0`）新跑：
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL（`-x buildNativeRuntime`）。
-- 输入/附件目标回归 34 项（不含 transport 认证/HTTP；该层等待 42 统一接线）：`DshComposerProtocolTest` 15、`DshComposerClientTest` 8、`DshComposerControllerTest` 11；0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 本切片 34）。
-- `:app:lintModernDebug`：BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
+- 输入/附件目标回归 38 项（不含 transport 认证/HTTP；该层等待 42 统一接线）：`DshComposerProtocolTest` 17、`DshComposerClientTest` 8、`DshComposerControllerTest` 13；0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，74 个结果文件、**615 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 文件复制 19 + 本切片 38）。
+- `:app:lintModernDebug`：BUILD SUCCESSFUL，**0 errors / 96 warnings / 1 hint**；新增文件无 lint 告警。
 - 覆盖：官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 参数与返回解析；图片类型嗅探与 PNG/JPEG/GIF/WebP 尺寸；图片字节/数量/总量/宽高/像素限制中文错误；文件 20 MiB/5 个/50 MiB 限制；@ 引号/目录/邮箱式文本；斜杠命令识别；按会话草稿；图片+文本发送；文件先上传后 receipt；命令附件策略；上传失败/发送失败保留草稿；官方附件错误码中文化。
 
 未验证：

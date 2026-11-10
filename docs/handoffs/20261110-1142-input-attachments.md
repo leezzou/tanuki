@@ -17,10 +17,30 @@
 ## 当前状态
 
 - 已实现：原生输入栏组件（多行、`Ctrl/⌘+Enter` 发送、按会话草稿）、@ 文件/会话补全、斜杠命令目录/补全/执行、图片/文件选择与预览、普通文件上传换 receipt、图片 base64 随 prompt、粘贴图片、拖入文件、大小/类型限制中文错误。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 34 项全过；完整 JVM 592 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 95 warnings / 1 hint，新增文件无 lint 告警。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 38 项全过；完整 JVM 615 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 96 warnings / 1 hint，新增文件无 lint 告警。
 - 待验证：42 接线后的真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机；独立 Review、CI 与合并。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`（modern flavor 为 `com.tanuki.modern`）；分支 `ao/input-attachments/root`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#39](https://github.com/leezzou/tanuki/pull/39) 已认领；无设备/模拟器任务。
-- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。最新 `main=533eff4` 与 `main=1cb7ad9`（原生功能对齐审计）已合入本分支；冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，两边记录均已保留。
+- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。最新 `main=533eff4`、`main=1cb7ad9`（原生功能对齐审计）与 `main=2a4a050`（文件复制界面稳定）已合入本分支；冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，两边记录均已保留。
+
+### Codex Review 修复（5 项）
+
+- P1 发送成功误清新草稿：发送前快照 `submittedText` 与附件 id；成功时仅移除本次提交的文本/附件，发送期间的新文本、新附件保留并回写草稿；延迟响应回归 `sendKeepsEditsMadeWhileWaitingForResponse`。
+- P1 异步附件串会话：新增 `DshComposerSessionToken(sessionId, generation)`；选择器打开、粘贴、拖入读取前捕获，返回时 `isCurrentSession` 校验；`addImages/addFiles` 也接受 token 做二次拒绝；回归 `staleAttachmentTokenIsRejectedAfterSessionSwitch`。
+- P2 批量读取预算：新增 `DshAttachmentReadBudget`，`readUris`/剪贴板/拖入在读取每个 URI 前按剩余数量、剩余总量和单文件上限分配；不再先把整批字节读进内存；回归 `batchBudgetStopsBeforeOverAllocating`。
+- P2 拖入开始判定：`shouldStartDragAndDrop` 改用 `event.mimeTypes()`，不再依赖 ACTION_DROP 才提供的 `clipData`；纯策略 `DshComposerDragPolicy.accepts` 有回归。
+- P2 跨应用临时权限：`onDrop` 调 `Activity.requestDragAndDropPermissions`，权限保留到异步读取结束并在 `finally` release；真实外部 provider 读取仍需设备验证。
+
+### transport 收敛
+
+- 当前分支已删除早期 head 的临时 `HttpDshComposerRemote`；它曾使用 `POST /api/<method>`、connect 5s/read 30s、401 单次重试、2 MiB 响应上限和 `DshApiException(code)` 错误映射。该实现不再存在，仅保留历史说明。
+- 现在只依赖 `DshComposerRemote`：`suspend fun call(method: String, args: JSONObject): Any?`（返回官方 `result.value`，业务错误抛 `DshApiException`，认证/网络 IOException）与 `fun reset()`。
+- 42 的 `DshNativeComposerRemote(transport)` 适配器只需转发这两个方法；输入栏不使用 `live`/`connection`，不读 token/Cookie、不拼 URL、不自建 HTTP/WS。
+
+### 真实可用性
+
+- 发送、附件选择/上传、@ 引用、斜杠命令、草稿保留：控制器/UI/协议已实现并有 JVM 覆盖；**但当前 head 未挂载到 `DshNativePage`**（42 独占文件 + transport 未接），不能宣称端到端在原生页可用。
+- 停止/取消：**未实现**。
+- 图片/文件选择、缩略图/大图预览、粘贴、拖入、临时权限：Android 代码已实现，未在设备验证。
 
 ## 本次改动
 
@@ -74,12 +94,12 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL；仅既有弃用/平台告警 | 本 worktree `android_agent-46`；未跑原生 `buildNativeRuntime` |
-| `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**34 tests / 0 failures / 0 errors / 0 skipped** | 15 + 8 + 11；不含 transport 认证/HTTP |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 95 warnings / 1 hint** | 合并 main 后：0.1.10 基线 535 + 文件查看器 23 + 本切片 34；新增文件无 lint 告警 |
+| `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**38 tests / 0 failures / 0 errors / 0 skipped** | 17 + 8 + 13；不含 transport 认证/HTTP |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；74 个结果文件、**615 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 96 warnings / 1 hint** | 合并 main 后：0.1.10 基线 535 + 文件查看器 23 + 文件复制 19 + 本切片 38；新增文件无 lint 告警 |
 | `git diff --check` | 无输出 | 无空白错误 |
 | PR #39 新 head `4d03319` CI | Host 29s、Android build+JVM+lint 6m24s，均 pass | 以 PR 页面当前 head 为准 |
 
-- 哪些是前一轮结果，哪些是本次新验证：592/0/0/0、lint 0 errors/95 warnings/1 hint、34 项目标回归均为合并 main 后本次新跑；535 是 0.1.10 基线记录，23 是文件查看器已合并到 main 的回归，34 是本切片新增；PR #39 旧 head CI 不能作为当前 head 依据。
+- 哪些是前一轮结果，哪些是本次新验证：615/0/0/0、lint 0 errors/96 warnings/1 hint、38 项目标回归均为合并 main 后本次新跑；535 是 0.1.10 基线记录，23 是文件查看器已合并到 main 的回归，38 是本切片新增；PR #39 旧 head CI 不能作为当前 head 依据。
 - 未测试、超时、失败和暂未复现的情况：42 接线后的真实设备 UI/键盘/选择器/粘贴/拖入/上传失败重试、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 交互没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试；transport 认证/HTTP 由 42 统一实现，本分支未测。
 
 ## 未完成与暂停项

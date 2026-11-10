@@ -462,4 +462,39 @@ class FilesBrowserPresentationTest {
             assertFalse("切换目录后不能保留旧目录的筛选结果", nodes().any { it.text?.toString() == "entry5999.txt" })
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
+    /**
+     * 同目录刷新新增条目时，旧列表要保留到新结果就绪；不能先清空列表导致滚动位置归零。
+     * 目前只编译、未在本会话设备上执行（设备由独立 QA 独占）。
+     */
+    @Test fun sameDirectoryRefreshWithNewFilesKeepsScrollPosition() {
+        val folder = fixture()
+        repeat(400) { index -> File(folder, "scroll${index.toString().padStart(3, '0')}.txt").writeText("synthetic $index") }
+        val activity = launch()
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme { Surface(Modifier.fillMaxSize()) {
+                        WorkspaceFilesPage(WorkspaceFileManager(runtime.paths), {}, {}, Modifier.fillMaxSize().safeDrawingPadding())
+                    } }
+                }
+            }
+            click(folder.name); find("scroll000.txt")
+            // 选取面积最大的可滚动节点（页面工具栏自身也是横向可滚动的小容器）。
+            val list = requireNotNull(nodes().filter { it.isScrollable && it.actionList.any { action -> action.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD } }
+                .maxByOrNull { Rect().also(it::getBoundsInScreen).height() }) { "找不到文件列表滚动容器" }
+            repeat(4) { list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); SystemClock.sleep(120) }
+            instrumentation.waitForIdleSync()
+            assertFalse("列表应已离开顶部", nodes().any { it.isVisibleToUser && it.text?.toString() == "scroll000.txt" })
+            val visibleBefore = nodes().filter { it.isVisibleToUser }.mapNotNull { it.text?.toString() }
+                .filter { it.startsWith("scroll") }.toSet()
+            assertTrue("滚动后应能看到文件条目", visibleBefore.isNotEmpty())
+            // 同目录新增文件后刷新：列表内容变化会触发重新筛选/排序。
+            File(folder, "scroll-new.txt").writeText("new")
+            click("刷新文件")
+            val total = folder.listFiles().orEmpty().size
+            find("显示 ${total - 1} 项 · 共 $total 项")
+            assertTrue("刷新后仍应停留在原滚动位置", nodes().any { it.isVisibleToUser && it.text?.toString() in visibleBefore })
+            assertFalse("刷新不能把列表拉回顶部", nodes().any { it.isVisibleToUser && it.text?.toString() == "scroll000.txt" })
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
 }

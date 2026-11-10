@@ -27,6 +27,29 @@ data class DshImageLimits(
 /** 从官方图片头解析出的固有尺寸。 */
 data class DshImageSize(val width: Int, val height: Int)
 
+/** 拖入接收判定只看开始阶段的 MIME 元数据；此时 Android 还不提供 clipData。 */
+object DshComposerDragPolicy {
+    fun accepts(mimeTypes: Set<String>): Boolean = mimeTypes.any { it.isNotBlank() }
+}
+
+/** 一次批量读取前分配的附件预算；读取阶段就拒绝超量，避免先把整批字节读进内存。 */
+data class DshAttachmentReadBudget(
+    val maxItems: Int,
+    val remainingBytes: Long,
+    val maxItemBytes: Int,
+    val totalLabelBytes: Long
+) {
+    /** 返回当前条目可读取的最大字节；数量或总量已用尽时返回 null。 */
+    fun limitFor(acceptedItems: Int, usedBytes: Long): Int? {
+        if (acceptedItems >= maxItems || remainingBytes <= usedBytes) return null
+        return minOf(maxItemBytes.toLong(), remainingBytes - usedBytes).toInt()
+    }
+
+    fun exhaustionMessage(acceptedItems: Int): String =
+        if (acceptedItems >= maxItems) "还能添加 $maxItems 个附件"
+        else "附件总大小不能超过 ${DshComposerPolicy.formatBytes(totalLabelBytes)}"
+}
+
 /** 官方 prompt 的内容块；顺序由调用方决定，原生输入栏按附件后文本发送。 */
 sealed interface DshOutgoingPart {
     data class Text(val text: String) : DshOutgoingPart
