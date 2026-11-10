@@ -249,12 +249,14 @@ HTTP 200..399 或 401 → 存活
 - 草稿按会话保存在应用私有 `dsh-composer` 偏好中，只保存文本；附件不跨会话保留。异步选择器/剪贴板/拖入结果用 `DshComposerSessionToken(sessionId, generation)` 拒绝已切换会话。
 - 批量读取在分配字节前执行 `DshAttachmentReadBudget` 的数量/总量/单文件预算；总附件名额与图片/文件类型名额分开，图片只扣总名额与共享字节，不占文件名额。拖入开始用 `mimeTypes()` 判定，`onDrop` 领取并在异步读取结束释放 `requestDragAndDropPermissions`；批次被预算阻断时返回中文提示，不静默丢弃。选择器结果缺少发起 token（含 Activity/进程恢复）直接丢弃并提示。
 - 发送成功只移除本次实际提交的文本/附件（发送时快照比对），发送期间的新编辑保留；失败保留草稿与附件并显示“重发”，用户可直接再次发送。
-- 输入框随内容增高到 6 行后内部滚动；组件自身 `imePadding()` 保证软键盘不遮挡，父级已消费的 IME inset 不重复叠加。`Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
+- 输入区为胶囊：单行 48dp、圆角 28；1–6 行随文本布局平滑增高（`animateContentSize`），多行圆角收紧为 18 且左右 36dp 圆键贴底；超过 6 行在输入框内部滚动。输入框上方展示附件缩略/进度。组件自身 `imePadding()` 保证软键盘不遮挡，父级已消费的 IME inset 不重复叠加。
+- 发送/停止同键位形变：空闲为发送（↑），生成中为停止（■ 实心主色），同一 36dp 位置/尺寸；禁用态用低对比底色。只对图标做短促的淡入缩放/位移动画，不重建整条输入框。没有真实语音/听写能力，因此不放假入口。
+- `Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
 - `@`/斜杠候选支持上下键循环选择、Enter/Tab 插入、Esc 关闭；斜杠候选按命令名前缀、名称包含、描述/参数提示包含排序。插入只替换当前 `@` 查询或首行命令 token，保留后续参数与换行。
-- 停止生成由控制器的 `requestStop()` 调 `session/cancel`，状态为 `generationRunning`/`stopping`/`stopOutcome`；页面接线需在 `DshNativeState.running` 变化时调用 `setGenerationRunning(running)` 复位，否则发送成功后停止入口不会随回合结束自动消失。组件 PR 不改页面接线。
+- 停止生成由 `requestStop()` 调 `session/cancel`。accepted 只进入 `DshStopOutcome.REQUESTED`，保留 `generationRunning` 与停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。
 - 文件上传显示不定进度（官方 unary 上传无字节回调，不伪造百分比）；上传中可点“取消”，立即移除本地卡片并使晚到响应失效，不留下本地半成品。官方没有上传取消端点，服务端可能仍完成已发出的请求，界面不把它写成已发送附件。
 - `DshComposerRemote` 是**临时抽象**：只覆盖输入/附件需要的 unary `call(method,args): Any?` 与 `reset()`，不代表第二套传输。42 的 `DshTransport` / `DshNativeComposerRemote(transport)` 定稿后，消费方应改为直接依赖该适配器并删除/收敛这个临时接口；早期 head 的临时 `HttpDshComposerRemote` 已删除，当前分支不自建 HTTP/WS。
-- 本组件 PR 仍不含页面接线；停止入口已实现于 `DshComposerBar`/`DshComposerController`，集成方只需同步 `running` 状态即可显示和复位。
+- 本组件 PR 仍不含页面接线；集成方需在 `DshNativeState.running` 变化时调用 `setGenerationRunning(running)`，停止入口才会在官方确认 idle 后隐藏并显示“已停止”。
 
 细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 

@@ -33,8 +33,13 @@ import java.util.UUID
 
 enum class DshAttachmentStatus { READY, UPLOADING, UPLOADED, FAILED }
 
-/** 停止生成的结果；界面据此区分“已停止”和“停止失败”，不把失败当成功。 */
-enum class DshStopOutcome { STOPPED, FAILED }
+/**
+ * 停止生成的结果。
+ *
+ * [REQUESTED] 只表示官方已接受停止请求，回合可能仍在收尾；必须等官方
+ * `running=false` 确认后才能进入 [STOPPED]，不能把 accepted 回执当成已停止。
+ */
+enum class DshStopOutcome { REQUESTED, STOPPED, FAILED }
 
 /** 已读取到内存的待发送附件；previewUri 只用于本地缩略图，不进入发送协议。 */
 data class DshDraftAttachment(
@@ -374,7 +379,10 @@ class DshComposerController(
                 sendFailed = false,
                 error = null,
                 notice = null,
-                stopOutcome = null
+                // 已在收尾的停止请求不能被新一次提交清掉；它是独立于提交回执的状态。
+                stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
+                    DshStopOutcome.REQUESTED
+                } else null
             )
         }
         sendJob?.cancel()
@@ -438,7 +446,10 @@ class DshComposerController(
                         // 普通 prompt 被接受后本轮进入运行；斜杠命令不一定产生回合，
                         // 不默认置运行中，页面仍可用官方 running 状态纠正。
                         generationRunning = command == null,
-                        stopOutcome = null,
+                        // 停止回执可能与 prompt 回执交错到达；保留仍在收尾的请求状态。
+                        stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
+                            DshStopOutcome.REQUESTED
+                        } else null,
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
@@ -456,17 +467,35 @@ class DshComposerController(
     }
 
     /**
-     * 页面把官方 `running` 状态同步进来；运行结束后停止入口消失。
-     * 未接线时发送成功会先置为运行中，用户仍可从输入栏停止当前回合。
+     * 页面把官方 `running` 状态同步进来。
+     *
+     * `running=false` 才是停止完成的唯一确认：若此前已接受停止请求，这里才切到
+     * [DshStopOutcome.STOPPED]；单纯收到 `session/cancel` 的 accepted 回执不改变
+     * 运行状态，避免隐藏仍在收尾的停止入口。
      */
     fun setGenerationRunning(running: Boolean) {
         _state.update { state ->
-            if (state.generationRunning == running) state
-            else state.copy(generationRunning = running)
+            if (running) {
+                if (state.generationRunning) state else state.copy(generationRunning = true)
+            } else {
+                val awaitingStop = state.stopping || state.stopOutcome == DshStopOutcome.REQUESTED
+                if (!awaitingStop && !state.generationRunning) return@update state
+                state.copy(
+                    generationRunning = false,
+                    stopping = false,
+                    stopOutcome = if (awaitingStop) DshStopOutcome.STOPPED else state.stopOutcome,
+                    notice = if (awaitingStop) "已停止当前回合" else state.notice
+                )
+            }
         }
     }
 
-    /** 停止当前活动回合；成功显示“已停止”，失败显示“停止失败”，不伪造成功。 */
+    /**
+     * 请求停止当前活动回合；只影响生成，不取消在途 prompt 的提交回执。
+     *
+     * accepted 回执表示官方已受理停止请求，回合仍可能在收尾；此期间保留
+     * `generationRunning` 与停止入口，等 [setGenerationRunning] 收到官方 idle 再显示“已停止”。
+     */
     fun requestStop() {
         val current = _state.value
         val sessionId = current.sessionId ?: run {
@@ -479,30 +508,43 @@ class DshComposerController(
             return
         }
         _state.update {
-            it.copy(stopping = true, stopOutcome = null, error = null, notice = null)
+            it.copy(
+                stopping = true,
+                // 已受理的停止请求在重试期间保持“收尾中”，不要退回空闲。
+                stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
+                    DshStopOutcome.REQUESTED
+                } else null,
+                error = null,
+                notice = null
+            )
         }
         stopJob?.cancel()
         stopJob = scope.launch {
             val result = client.cancel(sessionId)
             if (sessionId != _state.value.sessionId) return@launch
             result.onSuccess {
-                // 发送请求可能仍在等待返回；停止后不再让晚到的成功结果清空草稿。
-                sendJob?.cancel()
+                // 停止只影响生成；在途 prompt 的回执必须继续走完，不能在这里 cancel sendJob。
+                // 只要回合仍在运行或还有提交回执在途，就不能把 accepted 当成“已停止”。
+                val awaitingOfficial = _state.value.generationRunning || _state.value.sending
                 _state.update {
                     it.copy(
                         stopping = false,
-                        sending = false,
-                        generationRunning = false,
-                        stopOutcome = DshStopOutcome.STOPPED,
-                        notice = "已停止当前回合"
+                        stopOutcome = if (awaitingOfficial) {
+                            DshStopOutcome.REQUESTED
+                        } else DshStopOutcome.STOPPED,
+                        notice = if (awaitingOfficial) {
+                            "停止请求已发送，仍在收尾，等待官方确认"
+                        } else "已停止当前回合"
                     )
                 }
             }.onFailure { error ->
+                val stillActive = _state.value.generationRunning || _state.value.sending
                 _state.update {
                     it.copy(
                         stopping = false,
-                        stopOutcome = DshStopOutcome.FAILED,
-                        error = "停止失败：${messageOf(error)}"
+                        stopOutcome = if (stillActive) DshStopOutcome.FAILED else DshStopOutcome.STOPPED,
+                        error = if (stillActive) "停止失败：${messageOf(error)}" else it.error,
+                        notice = if (stillActive) it.notice else "回合已结束"
                     )
                 }
             }

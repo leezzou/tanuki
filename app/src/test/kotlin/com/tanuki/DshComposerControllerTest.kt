@@ -410,7 +410,7 @@ class DshComposerControllerTest {
         assertFalse(controller.state.value.uploadBusy)
     }
 
-    @Test fun stopSuccessMarksStoppedAndClearsRunning() {
+    @Test fun stopAcceptedWaitsForOfficialIdleBeforeStopped() {
         val remote = FakeRemote()
         val controller = controller(remote)
         controller.setSession("s1")
@@ -420,10 +420,41 @@ class DshComposerControllerTest {
         assertTrue(controller.state.value.generationRunning)
 
         controller.requestStop()
+        // accepted 回执只进入“收尾中”，不能立刻隐藏停止入口或宣称已停止。
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertTrue(requested.generationRunning)
+        assertFalse(requested.stopping)
+        assertTrue(requested.notice.orEmpty().contains("停止请求已发送"))
+        assertTrue(remote.calls.any { it.method == "session/cancel" })
+
+        controller.setGenerationRunning(false)
         val stopped = awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
         assertFalse(stopped.generationRunning)
         assertTrue(stopped.notice.orEmpty().contains("已停止"))
-        assertTrue(remote.calls.any { it.method == "session/cancel" })
+    }
+
+    @Test fun stopDoesNotCancelDelayedPromptReceipt() {
+        val remote = FakeRemote().apply { promptDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("B", 1)
+        controller.send()
+        assertTrue(controller.state.value.sending)
+
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 停止请求在 prompt 回执前被接受；提交回执必须继续走完，不能被 cancel。
+        assertTrue(requested.sending)
+
+        val sent = awaitState(controller) { it.notice == "已发送" }
+        assertFalse(sent.sending)
+        assertFalse(sent.sendFailed)
+        assertEquals(1, remote.calls.count { it.method == "session/prompt" })
+        // prompt 回执不能把仍在收尾的停止状态清掉。
+        assertEquals(DshStopOutcome.REQUESTED, sent.stopOutcome)
+
+        controller.setGenerationRunning(false)
+        awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
     }
 
     @Test fun stopFailureKeepsRunningAndShowsFailure() {
