@@ -254,16 +254,22 @@ def changed_paths(options) -> list[PurePosixPath] | None:
     return [path for path in (normalize_changed(value) for value in values) if path is not None]
 
 
-def is_record_change(relative: PurePosixPath) -> bool:
+def is_handoff_path(relative: PurePosixPath) -> bool:
+    """判断是否为规范命名的交接记录路径，不要求文件仍然存在（删除也按此豁免）。"""
     return (len(relative.parts) == 3 and relative.parts[:2] == ("docs", "handoffs")
             and relative.suffix == ".md" and relative.name != "TEMPLATE.md"
-            and RECORD_NAME.match(relative.name) is not None
-            and (ROOT / relative).is_file())
+            and RECORD_NAME.match(relative.name) is not None)
+
+
+def is_record_change(relative: PurePosixPath) -> bool:
+    """本次变更集中新增/修改的本 PR 记录；删除的记录不算可用证据。"""
+    return is_handoff_path(relative) and (ROOT / relative).is_file()
 
 
 def is_public_change(relative: PurePosixPath, package) -> bool:
-    """除交接记录与共享状态外，公开文件变化都要求本次同时更新交接记录。"""
-    if is_record_change(relative):
+    """除交接记录与共享状态外，公开文件变化（含删除）都要求本次同时更新交接记录。"""
+    # 旧交接记录的删除属于清理动作，由 PUBLICATION 流程约束，不要求为删除本身再写记录。
+    if is_handoff_path(relative):
         return False
     if relative.as_posix() in {STATE_RELATIVE, STAMP_RELATIVE}:
         return False

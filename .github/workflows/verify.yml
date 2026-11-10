@@ -81,15 +81,18 @@ jobs:
             python3 scripts/check-handoff.py --release
             exit 0
           fi
-          changed="$(mktemp)"
-          : > "$changed"
           if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            # 只取新增/修改/重命名；删除旧记录不需要为删除本身再写一条记录。
-            git diff --name-only --diff-filter=AMR "$BASE_SHA"...HEAD > "$changed"
+            # 包含删除：删除公开源码/回归测试同样必须附带本次交接记录；
+            # 删除旧交接记录由 check-handoff.py 按 docs/handoffs 路径单独豁免。
+            changed="$(mktemp)"
+            git diff --name-only --diff-filter=AMRD "$BASE_SHA"...HEAD > "$changed"
+            python3 scripts/check-handoff.py --pr --changed-from "$changed"
           else
-            echo "无法确定基线提交；仅校验最新交接记录结构（PR 模式）。"
+            # 没有基线时不能传空清单（空清单会被当成“无需记录”而直接通过），
+            # 改为实际校验最新交接记录结构。
+            echo "无法确定基线提交；改为校验最新交接记录结构（PR 模式）。"
+            python3 scripts/check-handoff.py --pr
           fi
-          python3 scripts/check-handoff.py --pr --changed-from "$changed"
 
   android-build:
     name: Android build, JVM tests and lint

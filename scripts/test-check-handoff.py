@@ -132,6 +132,29 @@ def public_file(path):
         # 变更清单里的交接文件名必须符合 YYYYMMDD-HHMM-topic.md。
         self.assert_fail("--pr", "--changed-file", "docs/handoffs/not-a-record.md")
 
+    def test_deleted_public_file_requires_record_but_handoff_deletion_is_exempt(self):
+        # 删除公开源码/回归测试也必须附带本次交接记录。
+        self.assert_fail("--pr", "--changed-file", "app/src/main/deleted.kt")
+        self.assert_ok("--pr", "--changed-file", "app/src/main/deleted.kt", "--changed-file", RECORD)
+        # 删除旧交接记录属于清理，不要求为删除本身再写一条记录。
+        self.assert_ok("--pr", "--changed-file", "docs/handoffs/20260103-0000-old.md")
+        self.assert_fail("--pr", "--changed-file", "app/src/main/deleted.kt",
+                         "--changed-file", "docs/handoffs/20260103-0000-old.md")
+
+    def test_ci_workflow_keeps_deletions_and_structural_fallback(self):
+        # 防止 CI 回归为“排除删除”或“无基线时传空清单”。
+        workflow = (ROOT / ".github/workflows/verify.yml").read_text()
+        self.assertIn("--diff-filter=AMRD", workflow)
+        self.assertRegex(workflow, r"python3 scripts/check-handoff\.py --pr\s*\n")
+
+    def test_pr_mode_without_changed_list_checks_latest_record(self):
+        # CI 拿不到基线时不传空清单；无清单的 --pr 必须实际校验最新记录结构。
+        invalid = record_text().replace("## 下一步\n合成内容：下一步。\n", "")
+        self.put(NEWER, invalid.replace("20260101-0000", "20260102-0000"))
+        self.assert_fail("--pr")
+        self.put(NEWER, record_text().replace("20260101-0000", "20260102-0000"))
+        self.assert_ok("--pr")
+
     def test_integrate_requires_state_link_and_latest_record(self):
         self.assert_fail("--integrate", "--record", RECORD)
         self.link_state()

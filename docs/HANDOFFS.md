@@ -54,7 +54,7 @@ python3 scripts/check-handoff.py --integrate --record docs/handoffs/<最新记�
 python3 scripts/check-handoff.py --release
 ```
 
-`--changed-file PATH` 可重复传入单个路径；`--changed-from FILE` 每行一个路径，`-` 表示标准输入。CI 用 `git diff --name-only --diff-filter=AMR <base>...HEAD` 生成该清单。
+`--changed-file PATH` 可重复传入单个路径；`--changed-from FILE` 每行一个路径，`-` 表示标准输入。CI 用 `git diff --name-only --diff-filter=AMRD <base>...HEAD` 生成该清单（包含删除）。
 
 普通 PR 模式的记录检查包括：
 
@@ -65,8 +65,8 @@ python3 scripts/check-handoff.py --release
 
 变更集守卫把公开文件分为两类：
 
-- **交接记录与共享状态**（`docs/handoffs/*.md`、`AGENT-STATE.md`、`CURRENT.json`）：允许单独出现，不要求新记录；
-- **其余公开文件**（`app/src`、`scripts`、`docs`、`.github` 等，按 `scripts/package-source.py` 白名单）：只要有改动，本次变更集就必须同时新增/修改一条交接记录，否则失败。`app/src/main/jniLibs` 等生成物不在公开清单内，不触发。
+- **交接记录与共享状态**（`docs/handoffs/*.md`、`AGENT-STATE.md`、`CURRENT.json`）：允许单独出现，不要求新记录；删除旧交接记录也属于清理动作，不要求为删除本身再写记录；
+- **其余公开文件**（`app/src`、`scripts`、`docs`、`.github` 等，按 `scripts/package-source.py` 白名单）：只要新增、修改或删除，本次变更集就必须同时新增/修改一条交接记录，否则失败。`app/src/main/jniLibs` 等生成物不在公开清单内，不触发；旧交接记录的删除按 `docs/handoffs` 路径豁免。
 
 ## 4. 普通 PR 流程
 
