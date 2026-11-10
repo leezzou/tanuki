@@ -2,15 +2,19 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
-## DSH 多版本卸载与互斥验证（2026-11-10，android_agent-43，非设备）
+## 交接机制改造验证（2026-11-10，android_agent-49，非设备）
 
-- 范围：已安装 DSH 清单（当前使用/备用、占用、安装时间、校验）、非当前版本卸载确认、当前/运行/更新占用拒绝、两阶段卸载与失败回滚、共享数据保护、切换/卸载与安装/启动/更新检查互斥。基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`。
+- 范围：只改宿主脚本、CI 与交接文档，不改产品代码。`scripts/check-handoff.py` 新增普通 PR / 集成 / 发布三模式；普通 PR 只校验自己的记录，CI 用变更清单强制“公开文件有改动必须附带交接记录”；集成模式刷新 schema 2 印章，发布模式只读严格校验；新增 `docs/HANDOFFS.md` 与 `scripts/test-check-handoff.py`。基线创建于 `main=1cb7ad95`；PR 创建后连续合并 `main=2a4a0503`（PR #35）与 `main=0068c872`（PR #36 中继配对），解决交接文档冲突并按新树复跑宿主回归；分支 `ao/handoff-conflicts/pr-mode`，不合并、不发布。
 - 实际执行：
-  - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` → BUILD SUCCESSFUL，36 tests / 0 failures / 0 errors / 0 skipped（卸载 17、版本 7、切换 12）。
-  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m30s），66 个结果文件、**552 tests / 0 failures / 0 errors / 0 skipped**；合并 `origin/main=2a4a050`（PR #34 文件查看器、PR #32 原生一致性审计、PR #35 文件复制界面稳定）后完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件）、`lintModernDebug` **0 errors / 95 warnings / 1 hint**；合并 `origin/main=0068c87`（#36 远程中继）后的完整套件由 CI 在新 head 复跑，本记录不把 594 冒充合并后结果。
-- 新增回归 17 项（`DshUninstallTest`）：当前版本卸载被拒；运行中/活动子进程/更新检查/安装占用被拒；当前元数据缺失、非法版本、未安装版本被拒；卸载备用版本后程序目录消失、当前版本与 `userdata`/`workspaces`/`backups`/下载缓存保留、清单重扫只剩当前版本；删除普通依赖后两个标记仍在也不回滚、保留隔离目录与 committed 日志；删除已触及 `.installed` 后同样不回滚；提交日志失败时在删除前回滚；提交日志失败且回滚 move 失败时保留 prepared 日志，下次 prepared 恢复移回；committed 恢复只清理隔离目录并保留同版本重装的 target；prepared 恢复移回隔离目录；target 已存在时 prepared 只清理隔离副本；旧协议无 phase 仍删除 target；版本窄锁第二次 `tryEnter` 被拒且等待者串行；两个并发卸载同一版本只能成功一个；卸载失败后重装另一版本，重启恢复只清隔离目录并保留当前版本；恢复失败不覆盖待处理日志；先恢复后写新事务日志。
-- 首次完整 JVM 运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未修改该测试。
-- 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、独立 Review 复核。review 修复前 head `1fa66bd` 的 Host/Android CI 4/4 通过；review 修复后新 head 的 CI 以 PR 页面为准。JVM 与 lint 不能替代设备验收。
+  - `python3 scripts/test-check-handoff.py` → 8 tests / 0 failures，覆盖 PR 容忍落后共享状态、记录缺失/空章节/占位符、路径与符号链接、变更集守卫、集成最新记录、发布篡改检测、目录移动可迁移。
+  - `python3 scripts/test-agent-workflow.py` → 19 tests / 0 failures（54.318s），含设备锁/模拟 ADB 离线回归，不访问真实设备。
+  - `python3 scripts/test-publication.py` → 19 tests / 0 failures；`python3 scripts/test-app-release.py` → 18 tests / 0 failures（并断言发布入口调用 `--release`）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过（共享状态允许落后）。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建）。
+  - `python3 scripts/check-handoff.py --release` → 通过（记录哈希、公开源码指纹、证据指纹与最新记录一致）。
+  - `python3 scripts/check-publication.py --git` → 0 findings；`python3 scripts/package-source.py` → 源码包生成成功。
+  - `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` → YAML_OK；`bash -n scripts/verify-workspace.sh` 与 Python 内存语法检查通过。
+- 未执行：设备/仪器、PR 独立审查、合并、`AGENT-STATE` 指针 + 最近 N 条实际精简、APK/发布附件；Android 构建/JVM/lint 与 Host 已由 GitHub Actions 在 `c417daa` 验证通过，后续 head 以 PR 页面为准。源码包 SHA 会随最终文档改动变化，以最后一次输出为准，不回填到记录形成循环。
 
 ## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
 

@@ -1,7 +1,8 @@
 {
-  "schema": 1,
-  "record": "docs/handoffs/20261110-1142-dsh-version-uninstall.md",
-  "recordSha256": "7a2b0081db5178fdc098888fab86cf09cd437c521a93b9e51c73392d288a929b",
-  "sourceFingerprint": "b8bc79db085fa001de8089626c12ec42f8610aad7c0dba57140399d39aaab09f",
-  "fileCount": 620
+  "schema": 2,
+  "record": "docs/handoffs/20261110-1333-handoff-pr-mode.md",
+  "recordSha256": "76f27edaf5d00ef196e5a2bf34ae995217a4a3823e32f14bda0c3f4e8f0218a4",
+  "sourceFingerprint": "88e1b9ead1f4c6b89c6aa027149292527bf8c3503cee7a29e7480fea5a2f3b99",
+  "evidenceFingerprint": "e38d814c481350e2c754b9217393a11c1bd28920cf7ca2e3d970e56e53ff9de0",
+  "fileCount": 621
 }

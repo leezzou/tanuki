@@ -116,6 +116,6 @@ python3 scripts/check-development-gates.py --pr <PR> --session <实现 worker> \
 ## 7. 记录位置
 
 - 设备/JVM/lint 的验证摘要写入 [TEST-REPORT](TEST-REPORT.md)，注明环境、命令、结果和限制；不要只写“已测试”。
-- 本任务的执行范围和未完成项写入 `docs/handoffs/<本轮记录>.md`，并在 [AGENT-STATE](AGENT-STATE.md) 区分已验证/待验证。
+- 本任务的执行范围和未完成项写入 `docs/handoffs/<本轮记录>.md` 并区分已验证/待验证；`AGENT-STATE` 由集成维护方在集成阶段汇总，普通 QA 任务不改共享状态。
 - PR 正文写清实际执行的测试、未执行范围和风险；不要用历史数字替代当前 head 的结果。
 - 设备原始日志留在 `.build` 或本机临时目录，不提交、不打包、不直接粘贴到公开证据。

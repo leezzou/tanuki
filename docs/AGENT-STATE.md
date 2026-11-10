@@ -1,6 +1,6 @@
-当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 四轮 Codex Review 意见已修复，已合并 `origin/main=0068c87`（含 #32/#34/#35/#36），合并后完整 JVM 由 CI 复跑（本地最近 594/0/0/0），新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+# Tanuki 当前状态
 
-并行交接（android_agent-36/40/41）：
+当前交接：[交接机制改造：普通 PR 不再改共享状态](handoffs/20261110-1333-handoff-pr-mode.md)（android_agent-49，基线 `main=0068c872`，分支 `ao/handoff-conflicts/pr-mode`，PR [#42](https://github.com/leezzou/tanuki/pull/42) 待审；脚本/文档非设备验证通过，不合并、不发布）。共享状态现由单一集成维护方在批量合并后统一刷新，规则、指针 + 最近 N 条目标格式与迁移步骤见 [交接机制](HANDOFFS.md)；本 PR 之后的普通 PR 只新增自己的 `docs/handoffs/<日期>-<主题>.md`，不再修改本文件或 `CURRENT.json`。上一记录：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，PR [#36](https://github.com/leezzou/tanuki/pull/36) 已合并为 `0068c872`）；文件复制、文件查看器、0.1.10 与并行历史保留在 `docs/handoffs/`。
 
 ## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
 
@@ -50,18 +50,6 @@
 - 0.1.8 已有独立 QA 会话 android_agent-10 的首轮设备冒烟：`emulator-5572` = `Pixel_7_API_34_arm64`（API34/ARM64，WebView `159.0.8133.0`）；`install -r` 从 0.1.7/code9 升级到 0.1.8/code10（约 1.57s，保留数据），设备 base.apk 与发布件 SHA-256 一致；冷启动 `LaunchState COLD`、`TotalTime 1616ms`；首启停在 Ubuntu 安装页 1/4，未执行安装；应用内浏览器加载 GitHub Release 页，WebView 正常；logcat 无 FATAL/ANR。
 - 该冒烟只覆盖安装/启动/基础 UI/WebView；Ubuntu/Node/基础工具/DSH 安装、真实模型任务、底部导航点击、真机/MIUI/低 API 均未验证，不能写成 0.1.8 已验收。0.1.7 及更早的 104 JVM、54 设备方法等仍是历史记录，未在本轮复跑。
 - main CI 以 PR #13 合并后的 Actions 结果为准；Android job 使用 `-x buildNativeRuntime` 且仓库不跟踪 `jniLibs`，CI APK 无原生 `.so`，不能用于设备验收。
-
-### DSH 多版本卸载与互斥（android_agent-43，PR #33 待审）
-
-- 基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`；只读代码与现有交接后实现，未启动设备、未安装/卸载真实 DSH。
-- 清单：版本管理对话框明确显示“当前使用/备用”、占用空间、安装时间、依赖锁/启动校验与总占用；当前版本无卸载入口，当前元数据缺失时禁止切换与卸载并显示中文原因。
-- 卸载策略：新增纯逻辑 `DshUninstall.requireUninstallable`，拒绝当前版本、运行中服务、活动子进程、更新检查/安装占用与无效/未安装版本；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。Review 修复：删除开始后一律不回滚（标记文件不能证明目录完整），回滚 move 失败保留 prepared 日志。
-- 事务：`prepared` 日志 → 原子改名到 `runtime/dsh-<version>.uninstall` → `committed` 日志 → 删除；删除开始后不再回滚，隔离目录与 committed 日志由 `recover()` 清理；提交日志失败只有移回成功才清 prepared 日志，回滚失败保留记录。新增 `DshUninstallRecovery`：prepared 移回隔离目录，committed 只清理隔离目录、保留 engines 中可能重装的 target，旧协议无 phase 仍删除 target。`replace()` 写新组件事务前先 `recover()`，避免 DSH 安装/重装覆盖待恢复的卸载日志。只删除 `engines/<version>` 与隔离目录，共享 `userdata`/`workspaces`/`backups`/下载缓存/会话不删除。
-- 互斥：安装、启动、切换、卸载共用环境 mutation；新增 `DshVersionGate` 供切换/卸载与 `UpdateManager.check()` 共用，锁顺序固定 mutation → versionGate；环境锁被占用时写入中文错误而非只记事件。
-- UI：主界面当前版本“卸载”改为“管理版本”；官方版本列表只对非当前已安装版本显示“卸载该备用版本”；确认框显示版本、占用、安装时间和保留范围。
-- 恢复：组件事务日志改用 `AtomicFile.delete()`，避免只删主文件留下 `.bak` 导致下次启动恢复已完成的卸载/替换事务。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9、`DshVersionsTest` 7、`DshSwitchTest` 12）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**，详见 [测试报告](TEST-REPORT.md)。
-- 待验证：review 修复后新 head 的 Host/Android CI 与独立 Codex High Review 复核；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、删除中断后的隔离清理、prepared/committed 中断恢复；未跑 assemble/仪器/真机。
 
 ### 远程主机直连 SSH 切片（android_agent-34，PR #29 待审）
 
@@ -225,7 +213,6 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 36 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 17 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、卸载失败后重装另一版本后恢复保留当前版本、恢复失败不覆盖待处理日志、先恢复后写新日志、并发锁与并发卸载）；合并 `origin/main=0068c87` 后完整 JVM 由 CI 复跑（本地最近一次合并 2a4a050 后为 **594 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 95 warnings / 1 hint**）。未跑 assemble、仪器、真机。
 - 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-31 新跑，merge `f5f3bf3` 后）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
@@ -246,14 +233,13 @@
 - 已验证（#13/#15、W8 当时，历史）：宿主 mock/并发回归 19 tests OK（76.760s）；设备门禁脚本 `--help` 与 `bash -n` 通过；main/CI/设备 metadata 只读核对。
 - 已验证（W5 前轮，历史）：24 项门禁离线回归；真实 `gh`/`ao` 只读 CLI 格式核对。
 - 已验证（W2/W3/W1 前轮，历史）：worktree 构建引导、CI/RPC 契约、文档门禁恢复。
-- 待验证：DSH 多版本卸载（android_agent-43）的真实设备清单/确认/卸载/回滚/进程中断恢复、更新检查期间禁用与 CI/独立 Review；远程主机 PR #29 的真实 sshd/Keystore/token、Cookie 两主机隔离设备路径与 UI；DSH 聊天通知的 Android 13 权限/渠道/group/summary、点击切会话、后台/息屏与 MIUI/其他 ROM、真实 DSH WebSocket 事件；XLSX 真机大表/手势/深色；安全模式真机 rescue/崩溃/低内存/磁盘满；DSH 安装 PR #20、后台更新、视频全屏、F1、设备门禁、0.1.8 与真机/MIUI 仍按原记录待验证。
+- 待验证：远程主机 PR #29 的真实 sshd/Keystore/token、Cookie 两主机隔离设备路径与 UI；DSH 聊天通知的 Android 13 权限/渠道/group/summary、点击切会话、后台/息屏与 MIUI/其他 ROM、真实 DSH WebSocket 事件；XLSX 真机大表/手势/深色；安全模式真机 rescue/崩溃/低内存/磁盘满；DSH 安装 PR #20、后台更新、视频全屏、F1、设备门禁、0.1.8 与真机/MIUI 仍按原记录待验证。
 - 待验证：XLSX 原生预览的真机/模拟器双向滚动、冻结区手势、缩放可读性、大表性能、深色主题与真实 Excel/WPS 文件；DSH 聊天通知的真实设备/模拟器权限弹窗、通知展示/group/summary、点击切会话与后台/息屏送达；DSH 冷启动的真实 PRoot 启动/首帧时序与设置开关；PDF 原生阅读的大文档滚动/内存、加密/损坏样本与缩放手感；原生界面的真机/PRoot 切换、通知点击与回退；设备温控/低电/低内存的真机策略与 WorkManager 恢复；DSH 安全模式在真实设备/PRoot 的 rescue 启动、真实崩溃/低内存/磁盘满与插件隔离；DSH 安装 PR #20 的独立 Codex High Review、真实设备/弱网镜像切换与 4000 包规模验收；后台更新检查的真实 WorkManager 调度/通知/网络与设备徽标；视频全屏 PR #17 的设备旋转/恢复验收；F1 的设备手势/PDF/DOCX 验收；DOCX 原生预览的真实设备双指缩放/横向滚动/深色主题/超大文档与真实复杂 Word 样本；真实设备上的锁、pre/post 门禁与 14 类回归；0.1.8 的 Ubuntu/Node/DSH 安装、真实模型任务与真机/MIUI/低 API；底部导航点击。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 
 
 ## 环境与阻塞
 
-- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，四轮 Codex Review 意见已修复，已合并 `origin/main=0068c87`；合并后完整 JVM 由 CI 复跑（本地最近 594/0、lint 0 errors），PR 新 head CI 以页面为准；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -265,7 +251,7 @@
 
 ## 下一步
 
-1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：四轮 Codex Review 意见已修复并 resolve，已合并 `origin/main=1cb7ad9`；等待合并后新 head CI 与独立 Codex High Review 复核；设备验收另行授权（清单、确认、卸载备用、删除中断隔离、prepared/committed 恢复、重装不覆盖日志）。不合并、不发布。
+1. 无公网 IP 中继切片 PR [#36](https://github.com/leezzou/tanuki/pull/36)：以最终 head/CI 为准，等待独立 Review；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
@@ -284,7 +270,7 @@
 8. PDF 原生阅读 PR [#24](https://github.com/leezzou/tanuki/pull/24) 已合并为 `0ba11da`：大文档滚动/内存、加密/损坏样本与缩放手感 QA 另行授权。
 9. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
 10. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-11. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+11. 合并后由集成维护方先运行 `check-handoff.py --integrate --record <最新记录>`，再跑 `--release`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。

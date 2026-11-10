@@ -8,7 +8,7 @@
 ## 用户目标与范围
 
 - 用户本次实际要求：修复 DSH 版本管理体验——已安装清单显示当前使用/备用/占用空间/安装时间，支持卸载任意非当前版本；卸载前确认，禁止卸载运行中/当前版本，失败可回滚并给中文原因，清理不能误删共享数据或用户会话；切换/卸载与安装、启动、更新检查互斥；补卸载当前版本被拒、卸载备用版本、并发、失败回滚、清单刷新单测；中文注释、指定 Git 身份、PR 交付、不合并不发布。
-- 本次包含：`DshVersions`/`DshUninstall`/`DshVersionGate` 纯逻辑；`RuntimeComponents` 卸载事务与恢复日志；`RuntimeManager` 互斥错误提示；`UpdateManager.check()` 与版本操作互斥；版本管理对话框文案与入口；JVM 回归；交接与专题文档。
+- 本次包含：`DshVersions`/`DshUninstall`/`DshVersionGate` 纯逻辑；`RuntimeComponents` 卸载事务与恢复日志；`RuntimeManager` 互斥错误提示；`UpdateManager.check()` 与版本操作互斥；版本管理对话框文案与入口；JVM 回归；本 handoff 记录。按新交接机制，不修改 `AGENT-STATE.md`、`CURRENT.json` 与共享 `TEST-REPORT.md`。
 - 本次不包含：真实 DSH 安装/卸载设备操作、切换后的真实 DSH 启动、下载逻辑、旧数据快照自动恢复、合并/发布/tag、独立 Review 触发。
 - 用户改变或暂停的要求：API Key 保存、真实模型/账号验收、真机验收仍暂停；本次未触碰。
 
@@ -21,10 +21,10 @@
   - 卸载只处理 `engines/<version>` 与隔离目录；共享 `userdata`、`workspaces`、`backups`、下载缓存和用户会话不在删除范围；硬链接载荷只回收不再被引用的项。
   - 切换/卸载与安装、启动共用环境 mutation；切换/卸载与更新检查共用 `DshVersionGate`，锁顺序固定为 mutation → versionGate。
   - 主界面当前版本“卸载”入口改为“管理版本”；官方版本选择弹窗只对非当前已安装版本显示“卸载该备用版本”。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 17 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **552 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **575 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 17 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **552 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **575 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；再合并 #35/#36 后本地最近一次为 **594 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 95 warnings / 1 hint**；合入 `origin/main=7593805`（#42 新交接机制）后的完整套件由 CI 在新 head 复跑。
 - PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建。Codex Review 的 3 条意见（删除后完整性、回滚日志保留、committed 误删 target）已在 `6c75914` 修复：删除开始后不再回滚，`prepared` 回滚失败保留日志，`DshUninstallRecovery` 让 committed 只清理隔离目录并保留可能重装的 target。第四轮发现 DSH 重装会覆盖共用 `component-transaction`：`replace()` 现在先 `recover()` 再写新日志，并补“卸载失败后重装另一版本，重启只清隔离目录、保留当前版本”的回归。review 修复新 head 以 PR 页面为准。
 - 待验证：review 修复后新 head 的 Host/Android CI、独立 Codex High Review 复核、真实设备上的版本列表/确认/卸载/回滚/清单刷新、真实 Node 降级/依赖锁损坏/进程中断恢复。
-- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已合并 `origin/main=0068c87`（含 PR #32 原生一致性审计、#34 文件查看器、#35 文件复制界面稳定、#36 远程中继）解决 AGENT-STATE/TEST-REPORT/CURRENT.json 冲突；合并后完整 JVM 由 CI 复跑，本地最近一次合并 2a4a050 后为 **594 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/95 warnings/1 hint；未启动设备，未切换/卸载真实 DSH。
+- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已按新交接机制合入 `origin/main=7593805`（#42）；`AGENT-STATE.md`、`TEST-REPORT.md`、`CURRENT.json` 均取 main 版本，PR 不包含对它们的改动；仅保留本 handoff 与代码/测试改动。本地最近完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/95 warnings/1 hint；合入后完整套件由 CI 复跑；未启动设备，未切换/卸载真实 DSH。
 - 关键事实：卸载事务只接收程序目录和隔离目录；当前版本不提供任何后端卸载路径；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
 
 ## 本次改动
@@ -51,8 +51,8 @@
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m30s） | 66 个结果文件、**552 tests / 0 failures / 0 errors / 0 skipped**（合并前）；合并 `origin/main=533eff4` 后 **575 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；`lintModernDebug` **0 errors / 95 warnings / 1 hint**；不替代设备验收。 |
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest' --rerun-tasks` | 通过 | 首次完整运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未改该测试。 |
 | GitHub Actions 42756830044 / 42756838942 | 通过 | review 修复前 head `1fa66bd` 的 Host/Android 4/4 全绿；review 修复后的新 head CI 以 PR 页面为准。 |
-| `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1142-dsh-version-uninstall.md` | 通过 | 刷新 `CURRENT.json` 指纹。 |
-| `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
+| `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1142-dsh-version-uninstall.md` | 待本次收尾执行 | 普通 PR 模式只校验本记录，不写 `AGENT-STATE.md`/`CURRENT.json`。 |
+| `python3 scripts/check-handoff.py --pr` | 待本次收尾执行 | 普通 PR 交接结构检查。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：review 修复后的 36 项目标 JVM、完整 552 项与合并后 594 项、lint 为本次新跑；review 修复前的 28/544 项是历史结果；合并前的 552 项也不再代表合并后 head，以 594 项为准。
 - 未测试、超时、失败和暂未复现的情况：未跑 assemble、Android 仪器、真实设备；未在真实 userdata 上执行卸载；未验证进程在 `prepared`/`committed` 之间被杀后的 OEM 行为；review 修复后新 head 的 CI 待跑。
@@ -81,5 +81,5 @@
 
 - 新/旧 APK、源码 ZIP 及校验文件：本轮未生成 APK/ZIP；收尾按 AGENTS 要求运行 `package-source.py` 核对清单，源码包为工作材料，不提交。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未发布、未合并。
-- 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：未删除历史记录；`20261109-1539-dsh-installed-version-manager.md` 仍被多份并行交接引用并保留切换/清单实现依据，本轮结论补充到本记录与 `docs/AGENT-STATE.md`。旧记录中的 151 项测试为历史结果，不代表当前 head。
+- 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：未删除历史记录；`20261109-1539-dsh-installed-version-manager.md` 仍被多份并行交接引用并保留切换/清单实现依据，本轮结论保留在本记录；共享状态由集成维护方刷新。旧记录中的 151 项测试为历史结果，不代表当前 head。
 - 文档或脚本变化后仍需刷新交接印章、重新生成源码 ZIP；不要把源码 ZIP 自身哈希写回归档内形成循环。
