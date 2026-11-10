@@ -818,6 +818,54 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun wizardLeavesBusyAfterControllerSuccessAndShowsFailureStage() = runBlocking {
+        // 成功：控制器 attemptSucceeded/localPort 驱动向导离开 TEST，而不是永久 busy。
+        val successFixture = Fixture()
+        successFixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val successController = controller(
+            successFixture,
+            StagedFakeTransport(tunnel = FakeTunnel(45678)),
+            RemoteHostMachine()
+        )
+        val successWizard = readyToTestWizard()
+        val success = successController.attempt(successWizard.buildConfig()!!, keepTunnel = false)
+        assertTrue(success is RemoteAttemptResult.Success)
+        successController.ui.value.stage?.let(successWizard::onStage)
+        successController.ui.value.failure?.let(successWizard::onFailure)
+        if (successController.ui.value.attemptSucceeded) {
+            successWizard.onTestSucceeded(successController.ui.value.localPort)
+        }
+        assertEquals(RemoteWizardStep.DONE, successWizard.state.value.step)
+        assertFalse(successWizard.state.value.busy)
+        assertEquals(45678, successWizard.state.value.localPort)
+
+        // 失败：控制器 failure/stage 驱动向导退出 busy，并停在失败阶段。
+        val failFixture = Fixture()
+        failFixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val failController = controller(
+            failFixture,
+            StagedFakeTransport(
+                stages = listOf(
+                    RemoteConnectionStage.TCP,
+                    RemoteConnectionStage.SSH_HANDSHAKE,
+                    RemoteConnectionStage.AUTHENTICATION
+                ),
+                openError = IOException("Auth fail")
+            ),
+            RemoteHostMachine()
+        )
+        val failWizard = readyToTestWizard()
+        val failed = failController.attempt(failWizard.buildConfig()!!, keepTunnel = false)
+        assertTrue(failed is RemoteAttemptResult.Failure)
+        failController.ui.value.stage?.let(failWizard::onStage)
+        failController.ui.value.failure?.let(failWizard::onFailure)
+        assertEquals(RemoteWizardStep.TEST, failWizard.state.value.step)
+        assertFalse(failWizard.state.value.busy)
+        assertEquals(RemoteConnectionStage.AUTHENTICATION, failWizard.state.value.failure?.stage)
+        assertEquals(RemoteStageStatus.FAILED, failWizard.stageStatus(RemoteConnectionStage.AUTHENTICATION))
+    }
+
+    @Test
     fun savedProfilesAreVisibleToControllerAndCanBeDeleted() = runBlocking {
         val fixture = Fixture()
         val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
