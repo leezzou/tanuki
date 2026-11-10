@@ -64,6 +64,7 @@ data class DshPlan(
             review != DshPlanReviewState.NONE -> review.label
             progressUnknown -> "进度未知"
             total == 0 -> "无步骤"
+            currentStepTitle != null || currentStep != null -> "执行中"
             completed == total -> "已完成"
             completed == 0 -> "未开始"
             else -> "执行中"

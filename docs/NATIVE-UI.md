@@ -73,6 +73,8 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：运行/成功/失败、耗时、命令与 cwd、文件变更、增删行配色 diff、折叠输出与复制 |
 | `app/src/main/kotlin/com/tanuki/web/DshPlan.kt` | 计划步骤/审阅状态模型；保守解析计划事件与计划工具调用，返回计划与需从普通工具卡剔除的 callId |
 | `app/src/main/kotlin/com/tanuki/ui/DshPlanCard.kt` | 计划卡片：多步骤状态、进度条、当前步骤、待审阅时“同意执行/要求修改”；不复用普通消息气泡 |
+| `app/src/main/kotlin/com/tanuki/web/DshQuestion.kt` | 用户提问模型与保守解析；单选/多选/文本、选项、草稿选择与必填校验 |
+| `app/src/main/kotlin/com/tanuki/ui/DshQuestionCard.kt` | 用户提问独立卡片：单选/多选/文本、选项与本地提交草稿；`onSubmit=null` 时明确标注“回答入口待协议确认” |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 42 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、单个与批量归档、写操作与中文错误 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 按 cwd 分组的会话列表、多选批量归档、主机切换、详情分页、模型/权限面板与确认交互 |
@@ -144,11 +146,12 @@
    - `DshApprovalController.forgetRemembered(choice)` 立即撤销单条记忆；之后相同会话/工具/风险的请求不会再自动回答。已经回传官方的结果不能撤回，也不伪造撤回。
    - `DshApprovalState.errorRetryable` 表示当前错误可重试；断线/回答失败始终保留 `pending`，界面显示中文原因和“重试连接”。服务地址变化导致旧审批无法回答时，`notice` 明确告知失效数量，不静默丢弃；`onDismissNotice` 可关闭提示。
    - 记忆的独立入口：`DshApprovalEntryBar` 在无待审批但有记忆时显示“审批记忆 N 项”，点击进入同一抽屉逐条撤销/全部清除。
+   - 抽屉内容有受视口约束的滚动容器；打开期间有新审批到达时只更新计数并显示 3 秒轻提示，不自动滚动或跳走当前处理项。
 
 2. 工具卡片 `DshToolCard`
    - 签名不变。`DshToolItem` 新增只读字段：`startedAt`、`finishedAt`、`durationMs`。
    - `DshToolTimeline.parse` 已用 `tool/call.time` 与 `tool/result.time` 填充；只显示真实耗时，进行中/孤儿结果显示“耗时未知”，不伪造。
-   - 输出/错误复制、diff 增删行背景色和耗时均由组件内部处理；实时 follow 分批到达时，51 必须用 `DshToolMerge.merge(current, incoming)` 替换 `DshNativeController` 的私有 `mergeTools`，否则终态会丢失 `finishedAt`、完成后仍显示“耗时未知”。该 helper 同时保留“迟到 RUNNING 不回退终态”的规则。
+   - 输出/错误复制、diff 增删行背景色和耗时均由组件内部处理；实时 follow 分批到达时，本 PR 已把 `DshNativeController.mergeTools` 委托给 `DshToolMerge.merge(current, incoming)`，终态保留 `finishedAt` 和已知调用起点；51 复核该跨文件改动。该 helper 同时保留“迟到 RUNNING 不回退终态”的规则。
 
 3. 计划审阅 `DshPlanCard` + `DshPlanParser`
    - `DshPlanParser.extract(records)` 返回 `DshPlanExtraction(plans, planCallIds)`，`latest` 为最新计划。
@@ -169,6 +172,21 @@
    - 解析支持计划事件（`plan/update`、`plan/review`、`plan`、`todo/update`、`todos/update`）与计划工具调用（`update_plan`、`plan`、`set_plan`、`plan_update`、`todo_write`、`write_todo`、`todowrite`、`update_todos`）。
    - 若官方计划审阅是 `user-questions/request` 或独立 waterfall，集成方可调用 `DshPlanParser.fromReviewPayload(seq, id, request)`，默认得到 `review=AWAITING`；解析失败时回退官方界面，不猜计划内容。
    - 真实字段以合成回归为准，未在真实 PRoot DSH 验证。
+
+4. 用户提问卡 `DshQuestionCard` + `DshQuestionParser`
+   - `DshQuestionParser.parse(eventId, sessionId, request)` 从 `user-questions/request` 的 `questions[]` 解析单选/多选/文本、选项、`allowCustom`、`required`；只保留短文本，不复制原始请求。
+   - `DshQuestionDraft` 负责本地选择：单选覆盖、多选切换、文本保存、必填校验；编辑态保留原始空格/换行（只限长度），必填用 `isBlank`，提交边界才 trim；可独立 JVM 回归。
+   - 组件调用：
+     ```kotlin
+     DshQuestionCard(
+         request = question,
+         onSubmit = null, // 协议未确认时必须为 null，界面显示“回答入口待协议确认”
+         submitting = false,
+         error = null
+     )
+     ```
+   - 回答 RPC 未在本切片确认；`onSubmit` 为可空接口，未接线时禁止伪造提交。51 接线时若官方协议确认，再把 `onSubmit` 接到真实回答；否则保持只读/待确认。
+   - 官方回答字段确认前，不要把 `user-questions/request` 当作普通消息，也不要把它静默回 `next` 后当作已处理。
 
 ### 切换语义
 
