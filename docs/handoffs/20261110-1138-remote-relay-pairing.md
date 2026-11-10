@@ -21,9 +21,10 @@
   - Python 参考实现 7 项回环端到端自测 OK。
   - P1 修复前完整 JVM/lint：BUILD SUCCESSFUL（2m32s）；552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
   - 合并 `origin/main=533eff4` 后、P2 修复前完整 JVM/lint：BUILD SUCCESSFUL（2m20s）；575 tests / 0 failures / 0 errors / 0 skipped（68 个结果文件）。
-  - P2 修复后完整 JVM/lint：BUILD SUCCESSFUL（2m17s）；**581 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；lint **0 errors / 95 warnings / 1 hint**。
+  - P2 修复后、合并 `2a4a050` 前完整 JVM/lint：BUILD SUCCESSFUL（2m17s）；581 tests / 0 failures / 0 errors / 0 skipped（68 个结果文件）。
+  - 合并 `origin/main=2a4a050`（PR #35 复制界面）后完整 JVM/lint：BUILD SUCCESSFUL（4m06s）；**600 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件）；lint **0 errors / 96 warnings / 1 hint**。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；独立 Codex High Review、合并/发布未授权。
-- 主线同步：已合并 `origin/main=533eff4`、`1cb7ad9`，解决 `AGENT-STATE`/`CURRENT.json`/`verify.yml` 冲突；合并后的 app 代码与 `049edcc` 相同。
+- 主线同步：已合并 `origin/main=533eff4`、`1cb7ad9`、`2a4a050`，解决 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`/`verify.yml` 冲突；合并后的 app 代码与 `049edcc` 相同。
 - 当前目标包名、分支/无 Git 状态、是否有运行中任务：分支 `ao/tanuki-remote/relay-pairing`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#36](https://github.com/leezzou/tanuki/pull/36) 已创建，base `main`；无运行中任务。
 - 关键事实与可定位源码/公共文档：方案/资源/流程见 `docs/REMOTE-CONNECT.md`；契约见 `docs/INTERFACES.md` 1.6；实现见 `app/src/main/kotlin/com/tanuki/runtime/{RemoteRelay,RelayTransport,RemoteHost,RemoteHostStorage,RemoteHostController}.kt`；参考中继/agent 见 `scripts/remote-relay/`；JVM 回归见 `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt`。
 
@@ -72,10 +73,11 @@
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DshRemoteIsolationTest' --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` | BUILD SUCCESSFUL；27 tests / 0 failures / 0 errors / 0 skipped | P1/P2 修复后定向回归；含 Cookie 用户/端口分区、close、重试 |
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`（P1 修复前） | BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 17 |
 | 合并 `origin/main=533eff4` 后、P2 修复前 `./gradlew ...` | BUILD SUCCESSFUL（2m20s）；68 个结果文件，575 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | main 558 + 中继 17；解决 AGENT-STATE/CURRENT 冲突后重跑 |
-| P2 修复后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（2m17s）；68 个结果文件，581 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 新增 6 项 close/重试回归；Python 7 项通过 |
+| P2 修复后 `./gradlew ...`（合并 `2a4a050` 前） | BUILD SUCCESSFUL（2m17s）；68 个结果文件，581 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 新增 6 项 close/重试回归；Python 7 项通过 |
+| 合并 `origin/main=2a4a050` 后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（4m06s）；72 个结果文件，600 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 96 warnings / 1 hint | main 558 + 中继 23 + 复制界面 19；解决 AGENT-STATE/TEST-REPORT/CURRENT 冲突后重跑 |
 | `python3 scripts/check-handoff.py --record ...` / 无参检查 | 通过；602 public files | 本轮结束刷新印章 |
 | `python3 scripts/check-publication.py --git` | 0 findings | 实际暂存内容检查 |
-| PR #36 P1 修复提交 `ff8b706` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；P2 修复后的新 head CI 以 PR 页面为准 |
+| PR #36 P2 修复提交 `049edcc` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；最终 merge head CI 以 PR 页面为准 |
 | `python3 scripts/package-source.py` | 待执行 | 仅检查源码包，不提交 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只记录上表本轮实际执行；0.1.10 的 535 tests 与旧 PR 结果未复跑，不作为本轮结论。

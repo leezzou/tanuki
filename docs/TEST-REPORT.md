@@ -8,25 +8,38 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本轮新跑）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
   - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` → BUILD SUCCESSFUL，22 tests / 0 failures / 0 errors / 0 skipped。
-  - `cd scripts/remote-relay && python3 test_remote_relay.py` → OK，6 tests / 0 failures（回环自签名 TLS + pin、主机注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）。
+  - `cd scripts/remote-relay && python3 test_remote_relay.py` → OK，7 tests / 0 failures（回环自签名 TLS + pin、主机注册、JOIN/OPEN_OK/DATA 双向、2 MiB 慢消费者、错误 token、未知房间、明文拒绝、日志不含 token）。
   - P1 修复前 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
   - 合并 `origin/main=533eff4`（PR #34 文件查看器）后、P2 修复前完整 JVM/lint：2m20s，68 个结果文件，575 tests / 0 failures / 0 errors / 0 skipped。
-  - P2 修复后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m17s）；68 个结果文件，**581 tests / 0 failures / 0 errors / 0 skipped**（main 558 + 中继 23）；lint **0 errors / 95 warnings / 1 hint**。
+  - P2 修复后、合并 `2a4a050` 前完整 JVM/lint：2m17s，68 个结果文件，581 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 合并 `origin/main=2a4a050`（PR #35 文件复制界面稳定）后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（4m06s）；72 个结果文件，**600 tests / 0 failures / 0 errors / 0 skipped**（main 558 + 中继 23 + 复制界面 19）；lint **0 errors / 96 warnings / 1 hint**。
   - PR [#36](https://github.com/leezzou/tanuki/pull/36) P1 修复提交 `ff8b706` 的 Host scripts 与 Android build/JVM/lint 两项 CI 均 pass；合并 main 后的新 head CI 以 PR 页面为准；CI 不替代独立 Review 或设备验收。
 - 新增覆盖：配对链接 IPv4/IPv6/域名往返与未知/重复/非规范字段拒绝；帧编解码/64 KiB/1 KiB/截断/未知类型；共享 HMAC host/client 向量；证书 DER SHA-256 钉扎；指数退避与仅瞬时错误重试；假中继配对 + 早期字节不丢失 + DATA 回声；错误 token；中继稳定 `relay:<hostId>` 身份/Cookie 作用域；token 加密存储/篡改拒绝/切回直连；控制器使用稳定身份跳过首次指纹探测。
 - 复审修复（PR #36 P1）：中继 Cookie 作用域从 `relay:<hostId>` 改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，同一服务换房间复用 Cookie，同一主机不同用户/DSH 端口分别保存，避免切回时把 A 的认证 Cookie 恢复给 B。`DshRemoteIsolationTest` 新增对应用户/端口分区与同服务换 room 回归；`RemoteRelayTest` 更新作用域断言。定向 `DshRemoteIsolationTest` + `RemoteRelayTest` 共 27 tests / 0 failures；P1 修复提交 `ff8b706` 的 Host/Android CI 均 pass。
 - 复审修复（PR #36 P2）：桥接/会话关闭不再等待 `writerLock`，先关闭底层 TLS socket 解除阻塞写，关闭路径不再同步写 CLOSE；`RelaySshTunnel.close` 先拆桥再关 JSch。`RemoteRelayTest` 新增对端不读、写阻塞时 `RelayBridge.close`/`RelayClientSession.close` 及时返回的回归。`relayRetry` 接入 `RelaySshTransport.join`，最多 4 次尝试、只重试瞬时错误、可取消；新增先失败后成功、耗尽、认证/钉扎/协议不重试、退避取消回归。Python 参考中继去掉 32 帧有损队列，改为每 peer 写锁内阻塞写并在释放 `room.lock` 后发送；新增 2 MiB 慢消费者完整传输回归。
 - 未执行：真实 Android 设备到真实中继/sshd/DSH、Android Keystore 真机、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN。JVM/Python 回环不能替代设备或公网验收。
 
-## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
+## 文件复制界面稳定验证（2026-11-10，android_agent-40，非设备）
 
-- 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
-- 实际执行：
-  - `source scripts/env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m07s），**535 tests / 0 failures / 0 errors / 0 skipped**。
-  - `python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --channel workspacecheck` → BUILD SUCCESSFUL（2m05s）；正式 APK 实核 `com.tanuki.modern.workspacecheck`、0.1.10/code12、minSdk26、证书 `371dc301...`、11,485,978 字节、SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`；旧 `d9b4aa21` 候选作废。
-  - `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` → 通过。
-- 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
-- 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
+- 范围：从手机/SAF 多选「导入文件到工作区」（写入新独立项目）的进度与列表稳定性。基线 `origin/main=0555c3c0`，分支 `ao/copy-flicker/root`；PR [#35](https://github.com/leezzou/tanuki/pull/35)，不合并、不发布。
+- 根因（源码路径，不是设备观测）：
+  - `WorkspaceStorage.importFiles` 每 64 KiB 调一次 `onProgress`；`MainActivity` 在 `setContent` 根部 `collectAsState()` 传输列表，`TanukiUiModel.transfers` 随之变化，导致整个 `TanukiUi`（含文件列表）随每个分块重组；导入 `track` 未传总量，进度只能显示不定态。
+  - `WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，`LazyColumn/LazyGrid` 项数短暂归零会使 `LazyListState` 回退到顶部；`busy/sorting` 的 `LinearProgressIndicator` 直接插入布局也会推动列表上下位移。
+- 修复要点：`FileTransfers` 集中合并中间进度（默认 160ms）、总量变化/最终帧立即发布、同总量下丢弃回退分块、新增协作取消与 `onCancel` 登记动作（用于等待网页回包的 Blob 导出）；导入先读 `DISPLAY_NAME`/`SIZE`，仅当全部大小有效时才显示真实总量；进度流只由 `OperationBanner` 订阅，根组合不再重组；`FileListPresentation` 在同目录刷新时保留旧条目、换目录才清空、内容相等时复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；列表进度槽固定 4dp 高。
+- 实际执行（本轮新跑）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
+  - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 本次新增 19；合入前）。合并 `main=533eff4`/`1cb7ad9` 后完整套件由 CI 在新 head 复跑，558（main #34）不与 554 相加宣称为本地结果（#32 只加文档/脚本）。
+  - 同一组合运行中 `:app:compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
+- 新增回归 19 项：
+  - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
+  - `ImportProgressTest` 3 项：空/含未知/含负数大小不产生总量；溢出保持未知；百分比只由正总量产生并限制在 0–1。
+  - `FileListPresentationTest` 8 项：同目录刷新保留旧列表、搜索/排序/显示隐藏不闪空、换目录清空旧结果、完成后显示自身条目、内容相等复用条目列表、隐藏/查询/排序规则、文件夹优先与身份稳定、排序方式与来源区分。
+  - `ExportCleanupTest` 3 项：删除成功/失败/异常、取消与失败提示不假装已删除、写入 128 KiB 部分数据后取消会删除截断目标并清空进度。
+- 新增仪器测试：`FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition`（同目录新增文件后刷新，列表不回到顶部）与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport`（取消等待中的 Blob 后不触发 ready）——均仅编译通过，本会话未运行；设备由独立 QA 独占。
+- Review P2 修复一：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
+- Review P2 修复二：新开放取消的“保存网页 Blob 文件”“下载网页文件”“导出浏览器文件”在取消/失败时会留下零字节或截断的 SAF 目标；现统一通过 `ExportCleanup` 删除本次 `CreateDocument` 目标，删除失败明确提示，并新增“写入部分数据后取消删除截断目标”的 JVM 回归。
+- 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
 
 ## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
 
@@ -40,6 +53,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - Review P2 修复：点号配置只匹配已知文件名与 `.env`/`.env.*` 变体；`.DS_Store` 明确归为隐藏二进制并跳过内容探测，`.env-image.png` 因媒体扩展名优先按图片处理；新增隐藏二进制/`.env` 前缀媒体回归（`FileTypeCatalogTest` 11 项），完整 JVM 558 tests 通过。
 - 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
 - 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
+
+## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
+
+- 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
+- 实际执行：
+  - `source scripts/env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m07s），**535 tests / 0 failures / 0 errors / 0 skipped**。
+  - `python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --channel workspacecheck` → BUILD SUCCESSFUL（2m05s）；正式 APK 实核 `com.tanuki.modern.workspacecheck`、0.1.10/code12、minSdk26、证书 `371dc301...`、11,485,978 字节、SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`；旧 `d9b4aa21` 候选作废。
+  - `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` → 通过。
+- 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
+- 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
 
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
