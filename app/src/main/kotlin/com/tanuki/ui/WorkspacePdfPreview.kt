@@ -67,7 +67,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.tanuki.storage.WorkspaceFileManager
+import com.tanuki.storage.OpenDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -224,38 +224,37 @@ internal class PdfDocumentSession private constructor(
  */
 @Composable
 internal fun PdfPreview(
-    files: WorkspaceFileManager,
-    path: String,
+    document: OpenDocument,
     modifier: Modifier = Modifier,
     maxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     maxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
     val renderLimits = remember(maxDimension, maxPixels) { PdfRenderPolicy.limits(maxDimension, maxPixels) }
-    var session by remember(path) { mutableStateOf<PdfDocumentSession?>(null) }
-    var opening by remember(path) { mutableStateOf(true) }
-    var openError by remember(path) { mutableStateOf<String?>(null) }
-    var pageCount by remember(path) { mutableIntStateOf(0) }
-    var currentPage by remember(path) { mutableIntStateOf(0) }
-    var fitMode by remember(path) { mutableStateOf(PdfFitMode.FIT_WIDTH) }
-    var renderToken by remember(path) { mutableIntStateOf(0) }
-    var jumpVisible by remember(path) { mutableStateOf(false) }
-    var jumpInput by remember(path) { mutableStateOf("") }
-    var jumpError by remember(path) { mutableStateOf<String?>(null) }
+    var session by remember(document.key) { mutableStateOf<PdfDocumentSession?>(null) }
+    var opening by remember(document.key) { mutableStateOf(true) }
+    var openError by remember(document.key) { mutableStateOf<String?>(null) }
+    var pageCount by remember(document.key) { mutableIntStateOf(0) }
+    var currentPage by remember(document.key) { mutableIntStateOf(0) }
+    var fitMode by remember(document.key) { mutableStateOf(PdfFitMode.FIT_WIDTH) }
+    var renderToken by remember(document.key) { mutableIntStateOf(0) }
+    var jumpVisible by remember(document.key) { mutableStateOf(false) }
+    var jumpInput by remember(document.key) { mutableStateOf("") }
+    var jumpError by remember(document.key) { mutableStateOf<String?>(null) }
 
-    val pages = remember(path) { mutableStateMapOf<Int, PdfPageBitmap>() }
-    val aspects = remember(path) { mutableStateMapOf<Int, Float>() }
-    val pageErrors = remember(path) { mutableStateMapOf<Int, String>() }
-    var visiblePages by remember(path) { mutableStateOf(emptyList<Int>()) }
+    val pages = remember(document.key) { mutableStateMapOf<Int, PdfPageBitmap>() }
+    val aspects = remember(document.key) { mutableStateMapOf<Int, Float>() }
+    val pageErrors = remember(document.key) { mutableStateMapOf<Int, String>() }
+    var visiblePages by remember(document.key) { mutableStateOf(emptyList<Int>()) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val zoom = remember(path) { mutableFloatStateOf(ZoomPolicy.MIN_SCALE) }
-    val panX = remember(path) { mutableFloatStateOf(0f) }
+    val zoom = remember(document.key) { mutableFloatStateOf(ZoomPolicy.MIN_SCALE) }
+    val panX = remember(document.key) { mutableFloatStateOf(0f) }
     // 留白扩大后新的滚动范围要等下一次测量才生效，补偿先累积、随后统一应用。
-    val pendingScroll = remember(path) { floatArrayOf(0f) }
+    val pendingScroll = remember(document.key) { floatArrayOf(0f) }
 
     // 缓存预算按应用堆计算；单页像素上限保证预算内至少容纳 3 页。
     val cacheBudget = remember { PdfMemoryPolicy.cacheBudgetBytes(Runtime.getRuntime().maxMemory()) }
-    val memory = remember(path) {
+    val memory = remember(document.key) {
         PdfPageMemory<Int, PdfPageBitmap>(
             budgetBytes = cacheBudget,
             sizeOf = { it.bytes },
@@ -263,18 +262,18 @@ internal fun PdfPreview(
         )
     }
 
-    LaunchedEffect(path) {
+    LaunchedEffect(document.key) {
         opening = true
         openError = null
         var pending: PdfDocumentSession? = null
         try {
-            val info = files.describe(path)
+            val info = document.describe()
             if (PdfOpenPolicy.fileTooLarge(info.bytes)) {
                 openError = "此 PDF 为 ${pdfBytesLabel(info.bytes)}，超过内置预览上限 " +
                     "${pdfBytesLabel(PdfOpenPolicy.MAX_FILE_BYTES)}；请使用其他应用打开。"
                 return@LaunchedEffect
             }
-            val descriptor = files.openPreviewDescriptor(path)
+            val descriptor = document.openPreviewDescriptor()
             val opened = PdfDocumentSession.open(descriptor) { created -> pending = created }
             pending = opened
             currentCoroutineContext().ensureActive()
@@ -292,7 +291,7 @@ internal fun PdfPreview(
         }
     }
 
-    DisposableEffect(path) {
+    DisposableEffect(document.key) {
         onDispose {
             session?.close()
             session = null
@@ -309,7 +308,7 @@ internal fun PdfPreview(
     }
 
     // 切换文件时复用同一个 LazyListState，必须回到第一页，避免沿用上一份文档的滚动位置。
-    LaunchedEffect(path, pageCount) {
+    LaunchedEffect(document.key, pageCount) {
         if (pageCount > 0) listState.scrollToItem(0)
     }
 

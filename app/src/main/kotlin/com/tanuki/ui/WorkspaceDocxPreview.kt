@@ -72,7 +72,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tanuki.storage.WorkspaceFileManager
+import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.docx.DocxAlignment
 import com.tanuki.storage.docx.DocxBlock
 import com.tanuki.storage.docx.DocxDocument
@@ -89,15 +89,15 @@ import kotlin.math.roundToInt
 
 /** DOCX 应用内只读原生预览：解析在 IO 线程，渲染使用 Compose，不经外部应用或 LibreOffice。 */
 @Composable
-internal fun DocxPreview(files: WorkspaceFileManager, path: String, modifier: Modifier = Modifier) {
-    var document by remember(path) { mutableStateOf<DocxDocument?>(null) }
-    var error by remember(path) { mutableStateOf<String?>(null) }
-    var loading by remember(path) { mutableStateOf(true) }
-    LaunchedEffect(path) {
+internal fun DocxPreview(source: OpenDocument, modifier: Modifier = Modifier) {
+    var document by remember(source.key) { mutableStateOf<DocxDocument?>(null) }
+    var error by remember(source.key) { mutableStateOf<String?>(null) }
+    var loading by remember(source.key) { mutableStateOf(true) }
+    LaunchedEffect(source.key) {
         loading = true
         error = null
         try {
-            document = files.readDocx(path)
+            document = source.readDocx()
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {

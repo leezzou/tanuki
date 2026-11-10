@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -47,8 +48,7 @@ import java.util.Locale
 /** 文件在独立阅读页展示，分段读取避免将整个大文本放进内存。 */
 @Composable
 internal fun WorkspaceFileViewer(
-    files: WorkspaceFileManager,
-    entry: WorkspaceFileManager.Entry,
+    document: OpenDocument,
     modifier: Modifier = Modifier,
     bottomInset: Dp = 0.dp,
     actionError: String? = null,
@@ -56,6 +56,8 @@ internal fun WorkspaceFileViewer(
     onClose: () -> Unit,
     onExport: () -> Unit,
     onEdit: () -> Unit,
+    onCopyToWorkspace: (() -> Unit)? = null,
+    onReselect: (() -> Unit)? = null,
     fullscreen: Boolean = false,
     onFullscreen: (Boolean) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
@@ -64,24 +66,24 @@ internal fun WorkspaceFileViewer(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-    var info by remember(files, entry.path) { mutableStateOf<WorkspaceFileManager.FileInfo?>(null) }
-    var image by remember(files, entry.path) { mutableStateOf<WorkspaceFileManager.Preview?>(null) }
-    var error by remember(files, entry.path) { mutableStateOf<String?>(null) }
-    var loading by remember(files, entry.path) { mutableStateOf(true) }
-    var forceText by remember(files, entry.path) { mutableStateOf(false) }
-    var copiedPath by remember(files, entry.path) { mutableStateOf(false) }
+    var info by remember(document.key) { mutableStateOf<WorkspaceFileManager.FileInfo?>(null) }
+    var image by remember(document.key) { mutableStateOf<WorkspaceFileManager.Preview?>(null) }
+    var error by remember(document.key) { mutableStateOf<String?>(null) }
+    var loading by remember(document.key) { mutableStateOf(true) }
+    var forceText by remember(document.key) { mutableStateOf(false) }
+    var copiedPath by remember(document.key) { mutableStateOf(false) }
     var opening by remember { mutableStateOf(false) }
     var copied by remember { mutableLongStateOf(0L) }
     var copyTotal by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
-    var openIntent by remember(files, entry.path) { mutableStateOf<Intent?>(null) }
+    var openIntent by remember(document.key) { mutableStateOf<Intent?>(null) }
     fun report(e: Exception) {
         error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
             ?: "无法读取此文件。它可能已被修改或移除，请返回后刷新。"
     }
     suspend fun prepare(): Intent {
         copied = 0; copyTotal = 0
-        return files.prepareOpen(context, entry.path) { current, total -> copied = current; copyTotal = total }
+        return document.prepareOpen(context) { current, total -> copied = current; copyTotal = total }
     }
     fun openWith() {
         if (opening) return
@@ -97,13 +99,13 @@ internal fun WorkspaceFileViewer(
             finally { opening = false }
         }
     }
-    LaunchedEffect(files, entry.path) {
+    LaunchedEffect(document.key) {
         try {
-            val details = files.describe(entry.path)
+            val details = document.describe()
             info = details
             when (details.kind) {
                 WorkspaceFileManager.FileKind.IMAGE -> {
-                    image = files.preview(entry.path)
+                    image = document.previewImage()
                     if (image?.image == null) error = "此图片格式无法内置预览，请使用其他应用打开。"
                 }
                 WorkspaceFileManager.FileKind.AUDIO, WorkspaceFileManager.FileKind.VIDEO -> {
@@ -132,7 +134,7 @@ internal fun WorkspaceFileViewer(
             if (!fullscreen) Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "关闭文件") }
                 Column(Modifier.weight(1f)) {
-                    Text(entry.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(document.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(info?.let { "${viewerBytes(it.bytes)} · ${it.mimeType}" } ?: "读取文件信息…",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -147,6 +149,16 @@ internal fun WorkspaceFileViewer(
                     Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
             } else if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+            document.accessWarning?.let {
+                Text(it, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (error != null && (onReselect != null || onCopyToWorkspace != null)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    onReselect?.let { action -> TextButton(onClick = action) { Text("重新选择文件") } }
+                    onCopyToWorkspace?.let { action -> TextButton(onClick = action) { Text("复制到工作区") } }
+                }
+            }
             // 未知/不支持类型被强制按文本打开时，保留返回类型说明的入口，避免用户只能退出查看器。
             if (forceText && info?.kind != null && info?.kind != WorkspaceFileManager.FileKind.TEXT) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
@@ -157,7 +169,7 @@ internal fun WorkspaceFileViewer(
                 }
             }
             if (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT) {
-                TextFileReader(files, entry.path, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
+                TextFileReader(document, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
             } else {
                 val kind = info?.kind
                 val contentModifier = Modifier.weight(1f).fillMaxWidth()
@@ -172,19 +184,19 @@ internal fun WorkspaceFileViewer(
                             Zoomable(
                                 contentWidth = bitmap.width,
                                 contentHeight = bitmap.height,
-                                resetKey = entry.path,
+                                resetKey = document.key,
                                 modifier = Modifier.fillMaxSize(),
                             ) { content ->
-                                Image(bitmap.asImageBitmap(), entry.name, content, contentScale = ContentScale.Fit)
+                                Image(bitmap.asImageBitmap(), document.displayName, content, contentScale = ContentScale.Fit)
                             }
                         }
                         WorkspaceFileManager.FileKind.PDF -> PdfPreview(
-                            files, entry.path, Modifier.fillMaxSize(),
+                            document, Modifier.fillMaxSize(),
                             maxDimension = previewMaxDimension,
                             maxPixels = previewMaxPixels,
                         )
-                        WorkspaceFileManager.FileKind.DOCX -> DocxPreview(files, entry.path, Modifier.fillMaxSize())
-                        WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(files, entry.path, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.DOCX -> DocxPreview(document, Modifier.fillMaxSize())
+                        WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(document, Modifier.fillMaxSize())
                         WorkspaceFileManager.FileKind.DOC -> Column(
                             Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -192,19 +204,21 @@ internal fun WorkspaceFileViewer(
                         ) {
                             TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
                             Text("旧版 Word 文档（.doc）", style = MaterialTheme.typography.titleMedium)
-                            Text("暂不支持内置预览，可用其他应用打开。", style = MaterialTheme.typography.bodyMedium)
+                            Text("暂不支持内置预览，可用其他应用打开；外部文件也可复制到工作区。", style = MaterialTheme.typography.bodyMedium)
+                            onCopyToWorkspace?.let { action -> OutlinedButton(onClick = action) { Text("复制到工作区") } }
                         }
                         WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
                         WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
                         WorkspaceFileManager.FileKind.OTHER -> UnsupportedPreview(
-                            name = entry.name,
+                            name = document.displayName,
                             mime = info?.mimeType.orEmpty(),
                             copied = copiedPath,
                             onOpenAsText = { forceText = true },
                             onCopyPath = {
-                                clipboard.setText(AnnotatedString(files.guestPath(entry.path)))
+                                clipboard.setText(AnnotatedString(document.copyablePath))
                                 copiedPath = true
                             },
+                            onCopyToWorkspace = onCopyToWorkspace,
                         )
                         // 信息读取失败时由上方错误文案说明；这里给出兜底提示，不能留下空白区域。
                         null -> if (!loading) Text("无法读取文件类型信息，请返回后重试。", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
@@ -220,23 +234,29 @@ internal fun WorkspaceFileViewer(
                 TextButton(onClick = ::openWith, enabled = !opening && !loading && info != null, modifier = Modifier.heightIn(min = 48.dp)) {
                     Icon(Icons.Default.ExitToApp, null); Spacer(Modifier.width(8.dp)); Text("使用其他应用打开")
                 }
+                // 外部文件即使内置预览失败（如提供方不支持随机读），也保留显式复制入口。
+                onCopyToWorkspace?.let { action ->
+                    TextButton(onClick = action, enabled = !opening && !loading, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("复制到工作区")
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: Modifier, clipboardCopy: (String) -> Unit) {
-    var requestedEncoding by rememberSaveable(files, path) { mutableStateOf("自动") }
-    var offsets by remember(files, path, requestedEncoding) { mutableStateOf(listOf(0L)) }
+private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboardCopy: (String) -> Unit) {
+    var requestedEncoding by rememberSaveable(document.key) { mutableStateOf("自动") }
+    var offsets by remember(document.key, requestedEncoding) { mutableStateOf(listOf(0L)) }
     // 与 offsets 平行保存每段第一行的行号，上一段/下一段不会重新从 1 计数。
-    var lineStarts by remember(files, path, requestedEncoding) { mutableStateOf(listOf(1)) }
-    var pageIndex by remember(files, path, requestedEncoding) { mutableIntStateOf(0) }
-    var page by remember(files, path, requestedEncoding) { mutableStateOf<WorkspaceFileManager.TextPage?>(null) }
-    var error by remember(files, path) { mutableStateOf<String?>(null) }
+    var lineStarts by remember(document.key, requestedEncoding) { mutableStateOf(listOf(1)) }
+    var pageIndex by remember(document.key, requestedEncoding) { mutableIntStateOf(0) }
+    var page by remember(document.key, requestedEncoding) { mutableStateOf<WorkspaceFileManager.TextPage?>(null) }
+    var error by remember(document.key) { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var query by rememberSaveable(files, path) { mutableStateOf("") }
-    var searchVisible by rememberSaveable(files, path) { mutableStateOf(false) }
+    var query by rememberSaveable(document.key) { mutableStateOf("") }
+    var searchVisible by rememberSaveable(document.key) { mutableStateOf(false) }
     var matchIndex by remember { mutableIntStateOf(0) }
     var fontSize by rememberSaveable { mutableIntStateOf(16) }
     var wrap by rememberSaveable { mutableStateOf(true) }
@@ -261,12 +281,12 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
     val displayMatches = remember(matches, text, numbered.prefixLength) {
         TextPageLayout.displayOffsets(matches, text, numbered.prefixLength)
     }
-    LaunchedEffect(files, path, requestedEncoding, pageIndex) {
+    LaunchedEffect(document.key, requestedEncoding, pageIndex) {
         loading = true; error = null; copied = false
         // 切换到新分段时先清空旧文本，避免读取失败后继续展示上一段却显示新行号。
         page = null; layout = null
         try {
-            page = files.readTextPage(path, offsets[pageIndex], requestedEncoding)
+            page = document.readTextPage(offsets[pageIndex], requestedEncoding)
             matchIndex = 0; vertical.scrollTo(0); horizontal.scrollTo(0)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
@@ -297,7 +317,7 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
             }
         }
     }
-    val hasNext = page?.let { TextPageLayout.canAdvance(it.nextOffset, it.totalBytes) } == true
+    val hasNext = page?.let { TextPageLayout.canAdvance(it.nextOffset, it.totalBytes, it.hasMore) } == true
     val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes, it.hasMore) } == true
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -366,6 +386,7 @@ private fun TextFileReader(files: WorkspaceFileManager, path: String, modifier: 
 private fun UnsupportedPreview(
     name: String, mime: String, copied: Boolean,
     onOpenAsText: () -> Unit, onCopyPath: () -> Unit,
+    onCopyToWorkspace: (() -> Unit)? = null,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -383,6 +404,7 @@ private fun UnsupportedPreview(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onOpenAsText) { Text("用文本打开") }
             OutlinedButton(onClick = onCopyPath) { Text(if (copied) "已复制路径" else "复制路径") }
+            onCopyToWorkspace?.let { action -> OutlinedButton(onClick = action) { Text("复制到工作区") } }
         }
     }
 }
@@ -452,6 +474,7 @@ internal fun MediaPlaybackLifecycle(onBackground: () -> Unit) {
 
 private fun mediaTime(milliseconds: Int): String = String.format(Locale.ROOT, "%d:%02d", milliseconds / 60000, milliseconds / 1000 % 60)
 private fun viewerBytes(bytes: Long): String = when {
+    bytes < 0 -> "大小未知"
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f KiB", bytes / 1024.0)
     bytes < 1024L * 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f MiB", bytes / (1024.0 * 1024))

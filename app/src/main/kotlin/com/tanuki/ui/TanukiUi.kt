@@ -188,7 +188,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
              filesPage: @Composable (Modifier, Dp) -> Unit = { _, _ -> },
              agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> },
              nativeDshPage: @Composable (Modifier) -> Unit = {},
-             browserOpenRequest: Int = 0, dshOpenRequest: Int = 0,
+             browserOpenRequest: Int = 0, dshOpenRequest: Int = 0, filesOpenRequest: Int = 0,
              browserControl: BrowserControlUiState = BrowserControlUiState()) {
     var tab by rememberSaveable(key = "tanuki-navigation-5") { mutableIntStateOf(0) }
     val pageStates = rememberSaveableStateHolder()
@@ -203,6 +203,8 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     LaunchedEffect(browserOpenRequest) { if (browserOpenRequest > 0) navigate(3) }
     // 通知点击可能要求直接回到 DSH 页；保留当前会话选择，只切换导航。
     LaunchedEffect(dshOpenRequest) { if (dshOpenRequest > 0) tab = 1 }
+    // 外部 content:// 文件或应用内选择器打开文件时直接进入文件页，避免用户再手动切页。
+    LaunchedEffect(filesOpenRequest) { if (filesOpenRequest > 0) tab = 2 }
     LaunchedEffect(tab) { callbacks.dshVisible(tab == 1) }
     DisposableEffect(Unit) { onDispose { callbacks.dshVisible(false) } }
     val s = model.snapshot

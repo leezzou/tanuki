@@ -28,8 +28,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.tanuki.runtime.*
+import com.tanuki.storage.ContentDocument
 import com.tanuki.storage.DataSnapshots
 import com.tanuki.storage.ExportCleanup
+import com.tanuki.storage.ExternalDocumentAccess
+import com.tanuki.storage.ExternalDocumentDescriptor
+import com.tanuki.storage.ExternalDocumentPolicy
+import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
 import com.tanuki.storage.WorkspaceFileManager
@@ -66,6 +71,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.Files
 import java.util.zip.ZipEntry
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipOutputStream
 
 class MainActivity : ComponentActivity() {
@@ -93,6 +99,8 @@ class MainActivity : ComponentActivity() {
             android.widget.Toast.makeText(this, "尚未允许悬浮窗；完整浏览器仍可正常使用", android.widget.Toast.LENGTH_LONG).show()
         }
     }
+    private val EXTERNAL_OPEN_PREFS = "external-open"
+
     private val workspaceFiles by lazy {
         WorkspaceFileManager(manager.paths, manager.mutation, {
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
@@ -101,6 +109,11 @@ class MainActivity : ComponentActivity() {
         }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) })
     }
     private var fileViewerFullscreen by mutableStateOf(false)
+    // 外部 content:// 文档只在 Activity 状态中保存描述；进程重建后按描述重新申请读取。
+    private var externalDescriptor by mutableStateOf<ExternalDocumentDescriptor?>(null)
+    private var externalConsumedRequest: String? = null
+    private val externalOpenSequence = AtomicLong(0)
+    private var filesOpenRequest by mutableIntStateOf(0)
     private var phoneStorageGranted by mutableStateOf(false)
     private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
@@ -144,13 +157,21 @@ class MainActivity : ComponentActivity() {
         if (!PhoneStorageAccess.isWriteGranted(this)) manager.phoneFiles.setWriteAllowed(false)
     }
     private var pendingFileExport: Pair<WorkspaceFileManager, String>? = null
+    private var pendingDocumentExport: OpenDocument? = null
     private val exportSingleFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        val source = pendingFileExport; pendingFileExport = null
-        if (uri != null && source != null) lifecycleScope.launch(Dispatchers.IO) {
+        val source = pendingFileExport
+        val document = pendingDocumentExport
+        pendingFileExport = null
+        pendingDocumentExport = null
+        if (uri != null && (source != null || document != null)) lifecycleScope.launch(Dispatchers.IO) {
             try {
                 manager.fileTransfers.track("导出文件") { id ->
                     contentResolver.openOutputStream(uri, "w")!!.use { output ->
-                        source.first.exportFile(source.second, output) { received, total -> manager.fileTransfers.update(id, received, total) }
+                        if (document != null) {
+                            document.export(output) { received, total -> manager.fileTransfers.update(id, received, total) }
+                        } else if (source != null) {
+                            source.first.exportFile(source.second, output) { received, total -> manager.fileTransfers.update(id, received, total) }
+                        }
                     }
                 }
                 manager.event("文件导出完成")
@@ -158,6 +179,12 @@ class MainActivity : ComponentActivity() {
             catch (error: Exception) { discardIncompleteExport(uri); manager.fail(error) }
         }
     }
+
+    /** 应用内文件选择器：既能打开内置预览，也能为不支持的类型提供显式复制回退。 */
+    private val openExternalDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) openExternal(uri)
+    }
+
     private fun discardIncompleteExport(uri: Uri): Boolean {
         val cleaned = ExportCleanup.discard {
             check(android.provider.DocumentsContract.deleteDocument(contentResolver, uri))
@@ -275,6 +302,9 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         consumeBrowserIntent(intent)
         consumeChatIntent(intent)
+        restoreExternalConsumedRequest(savedInstanceState)
+        restoreExternalDocument(savedInstanceState)
+        consumeExternalDocumentIntent(intent, restored = savedInstanceState != null || externalConsumedRequest != null)
         browser = DshWebView(this, manager,
             chooser = ::chooseDshFiles,
             download = { url, name ->
@@ -540,10 +570,28 @@ class MainActivity : ComponentActivity() {
                     },
                     browserOpenRequest = browserOpenRequest,
                     dshOpenRequest = dshOpenRequest,
+                    filesOpenRequest = filesOpenRequest,
                     browserControl = browserControl,
                     filesPage = { modifier, bottomInset ->
+                        val descriptor = externalDescriptor
+                        val externalDocument = descriptor?.let { current ->
+                            remember(current.uri, current.displayName, current.mimeType, current.bytes, current.persistedRead) {
+                                ContentDocument.create(this@MainActivity, current)
+                            }
+                        }
                         WorkspaceFilesPage(workspaceFiles,
                             onImport = { importFiles.launch(arrayOf("*/*")) },
+                            onOpenExternal = { openExternalDocument.launch(arrayOf("*/*")) },
+                            externalDocument = externalDocument,
+                            onCloseExternal = { externalDescriptor = null },
+                            onCopyExternalToWorkspace = { copyExternalToWorkspace(descriptor) },
+                            onExportExternal = { document ->
+                                if (pendingFileExport == null && pendingDocumentExport == null) {
+                                    pendingDocumentExport = document
+                                    exportSingleFile.launch(document.displayName)
+                                }
+                            },
+                            onReselectExternal = { openExternalDocument.launch(arrayOf("*/*")) },
                             onExport = { confirmation = "EXPORT" }, modifier = modifier, bottomInset = bottomInset,
                             runtimeRunning = s.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING),
                             onStop = { confirmation = "STOP" },
@@ -833,11 +881,107 @@ class MainActivity : ComponentActivity() {
             (application as TanukiApp).hideBrowserOverlay()
         }
     }
+    /** 只接受 content://；权限持久化结果写入描述，供界面提示进程重建后的可恢复性。 */
+    private fun openExternal(uri: Uri) {
+        if (!ExternalDocumentPolicy.isAcceptedUri(uri.toString())) {
+            manager.event(ExternalDocumentPolicy.INVALID_URI_MESSAGE)
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val persisted = ExternalDocumentAccess.persistReadPermission(this@MainActivity, uri)
+                val descriptor = ExternalDocumentAccess.descriptor(this@MainActivity, uri, persisted)
+                    .copy(openToken = externalOpenSequence.incrementAndGet())
+                withContext(Dispatchers.Main) {
+                    externalDescriptor = descriptor
+                    filesOpenRequest++
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val message = ExternalDocumentAccess.failure(error).message ?: "无法打开此文件"
+                withContext(Dispatchers.Main) { manager.event(message) }
+            }
+        }
+    }
+
+    /** 进程重建后从 Activity 状态恢复同一 URI；实际读取仍会重新校验权限。 */
+    private fun restoreExternalDocument(state: Bundle?) {
+        if (state == null) return
+        val descriptor = ExternalDocumentDescriptor.restore(
+            uri = state.getString("externalUri"),
+            name = state.getString("externalName"),
+            mime = state.getString("externalMime"),
+            bytes = state.getLong("externalBytes", ExternalDocumentPolicy.UNKNOWN_SIZE),
+            persisted = state.getBoolean("externalPersisted", false),
+            openToken = state.getLong("externalOpenToken", 0),
+        ) ?: return
+        externalDescriptor = descriptor
+        filesOpenRequest++
+    }
+
+    /** 只消费尚未处理过的启动 Intent；重建时保留当前选择和关闭状态。 */
+    private fun consumeExternalDocumentIntent(value: Intent?, restored: Boolean) {
+        val action = value?.action ?: return
+        val uri = when (action) {
+            Intent.ACTION_VIEW -> value.data
+            Intent.ACTION_SEND -> if (android.os.Build.VERSION.SDK_INT >= 33) {
+                value.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                value.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            else -> null
+        } ?: return
+        val request = ExternalDocumentPolicy.requestId(action, uri.toString(), uri.toString())
+        if (!ExternalDocumentPolicy.shouldConsume(restored, externalConsumedRequest, request)) return
+        persistExternalConsumedRequest(request)
+        openExternal(uri)
+    }
+
+    private fun restoreExternalConsumedRequest(state: Bundle?) {
+        externalConsumedRequest = state?.getString("externalConsumedRequest")
+            ?: getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).getString("consumedRequest", null)
+    }
+
+    private fun persistExternalConsumedRequest(request: String?) {
+        externalConsumedRequest = request
+        getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).edit().putString("consumedRequest", request).apply()
+    }
+
+    /**
+     * 显式复制回退：沿用现有导入校验（512 MiB、容量预算、临时目录回滚），
+     * 默认不触发；只有用户在不支持直开或权限失效时点击才执行。
+     */
+    private fun copyExternalToWorkspace(descriptor: ExternalDocumentDescriptor?) {
+        if (descriptor == null) return
+        val uri = Uri.parse(descriptor.uri)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                manager.fileTransfers.track("复制到工作区", descriptor.bytes) { id ->
+                    val name = ExternalDocumentPolicy.sanitizeDisplayName(descriptor.displayName)
+                    val destination = manager.workspaceStorage.importFiles(
+                        names = listOf(name),
+                        onProgress = { received -> manager.fileTransfers.update(id, received, descriptor.bytes) },
+                    ) { _ ->
+                        contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
+                    }
+                    manager.event("已复制到工作区新项目 ${destination.name}；可在文件页打开")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                manager.fail(error)
+            }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         consumeBrowserIntent(intent)
         consumeChatIntent(intent)
+        consumeExternalDocumentIntent(intent, restored = false)
     }
     private fun confirmApplicationUpdate() {
         if (!appUpdates.installAllowed()) {
@@ -932,6 +1076,15 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         val b = Bundle(); browser.save(b); outState.putBundle("web", b)
         agentBrowser?.let { controller -> val state = Bundle(); controller.saveState(state); outState.putBundle("agentBrowser", state) }
+        externalDescriptor?.let { descriptor ->
+            outState.putString("externalUri", descriptor.uri)
+            outState.putString("externalName", descriptor.displayName)
+            outState.putString("externalMime", descriptor.mimeType)
+            outState.putLong("externalBytes", descriptor.bytes)
+            outState.putBoolean("externalPersisted", descriptor.persistedRead)
+            outState.putLong("externalOpenToken", descriptor.openToken)
+            outState.putString("externalConsumedRequest", externalConsumedRequest)
+        }
     }
     override fun onPause() {
         activityResumed = false
@@ -947,6 +1100,10 @@ class MainActivity : ComponentActivity() {
         browserBackgroundHost = null
         // The application and foreground browser service own tabs/RPC, not this Activity.
         browser.destroy()
+        // 任务真正结束时清除去重标记；进程被杀时保留，避免系统用原 Intent 重建后重放旧文件。
+        if (isFinishing) {
+            getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).edit().remove("consumedRequest").apply()
+        }
         super.onDestroy()
     }
 

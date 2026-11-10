@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.ScrollState
-import com.tanuki.storage.WorkspaceFileManager
+import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.XlsxCell
 import com.tanuki.storage.XlsxHorizontalAlign
 import com.tanuki.storage.XlsxVerticalAlign
@@ -60,17 +60,17 @@ import kotlinx.coroutines.CancellationException
  * 基础字体/填充/边框和格式化显示值。图表、宏、透视表、外部链接和复杂条件格式不显示。
  */
 @Composable
-internal fun XlsxTablePreview(files: WorkspaceFileManager, path: String, modifier: Modifier = Modifier) {
-    var workbook by remember(path) { mutableStateOf<XlsxWorkbook?>(null) }
-    var error by remember(path) { mutableStateOf<String?>(null) }
-    var loading by remember(path) { mutableStateOf(true) }
-    var sheetIndex by remember(path) { mutableIntStateOf(0) }
-    var scale by remember(path) { mutableFloatStateOf(XlsxPreviewPolicy.DEFAULT_SCALE) }
-    LaunchedEffect(path) {
+internal fun XlsxTablePreview(document: OpenDocument, modifier: Modifier = Modifier) {
+    var workbook by remember(document.key) { mutableStateOf<XlsxWorkbook?>(null) }
+    var error by remember(document.key) { mutableStateOf<String?>(null) }
+    var loading by remember(document.key) { mutableStateOf(true) }
+    var sheetIndex by remember(document.key) { mutableIntStateOf(0) }
+    var scale by remember(document.key) { mutableFloatStateOf(XlsxPreviewPolicy.DEFAULT_SCALE) }
+    LaunchedEffect(document.key) {
         loading = true
         error = null
         try {
-            workbook = files.readXlsx(path)
+            workbook = document.readXlsx()
             sheetIndex = 0
         } catch (failure: CancellationException) {
             throw failure

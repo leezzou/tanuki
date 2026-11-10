@@ -86,7 +86,15 @@ internal object TextPageLayout {
 
     /** 是否还能继续下一页；到达文件末尾或显示上限时停止。 */
     fun canAdvance(displayedBytes: Long, totalBytes: Long): Boolean =
-        displayedBytes > 0 && displayedBytes < totalBytes && displayedBytes < MAX_VIEW_BYTES
+        canAdvance(displayedBytes, totalBytes, hasMore = totalBytes > displayedBytes)
+
+    /**
+     * 外部顺序流可能不返回总大小（totalBytes < 0），此时以本次分页的 hasMore 为准，
+     * 仍保留 4 MiB 显示上限。
+     */
+    fun canAdvance(displayedBytes: Long, totalBytes: Long, hasMore: Boolean): Boolean =
+        displayedBytes > 0 && hasMore && displayedBytes < MAX_VIEW_BYTES &&
+            (totalBytes < 0 || displayedBytes < totalBytes)
 
     /** 是否因为达到显示上限而截断（文件实际还有内容）。 */
     fun isTruncated(displayedBytes: Long, totalBytes: Long, hasMore: Boolean): Boolean =

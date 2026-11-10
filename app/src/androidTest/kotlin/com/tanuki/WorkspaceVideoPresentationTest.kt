@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
+import com.tanuki.storage.WorkspaceDocument
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.WorkspaceFileViewer
@@ -331,8 +332,8 @@ class WorkspaceVideoPresentationTest {
             activity.setContent {
                 CompositionLocalProvider(LocalConfiguration provides config, LocalDensity provides Density(density, 2f)) {
                     TanukiTheme {
-                        WorkspaceFileViewer(manager,
-                            WorkspaceFileManager.Entry("${folder.name}/${movie.name}", movie.name, false, movie.length(), false),
+                        WorkspaceFileViewer(
+                            WorkspaceDocument(manager, "${folder.name}/${movie.name}", movie.name),
                             Modifier.widthIn(max = 320.dp).fillMaxSize().safeDrawingPadding(), canEdit = false,
                             onClose = {}, onExport = {}, onEdit = {}, fullscreen = fullscreen.value, onFullscreen = { fullscreen.value = it })
                     }
