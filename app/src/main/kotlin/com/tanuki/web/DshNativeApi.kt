@@ -36,7 +36,12 @@ enum class DshMessageRole(val label: String) { USER("你"), ASSISTANT("DSH") }
 /** 从官方 session/page 事件中提取的只读文本消息。 */
 data class DshMessage(val seq: Int, val role: DshMessageRole, val text: String, val time: Long)
 
-data class DshSessionPage(val messages: List<DshMessage>, val hasMore: Boolean)
+data class DshSessionPage(
+    val messages: List<DshMessage>,
+    val hasMore: Boolean,
+    /** 文本与工具调用按官方 seq 排列；`messages` 保留给只关心文本的调用方。 */
+    val timeline: List<DshTimelineItem> = messages.map { DshTimelineItem.Text(it) }
+)
 
 /** 官方 Remote 返回的业务错误；只保留短错误码，避免把响应细节带入界面或日志。 */
 class DshApiException(val code: String) : IOException("DSH 接口返回 $code")
@@ -153,37 +158,49 @@ object DshApiProtocol {
         val messages = ArrayList<DshMessage>(records.length())
         for (index in 0 until records.length()) {
             val event = records.optJSONObject(index)?.optJSONObject("event") ?: continue
-            val type = event.optString("type")
-            val role = when (type) {
-                "user/message" -> DshMessageRole.USER
-                "assistant/message" -> DshMessageRole.ASSISTANT
-                else -> continue
-            }
-            // 官方聊天只取 append-origin surface；replace 副本仅供模型上下文，不能当对话显示。
-            if (event.opt("surfaceOp") != "append") continue
-            val data = event.optJSONObject("data") ?: continue
-            // user/message 也可能是注入上下文；原生只把真实用户来源标成“你”。
-            if (role == DshMessageRole.USER) {
-                val sourceKind = data.optJSONObject("source")?.optString("kind")
-                if (sourceKind != null && sourceKind != "user") continue
-            }
-            val content = when (role) {
-                DshMessageRole.USER -> data.optJSONArray("content")
-                    ?: data.optJSONObject("message")?.optJSONArray("content")
-                DshMessageRole.ASSISTANT -> data.optJSONObject("message")?.optJSONArray("content")
-                    ?: data.optJSONArray("content")
-            } ?: continue
-            val text = textOf(content)
-            if (text.isBlank()) continue
-            messages += DshMessage(
-                seq = event.optInt("seq", 0),
-                role = role,
-                text = text,
-                time = event.optLong("time", 0L)
-            )
+            messageOf(event)?.let { messages += it }
         }
         messages.sortBy { it.seq }
-        return DshSessionPage(messages, value.optBoolean("hasMore", false))
+        return DshSessionPage(
+            messages = messages,
+            hasMore = value.optBoolean("hasMore", false),
+            timeline = DshToolTimeline.parse(records)
+        )
+    }
+
+    /**
+     * 从官方消息事件提取只读文本；文本规则同时供时间线解析复用，避免两套口径。
+     * 只接受 append-origin surface，且 user/message 只认真实用户来源。
+     */
+    internal fun messageOf(event: JSONObject): DshMessage? {
+        val type = event.optString("type")
+        val role = when (type) {
+            "user/message" -> DshMessageRole.USER
+            "assistant/message" -> DshMessageRole.ASSISTANT
+            else -> return null
+        }
+        // 官方聊天只取 append-origin surface；replace 副本仅供模型上下文，不能当对话显示。
+        if (event.opt("surfaceOp") != "append") return null
+        val data = event.optJSONObject("data") ?: return null
+        // user/message 也可能是注入上下文；原生只把真实用户来源标成“你”。
+        if (role == DshMessageRole.USER) {
+            val sourceKind = data.optJSONObject("source")?.optString("kind")
+            if (sourceKind != null && sourceKind != "user") return null
+        }
+        val content = when (role) {
+            DshMessageRole.USER -> data.optJSONArray("content")
+                ?: data.optJSONObject("message")?.optJSONArray("content")
+            DshMessageRole.ASSISTANT -> data.optJSONObject("message")?.optJSONArray("content")
+                ?: data.optJSONArray("content")
+        } ?: return null
+        val text = textOf(content)
+        if (text.isBlank()) return null
+        return DshMessage(
+            seq = event.optInt("seq", 0),
+            role = role,
+            text = text,
+            time = event.optLong("time", 0L)
+        )
     }
 
     private fun textOf(content: JSONArray): String {

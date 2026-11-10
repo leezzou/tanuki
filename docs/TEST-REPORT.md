@@ -110,6 +110,18 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - P1/P2 修复：认证网络 I/O 移出 monitor，`reset()` 只短暂持锁并按代次拒绝旧 Cookie 发布；401 重试必须属于当前代次；消息按官方 append-origin 语义过滤。
 - 未执行：assemble、仪器测试、真实设备、真实 PRoot 内 DSH 与 WebSocket/审批/发送。最终 head CI 与独立 Pi Review 以 PR 页面为准。
 
+## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
+
+- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 新增：`DshApprovalProtocol`（帧/回答信封/风险/本次运行记忆）、`DshWebSocketClient`（最小 RFC6455）、`DshApprovalSession`（`/connect`→`$events`→`$events/result`，401 重认证）、`DshToolTimeline`（工具/命令/diff/文件变更）、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`；`DshNativeApi`/`DshNativeController`/`DshNativePage`/`MainActivity` 只做增量接线。
+- 新增 JVM 回归 34 项：`DshApprovalProtocolTest` 9、`DshToolTimelineTest` 8、`DshWebSocketTest` 5、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 7。覆盖 ready/waterfall/cancel/error 帧、字段白名单、官方回答信封、风险分级、本次运行记忆、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
+- 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：
+  - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，70 个结果文件，**569 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 34）。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 94 warnings / 1 hint**（存量弃用/可读性告警）。
+  - `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL（仅打包验证，未安装）。
+- 未验证：真实 Android 设备/模拟器上的原生审批卡片布局、深色主题、大字体、长参数/长 diff、输出折叠与滚动；真实 PRoot 内 DSH `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue；远程 SSH 隧道后的审批流；通知点击后待审批列表过滤；Android 仪器/真机未执行。以上不能计为设备通过。
+
 ## XLSX 应用内原生预览验证（2026-11-09，android_agent-32，非设备）
 
 - 范围：新增 `XlsxWorkbookParser` 只读 OOXML 解析（workbook/rels/sharedStrings/styles/sheet）、`XlsxValueFormatter` 显示格式、Compose 原生表格 `XlsxTablePreview`、`FileKind.XLSX` 分类/入口与 `WorkspaceFileViewer` 接线。基线 `main=2f3fac9301c7c3484df85e99091e8f63dddc0a48`，分支 `ao/xlsx-preview/xlsx-native-preview`，未引入第三方 XLSX 库，不依赖 LibreOffice/外部 App。

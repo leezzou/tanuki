@@ -36,6 +36,7 @@ import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
+import com.tanuki.ui.DshApprovalController
 import com.tanuki.ui.DshNativeController
 import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.WorkspaceFilesPage
@@ -52,6 +53,7 @@ import com.tanuki.web.ChatNotificationRoutePolicy
 import com.tanuki.web.ChatNotificationTargetPolicy
 import com.tanuki.web.DshEndpoint
 import com.tanuki.web.DshNativeClient
+import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshUiMode
 import com.tanuki.web.DshWebView
 import com.tanuki.web.DshFileChooser
@@ -310,24 +312,48 @@ class MainActivity : ComponentActivity() {
                 }
                 var nativeFallback by remember { mutableStateOf<String?>(null) }
                 var nativeChatRequest by remember { mutableStateOf<String?>(null) }
+                val nativeEndpoint: () -> DshEndpoint? = {
+                    val origin = manager.origin
+                    val launchUrl = manager.authenticatedUrl
+                    if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
+                }
                 val nativeController = remember {
-                    DshNativeController(
-                        DshNativeClient {
-                            val origin = manager.origin
-                            val launchUrl = manager.authenticatedUrl
-                            if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
-                        },
-                        lifecycleScope
-                    )
+                    DshNativeController(DshNativeClient(nativeEndpoint), lifecycleScope)
                 }
                 val nativeState by nativeController.state.collectAsState()
-                DisposableEffect(Unit) { onDispose { nativeController.close() } }
-                LaunchedEffect(s.service, nativeUiMode) {
+                val approvalController = remember {
+                    DshApprovalController(
+                        endpointProvider = nativeEndpoint,
+                        scope = lifecycleScope,
+                        toolLookup = { callId ->
+                            nativeController.state.value.timeline
+                                .filterIsInstance<DshTimelineItem.Tool>()
+                                .firstOrNull { it.tool.callId == callId }?.tool
+                        }
+                    )
+                }
+                val approvalState by approvalController.state.collectAsState()
+                DisposableEffect(Unit) {
+                    onDispose {
+                        nativeController.close()
+                        approvalController.close()
+                    }
+                }
+                LaunchedEffect(s.service, nativeUiMode, s.remote.connected, s.remote.localPort) {
                     nativeFallback = null
                     when {
-                        nativeUiMode.isNative && s.service == ServiceState.RUNNING -> nativeController.refresh()
-                        s.service == ServiceState.RUNNING -> nativeController.clear()
-                        else -> nativeController.close()
+                        nativeUiMode.isNative && s.service == ServiceState.RUNNING -> {
+                            nativeController.refresh()
+                            approvalController.start()
+                        }
+                        s.service == ServiceState.RUNNING -> {
+                            nativeController.clear()
+                            approvalController.close()
+                        }
+                        else -> {
+                            nativeController.close()
+                            approvalController.close()
+                        }
                     }
                 }
                 fun setNativePreference(enabled: Boolean) {
@@ -336,8 +362,13 @@ class MainActivity : ComponentActivity() {
                     nativeFallback = null
                     getSharedPreferences(DshUiMode.PREFERENCE_FILE, MODE_PRIVATE).edit()
                         .putString(DshUiMode.PREFERENCE_KEY, mode.storageValue).apply()
-                    if (mode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()
-                    else nativeController.clear()
+                    if (mode.isNative && s.service == ServiceState.RUNNING) {
+                        nativeController.refresh()
+                        approvalController.start()
+                    } else {
+                        nativeController.clear()
+                        approvalController.close()
+                    }
                 }
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
@@ -501,7 +532,10 @@ class MainActivity : ComponentActivity() {
                         toggleNativeDsh = ::setNativePreference,
                         retryNativeDsh = {
                             nativeFallback = null
-                            if (nativeUiMode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()
+                            if (nativeUiMode.isNative && s.service == ServiceState.RUNNING) {
+                                nativeController.refresh()
+                                approvalController.start()
+                            }
                         }
                     ),
                     browserView = browser.view,
@@ -510,7 +544,11 @@ class MainActivity : ComponentActivity() {
                             controller = nativeController,
                             modifier = modifier,
                             onFallback = { reason -> nativeFallback = Redact.text(reason) },
-                            onSwitchOfficial = { setNativePreference(false) }
+                            onSwitchOfficial = { setNativePreference(false) },
+                            approvalState = approvalState,
+                            onApprovalAnswer = approvalController::answer,
+                            onApprovalRetry = approvalController::retry,
+                            onClearRemembered = approvalController::clearRemembered
                         )
                     },
                     browserOpenRequest = browserOpenRequest,

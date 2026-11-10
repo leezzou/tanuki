@@ -193,12 +193,16 @@ HTTP 200..399 或 401 → 存活
 
 ### 1.7 可选原生界面的官方 DSH 接口
 
-设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话，不另造协议：
+设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话与审批，不另造协议：
 
-- 认证：同一启动 token 调 `GET /connect?token=...&interactions=none`，只取签名 API Cookie；不跟随 302。
+- 认证：同一启动 token 调 `GET /connect?token=...&interactions=none`，只取签名 API Cookie；不跟随 302。原生列表与审批流各自换取 API Cookie，互不共享内存对象。
 - 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
-- 实时流/审批：官方 `session/follow`、`session/control` 与审批 waterfall 只经 `/api/remote.mux` WebSocket；原生最小切片未实现，列表失败时回退官方界面。
-- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebView 同源与 Cookie 策略不变。
+- 实时流：`/api/remote.mux` WebSocket 上发送 `{"type":"open","streamId":...,"endpoint":"$events","payload":{"args":{}}}`；服务端返回 `ready(clientId)`、`waterfall(approval/request, eventId, agentId, request)`、`cancel(eventId)` 或 `error(code)`。原生只读取审批白名单字段（`toolName`、`callId`、`reason`、`displayReason`），不复制工具参数以外的请求正文。
+- 审批回答：`POST /api/$events/result`，信封 `{"type":"client-request","rpcId":...,"method":"$events/result","payload":{"args":{"clientId":...,"eventId":...,"outcome":{"kind":"result","value":"allowed-once"|"rejected"}}}}`。`cancelled` 由 Host 撤回，`unavailable` 由 Host 无回答者时产生；原生不发明新 outcome。
+- 记住选择：官方审批是一次性授权，没有“记住”outcome。原生“本次运行内记住”只按 `sessionId + toolName + 风险等级` 在内存中自动复用刚才的 `allowed-once`/`rejected`，不写 DSH 配置、不跨进程/重启，关闭原生页或服务停止即清空。
+- 工具卡片：来自 `session/page` 的 `tool/call`（`callId`、`name`、`arguments`）与 `tool/result`（`message.toolCallId`、`content`、`isError`、`error`、`meta`）。`meta.diffs[]` 为官方 `FileDiff`（`path`、`oldText`、`newText`）；没有结果的事件明确显示“进行中/未读取到结果”，不伪造成功。
+- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 只连 `http://127.0.0.1:<port>/api/remote.mux`，校验 `Sec-WebSocket-Accept`，客户端帧掩码，服务端帧拒绝掩码，单帧上限 1 MiB；WebView 同源与 Cookie 策略不变。
+- 缺口：`session/follow`、`session/control`、聊天发送/取消/附件/模型选择仍未实现；工具卡片来自历史页，不提供实时增量流。
 
 细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 

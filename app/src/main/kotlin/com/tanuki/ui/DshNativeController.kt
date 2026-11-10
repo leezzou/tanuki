@@ -4,6 +4,7 @@ import com.tanuki.runtime.Redact
 import com.tanuki.web.DshApiException
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshSessionSource
+import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -20,6 +21,8 @@ data class DshNativeState(
     val sessions: List<DshSession> = emptyList(),
     val selectedId: String? = null,
     val messages: List<DshMessage> = emptyList(),
+    /** 文本与工具调用按官方 seq 排列；`messages` 保留给既有文本视图。 */
+    val timeline: List<DshTimelineItem> = emptyList(),
     val hasMore: Boolean = false,
     val error: String? = null,
     /** 会话列表都读不到时置位；界面据此回退官方页面。 */
@@ -102,7 +105,7 @@ class DshNativeController(
         pendingSelection = null
         val token = generation
         job?.cancel()
-        _state.update { it.copy(selectedId = sessionId, messages = emptyList(), error = null, hasMore = false) }
+        _state.update { it.copy(selectedId = sessionId, messages = emptyList(), timeline = emptyList(), error = null, hasMore = false) }
         job = scope.launch { loadMessages(sessionId, token) }
     }
 
@@ -121,11 +124,11 @@ class DshNativeController(
     }
 
     private suspend fun loadMessages(sessionId: String, token: Int) {
-        _state.update { it.copy(loading = true, error = null, messages = emptyList(), hasMore = false) }
+        _state.update { it.copy(loading = true, error = null, messages = emptyList(), timeline = emptyList(), hasMore = false) }
         val result = client.messages(sessionId)
         if (token != generation) return
         result.onSuccess { page ->
-            _state.update { it.copy(loading = false, messages = page.messages, hasMore = page.hasMore) }
+            _state.update { it.copy(loading = false, messages = page.messages, timeline = page.timeline, hasMore = page.hasMore) }
         }.onFailure { error ->
             // 历史页读取失败只影响当前会话，不把整个原生列表判死，也不伪造消息。
             _state.update { it.copy(loading = false, error = messageOf(error)) }

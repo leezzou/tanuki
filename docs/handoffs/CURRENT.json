@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-2310-release-0.1.10.md",
-  "recordSha256": "7f8e7a7191445d459d776d001922f07a4effa7d4ce945412ce2868ec51ffca0e",
-  "sourceFingerprint": "fcad28f82f5a2b9a35661d8e04d0c1f8837e872b3d3215308f2e2b82d60c5387",
-  "fileCount": 591
+  "record": "docs/handoffs/20261110-1139-native-approval-tools.md",
+  "recordSha256": "0a42da05e706a748d75d69038682d0e609ab91ab2a96f9b449a61e3c1296288a",
+  "sourceFingerprint": "a4ca8e40b09677fb6dc371efa2a9759d09b4dd63a30096dc928d819370affab6",
+  "fileCount": 604
 }

@@ -2,6 +2,11 @@
 
 当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
 
+### 原生审批/权限/工具调用切片（android_agent-45，进行中）
+
+- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`；新增官方 `$events` 审批流与 `$events/result` 回答、工具调用时间线/卡片（运行中/成功/失败、命令、diff、文件变更、折叠输出）、本次运行内的“记住选择”（仅内存，不写 DSH 配置）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 569 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 0 errors / 94 warnings；设备、真实 PRoot DSH、远程 SSH 隧道、安全模式 rescue 与 Android 仪器/真机未验证；`assembleModernDebug` 已通过（未安装）。PR 待创建，不合并、不发布。详见 [交接](handoffs/20261110-1139-native-approval-tools.md)。
+
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
 - 版本 `versionName=0.1.10`、`versionCode=12`、`channel=workspacecheck`（开发证书、non-debuggable、ARM64、minSdk26/targetSdk34）；最终基线 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95`，分支 `ao/xlsx-preview/release-0.1.10`。
