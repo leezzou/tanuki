@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-46
 - 时间：2026-11-10 11:42 CST
-- 状态：部分完成（新文件与本地验证完成；42 接线待办；PR #39 已认领，边界修正已推送；已合并最新 `main=533eff4` 解决共享文档冲突，合并提交随本提交推送）
+- 状态：已停止功能开发（PR #39 已被 #40 完整吸收并关闭，远端分支由编排器删除；composer/附件/@/斜杠实现随 #40 进入评审。仅保留 `DshComposerRemote` 临时抽象说明）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -41,6 +41,13 @@
 - 发送、附件选择/上传、@ 引用、斜杠命令、草稿保留：控制器/UI/协议已实现并有 JVM 覆盖；**但当前 head 未挂载到 `DshNativePage`**（42 独占文件 + transport 未接），不能宣称端到端在原生页可用。
 - 停止/取消：**未实现**。
 - 图片/文件选择、缩略图/大图预览、粘贴、拖入、临时权限：Android 代码已实现，未在设备验证。
+
+### 最终交付状态
+
+- PR #39 已被 android_agent-42 的 #40 完整吸收（6 个组件 + 3 个测试均在 #40），并由编排器关闭、删除远端分支；本分支不再作为独立交付 PR。
+- 本分支最后一次代码提交为 `4b82d8b`（5 项 review 修复 + main 合并），保留在本地与 `refs/pull/39/head`，供 #40 需要时移植。
+- `DshComposerRemote` 已在 `docs/INTERFACES.md` 明确为临时抽象：只含 unary `call`/`reset`，待 42 的 `DshTransport`/`DshNativeComposerRemote(transport)` 收敛后删除；当前无自建 HTTP/WS。
+- 真实可用性：组件/协议/控制器已实现并有 JVM 覆盖，但 #39 未挂载 `DshNativePage`；停止/取消未实现。端到端可用性以 #40 接线与设备 QA 为准。
 
 ## 本次改动
 
@@ -104,13 +111,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：42 按上节 hook 接线；独立 Codex High Review；适用 Android QA。
+- 未完成：后续若 #40 评审指出 composer 问题，由编排器转交后通过 42 分支或另开小 PR 修复；当前不再推功能提交。
 - 外部阻塞：transport 最小接口由 42 定稿；在拿到前本分支只保留 `DshComposerRemote` 抽象，不阻塞其余新文件与回归。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按项目既有暂停项保留；本次未触碰。
 
 ## 下一步
 
-1. 边界修正已推送 `4d03319`，PR #39 正文已更新 hook 清单，新 head CI 已 pass；等待 42 接线与独立 Review。
+1. 停止功能开发，保持空闲；等待 #40 评审转交的 composer 问题。PR #39 已关闭，不重开、不再合并/发布。
 2. 把本交接“需要 42 的接线 hook”发给 android_agent-42/编排器；由 42 在其独占文件中接线，不在本分支自行合并对方改动。
 3. 42 接线后复跑 `compileModernDebugKotlin`、目标/完整 JVM、lint；设备 QA 由编排器另派独立 QA 会话，使用既有 ARM64 AVD，不把宿主/JVM 结果当 Android 验收。
 

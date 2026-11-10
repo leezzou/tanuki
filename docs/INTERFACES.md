@@ -222,6 +222,7 @@ HTTP 200..399 或 401 → 存活
 - 附件只读取文档选择器/剪贴板/拖入提供的 `content://` 或受限 `data:` 图片；不接受 `file://`、App 私有文件或外部明文路径。
 - 输入栏不改变消息流式/渲染路径；发送成功后由现有原生页强制重读当前会话历史。
 - 传输：输入/附件客户端只依赖 `DshComposerRemote` 小接口（`suspend call(method, args): Any?`、`reset()`）；42 的 `DshNativeComposerRemote(transport)` 只做这两个方法的转发。HTTP/WS、Cookie 与连接状态由 42 的统一 `DshTransport` 实现；本切片不自建传输栈，也不直接读取 token。`call` 返回官方 `result.value`，业务错误抛 `DshApiException`。
+- `DshComposerRemote` 是**临时抽象**：只覆盖输入/附件需要的 unary `call` 与 `reset`，不代表第二套传输。42 的 `DshTransport` / `DshNativeComposerRemote(transport)` 定稿后，消费方应改为直接依赖该适配器并删除/收敛这个临时接口；早期 head 的临时 `HttpDshComposerRemote` 已按边界修正删除，当前分支不自建 HTTP/WS。
 
 细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
