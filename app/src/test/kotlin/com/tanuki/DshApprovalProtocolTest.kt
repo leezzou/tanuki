@@ -1,7 +1,9 @@
 package com.tanuki
 
+import com.tanuki.web.DshApprovalFailures
 import com.tanuki.web.DshApprovalMemory
 import com.tanuki.web.DshApprovalOutcome
+import com.tanuki.web.DshApprovalPresentation
 import com.tanuki.web.DshApprovalProtocol
 import com.tanuki.web.DshApiProtocol
 import com.tanuki.web.DshApprovalRisk
@@ -14,6 +16,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
+import java.net.SocketTimeoutException
 
 class DshApprovalProtocolTest {
     @Test fun parsesReadyAndKeepsClientId() {
@@ -148,6 +152,57 @@ class DshApprovalProtocolTest {
         assertEquals(DshRiskLevel.MEDIUM, DshApprovalRisk.assess("write", """{"file_path":"a.txt"}""").level)
         assertEquals(DshRiskLevel.LOW, DshApprovalRisk.assess("read", """{"path":"a.txt"}""").level)
         assertEquals(DshRiskLevel.UNKNOWN, DshApprovalRisk.assess("mcp__custom", null).level)
+    }
+
+    @Test fun approvalSourceIsShortLabelAndDoesNotCopyOtherFields() {
+        val frame = DshApprovalProtocol.parseStreamItem(item(JSONObject()
+            .put("type", "waterfall")
+            .put("event", "approval/request")
+            .put("eventId", "event-1")
+            .put("agentId", "session-1")
+            .put("request", JSONObject()
+                .put("toolName", "bash")
+                .put("source", JSONObject()
+                    .put("name", "工作区插件")
+                    .put("secret", "must-not-be-copied")))))
+        val request = (frame as DshEventFrame.Approval).request
+        assertEquals("工作区插件", request.source)
+        assertFalse(request.toString().contains("must-not-be-copied"))
+    }
+
+    @Test fun approvalSummaryExtractsImportantFieldAndBoundsLongText() {
+        val command = DshApprovalPresentation.summarize("""{"command":"rm -rf /workspaces/tmp"}""")!!
+        assertEquals("命令", command.field)
+        assertEquals("rm -rf /workspaces/tmp", command.headline)
+        val path = DshApprovalPresentation.summarize("""{"file_path":"/workspaces/a.txt"}""")!!
+        assertEquals("路径", path.field)
+        val long = DshApprovalPresentation.summarize("""{"command":"${"x".repeat(500)}"}""")!!
+        assertTrue(long.headline.length <= DshApprovalPresentation.MAX_HEADLINE_CHARS + 1)
+        assertTrue(long.headline.endsWith("…"))
+        assertNull(DshApprovalPresentation.summarize("  "))
+    }
+
+    @Test fun approvalFailureKeepsChineseReasonAndMapsEnglish() {
+        val chinese = DshApprovalFailures.describe(IOException("审批通道已断开"))
+        assertEquals("审批通道已断开", chinese.message)
+        assertTrue(chinese.retryable)
+        val timeout = DshApprovalFailures.describe(SocketTimeoutException("connect timed out"))
+        assertTrue(timeout.message.contains("超时"))
+        assertTrue(timeout.retryable)
+        val english = DshApprovalFailures.describe(IOException("connection reset"))
+        assertTrue(english.message.contains("审批通道"))
+        assertFalse(english.message.contains("connection reset"))
+    }
+
+    @Test fun memoryCanForgetOneChoiceImmediately() {
+        val memory = DshApprovalMemory()
+        assertTrue(memory.remember("s1", "bash", DshRiskLevel.HIGH, DshApprovalOutcome.ALLOWED_ONCE))
+        assertTrue(memory.remember("s1", "write", DshRiskLevel.MEDIUM, DshApprovalOutcome.REJECTED))
+        val first = memory.snapshot().first()
+        assertTrue(memory.forget(first))
+        assertNull(memory.lookup("s1", "bash", DshRiskLevel.HIGH))
+        assertEquals(DshApprovalOutcome.REJECTED, memory.lookup("s1", "write", DshRiskLevel.MEDIUM))
+        assertFalse(memory.forget(first))
     }
 
     @Test fun memoryOnlyReusesSameSessionToolAndRisk() {
