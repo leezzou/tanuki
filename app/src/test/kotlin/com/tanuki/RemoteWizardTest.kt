@@ -31,6 +31,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -767,6 +769,118 @@ class RemoteWizardTest {
         assertNull(fixture.storage.load())
         assertNull(controller.ui.value.saved)
         assertFalse(tunnel.closed)
+    }
+
+    @Test
+    fun publicReconnectAfterRestartPreservesSourceProfileId() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += firstScope
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        val first = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = firstScope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        first.connect(profile.config, profile.id)
+        withTimeout(5_000) {
+            while (machine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 模拟重启：新控制器从同一存储加载活动配置，再用公开 connect(config) 重连。
+        val restartedMachine = RemoteHostMachine()
+        restartedMachine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val restartedScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += restartedScope
+        val restarted = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = restartedScope,
+            machine = restartedMachine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        withTimeout(5_000) {
+            while (restarted.ui.value.saved == null) delay(10)
+        }
+        restarted.connect(restarted.ui.value.saved!!)
+        withTimeout(5_000) {
+            while (restartedMachine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals("公开重连必须保留来源 profile", profile.id, fixture.storage.sourceProfileId())
+
+        // 编辑同一 profile 目标为 B（仅保存），再删除：仍应按来源清理 A 的旧副本。
+        profileStore.save(
+            "家里电脑",
+            config(host = "b.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-b"),
+            profile.id
+        )
+        restarted.deleteProfile(profile.id)
+        withTimeout(5_000) {
+            while (restarted.ui.value.profiles.isNotEmpty()) delay(10)
+        }
+        assertNull(fixture.storage.load())
+        assertNull(fixture.storage.sourceProfileId())
+        assertNull(restarted.ui.value.saved)
+        assertFalse(tunnel.closed)
+    }
+
+    @Test
+    fun newManualConnectDoesNotInheritPreviousSourceProfile() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val transport = StagedFakeTransport(tunnel = FakeTunnel(45678))
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        fixture.storage.trustFingerprint("c.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        controller.connect(profile.config, profile.id)
+        withTimeout(5_000) {
+            while (machine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 新的手工配置成功后不能继承 P 的来源；删除 P 也不应清掉 C 的活动副本。
+        controller.connect(
+            config(host = "c.example.test", user = "c", auth = RemoteAuthType.PASSWORD, password = "synthetic-c")
+        )
+        withTimeout(5_000) {
+            while (controller.ui.value.saved?.host != "c.example.test") delay(10)
+        }
+        assertNull(fixture.storage.sourceProfileId())
+        controller.deleteProfile(profile.id)
+        withTimeout(5_000) {
+            while (controller.ui.value.profiles.isNotEmpty()) delay(10)
+        }
+        assertEquals("c.example.test", fixture.storage.load()?.host)
+        assertEquals("c.example.test", controller.ui.value.saved?.host)
     }
 
     @Test

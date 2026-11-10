@@ -79,7 +79,9 @@ class RemoteHostController(
     fun test(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = false)
 
     fun connect(config: RemoteHostConfig, profileId: String? = null) =
-        launchAttempt(config, keepTunnel = true, profileId = profileId)
+        // “连接当前配置”/失败重试只拿到 config；此时必须从活动副本或本次失败尝试恢复来源，
+        // 否则成功保存会把 sourceProfileId 清空，删除 profile 时漏清旧凭据。
+        launchAttempt(config, keepTunnel = true, profileId = profileId ?: sourceProfileIdFor(config))
 
     /** 连接命名连接：先标记“上次使用”，再走与手动配置相同的严格流程。 */
     fun connectProfile(profile: RemoteHostProfile) {
@@ -606,6 +608,24 @@ class RemoteHostController(
     private fun friendlyStorage(error: Throwable): String =
         error.message?.takeIf { it.startsWith("连接") || it.startsWith("中继") || it.startsWith("已保存") }
             ?: "请重试，或删除本机远程配置后重新添加"
+
+    /**
+     * 公开 connect 路径的来源推断：
+     * - 失败重试：本次 attemptConfig 相同，沿用 attemptProfileId；
+     * - 重启后“连接当前配置”：与已保存活动配置完全相同，沿用持久化的 sourceProfileId；
+     * - 新的手工配置：不继承旧来源，避免把新配置归到旧 profile。
+     */
+    private fun sourceProfileIdFor(config: RemoteHostConfig): String? {
+        val current = mutableUi.value
+        if (current.attemptConfig == config && current.attemptProfileId != null) {
+            return current.attemptProfileId
+        }
+        val stored = runCatching { storage.load() }.getOrNull()
+        if (stored == config) {
+            return runCatching { storage.sourceProfileId() }.getOrNull()
+        }
+        return null
+    }
 
     /** 判断两份配置是否指向同一远程 DSH 服务；用于删除命名连接时定位活动配置副本。 */
     private fun sameRemoteService(first: RemoteHostConfig, second: RemoteHostConfig): Boolean =
