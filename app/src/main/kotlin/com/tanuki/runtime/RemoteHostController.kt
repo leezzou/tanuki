@@ -79,7 +79,9 @@ class RemoteHostController(
     fun test(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = false)
 
     fun connect(config: RemoteHostConfig, profileId: String? = null) =
-        launchAttempt(config, keepTunnel = true, profileId = profileId)
+        // “连接当前配置”/失败重试只拿到 config；此时必须从活动副本或本次失败尝试恢复来源，
+        // 否则成功保存会把 sourceProfileId 清空，删除 profile 时漏清旧凭据。
+        launchAttempt(config, keepTunnel = true, profileId = profileId ?: sourceProfileIdFor(config))
 
     /** 连接命名连接：先标记“上次使用”，再走与手动配置相同的严格流程。 */
     fun connectProfile(profile: RemoteHostProfile) {
@@ -136,9 +138,16 @@ class RemoteHostController(
             }
             // 成功连接会把同一份凭据复制到活动配置存储；删除命名连接时必须同步清掉这份副本，
             // 否则重启后仍可通过“连接当前配置”使用已被删除的凭据。只清活动配置，不动 known_hosts。
+            // 归属以写入时记录的稳定 sourceProfileId 为准：编辑同一 profile 的目标后，host/user/端口
+            // 已经变化，不能再用它们判断；同服务的另一条 profile 也不能被误删。
+            val sourceId = runCatching { storage.sourceProfileId() }.getOrNull()
             val activeCopy = runCatching { storage.load() }.getOrNull() ?: mutableUi.value.saved
-            val removeActiveCopy = removed != null && activeCopy != null &&
-                sameRemoteService(activeCopy, removed.config)
+            val legacyMatch = sourceId == null && removed != null && activeCopy != null &&
+                sameRemoteService(activeCopy, removed.config) &&
+                // known_hosts 可以按主机身份共享，但活动凭据必须按完整服务归属判断；
+                // 同主机不同账号/DSH 端口不能阻止删除方清理自己的密码/私钥。
+                !store.serviceUsedByOthers(removed.config, id)
+            val removeActiveCopy = removed != null && (sourceId == id || legacyMatch)
             val activeCleared = if (removeActiveCopy) {
                 runCatching { storage.clearConfig() }.isSuccess
             } else {
@@ -176,7 +185,7 @@ class RemoteHostController(
         val value = pending ?: return RemoteAttemptResult.Failure("没有待确认的主机密钥")
         pending = null
         mutableUi.update { it.copy(pendingFingerprint = null, pendingHost = "") }
-        return attempt(value.config, value.keepTunnel, value.fingerprint)
+        return attempt(value.config, value.keepTunnel, value.fingerprint, value.profileId)
     }
 
     fun cancelHostKey() {
@@ -263,17 +272,18 @@ class RemoteHostController(
                 attemptProfileId = profileId
             )
         }
-        scope.launch { attempt(config, keepTunnel) }
+        scope.launch { attempt(config, keepTunnel, profileId = profileId) }
     }
 
     internal suspend fun attempt(
         config: RemoteHostConfig,
         keepTunnel: Boolean,
-        forcedFingerprint: String? = null
+        forcedFingerprint: String? = null,
+        profileId: String? = null
     ): RemoteAttemptResult = mutex.withLock {
         pending = null
-        // 直接调用 attempt 的测试/内部路径也要记录本次配置，保证失败后的重试不会回到旧主机。
-        mutableUi.update { it.copy(attemptConfig = config) }
+        // 直接调用 attempt 的测试/内部路径也要记录本次配置/来源，保证失败重试与删除清理可定位。
+        mutableUi.update { it.copy(attemptConfig = config, attemptProfileId = profileId ?: it.attemptProfileId) }
         val problem = config.validationError()
         // 配置本身无效时不要拆掉已经连着的远程隧道。
         if (problem != null) return failWith(RemoteConnectionErrors.validation(problem), keepTunnel = false)
@@ -313,7 +323,7 @@ class RemoteHostController(
             if (trusted == null) {
                 publishStage(RemoteConnectionStage.TCP)
                 val probe = probeHostKey(config)
-                pending = PendingConnection(config, keepTunnel, probe.fingerprint)
+                pending = PendingConnection(config, keepTunnel, probe.fingerprint, mutableUi.value.attemptProfileId)
                 mutableUi.update {
                     it.copy(
                         busy = false,
@@ -392,7 +402,7 @@ class RemoteHostController(
                 }
                 return RemoteAttemptResult.Success(message, port)
             }
-            runCatching { storage.save(config) }.getOrElse {
+            runCatching { storage.save(config, mutableUi.value.attemptProfileId) }.getOrElse {
                 throw RemoteHostFailure("凭据无法加密保存，已取消远程连接")
             }
             val endpoint = config.endpointFor(candidate.localPort)
@@ -601,15 +611,32 @@ class RemoteHostController(
         error.message?.takeIf { it.startsWith("连接") || it.startsWith("中继") || it.startsWith("已保存") }
             ?: "请重试，或删除本机远程配置后重新添加"
 
+    /**
+     * 公开 connect 路径的来源推断：
+     * - 失败重试：本次 attemptConfig 相同，沿用 attemptProfileId；
+     * - 重启后“连接当前配置”：与已保存活动配置完全相同，沿用持久化的 sourceProfileId；
+     * - 新的手工配置：不继承旧来源，避免把新配置归到旧 profile。
+     */
+    private fun sourceProfileIdFor(config: RemoteHostConfig): String? {
+        val current = mutableUi.value
+        if (current.attemptConfig == config && current.attemptProfileId != null) {
+            return current.attemptProfileId
+        }
+        val stored = runCatching { storage.load() }.getOrNull()
+        if (stored == config) {
+            return runCatching { storage.sourceProfileId() }.getOrNull()
+        }
+        return null
+    }
+
     /** 判断两份配置是否指向同一远程 DSH 服务；用于删除命名连接时定位活动配置副本。 */
     private fun sameRemoteService(first: RemoteHostConfig, second: RemoteHostConfig): Boolean =
-        first.hostIdentity() == second.hostIdentity() &&
-            first.user == second.user &&
-            first.remoteDshPort == second.remoteDshPort
+        first.sameServiceAs(second)
 
     private data class PendingConnection(
         val config: RemoteHostConfig,
         val keepTunnel: Boolean,
-        val fingerprint: String
+        val fingerprint: String,
+        val profileId: String?
     )
 }

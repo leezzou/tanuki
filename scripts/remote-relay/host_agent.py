@@ -250,6 +250,9 @@ def main() -> int:
     parser.add_argument("--ca-file", default="", help="使用系统 CA 之外的私有 CA 证书文件")
     parser.add_argument("--print-pairing", action="store_true", help="把配对链接打印到 stdout；链接含一次性密钥")
     args = parser.parse_args()
+    # 必须在任何 logging.warning/info 之前配置；默认 WARNING handler 一旦被安装，
+    # 后面的 basicConfig(level=INFO) 不会生效，配对码会看不到。
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     host, port = p.split_endpoint(args.relay)
     if not 1 <= port <= 65535:
@@ -274,12 +277,15 @@ def main() -> int:
 
     pairing_path = Path(args.pairing_out).expanduser() if args.pairing_out else state_dir / "pairing.txt"
     uri = p.build_pairing_uri(host, port, room, token, host_id, args.cert_pin)
+    code = p.pairing_code(uri)
     write_pairing(pairing_path, uri)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.info("pairing file written: %s", pairing_path)
+    # 6 位码只用于人工核对链接，和链接一起输入手机；单独输入无法恢复中继/房间/token。
+    logging.info("pairing code: %s (请输入到手机，并与配对链接一起使用)", code)
     logging.info("ssh target: %s:%s", args.ssh_host, args.ssh_port)
     if args.print_pairing:
         print(uri, flush=True)
+        print("pairing_code=" + code, flush=True)
 
     agent = HostAgent(args)
     try:

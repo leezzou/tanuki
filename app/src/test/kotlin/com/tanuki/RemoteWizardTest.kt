@@ -15,8 +15,11 @@ import com.tanuki.runtime.RemoteHostKeyChangedException
 import com.tanuki.runtime.RemoteHostMachine
 import com.tanuki.runtime.RemoteHostProfileStore
 import com.tanuki.runtime.RemoteHostStorage
+import com.tanuki.runtime.RemoteHostStatus
+import com.tanuki.ui.RemoteHostSwitchPresentation
 import com.tanuki.runtime.RemoteHostWizard
 import com.tanuki.runtime.RemotePhase
+import com.tanuki.runtime.RemotePairingCode
 import com.tanuki.runtime.RemoteRelayPairing
 import com.tanuki.runtime.RemoteStageStatus
 import com.tanuki.runtime.RemoteWizardField
@@ -28,6 +31,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -224,6 +229,38 @@ class RemoteWizardTest {
         assertEquals(RemoteStageStatus.ACTIVE, wizard.stageStatus(RemoteConnectionStage.PORT_FORWARD))
     }
 
+    @Test
+    fun latePrivateKeyReadIsDiscardedAfterAuthSwitch() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
+        wizard.next()
+        wizard.updateDraft { it.copy(host = "dev.example.test", user = "tanuki") }
+        wizard.next()
+        wizard.setAuth(RemoteAuthType.PRIVATE_KEY)
+        val request = wizard.beginPrivateKeyRead()
+        wizard.setAuth(RemoteAuthType.PASSWORD)
+        assertFalse(wizard.applyPrivateKeyRead(request, "id_rsa", SYNTHETIC_KEY))
+        assertEquals("", wizard.state.value.draft.privateKey)
+    }
+
+    @Test
+    fun latePrivateKeyReadIsDiscardedAfterTestStarts() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
+        wizard.next()
+        wizard.updateDraft { it.copy(host = "dev.example.test", user = "tanuki") }
+        wizard.next()
+        wizard.setAuth(RemoteAuthType.PRIVATE_KEY)
+        wizard.updateDraft { it.copy(privateKey = SYNTHETIC_KEY) }
+        val request = wizard.beginPrivateKeyRead()
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.TEST, wizard.state.value.step)
+
+        assertFalse(wizard.applyPrivateKeyRead(request, "new-key", "-----BEGIN NEW-----"))
+        assertEquals(SYNTHETIC_KEY, wizard.state.value.draft.privateKey)
+        assertEquals(RemoteWizardStep.TEST, wizard.state.value.step)
+    }
+
     // ---------- 字段校验 ----------
 
     @Test
@@ -292,6 +329,73 @@ class RemoteWizardTest {
         assertNull(RemoteWizardValidation.relayLink(pairing.toUri()))
         assertNotNull(RemoteWizardValidation.relayLink(""))
         assertNotNull(RemoteWizardValidation.relayLink("https://example.test"))
+    }
+
+    @Test
+    fun pairingCodeMatchesSharedPythonVector() {
+        val uri = "tanuki-relay://v1?relay=relay.example.test%3A8443" +
+            "&room=ICEiIyQlJicoKSorLC0uLw" +
+            "&token=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" +
+            "&host=303132333435363738393a3b3c3d3e3f"
+        assertEquals("308002", RemotePairingCode.ofLink(uri))
+        assertNull(RemotePairingCode.validate("308002"))
+        assertNotNull(RemotePairingCode.validate("12345"))
+        assertNotNull(RemotePairingCode.validate("12345a"))
+    }
+
+    @Test
+    fun pairingRequiresMatchingSixDigitCode() {
+        val pairing = RemoteRelayPairing(
+            relayHost = "relay.example.test",
+            relayPort = 8443,
+            roomId = "ICEiIyQlJicoKSorLC0uLw",
+            token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            hostId = "303132333435363738393a3b3c3d3e3f"
+        )
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        wizard.next()
+        wizard.updateDraft { it.copy(relayUri = pairing.toUri(), user = "tanuki") }
+        assertFalse(wizard.next())
+        assertNotNull(wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE])
+
+        wizard.updateDraft { it.copy(pairingCode = "000000") }
+        assertFalse(wizard.next())
+        assertTrue(
+            wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE].orEmpty().contains("不一致")
+        )
+
+        wizard.updateDraft { it.copy(pairingCode = RemotePairingCode.of(pairing)) }
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
+    }
+
+    @Test
+    fun switchChipReflectsRealStatus() {
+        assertEquals(
+            "本机·运行中",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.LOCAL), localRunning = true).label
+        )
+        assertEquals(
+            "本机·未运行",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.LOCAL), localRunning = false).label
+        )
+        assertEquals(
+            "电脑·已连接",
+            RemoteHostSwitchPresentation.of(
+                RemoteHostStatus(phase = RemotePhase.REMOTE, host = "家里电脑"),
+                localRunning = true
+            ).label
+        )
+        assertEquals(
+            "切换中…",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.CONNECTING), localRunning = true).label
+        )
+        assertEquals(
+            "本机·已回退",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.FALLBACK), localRunning = true).label
+        )
+        assertFalse(RemoteHostSwitchPresentation.canSwitch(RemoteHostStatus(phase = RemotePhase.CONNECTING)))
     }
 
     @Test
@@ -575,8 +679,9 @@ class RemoteWizardTest {
         )
         val profile = profileStore.save("家里电脑", config(auth = RemoteAuthType.PASSWORD, password = "synthetic-password"))
 
-        assertTrue(controller.attempt(profile.config, keepTunnel = true) is RemoteAttemptResult.Success)
+        assertTrue(controller.attempt(profile.config, keepTunnel = true, profileId = profile.id) is RemoteAttemptResult.Success)
         assertNotNull(fixture.storage.load())
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
         assertEquals(RemotePhase.REMOTE, machine.status.phase)
 
         controller.deleteProfile(profile.id)
@@ -586,6 +691,241 @@ class RemoteWizardTest {
         assertTrue(controller.ui.value.profiles.isEmpty())
         assertFalse("已建立的隧道不应因删除保存记录而被关闭", tunnel.closed)
         assertEquals(RemotePhase.REMOTE, machine.status.phase)
+    }
+
+    @Test
+    fun editingProfileTargetThenDeletingStillClearsOldActiveCopy() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        assertTrue(controller.attempt(profile.config, keepTunnel = true, profileId = profile.id) is RemoteAttemptResult.Success)
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 只编辑目标并保存，不连接：活动存储仍是 A，但 profile 已变成 B。
+        profileStore.save(
+            "家里电脑",
+            config(host = "b.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-b"),
+            profile.id
+        )
+        assertEquals("a.example.test", fixture.storage.load()?.host)
+
+        controller.deleteProfile(profile.id)
+        assertNull(fixture.storage.load())
+        assertNull(fixture.storage.sourceProfileId())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
+        assertEquals(RemotePhase.REMOTE, machine.status.phase)
+    }
+
+    @Test
+    fun deletingOneOfTwoProfilesWithSameServiceKeepsActiveCopyOfOther() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val value = config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        val first = profileStore.save("家里电脑", value)
+        val second = profileStore.save("同一台电脑（备用）", value)
+        assertTrue(controller.attempt(value, keepTunnel = true, profileId = first.id) is RemoteAttemptResult.Success)
+
+        controller.deleteProfile(second.id)
+        assertNotNull("删除同服务的另一条 profile 不应清除活动副本", fixture.storage.load())
+        assertEquals(first.id, fixture.storage.sourceProfileId())
+        assertEquals("a.example.test", controller.ui.value.saved?.host)
+        assertFalse(tunnel.closed)
+
+        controller.deleteProfile(first.id)
+        assertNull(fixture.storage.load())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
+    }
+
+    @Test
+    fun publicReconnectAfterRestartPreservesSourceProfileId() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += firstScope
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        val first = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = firstScope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        first.connect(profile.config, profile.id)
+        withTimeout(5_000) {
+            while (machine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 模拟重启：新控制器从同一存储加载活动配置，再用公开 connect(config) 重连。
+        val restartedMachine = RemoteHostMachine()
+        restartedMachine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val restartedScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += restartedScope
+        val restarted = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = restartedScope,
+            machine = restartedMachine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        withTimeout(5_000) {
+            while (restarted.ui.value.saved == null) delay(10)
+        }
+        restarted.connect(restarted.ui.value.saved!!)
+        withTimeout(5_000) {
+            while (restartedMachine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals("公开重连必须保留来源 profile", profile.id, fixture.storage.sourceProfileId())
+
+        // 编辑同一 profile 目标为 B（仅保存），再删除：仍应按来源清理 A 的旧副本。
+        profileStore.save(
+            "家里电脑",
+            config(host = "b.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-b"),
+            profile.id
+        )
+        restarted.deleteProfile(profile.id)
+        withTimeout(5_000) {
+            while (restarted.ui.value.profiles.isNotEmpty()) delay(10)
+        }
+        assertNull(fixture.storage.load())
+        assertNull(fixture.storage.sourceProfileId())
+        assertNull(restarted.ui.value.saved)
+        assertFalse(tunnel.closed)
+    }
+
+    @Test
+    fun newManualConnectDoesNotInheritPreviousSourceProfile() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val transport = StagedFakeTransport(tunnel = FakeTunnel(45678))
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        fixture.storage.trustFingerprint("c.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val profile = profileStore.save(
+            "家里电脑",
+            config(host = "a.example.test", auth = RemoteAuthType.PASSWORD, password = "synthetic-a")
+        )
+        controller.connect(profile.config, profile.id)
+        withTimeout(5_000) {
+            while (machine.status.phase != RemotePhase.REMOTE) delay(10)
+        }
+        assertEquals(profile.id, fixture.storage.sourceProfileId())
+
+        // 新的手工配置成功后不能继承 P 的来源；删除 P 也不应清掉 C 的活动副本。
+        controller.connect(
+            config(host = "c.example.test", user = "c", auth = RemoteAuthType.PASSWORD, password = "synthetic-c")
+        )
+        withTimeout(5_000) {
+            while (controller.ui.value.saved?.host != "c.example.test") delay(10)
+        }
+        assertNull(fixture.storage.sourceProfileId())
+        controller.deleteProfile(profile.id)
+        withTimeout(5_000) {
+            while (controller.ui.value.profiles.isNotEmpty()) delay(10)
+        }
+        assertEquals("c.example.test", fixture.storage.load()?.host)
+        assertEquals("c.example.test", controller.ui.value.saved?.host)
+    }
+
+    @Test
+    fun legacyActiveCopyWithoutSourceClearsForSameHostDifferentAccount() = runBlocking {
+        val fixture = Fixture()
+        val profileStore = RemoteHostProfileStore(fixture.profileConfig, AesGcmSecretVault(fixture.key, fixture.profileSecrets))
+        val tunnel = FakeTunnel(45678)
+        val transport = StagedFakeTransport(tunnel = tunnel)
+        fixture.storage.trustFingerprint("a.example.test", 22, "SHA256:staged")
+        val machine = RemoteHostMachine()
+        machine.localConnected("http://127.0.0.1:41000", "http://127.0.0.1:41000/?token=local")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scopes += scope
+        val controller = RemoteHostController(
+            storage = fixture.storage,
+            transport = transport,
+            scope = scope,
+            machine = machine,
+            httpProbe = { true },
+            profileStore = profileStore
+        )
+        val alice = profileStore.save(
+            "alice",
+            config(host = "a.example.test", user = "alice", auth = RemoteAuthType.PASSWORD, password = "alice-secret")
+        )
+        profileStore.save(
+            "bob",
+            config(host = "a.example.test", user = "bob", auth = RemoteAuthType.PASSWORD, password = "bob-secret")
+        )
+        assertTrue(controller.attempt(alice.config, keepTunnel = true, profileId = alice.id) is RemoteAttemptResult.Success)
+
+        // 模拟从旧版本升级：活动副本存在，但没有 sourceProfileId。
+        fixture.storage.save(alice.config)
+        assertNull(fixture.storage.sourceProfileId())
+
+        controller.deleteProfile(alice.id)
+        withTimeout(5_000) {
+            while (controller.ui.value.profiles.any { it.id == alice.id }) delay(10)
+        }
+        assertNull("同主机不同账号不能阻止删除方清理自己的活动凭据", fixture.storage.load())
+        assertNull(controller.ui.value.saved)
+        assertFalse(tunnel.closed)
+        // bob 仍共享同一主机密钥信任，但 alice 的凭据副本已被清理。
+        assertNotNull(fixture.storage.knownFingerprint("a.example.test", 22))
+        assertTrue(controller.ui.value.profiles.any { it.name == "bob" })
     }
 
     @Test
@@ -634,6 +974,54 @@ class RemoteWizardTest {
         assertNull(controller.ui.value.saved)
         assertEquals("dev.example.test", controller.ui.value.attemptConfig?.host)
         assertEquals(RemoteFailureKind.AUTHENTICATION, controller.ui.value.failure?.kind)
+    }
+
+    @Test
+    fun wizardLeavesBusyAfterControllerSuccessAndShowsFailureStage() = runBlocking {
+        // 成功：控制器 attemptSucceeded/localPort 驱动向导离开 TEST，而不是永久 busy。
+        val successFixture = Fixture()
+        successFixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val successController = controller(
+            successFixture,
+            StagedFakeTransport(tunnel = FakeTunnel(45678)),
+            RemoteHostMachine()
+        )
+        val successWizard = readyToTestWizard()
+        val success = successController.attempt(successWizard.buildConfig()!!, keepTunnel = false)
+        assertTrue(success is RemoteAttemptResult.Success)
+        successController.ui.value.stage?.let(successWizard::onStage)
+        successController.ui.value.failure?.let(successWizard::onFailure)
+        if (successController.ui.value.attemptSucceeded) {
+            successWizard.onTestSucceeded(successController.ui.value.localPort)
+        }
+        assertEquals(RemoteWizardStep.DONE, successWizard.state.value.step)
+        assertFalse(successWizard.state.value.busy)
+        assertEquals(45678, successWizard.state.value.localPort)
+
+        // 失败：控制器 failure/stage 驱动向导退出 busy，并停在失败阶段。
+        val failFixture = Fixture()
+        failFixture.storage.trustFingerprint("dev.example.test", 22, "SHA256:staged")
+        val failController = controller(
+            failFixture,
+            StagedFakeTransport(
+                stages = listOf(
+                    RemoteConnectionStage.TCP,
+                    RemoteConnectionStage.SSH_HANDSHAKE,
+                    RemoteConnectionStage.AUTHENTICATION
+                ),
+                openError = IOException("Auth fail")
+            ),
+            RemoteHostMachine()
+        )
+        val failWizard = readyToTestWizard()
+        val failed = failController.attempt(failWizard.buildConfig()!!, keepTunnel = false)
+        assertTrue(failed is RemoteAttemptResult.Failure)
+        failController.ui.value.stage?.let(failWizard::onStage)
+        failController.ui.value.failure?.let(failWizard::onFailure)
+        assertEquals(RemoteWizardStep.TEST, failWizard.state.value.step)
+        assertFalse(failWizard.state.value.busy)
+        assertEquals(RemoteConnectionStage.AUTHENTICATION, failWizard.state.value.failure?.stage)
+        assertEquals(RemoteStageStatus.FAILED, failWizard.stageStatus(RemoteConnectionStage.AUTHENTICATION))
     }
 
     @Test

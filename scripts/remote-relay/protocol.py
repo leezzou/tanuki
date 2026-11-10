@@ -260,6 +260,17 @@ def build_pairing_uri(host: str, port: int, room: str, token: str, host_id: str,
     return URI_PREFIX + "&".join(parts)
 
 
+def pairing_code(uri: str) -> str:
+    """与手机端 RemotePairingCode 共用：SHA-256(规范链接) 前 8 字节 mod 1e6。
+
+    6 位码只用于人工核对“链接和码来自同一次配对”，不是新的传输秘密；
+    单独输入 6 位码无法恢复中继地址/房间/token。
+    """
+    digest = hashlib.sha256(uri.strip().encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], "big")
+    return "{:06d}".format(value % 1000000)
+
+
 def parse_pairing_uri(uri: str) -> Dict[str, object]:
     text = uri.strip()
     if not text.startswith(URI_PREFIX) or "#" in text:

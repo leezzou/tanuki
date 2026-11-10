@@ -158,6 +158,7 @@ HTTP 200..399 或 401 → 存活
 | 阶段进度 | `TCP → SSH_HANDSHAKE → AUTHENTICATION → PORT_FORWARD → DSH_PROBE → COMPLETE`；只前进不后退；控制器通过可选 `StagedSshTransport` 报告，未实现阶段回调的测试假传输退化为粗粒度 |
 | 错误契约 | `RemoteFailureInfo(stage, kind, reason, suggestion, retryable)`；中文原因 + 下一步建议；主机密钥变化 `retryable=false`；错误文案只使用固定中文或领域异常，不回显密码/私钥/token |
 | 命名连接 | 最多 50 条，名称 1-64 字符；非敏感字段与应用私有配置分离，密码/私钥/口令/token 只经 Android Keystore AES-256-GCM 保存；删除一条不影响其他连接；同一时间仍只允许一个活动远程连接 |
+| 活动副本归属 | 成功连接时在活动配置存储写入稳定的 `sourceProfileId`；公开“连接当前配置”/失败重试在配置匹配时恢复来源，新手工配置不继承旧来源；删除命名连接按来源 ID 清理对应活动副本（编辑目标后仍正确），同服务的其他 profile 不被误删；已建立隧道保持到用户断开 |
 | 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文阶段化错误并关闭隧道；不自动重试、不静默降级为明文 |
 | 未实现 | 中继/WebRTC、远程 DSH 启停、多台远程主机同时连接、Ed25519 私钥/主机密钥；均标注为后续切片 |
 
@@ -168,6 +169,7 @@ HTTP 200..399 或 401 → 存活
 | 项目 | 契约 |
 |---|---|
 | 配对链接 | `tanuki-relay://v1?relay=<host:port>&room=<16B base64url>&token=<32B base64url>&host=<16B hex>&pin=sha256-<32B base64url>`；`pin` 可省略但仅当系统 CA + 主机名校验可用；自签名中继必须提供 |
+| 6 位配对码 | `code = SHA-256(规范配对链接) 前 8 字节大端无符号整数 mod 1,000,000`，零填充 6 位；主机端显示/打印，手机端要求与链接一起输入并比对；它是人工核对码，不是新的传输秘密，单独输入不能恢复 relay/room/token |
 | 传输 | TLS 1.2/1.3；有 pin 时只信任该证书 DER 的 SHA-256 并检查有效期；无 pin 时使用系统 CA + 主机名；不存在忽略证书/明文回退开关 |
 | 帧 | `4 字节大端总长 | 1 字节类型 | 4 字节流号 | 负载`；总长 ≤64 KiB，控制帧负载 ≤1 KiB |
 | 类型 | `CONTROL=1`、`OPEN=2`、`OPEN_OK=3`、`DATA=4`、`CLOSE=5`、`PING=6`、`PONG=7`、`ERROR=8` |

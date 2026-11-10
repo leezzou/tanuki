@@ -179,6 +179,14 @@ class RemoteHostProfileStore(
     fun identityUsedByOthers(identity: String, excludingId: String): Boolean =
         list().any { it.id != excludingId && it.config.hostIdentity() == identity }
 
+    /**
+     * 是否还有别的 profile 指向完全相同的服务（主机身份 + 用户 + DSH 端口）。
+     * 旧活动副本没有 sourceProfileId 时，用它判断凭据归属；不能复用 known_hosts 的主机身份判断，
+     * 因为 bob@host 与 alice@host 共享主机密钥，但不拥有 alice 的密码/私钥。
+     */
+    fun serviceUsedByOthers(config: RemoteHostConfig, excludingId: String): Boolean =
+        list().any { it.id != excludingId && it.config.sameServiceAs(config) }
+
     private fun ids(): List<String> = config.getString(KEY_IDS)
         .orEmpty()
         .split(',')
