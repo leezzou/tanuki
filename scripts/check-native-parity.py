@@ -97,21 +97,33 @@ def parse_matrix(text: str) -> tuple[list[dict[str, str]], list[str]]:
     return rows, errors
 
 
-def parse_cases(text: str) -> tuple[set[str], list[str]]:
+def parse_case_coverage(text: str) -> tuple[dict[str, set[str]], list[str]]:
+    """解析每个验收用例标题后的 `- 覆盖：...` 声明。
+
+    覆盖声明是“该用例真的验证了哪些矩阵行”的唯一依据；只写用例编号
+    不再足以通过门禁，避免行引用了不覆盖该行的共享用例。
+    """
     errors: list[str] = []
-    cases = set(CASE_RE.findall(text))
-    # 只把第 4 节里以 **A-... 开头的段落视为定义。
-    defined = set(re.findall(r"^\*\*(A-[A-Z]+-\d{2})", text, flags=re.MULTILINE))
-    referenced = set()
+    coverage: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    current: str | None = None
     for line in text.splitlines():
-        if line.startswith("|"):
-            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-            if len(cells) == 5:
-                referenced.update(CASE_RE.findall(cells[4]))
-    missing = sorted(referenced - defined)
-    if missing:
-        errors.append("验收用例被引用但未定义：" + "、".join(missing))
-    return defined, errors
+        heading = re.match(r"^\*\*(A-[A-Z]+-\d{2})", line)
+        if heading:
+            current = heading.group(1)
+            coverage.setdefault(current, set())
+            continue
+        if current and line.startswith("- 覆盖："):
+            raw = line[len("- 覆盖："):].strip()
+            seen.add(current)
+            if raw and raw != "—":
+                for token in re.split(r"[、,，\s]+", raw):
+                    if token:
+                        coverage[current].add(token)
+            current = None
+    for case_id in sorted(set(coverage) - seen):
+        errors.append(f"验收用例缺少覆盖声明：{case_id}")
+    return coverage, errors
 
 
 def check_paths(text: str, root: Path) -> list[str]:
@@ -134,8 +146,29 @@ def check_paths(text: str, root: Path) -> list[str]:
 
 def validate(text: str, root: Path, check_path_refs: bool = True) -> list[str]:
     rows, errors = parse_matrix(text)
-    _, case_errors = parse_cases(text)
+    coverage, case_errors = parse_case_coverage(text)
     errors.extend(case_errors)
+    row_ids = {row["id"] for row in rows}
+
+    for case_id, covered in sorted(coverage.items()):
+        for row_id in sorted(covered):
+            if row_id not in row_ids:
+                errors.append(f"{case_id}: 覆盖声明含不存在的矩阵行 {row_id}")
+
+    for row in rows:
+        refs = sorted(set(CASE_RE.findall(row["cells"][4])))
+        if not refs:
+            errors.append(f"{row['id']}: 没有验收用例")
+            continue
+        covering = [case_id for case_id in refs if row["id"] in coverage.get(case_id, set())]
+        if not covering:
+            errors.append(
+                f"{row['id']}: 引用的用例都不覆盖该行（{'、'.join(refs)}）"
+            )
+        for case_id in refs:
+            if case_id not in coverage:
+                errors.append(f"{row['id']}: 引用未定义或无覆盖声明的用例 {case_id}")
+
     if not rows:
         errors.append("没有解析到任何矩阵行")
     if check_path_refs:
@@ -289,19 +322,33 @@ def self_test() -> int:
 ## 4. 验收用例
 
 **A-SESS-01（JVM）**
+- 覆盖：SESS-01、SESS-02、SESS-03、SESS-04、SESS-05
 **A-CHAT-01（JVM）**
+- 覆盖：CHAT-01、CHAT-02、CHAT-03、CHAT-04、CHAT-05
 **A-INPUT-01（JVM）**
+- 覆盖：INPUT-01、INPUT-02、INPUT-03、INPUT-04、INPUT-05
 **A-ATT-01（JVM）**
+- 覆盖：ATT-01、ATT-02、ATT-03、ATT-04、ATT-05
 **A-MODEL-01（JVM）**
+- 覆盖：MODEL-01、MODEL-02、MODEL-03、MODEL-04、MODEL-05
 **A-APPROVAL-01（JVM）**
+- 覆盖：APPROVAL-01、APPROVAL-02、APPROVAL-03、APPROVAL-04、APPROVAL-05
 **A-TOOL-01（JVM）**
+- 覆盖：TOOL-01、TOOL-02、TOOL-03、TOOL-04、TOOL-05
 **A-FILE-01（JVM）**
+- 覆盖：FILE-01、FILE-02、FILE-03、FILE-04、FILE-05
 **A-SEARCH-01（JVM）**
+- 覆盖：SEARCH-01、SEARCH-02、SEARCH-03、SEARCH-04、SEARCH-05
 **A-SET-01（JVM）**
+- 覆盖：SET-01、SET-02、SET-03、SET-04、SET-05
 **A-NOTIFY-01（JVM）**
+- 覆盖：NOTIFY-01、NOTIFY-02、NOTIFY-03、NOTIFY-04、NOTIFY-05
 **A-SKILL-01（JVM）**
+- 覆盖：SKILL-01、SKILL-02、SKILL-03、SKILL-04、SKILL-05
 **A-REMOTE-01（JVM）**
+- 覆盖：REMOTE-01、REMOTE-02、REMOTE-03、REMOTE-04、REMOTE-05
 **A-SAFE-01（JVM）**
+- 覆盖：SAFE-01、SAFE-02、SAFE-03、SAFE-04、SAFE-05
 """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -316,9 +363,17 @@ def self_test() -> int:
         broken = sample.replace("| SESS-02 |", "| SESS-01 |", 1)
         broken = broken.replace("| CHAT-05 |", "| CHAT-05 | 多 |", 1)
         broken = broken.replace("A-INPUT-01", "A-INPUT-99", 1)
+        broken = broken.replace(
+            "| CHAT-02 | Markdown | 有 | 仅官方 | P1 · A-CHAT-01 |",
+            "| CHAT-02 | Markdown | 有 | 仅官方 | P1 · A-SESS-01 |",
+            1,
+        )
         broken_errors = validate(broken, root)
         if not broken_errors:
             print("SELF-TEST FAILED（坏样例未被发现）")
+            return 1
+        if not any("CHAT-02" in error and "覆盖" in error for error in broken_errors):
+            print("SELF-TEST FAILED（覆盖错配未被发现）")
             return 1
         print(f"SELF-TEST PASS（有效样例通过；坏样例发现 {len(broken_errors)} 个问题）")
         return 0
@@ -348,7 +403,7 @@ def main() -> int:
             print(" -", error)
         return 1
     rows, _ = parse_matrix(text)
-    print(f"PASS: {args.doc} 共 {len(rows)} 行、14 个功能域，ID/状态/优先级/验收引用/路径检查通过")
+    print(f"PASS: {args.doc} 共 {len(rows)} 行、14 个功能域，ID/状态/优先级/验收引用/覆盖/路径检查通过")
     return 0
 
 

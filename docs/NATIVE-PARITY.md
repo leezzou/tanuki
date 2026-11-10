@@ -81,13 +81,13 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | SESS-08 | 置顶/手动排序 | 置顶、拖拽、最近更新/手动排序；顺序本地保存 | `仅官方`：原生会话条顺序固定 | P2 · `workspace/pinSession`、`insertSessionBefore` · 44 会话管理（排序/置顶，待确认） · A-SESS-02 |
 | SESS-09 | 删除工作区/会话 | 工作区删除确认，会话留在 Ungrouped | `仅官方` | P2 · `workspace/delete` · 44 会话管理 · A-SESS-02 |
 | SESS-10 | 会话搜索 | 标题/工作区即时匹配 + 250ms 防抖的会话内容搜索，最多 20 条 | `仅官方`：原生只有文件页“搜索当前文件夹” | P1 · `session/search` · 44 会话管理（搜索，待确认） · A-SEARCH-01、A-SEARCH-02 |
-| SESS-11 | 工作区分组/树形层级 | 按工作区或工作区树分组，折叠、层级拖拽、祖先展开 | `仅官方`：原生是扁平会话条 | P2 · `workspace/follow` · 44 会话管理（工作区树，待确认） · A-SESS-03 |
+| SESS-11 | 工作区分组/树形层级 | 按工作区或工作区树分组，折叠、层级拖拽、祖先展开 | `仅官方`：原生是扁平会话条 | P2 · `workspace/follow` · 44 会话管理（工作区树，待确认） · A-FILE-05 |
 | SESS-12 | 待处理交互/未读状态 | 行内显示等待审批/计划待审/等待回答、warning 点、未读完成 | `仅官方`：原生只区分 running | P1 · `DshMuxProtocol` 事件 · 42 聊天链路（事件）+ 45 审批（状态展示） · A-APPROVAL-01、A-NOTIFY-01 |
 | SESS-13 | 子代理会话 | 侧栏隐藏 subagent 来源会话，可按直接父子地址打开 | `仅官方` | P2 · `subagents/*` · 42 聊天链路（子会话路由，待确认） · A-TOOL-02 |
-| SESS-14 | 会话目标（goal） | 输入框上方目标条，支持编辑/暂停/恢复/清除与 `/goal` 气泡 | `仅官方` | P2 · `goals/*` · 未排期 · A-SESS-02 |
-| SESS-15 | 定时任务/自动化 | Schedule 列表、历史、更新/删除，活动任务在会话行显示时钟 | `仅官方` | P2 · `schedule/*` · 未排期 · A-SESS-02 |
+| SESS-14 | 会话目标（goal） | 输入框上方目标条，支持编辑/暂停/恢复/清除与 `/goal` 气泡 | `仅官方` | P2 · `goals/*` · 44 会话管理（目标，待确认） · A-SESS-05 |
+| SESS-15 | 定时任务/自动化 | Schedule 列表、历史、更新/删除，活动任务在会话行显示时钟 | `仅官方` | P2 · `schedule/*` · 未排期 · A-SESS-06 |
 | SESS-16 | 复制会话 ID/日志导出 | 行菜单复制完整 ID；会话日志下载 | `仅官方` | P2 · `session/*`、日志路由 · 44 会话管理（复制 ID/日志导出，待确认） · A-SESS-02 |
-| SESS-17 | 通知点击定位会话 | 通知携带会话 id，点击后展开侧栏、清搜索、展开分组并选中 | `原生完整`：`DshNativeController.openSession()` 冷启动/已加载均选中，失败保留 pending 给官方回退 | — · `DshNativeController.kt` · android_agent-29/PR #22、android_agent-33/PR #26 · A-NOTIFY-01 |
+| SESS-17 | 通知点击定位会话 | 通知携带会话 id，点击后展开侧栏、清搜索、展开分组并选中 | `原生完整`：`DshNativeController.openSession()` 冷启动/已加载均选中，失败保留 pending 给官方回退 | — · `DshNativeController.kt` · android_agent-29/PR #22、android_agent-33/PR #26 · A-SESS-03、A-NOTIFY-02 |
 | SESS-18 | 会话级模型选择 | 每个会话可选模型，Host 返回模型目录 | `仅官方` | P1 · `session/selectModel`、`session/modelCatalog` · 44 会话管理（模型选择，待确认） · A-MODEL-01 |
 | SESS-19 | 队列/中途引导 | 排队消息、编辑/移除、steering 在下一步边界送达 | `仅官方` | P1 · `session/updateQueue`、`session/prompt` · 46 输入（队列/steering） · A-INPUT-01 |
 | SESS-20 | 草稿保留 | 切换会话/刷新/重启浏览器后保留未提交输入 | `仅官方` | P2 · 原生 composer · 46 输入（草稿） · A-INPUT-02 |
@@ -100,22 +100,22 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | CHAT-02 | Markdown/GFM | 标题、列表、表格、链接、引用、任务列表、代码块 | `仅官方`：原生 `Text` 纯文本 | P1 · 原生消息渲染 · 未排期 · A-CHAT-02、A-CHAT-03 |
 | CHAT-03 | 代码块/高亮/复制 | 语法高亮、复制、行号/折叠 | `仅官方` | P2 · 原生消息渲染 · 未排期 · A-CHAT-03 |
 | CHAT-04 | 消息图片 | 用户/助手图片、内嵌预览、点击浮层、失败状态 | `仅官方`：原生跳过图片 | P1 · `session/attachment` · 未排期 · A-ATT-01、A-CHAT-03 |
-| CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `仅官方` | P1 · `fileUploads/*`、`fileReferences/list` · android_agent-46（未提交） · A-ATT-01 |
+| CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `仅官方` | P1 · `fileUploads/*`、`fileReferences/list` · 46 输入（未提交） · A-ATT-01、A-CHAT-03 |
 | CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `仅官方`：原生跳过 `tool/result` | P1 · `DshMuxProtocol`/消息模型 · 45 审批/工具卡片（未提交）+ 42 聊天链路（事件） · A-TOOL-01、A-TOOL-02 |
 | CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `仅官方` | P1 · 原生消息模型 · 45 审批/工具卡片（未提交） · A-TOOL-01 |
 | CHAT-08 | 推理/思考过程 | 思考预览、过程分组、完全展开模式 | `仅官方`：原生只取 text-delta，不显示 reasoning | P2 · `DshFollowParser` · android_agent-42 · A-CHAT-02 |
 | CHAT-09 | Token 用量/上下文 | 每轮 token、输出速度、缓存命中、会话统计 | `仅官方` | P2 · 原生统计条 · 未排期 · A-CHAT-02 |
 | CHAT-10 | 轮次折叠/过程分组 | 已完成轮次过程可折叠，最终答案不隐藏 | `仅官方` | P2 · 原生消息分组 · 未排期 · A-CHAT-03 |
 | CHAT-11 | 失败行/重试/欠费 | 终止轮次红点、失败摘要、重试、欠费中立文案 | `仅官方`：原生只有整页错误 banner | P0/P1 · 原生消息状态 · 42 聊天链路（错误/失败行） · A-CHAT-01、A-CHAT-03 |
-| CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-03 |
-| CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-FILE-03 |
+| CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-05 |
+| CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-CHAT-05 |
 | CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*`、`approval/request` · 45 审批（42 提供事件） · A-APPROVAL-02 |
 | CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：android_agent-42 未提交的 `DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · 42 聊天链路 · A-CHAT-01、A-CHAT-03 |
-| CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-03 |
+| CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-05 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
 | CHAT-18 | 交付物（deliverables） | 轮次页脚交付物卡片、右侧预览 | `仅官方` | P2 · 官方交付物协议 · 未排期 · A-FILE-03 |
-| CHAT-19 | Goal/Todo/Queue 卡片 | 输入框上方上下文堆栈 | `仅官方` | P2 · `goals/*`、`session/updateQueue` · 未排期 · A-CHAT-03 |
-| CHAT-20 | 中断轮次显示 | 进程中途退出显示本地化停止行，不显示代码标签 | `仅官方` | P2 · 原生消息状态 · 未排期 · A-CHAT-03 |
+| CHAT-19 | Goal/Todo/Queue 卡片 | 输入框上方上下文堆栈 | `仅官方` | P2 · `goals/*`、`session/updateQueue` · 未排期 · A-CHAT-06 |
+| CHAT-20 | 中断轮次显示 | 进程中途退出显示本地化停止行，不显示代码标签 | `仅官方` | P2 · 原生消息状态 · 未排期 · A-CHAT-05 |
 
 ### 3.3 输入（INPUT）
 
@@ -129,13 +129,13 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | INPUT-06 | 附件/图片选择 | 选择、粘贴、拖放，按顺序进入草稿 | `仅官方` | P1 · `fileUploads/upload` · 46 输入 · A-ATT-01、A-ATT-02 |
 | INPUT-07 | 模型选择器 | 输入框旁模型选择，Host 校正实际值 | `仅官方` | P1 · `session/selectModel` · 未排期 · A-MODEL-02 |
 | INPUT-08 | 推理强度选择 | 模型支持的 reasoning effort 选择 | `仅官方` | P1 · `llm/*` · 未排期 · A-MODEL-02 |
-| INPUT-09 | 权限预设选择 | read-only/workspace-write/danger-full-access 等预设目录 | `仅官方`：原生只显示沙箱能力，不修改 DSH 策略 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-02 |
-| INPUT-10 | 计划模式 | plan mode 与计划审阅联动 | `仅官方` | P2 · `agentPresets/*`、`userQuestions/*` · 未排期 · A-APPROVAL-02 |
-| INPUT-11 | 语音输入 | 语音转文字/语音输入包 | `仅官方` | P2 · 官方语音插件 · 未排期 · A-INPUT-02 |
+| INPUT-09 | 权限预设选择 | read-only/workspace-write/danger-full-access 等预设目录 | `仅官方`：原生只显示沙箱能力，不修改 DSH 策略 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
+| INPUT-10 | 计划模式 | plan mode 与计划审阅联动 | `仅官方` | P2 · `agentPresets/*`、`userQuestions/*` · 未排期 · A-INPUT-05 |
+| INPUT-11 | 语音输入 | 语音转文字/语音输入包 | `仅官方` | P2 · 官方语音插件 · 未排期 · A-INPUT-04 |
 | INPUT-12 | 草稿/队列/中途引导 | 草稿本地保存、排队、steering | `仅官方` | P1 · `session/updateQueue` · 46 输入（队列/steering） · A-INPUT-01 |
 | INPUT-13 | 忙碌时发送行为 | 发送/排队/中途引导策略可配置 | `仅官方` | P1 · `session/prompt` · 46 输入（忙碌时发送） · A-INPUT-01 |
 | INPUT-14 | 上下文用量指示 | 输入框统计条：轮次、步骤、速度、token、缓存 | `仅官方` | P2 · 原生统计 · 未排期 · A-CHAT-02 |
-| INPUT-15 | 快捷键 | 发送、换行、停止、搜索、新建等可配置快捷键 | `仅官方`：原生无自定义快捷键 | P2 · 官方快捷键服务 · 未排期 · A-SET-02 |
+| INPUT-15 | 快捷键 | 发送、换行、停止、搜索、新建等可配置快捷键 | `仅官方`：原生无自定义快捷键 | P2 · 官方快捷键服务 · 未排期 · A-SET-05 |
 
 ### 3.4 附件（ATT）
 
@@ -147,7 +147,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | ATT-04 | 大小/类型/数量限制 | 单请求/图片总量/请求体上限，超限明确报错 | `仅官方` | P1 · `fileUploads/*` · 46 输入 · A-ATT-01 |
 | ATT-05 | 会话媒体授权读取 | `session/attachment` 按会话授权，图片 URL 随 binding 释放撤销 | `仅官方` | P1 · `session/attachment` · 未排期 · A-ATT-01 |
 | ATT-06 | 远程/工作区文件引用 | 工作区文件引用与 `@` 提及，不复制文件 | `仅官方` | P1 · `fileReferences/list` · 46 输入 · A-INPUT-01 |
-| ATT-07 | Office/PDF 转换预览 | `officeToPdf/*` 生成/渲染 | `仅官方`：原生文件页已有 PDF/DOCX/XLSX 只读预览，但不在对话内 | P2 · `officeToPdf/*` · 未排期 · A-FILE-02 |
+| ATT-07 | Office/PDF 转换预览 | `officeToPdf/*` 生成/渲染 | `仅官方`：原生文件页已有 PDF/DOCX/XLSX 只读预览，但不在对话内 | P2 · `officeToPdf/*` · 未排期 · A-ATT-03 |
 | ATT-08 | 上传进度/失败重试 | 阶段/字节进度、失败可重试 | `仅官方` | P2 · `fileUploads/*` · 46 输入 · A-ATT-02 |
 
 ### 3.5 模型/推理（MODEL）
@@ -161,8 +161,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | MODEL-05 | 默认模型 | 设置默认模型，新会话继承 | `仅官方` | P1 · `session/initializeDefaultModel` · 未排期 · A-MODEL-02 |
 | MODEL-06 | 模型发现 | 按提供方发现可用模型 | `仅官方` | P2 · `llm/discoverModels` · 未排期 · A-MODEL-01 |
 | MODEL-07 | Token/上下文用量 | 每轮/会话 token、缓存命中、速度 | `仅官方` | P2 · 原生统计 · 未排期 · A-CHAT-02 |
-| MODEL-08 | 自动审查 | auto-review 权限/流程 | `仅官方` | P2 · 官方插件 · 未排期 · A-MODEL-02 |
-| MODEL-09 | CoT 翻译 | 思考过程翻译 | `仅官方` | P2 · 官方插件 · 未排期 · A-CHAT-02 |
+| MODEL-08 | 自动审查 | auto-review 权限/流程 | `仅官方` | P2 · 官方插件 · 未排期 · A-MODEL-04 |
+| MODEL-09 | CoT 翻译 | 思考过程翻译 | `仅官方` | P2 · 官方插件 · 未排期 · A-MODEL-04 |
 | MODEL-10 | 账户余额/配额 | 账户状态、余额、配额失败提示 | `仅官方` | P2 · `account/*` · 未排期 · A-MODEL-01 |
 
 ### 3.6 审批/权限（APPROVAL）
@@ -171,7 +171,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 |---|---|---|---|---|
 | APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析 `approval/request` 最小字段，未接 UI | P0 · `DshMuxProtocol.kt` · 45 审批（42 提供 waterfall 事件） · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `仅官方`：原生无回答通道 | P0 · `$events/result` waterfall · 45 审批 · A-APPROVAL-01、A-APPROVAL-02 |
-| APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-02 |
+| APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
 | APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · 45 审批（42 提供事件） · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*` · 45 审批 · A-APPROVAL-02 |
@@ -192,16 +192,16 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | TOOL-06 | 后台任务（jobs） | 任务列表、实时输出、等待/取消、完成通知 | `仅官方` | P2 · `job/*` · 未排期 · A-TOOL-03 |
 | TOOL-07 | 子代理 | 子会话、父子地址、中断/提示 | `仅官方` | P2 · `subagents/*` · 未排期 · A-TOOL-03 |
 | TOOL-08 | 技能调用 | `skills/list`、技能卡片、斜杠命令 | `仅官方`：原生运行时装 browser/phone 受管技能，但无 UI | P2 · `skills/list` · 未排期 · A-SKILL-02 |
-| TOOL-09 | Office/PDF 工具 | Office 转 PDF/渲染 | `仅官方` | P2 · `officeToPdf/*` · 未排期 · A-FILE-02 |
+| TOOL-09 | Office/PDF 工具 | Office 转 PDF/渲染 | `仅官方` | P2 · `officeToPdf/*` · 未排期 · A-TOOL-04 |
 | TOOL-10 | 动态插件工具 | 动态 Cordis 插件提供的工具/UI | `仅官方` | P2 · `dynamicCordisRunner/*` · 未排期 · A-SKILL-03 |
 
 ### 3.8 工作区/文件（FILE）
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| FILE-01 | 工作区列表/添加 | 侧栏工作区、目录选择器、添加工作区 | `仅官方`：原生只有固定 `/workspaces` 文件页 | P1 · `workspace/*`、`directoryPicker/*` · 未排期 · A-SESS-02、A-FILE-02 |
-| FILE-02 | 工作区重命名/删除/重排 | 行菜单、确认、层级拖拽 | `仅官方` | P2 · `workspace/rename`、`delete`、`insertBefore` · 未排期 · A-SESS-02 |
-| FILE-03 | 工作区树形层级 | 按工作区树分组、祖先展开、子级优先 | `仅官方` | P2 · `workspace/follow` · 未排期 · A-SESS-03 |
+| FILE-01 | 工作区列表/添加 | 侧栏工作区、目录选择器、添加工作区 | `仅官方`：原生只有固定 `/workspaces` 文件页 | P1 · `workspace/*`、`directoryPicker/*` · 未排期 · A-FILE-05 |
+| FILE-02 | 工作区重命名/删除/重排 | 行菜单、确认、层级拖拽 | `仅官方` | P2 · `workspace/rename`、`delete`、`insertBefore` · 未排期 · A-FILE-05 |
+| FILE-03 | 工作区树形层级 | 按工作区树分组、祖先展开、子级优先 | `仅官方` | P2 · `workspace/follow` · 未排期 · A-FILE-05 |
 | FILE-04 | 文件树/浏览 | 右侧文件树、目录展开、面包屑 | `原生完整`：`WorkspaceFilesPage` 工作区/手机文件、面包屑、列表/网格 | — · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |
 | FILE-05 | 文件预览 | 文本、Markdown、图片、音频、视频、PDF、DOCX、XLSX、HTML | `原生部分`：文本/图片/音视频/PDF/DOCX/XLSX 已支持；`.doc` 明确不支持内置预览；Markdown/HTML 按文本 | P2 · `WorkspaceFileViewer.kt` · android_agent-31/32/35、41、39 · A-FILE-01、A-FILE-02 |
 | FILE-06 | 文本编辑 | 会话内编辑/保存，冲突检测 | `原生部分`：原生文件页可编辑 ≤256 KiB 文本，保存前检查 revision；DSH 运行时禁止写 | P2 · `WorkspaceFilesPage.kt`/`WorkspaceFileManager.kt` · 既有 · A-FILE-02 |
@@ -212,9 +212,9 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | FILE-11 | 文件变更/diff | 工作区变更列表、diff 预览 | `仅官方` | P2 · `workspaceFiles/changes`、`workspaceFiles/read` · 未排期 · A-FILE-03 |
 | FILE-12 | 交付物 | 轮次交付物卡片/预览 | `仅官方` | P2 · 官方交付物协议 · 未排期 · A-FILE-03 |
 | FILE-13 | Git worktree | 实验性 worktree 管理 | `仅官方` | P2 · 官方 worktree 插件 · 未排期 · A-FILE-03 |
-| FILE-14 | 在文件管理器中打开 | `session/openWorkspacePath`、系统关联打开 | `原生部分`：原生文件页可用系统 Intent 打开音视频/文档；无“在文件管理器中显示” | P2 · `session/openWorkspacePath` · 未排期 · A-FILE-02 |
+| FILE-14 | 在文件管理器中打开 | `session/openWorkspacePath`、系统关联打开 | `原生部分`：原生文件页可用系统 Intent 打开音视频/文档；无“在文件管理器中显示” | P2 · `session/openWorkspacePath` · 未排期 · A-FILE-06 |
 | FILE-15 | 手机文件访问/写入授权 | 官方网页无此能力 | `原生完整`：原生文件页手机卷只读浏览、单独授权写入、停止 DSH 恢复只读 | — · `PhoneFileService.kt`/`WorkspaceFilesPage.kt` · 既有 · A-FILE-02、A-FILE-04 |
-| FILE-16 | 工作区容量/存储统计 | 官方网页无 Tanuki 容量预算/目录占用 | `原生完整`：原生设置“存储与空间”容量预算、目录占用、清理缓存 | — · `WorkspaceStorageControls.kt` · 既有 · A-FILE-02 |
+| FILE-16 | 工作区容量/存储统计 | 官方网页无 Tanuki 容量预算/目录占用 | `原生完整`：原生设置“存储与空间”容量预算、目录占用、清理缓存 | — · `WorkspaceStorageControls.kt` · 既有 · A-SET-08 |
 
 ### 3.9 搜索（SEARCH）
 
@@ -223,9 +223,9 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | SEARCH-01 | 会话标题搜索 | 侧栏搜索标题/工作区，即时结果 | `仅官方` | P1 · `session/search` · 未排期 · A-SEARCH-01 |
 | SEARCH-02 | 会话内容搜索 | 250ms 防抖、摘要片段、最多 20 条 | `仅官方` | P1 · `session/search` · 未排期 · A-SEARCH-01 |
 | SEARCH-03 | 文件/文件夹搜索 | 文件树搜索 | `原生完整`：原生文件页“搜索当前文件夹” | — · `WorkspaceFilesPage.kt` · 既有 · A-SEARCH-02 |
-| SEARCH-04 | 对话内查找 | 页内查找/匹配跳转 | `仅官方` | P2 · 原生消息列表 · 未排期 · A-CHAT-03 |
-| SEARCH-05 | 命令面板/快捷键速查 | 快捷键速查、命令目录 | `仅官方` | P2 · 官方快捷键服务 · 未排期 · A-SET-02 |
-| SEARCH-06 | 全局搜索 | 跨会话/文件/命令的统一搜索 | `仅官方` | P2 · 官方组合 · 未排期 · A-SEARCH-01 |
+| SEARCH-04 | 对话内查找 | 页内查找/匹配跳转 | `仅官方` | P2 · 原生消息列表 · 未排期 · A-CHAT-05 |
+| SEARCH-05 | 命令面板/快捷键速查 | 快捷键速查、命令目录 | `仅官方` | P2 · 官方快捷键服务 · 未排期 · A-SET-05 |
+| SEARCH-06 | 全局搜索 | 跨会话/文件/命令的统一搜索 | `仅官方` | P2 · 官方组合 · 未排期 · A-SEARCH-03 |
 | SEARCH-07 | 浏览器页内查找 | 浏览器 tab 内查找/上下匹配 | `原生完整`：原生浏览器页内查找、匹配计数 | — · `AgentBrowserPage.kt` · 既有 · A-SEARCH-02 |
 
 ### 3.10 设置（SET）
@@ -234,19 +234,19 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 |---|---|---|---|---|
 | SET-01 | 官方 DSH 设置入口 | 侧栏 Settings，设置文档/分类面板 | `原生部分`：原生设置“网页与兼容性”可切官方/原生、打开官方页面；不内嵌官方设置 | P1 · `TanukiUi.kt`/`DshWebView.kt` · android_agent-33/PR #26 · A-SET-02 |
 | SET-02 | 模型/提供方设置 | 提供方、模型、凭据、默认模型 | `仅官方` | P1 · `settings/*`、`credentials/*`、`llm/*` · 未排期 · A-MODEL-01 |
-| SET-03 | 权限/沙箱设置 | 权限预设、工具审批策略 | `仅官方`：原生只显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-02 |
+| SET-03 | 权限/沙箱设置 | 权限预设、工具审批策略 | `仅官方`：原生只显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | SET-04 | 插件管理设置 | 安装/启用/禁用/卸载、版本豁免、市场 | `仅官方` | P2 · `pluginManager/*`、`pluginMarket/*` · 未排期 · A-SKILL-02 |
-| SET-05 | 快捷键设置 | 每设备自定义、冲突检测、恢复默认 | `仅官方` | P2 · 官方快捷键服务 · 未排期 · A-SET-02 |
+| SET-05 | 快捷键设置 | 每设备自定义、冲突检测、恢复默认 | `仅官方` | P2 · 官方快捷键服务 · 未排期 · A-SET-05 |
 | SET-06 | 主题/外观 | 跟随系统/浅色/深色、字号、字体 | `原生部分`：原生 Compose 跟随系统深浅色；无手动主题/字号设置 | P2 · `TanukiDesign.kt` · 既有 · A-SET-02 |
-| SET-07 | 语言/本地化 | 官方 zh/en 等 locale，切换即时生效 | `仅官方`：原生界面中文硬编码 | P2 · 原生字符串资源 · 未排期 · A-SET-02 |
+| SET-07 | 语言/本地化 | 官方 zh/en 等 locale，切换即时生效 | `仅官方`：原生界面中文硬编码 | P2 · 原生字符串资源 · 未排期 · A-SET-06 |
 | SET-08 | 通知设置 | 应用内通知/系统通知入口 | `原生完整`：原生“运行与后台”聊天通知总开关、权限/系统入口、更新通知 | — · `TanukiUi.kt`/`ChatNotification*` · android_agent-29/PR #22、24/PR #19 · A-NOTIFY-02 |
-| SET-09 | 应用更新 | 检查/下载/覆盖安装、后台检查 | `原生完整`：原生“应用更新”卡片、后台每 30 分钟检查、权限申请 | — · `ApplicationUpdateCard.kt`/`BackgroundUpdateChecks.kt` · android_agent-24/PR #19 · A-NOTIFY-02 |
+| SET-09 | 应用更新 | 检查/下载/覆盖安装、后台检查 | `原生完整`：原生“应用更新”卡片、后台每 30 分钟检查、权限申请 | — · `ApplicationUpdateCard.kt`/`BackgroundUpdateChecks.kt` · android_agent-24/PR #19 · A-SET-07 |
 | SET-10 | 组件版本/维护 | Ubuntu/Node/DSH 版本、重装、卸载、备用 | `原生完整`：原生“组件维护与诊断”、版本选择、重装/卸载/备用/切换 | — · `TanukiUi.kt`/`DshVersionManagerDialog.kt` · android_agent-25/PR #18、43 · A-SET-02 |
-| SET-11 | 存储/备份/快照 | 官方网页无 Tanuki 容量预算/私有快照；项目导出由 Tanuki 提供 | `原生完整`：原生“存储与空间”“项目与备份” | — · `TanukiUi.kt`/`DataSnapshots.kt` · 既有 · A-FILE-02 |
+| SET-11 | 存储/备份/快照 | 官方网页无 Tanuki 容量预算/私有快照；项目导出由 Tanuki 提供 | `原生完整`：原生“存储与空间”“项目与备份” | — · `TanukiUi.kt`/`DataSnapshots.kt` · 既有 · A-SET-08 |
 | SET-12 | 远程主机 | 官方网页无 SSH 隧道设置 | `原生完整`：原生“远程主机”配置、测试连接、指纹确认、断开/清除 | — · `RemoteHostSettings.kt` · android_agent-34/PR #29 · A-REMOTE-02 |
 | SET-13 | 网页/兼容性 | WebView 能力、兼容层、Blob 导出 | `原生完整`：原生“网页与兼容性”检测、更新入口、兼容开关 | — · `TanukiUi.kt`/`WebViewSupport.kt` · 既有 · A-SET-02 |
 | SET-14 | 高级/关于/许可 | 关于、许可、缓存清理 | `原生完整`：原生“高级与关于”、许可、清除下载缓存 | — · `TanukiUi.kt` · 既有 · A-SET-02 |
-| SET-15 | 遥测/分析开关 | 产品分析策略与开关 | `仅官方` | P2 · `productAnalytics/*` · 未排期 · A-SET-02 |
+| SET-15 | 遥测/分析开关 | 产品分析策略与开关 | `仅官方` | P2 · `productAnalytics/*` · 未排期 · A-SET-09 |
 
 ### 3.11 通知（NOTIFY）
 
@@ -257,7 +257,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | NOTIFY-03 | 审批/提问通知 | 页面 warning 点/等待状态 | `原生替代`：`approval/request`、`user-questions/request` 通知 | — · `ChatNotificationPolicy.kt` · android_agent-29/PR #22 · A-NOTIFY-01 |
 | NOTIFY-04 | 通知点击定位会话 | 页面内跳转 | `原生完整`：`openSession` 展开侧栏、清搜索、展开分组、确认选中 | — · `DshNativeController.kt` · android_agent-29/33 · A-NOTIFY-02 |
 | NOTIFY-05 | 通知权限/渠道 | 浏览器权限/系统通知 | `原生完整`：Android 13 `POST_NOTIFICATIONS`、`dsh-chat` 渠道、总开关、系统入口 | — · `ChatNotificationCenter.kt` · android_agent-29/PR #22 · A-NOTIFY-02 |
-| NOTIFY-06 | 应用内 Toast/待处理徽标 | 全局 Toast、行内 warning 点、未读 | `仅官方`：原生无会话内 toast/徽标；有少量系统 Toast | P2 · 原生 UI · 未排期 · A-NOTIFY-02 |
+| NOTIFY-06 | 应用内 Toast/待处理徽标 | 全局 Toast、行内 warning 点、未读 | `仅官方`：原生无会话内 toast/徽标；有少量系统 Toast | P2 · 原生 UI · 未排期 · A-NOTIFY-04 |
 | NOTIFY-07 | 后台/息屏/ROM 限制 | 浏览器后台节流/桌面通知 | `原生部分`：前台服务/唤醒锁/WorkManager 已有；真实 ROM/息屏送达未验收 | P1 · `RuntimeService`/`ChatNotifier` · android_agent-29 · A-NOTIFY-03 |
 
 ### 3.12 技能/插件（SKILL）
@@ -310,22 +310,26 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 > - `仪器`：`./gradlew :app:connectedModernDebugAndroidTest` 或指定类；需要 ARM64 模拟器/设备、已安装 App、已准备 DSH 运行环境；使用合成会话/合成数据，不登录真实账号。
 > - `手工`：需要真实设备、真实 DSH/PRoot、真实模型或真实 sshd；涉及真实模型/账号的用例仍受用户暂停项约束。
 > - 所有用例都不得使用真实用户会话、真实 API Key、真实 Cookie 或未脱敏日志。
+> - 每个用例标题下有 `- 覆盖：...`，列出它真正验证的矩阵行；第 3 节的行只能引用覆盖该行的用例。检查器会拒绝“编号存在但未覆盖该行”的引用。
 
 ### 4.1 会话
 
 **A-SESS-01（JVM）会话列表与历史分页协议**
+- 覆盖：SESS-01、SESS-02、SESS-03
 1. 启动本地合成 DSH HTTP 服务，按官方信封返回 `session/list`、`session/projections`、`session/page`。
 2. 断言：列表标题取 `projections.values.title`；`asOfSeq` 作为 `throughSeq`；只提取 append-origin 文本；`maxMessages=120`；空/损坏记录跳过。
 3. 增加“向前分页”用例：第二页 `throughSeq` 正确、重复页去重、失败保留已加载页。
 4. 现有覆盖：`DshNativeApiTest`、`DshNativeControllerTest`；新增分页用例应放在同目录。
 
 **A-SESS-02（JVM）会话生命周期方法**
+- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09、SESS-16
 1. 合成服务实现 `session/create`、`session/rename`、`session/fork`、`workspace/archiveSession`、`workspace/unarchiveSession`、`workspace/delete`、`workspace/pinSession`、`workspace/insertSessionBefore`。
 2. 断言请求信封 `type=client-request`、`rpcId` 关联、参数与官方方法一致；业务错误只显示短码。
 3. 断言失败不改变本地选择；归档/删除确认流程不被静默跳过。
 4. 现有覆盖：`DshNativeApiTest`；新增 `DshSessionLifecycleTest`。
 
 **A-SESS-03（仪器）会话列表/状态/通知定位**
+- 覆盖：SESS-01、SESS-17
 1. 前置：`Pixel_7_API_34_arm64`，WebView ≥123，安装当前 debug APK；DSH 运行环境就绪；预置 2 个合成会话（一个 running、一个 idle）。
 2. 打开“设置 → 网页与兼容性 → 界面：原生界面”，确认列表显示标题/时间/运行状态。
 3. 点击第二个会话，确认消息区切换且不残留上一个会话内容。
@@ -333,206 +337,360 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 5. 现有覆盖：`DshUiSwitchTest`、`DshNativeControllerTest`；仪器新增 `DshNativePresentationTest`。
 
 **A-SESS-04（手工）真实会话生命周期**
+- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09、SESS-16
 1. 前置：真实/模拟设备 + 真实 DSH + 可用模型账号（用户暂停项恢复后）。
 2. 新建、重命名、分叉、归档、取消归档各一次；确认官方页面与原生页看到同一会话。
 3. 在运行中会话执行“停止并归档”，确认工作列表、停止、归档、撤销。
 4. 记录设备、DSH 版本、模型、时间；不得使用真实用户数据。
 
+**A-SESS-05（JVM/仪器）会话目标（goal）**
+- 覆盖：SESS-14、CHAT-19
+1. JVM：合成 `goals/get`、`goals/create`、`goals/edit`、`goals/pause`、`goals/resume`、`goals/clear`，断言目标文本、状态、错误码与 `/goal` 气泡事件。
+2. 仪器：目标条显示、编辑、暂停、恢复、清除；`/goal` 命令气泡；被拒绝的变更内联提示。
+3. 预期：状态与官方投影一致；清除后条带消失；不伪造目标，不把目标写进会话正文。
+
+**A-SESS-06（JVM/仪器）定时任务（schedule）**
+- 覆盖：SESS-15
+1. JVM：合成 `schedule/list`、`schedule/history`、`schedule/update`、`schedule/delete`、`schedule/catalog`，断言任务字段、历史、更新/删除错误码。
+2. 仪器：任务列表/历史/编辑/删除；会话行活动时钟标记；收到 `schedule/changed` 后刷新。
+3. 预期：变更持久化；失败可读；无任务时空态；活动标记只在 idle 行显示。
+
 ### 4.2 对话
 
 **A-CHAT-01（JVM）follow/历史解析**
+- 覆盖：CHAT-01、CHAT-11、CHAT-15、CHAT-17
 1. 用 `DshFollowParser` 喂入：snapshot（含 assistantStream baseline）、event（user/assistant）、assistant-stream start/chunk/end（committed/aborted）、重复 event。
 2. 断言：只显示 text-delta；committed 后临时回复被持久消息替换且不重复；aborted 清空临时回复；超长文本截断；未知帧丢弃。
 3. 断言 `surfaceOp=replace` 的上下文副本、注入上下文、工具事件不进入文本消息。
 4. 现有覆盖：`DshChatProtocolTest`、`DshNativeApiTest`；新增 `DshMuxProtocolTest`（android_agent-42 已带实现）。
 
 **A-CHAT-02（JVM）消息内容模型**
+- 覆盖：CHAT-02、CHAT-08、CHAT-09、INPUT-14、MODEL-07
 1. 为 Markdown、代码块、图片、文件引用、工具卡片、推理、token 统计各构造一条合成事件。
 2. 断言解析后的消息模型字段完整、未知字段不崩、超长/非法内容降级为纯文本。
 3. 断言不把工具参数、Cookie、token 写入展示模型或日志。
 4. 新增 `DshMessageModelTest`。
 
 **A-CHAT-03（仪器）对话渲染**
+- 覆盖：CHAT-02、CHAT-03、CHAT-04、CHAT-05、CHAT-10、CHAT-11、CHAT-15
 1. 前置：同 A-SESS-03；预置包含文本、Markdown、代码块、图片、工具卡片、推理、失败行、token 统计的合成会话。
 2. 逐项检查：Markdown 结构、代码复制、图片预览/失败态、工具展开/折叠、推理显隐、失败重试、token 行。
 3. 检查深色主题、长文本、横竖屏、字体放大；截图留存但不得含真实数据。
 4. 新增 `DshNativeChatPresentationTest`。
 
 **A-CHAT-04（手工）真实长对话/流式/重连**
+- 覆盖：—
 1. 真实 DSH + 模型，发送长回复，观察流式增量与最终落盘不重复。
 2. 中途断网/杀进程/重启，确认重连后历史不丢、不重复、失败行正确。
 3. 记录 DSH 版本、模型、网络条件；用户暂停项恢复后执行。
 
+**A-CHAT-05（仪器）消息操作/链接/查找/滚动/中断**
+- 覆盖：CHAT-12、CHAT-13、CHAT-16、CHAT-20、SEARCH-04
+1. 前置：合成含 Markdown 文件链接、长消息、失败/中断轮次的会话。
+2. 操作：复制消息、点赞/点踩、点击文件链接打开右侧预览、页内查找上下匹配、切换会话后返回、查看中断轮次。
+3. 预期：复制文本正确；反馈提交；文件链接按当前工作区解析并支持 `#L24`；滚动位置恢复；中断行本地化且无代码标签。
+
+**A-CHAT-06（仪器）Goal/Todo/Queue 上下文卡片**
+- 覆盖：CHAT-19
+1. 前置：合成同时有 goal、todo、queue 的会话。
+2. 操作：查看输入框上方三张卡片，编辑/暂停 goal，展开/收起 todo，编辑/移除 queue。
+3. 预期：卡片顺序 Todo→Goal→Queue；状态与官方投影一致；空态不占位。
+
 ### 4.3 输入
 
 **A-INPUT-01（JVM）提示词/队列/取消协议**
+- 覆盖：INPUT-02、INPUT-05、INPUT-12、INPUT-13、SESS-19、ATT-06
 1. 合成服务实现 `session/prompt`、`session/cancel`、`session/updateQueue`。
 2. 断言：空文本且无附件被拒绝；`requestId` 幂等；附件顺序保持；queue edit 只接受非空文本；取消只作用于当前回合。
 3. 断言业务错误映射为短码，不泄露请求体。
 4. 新增 `DshPromptProtocolTest`。
 
 **A-INPUT-02（仪器）原生 composer**
+- 覆盖：INPUT-01、INPUT-02、INPUT-03、SESS-04、SESS-20
 1. 前置：同 A-SESS-03；原生页可输入。
 2. 输入多行文本、IME 组合、Shift+Enter；发送后出现本地回显；停止按钮可取消；草稿切换会话后保留。
 3. 检查发送中禁用/排队提示、空输入禁用、超长文本限制。
 4. 新增 `DshNativeComposerTest`。
 
 **A-INPUT-03（手工）真实发送/停止/steering**
+- 覆盖：INPUT-02、INPUT-03、SESS-19
 1. 真实 DSH + 模型，发送、停止、排队、steering 各一次。
 2. 确认停止后不回放任务；steering 在下一步边界生效；失败可重试。
 3. 用户暂停项恢复后执行。
 
+**A-INPUT-04（仪器）语音输入**
+- 覆盖：INPUT-11
+1. 前置：设备有麦克风权限；官方语音输入插件可用。
+2. 操作：点击语音输入，分别拒绝/允许权限，录制短句，转写后发送或取消。
+3. 预期：拒绝时有明确提示；转写文本进入草稿；取消不发送；不把录音写入应用私有目录。
+
+**A-INPUT-05（仪器）计划模式（plan mode）**
+- 覆盖：INPUT-10
+1. 前置：合成 plan-mode preset 与 plan-review 事件。
+2. 操作：进入计划模式，提交计划请求，查看计划审阅卡片，选择同意执行/要求修改。
+3. 预期：计划模式状态可见；审阅卡片与官方一致；要求修改回到编辑器且不提交批准。
+
 ### 4.4 附件
 
 **A-ATT-01（JVM）上传/附件协议**
+- 覆盖：ATT-01、ATT-02、ATT-04、ATT-05、CHAT-04、CHAT-05、INPUT-06
 1. 合成服务实现 `fileUploads/upload`、`session/attachment`。
 2. 断言：分块/偏移/总量、类型/大小限制、失败重试、会话授权、附件不跨会话读取。
 3. 断言 token/Cookie 不进入附件 URL 日志。
 4. 新增 `DshAttachmentProtocolTest`。
 
 **A-ATT-02（仪器）选择/粘贴/预览/移除**
+- 覆盖：ATT-02、ATT-03、ATT-08、INPUT-06
 1. 前置：同 A-SESS-03；准备合成图片/文本/PDF。
 2. 从系统选择器、粘贴、拖放各添加一次；检查缩略图、移除、失败保留、上传进度。
 3. 检查超大文件/不支持类型的明确错误；不读取真实用户文件。
 4. 新增 `DshNativeAttachmentTest`。
 
+**A-ATT-03（JVM/仪器）Office/PDF 转换预览**
+- 覆盖：ATT-07
+1. JVM：合成 `officeToPdf/generation`、`officeToPdf/render`，断言生成状态、渲染 URL/字节、错误码。
+2. 仪器：在对话附件中打开 Office/PDF 预览，检查加载、失败与重试。
+3. 预期：转换失败有中文错误；不把转换结果写入用户工作区；不覆盖原文件。
+
 ### 4.5 模型/推理
 
 **A-MODEL-01（JVM）模型目录/提供方/凭据协议**
+- 覆盖：MODEL-01、MODEL-04、MODEL-06、MODEL-10、SESS-18、SET-02
 1. 合成服务实现 `session/modelCatalog`、`llm/listProviders`、`llm/listConfigurableProviders`、`llm/discoverModels`、`credentials/describe`。
 2. 断言模型列表、默认值、错误码、密钥不回显。
 3. 新增 `DshModelProtocolTest`。
 
 **A-MODEL-02（仪器）模型/推理选择 UI**
+- 覆盖：MODEL-02、MODEL-03、MODEL-05、INPUT-07、INPUT-08
 1. 前置：同 A-SESS-03；合成模型目录含 2 个模型、2 档 reasoning。
 2. 切换模型/推理强度，确认新回合请求使用所选值；Host 拒绝时回退并提示。
 3. 检查默认模型设置持久化；重启后仍生效。
 4. 新增 `DshNativeModelTest`。
 
 **A-MODEL-03（手工）真实提供方/密钥**
+- 覆盖：MODEL-04
 1. 真实提供方 + 真实密钥（用户暂停项恢复后），完成一次模型调用。
 2. 确认密钥不出现在日志/状态/通知；失败时错误可读。
 3. 不在本审计中执行。
 
+**A-MODEL-04（JVM/仪器）自动审查/CoT 翻译**
+- 覆盖：MODEL-08、MODEL-09
+1. JVM：合成自动审查与 CoT 翻译的配置/事件，断言开关、权限、错误码。
+2. 仪器：开启自动审查/翻译，触发一次回合，检查审查结果与翻译显示。
+3. 预期：关闭后不显示；失败不阻塞主回复；不把翻译文本写回会话。
+
+**A-MODEL-05（JVM/仪器）账户余额/配额**
+- 覆盖：MODEL-10
+1. JVM：合成 `account/getState`、`getBalance`、`getProfile`，断言字段与错误码。
+2. 仪器：欠费/配额失败时显示中立文案，不显示提供方原文；账户页可打开。
+3. 预期：余额不泄露 token；配额失败可重试；账户页不缓存敏感值。
+
 ### 4.6 审批/权限
 
 **A-APPROVAL-01（JVM）审批/提问 waterfall**
+- 覆盖：APPROVAL-01、APPROVAL-02、APPROVAL-05、APPROVAL-08、SESS-12、SAFE-10
 1. 用 `DshMuxProtocol.parseEventFrame` 喂入 `approval/request`、`user-questions/request`、`cancel`、`ready`、非法帧。
 2. 断言：只保留 eventId/agentId/工具名/原因/问题/选项；不保留工具参数；超长截断；非法帧丢弃。
 3. 构造 `$events/result` 回答帧，断言 eventId 关联、批准/拒绝/回答语义、一次性请求不可重复回答。
 4. 现有/新增：`DshMuxProtocolTest`（android_agent-42）。
 
 **A-APPROVAL-02（仪器）审批/提问/计划审阅 UI**
+- 覆盖：APPROVAL-01、APPROVAL-02、APPROVAL-05、APPROVAL-06、APPROVAL-07、CHAT-14、SAFE-10
 1. 前置：同 A-SESS-03；合成 `approval/request`、`user-questions/request`、`plan-review`。
 2. 检查卡片显示工具/原因/问题/选项；Enter 批准、Esc 拒绝、按钮拒绝；问题选择/自定义/跳过；计划“同意执行/要求修改”。
 3. 检查回答后卡片消失、失败提示、重复点击不重复提交。
 4. 新增 `DshNativeApprovalTest`。
 
 **A-APPROVAL-03（手工）真实工具审批/沙箱**
+- 覆盖：APPROVAL-10
 1. 真实 DSH 触发 shell/文件写入审批；分别以 read-only/workspace-write/danger-full-access 运行。
 2. 确认无沙箱后端时 bash 被拒绝；批准只对当前请求生效；审计日志有记录。
 3. 用户暂停项恢复后执行。
 
+**A-APPROVAL-04（JVM/仪器）权限预设/沙箱设置**
+- 覆盖：APPROVAL-03、INPUT-09、SET-03
+1. JVM：合成 `permissionPresets/catalog`，断言预设 id/名称/描述/当前值；切换请求只提交允许字段。
+2. 仪器：在设置/输入框切换 read-only、workspace-write、danger-full-access；检查沙箱能力提示与二次确认。
+3. 预期：切换后新回合使用新预设；无沙箱后端时 workspace-write 的 bash 被拒绝；不自动切 danger-full-access。
+
 ### 4.7 工具调用
 
 **A-TOOL-01（JVM）工具事件/卡片模型**
+- 覆盖：TOOL-01、TOOL-02、CHAT-06、CHAT-07
 1. 合成 `tool/result`、`tool/start`、错误/取消事件，断言卡片状态、参数摘要、输出/错误、折叠边界。
 2. 断言敏感参数不进入展示模型；未知工具降级为通用卡片。
 3. 新增 `DshToolCardTest`。
 
 **A-TOOL-02（仪器）工具/终端/浏览器/任务/子代理**
+- 覆盖：TOOL-01、TOOL-02、TOOL-03、TOOL-04、TOOL-06、TOOL-07、SESS-13、APPROVAL-07
 1. 前置：同 A-SESS-03；合成工具调用、终端输出、任务列表、子代理会话。
 2. 检查卡片展开/折叠、长输出、错误、取消；终端 tab 创建/关闭/重连；任务等待/取消；子代理跳转。
 3. 新增 `DshNativeToolPresentationTest`。
 
 **A-TOOL-03（手工）真实终端/浏览器/任务/子代理**
+- 覆盖：TOOL-03、TOOL-04、TOOL-06、TOOL-07
 1. 真实 DSH 中运行 shell、打开浏览器、启动后台任务、创建子代理。
 2. 确认原生 UI 与官方 UI 状态一致；停止/取消不误杀其他任务。
 3. 用户暂停项恢复后执行。
 
+**A-TOOL-04（仪器）Office/PDF 工具**
+- 覆盖：TOOL-09
+1. 前置：合成 Office/PDF 工具调用。
+2. 操作：展开工具卡片，查看转换/渲染结果，失败后重试。
+3. 预期：结果可预览；失败有错误；不覆盖原文件。
+
 ### 4.8 工作区/文件
 
 **A-FILE-01（JVM）文件类型/预览策略**
+- 覆盖：FILE-05
 1. 现有 `WorkspaceFileKindTest`、`TextFileReaderTest`、`Pdf*Test`、`Docx*Test`、`Xlsx*Test` 覆盖分类、上限、损坏包、缩放/分页策略。
 2. 新增用例：Markdown/HTML 作为文本、`.doc` 明确不支持、超大文件错误、路径穿越拒绝。
 3. 命令：`./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.*File*' --tests 'com.tanuki.*Pdf*' --tests 'com.tanuki.*Docx*' --tests 'com.tanuki.*Xlsx*'`。
 
 **A-FILE-02（仪器）原生文件页**
+- 覆盖：FILE-04、FILE-05、FILE-06、FILE-07、FILE-08、FILE-09、FILE-10、FILE-14、FILE-15、FILE-16、TOOL-05
 1. 前置：同 A-SESS-03；预置合成工作区文件（文本/图片/PDF/DOCX/XLSX/视频）与手机卷。
 2. 浏览、搜索、排序、网格/列表、隐藏文件、面包屑；预览各格式；编辑 ≤256 KiB 文本并检查 revision 冲突；新建/重命名/复制/移动/删除；导入/导出。
 3. 检查 DSH 运行时写操作被阻止；手机卷只读/授权写入/停止后恢复只读；容量统计。
 4. 现有覆盖：`WorkspaceFileManagerTest`、`FilesBrowserPresentationTest`、`WorkspaceVideoPresentationTest`、`PhoneFile*Test`；新增 `WorkspaceFileParityTest`。
 
 **A-FILE-03（JVM/仪器）工作区变更/交付物/worktree**
+- 覆盖：FILE-11、FILE-12、FILE-13、CHAT-18
 1. JVM：合成 `workspaceFiles/changes`、`workspaceFiles/read`，断言 diff 模型、文件路径、截断。
 2. 仪器：变更列表、diff 预览、交付物卡片、worktree 入口；无数据时空态。
 3. 新增 `WorkspaceChangesTest`。
 
 **A-FILE-04（手工）真实大文件/Office/手机存储**
+- 覆盖：FILE-05、FILE-15
 1. 真实设备 + 真实 DSH，打开大 PDF/DOCX/XLSX、复杂 Word、加密 PDF、损坏包。
 2. 检查滚动/缩放/内存/深色主题；手机卷授权/撤销/停止后只读。
 3. 用户暂停项恢复后执行。
 
+**A-FILE-05（JVM/仪器）工作区管理**
+- 覆盖：FILE-01、FILE-02、FILE-03、SESS-11
+1. JVM：合成 `workspace/create`、`rename`、`delete`、`insertBefore`、`follow`，断言参数、错误码与顺序。
+2. 仪器：添加工作区、重命名、删除确认、拖拽排序、树形层级；删除父工作区后子工作区归入最近祖先。
+3. 预期：会话归属不变；删除确认保留边界；层级与官方一致；失败保留当前选择。
+
+**A-FILE-06（仪器）在文件管理器中打开**
+- 覆盖：FILE-14
+1. 前置：设备有文件管理器；合成工作区文件。
+2. 操作：对文件执行“在文件管理器中显示”或系统关联打开；检查不支持的类型提示。
+3. 预期：只打开当前工作区路径；不泄露 guest 路径；失败有提示；不复制文件。
+
 ### 4.9 搜索
 
 **A-SEARCH-01（JVM）会话搜索**
+- 覆盖：SESS-10、SEARCH-01、SEARCH-02
 1. 合成 `session/search` 返回标题匹配与内容匹配（含摘要片段）。
 2. 断言 250ms 防抖、查询中止、最多 20 条、归档结果标记、内容搜索失败仍显示标题匹配。
 3. 新增 `DshSessionSearchTest`。
 
 **A-SEARCH-02（仪器）搜索 UI**
+- 覆盖：SESS-10、SEARCH-01、SEARCH-02、SEARCH-03、SEARCH-07、FILE-09
 1. 前置：同 A-SESS-03；预置多会话/多文件。
 2. 会话标题/内容搜索、文件页当前文件夹搜索、浏览器页内查找各一次；检查清空、收起、选中、滚动到结果。
 3. 新增 `DshNativeSearchTest`。
 
+**A-SEARCH-03（JVM/仪器）全局搜索**
+- 覆盖：SEARCH-06
+1. JVM：合成跨会话/文件/命令搜索响应，断言合并、排序、上限与错误降级。
+2. 仪器：输入查询，切换结果类型，打开结果；无结果空态。
+3. 预期：不跨权限读取；归档结果标记；失败保留可用结果。
+
 ### 4.10 设置
 
 **A-SET-01（JVM）设置/凭据/权限预设协议**
+- 覆盖：SET-02、SET-03、SET-04
 1. 合成 `settings/describe`、`settings/mutate`、`settings/update`、`credentials/describe`、`permissionPresets/catalog`。
 2. 断言 schema 校验、变更只提交允许字段、密钥不回显、未知字段拒绝。
 3. 新增 `DshSettingsProtocolTest`。
 
 **A-SET-02（仪器）设置 UI**
+- 覆盖：SET-01、SET-06、SET-10、SET-13、SET-14
 1. 前置：同 A-SESS-03。
 2. 原生设置 8 个分类逐项打开；检查官方/原生界面开关、WebView 检测、远程主机、组件维护、应用更新、存储/备份、高级/关于。
 3. 检查深浅色、字体放大、横竖屏；官方设置入口可打开官方页面。
 4. 现有覆盖：`SetupPresentationTest`、`WorkspaceStorageUiTest`；新增 `SettingsParityTest`。
 
 **A-SET-03（手工）设置持久化/重启**
+- 覆盖：SET-01、SET-06、SET-08、SET-10、SET-12、SET-13、SET-14
 1. 修改界面偏好、通知开关、早启动、低电阈值、远程主机，重启 App/进程后确认保留。
 2. 确认失败写入不覆盖旧值；恢复默认只影响当前项。
 3. 用户暂停项恢复后执行。
 
+**A-SET-05（JVM/仪器）快捷键设置**
+- 覆盖：SET-05、INPUT-15、SEARCH-05
+1. JVM：合成快捷键目录/冲突检测/保存/恢复默认，断言冲突拒绝、覆盖持久化、未知命令拒绝。
+2. 仪器：修改发送、新建、搜索快捷键，触发冲突提示，恢复默认；检查快捷键速查。
+3. 预期：冲突不保存；重启后保留；恢复默认只影响当前项；不覆盖浏览器/系统保留键。
+
+**A-SET-06（仪器）语言/本地化**
+- 覆盖：SET-07
+1. 前置：官方支持 zh/en；原生界面当前中文。
+2. 操作：切换官方语言，检查会话、设置、审批文案；重启后保留。
+3. 预期：官方页面即时切换；原生硬编码文案列出待本地化清单；不把中文写死成唯一语言。
+
+**A-SET-07（仪器）应用更新**
+- 覆盖：SET-09
+1. 前置：合成 `app-update.json` 与更高 `versionCode`。
+2. 操作：手动检查、后台检查、下载、取消、安装权限；低版本/同版本/坏 JSON。
+3. 预期：只提示不自动安装；版本比较按 `versionCode`；失败可重试；不覆盖用户数据。
+
+**A-SET-08（仪器）存储/备份/快照**
+- 覆盖：SET-11、FILE-16
+1. 前置：合成工作区容量与目录占用；停止 DSH。
+2. 操作：调整容量预算、统计占用、创建/恢复私有快照、导出项目 ZIP。
+3. 预期：容量预算生效；快照含配置/凭据/会话但不回滚项目；导出排除常见凭据；失败保留旧数据。
+
+**A-SET-09（JVM/仪器）遥测/分析开关**
+- 覆盖：SET-15
+1. JVM：合成 `productAnalytics/enabled`、`watchPolicy`，断言开关、策略变更、错误码。
+2. 仪器：关闭/开启遥测，检查官方页面不发送分析事件；重启后保留。
+3. 预期：默认遵循官方策略；关闭后不采集；不把开关状态写入会话。
+
 ### 4.11 通知
 
 **A-NOTIFY-01（JVM）通知策略/路由/文案**
+- 覆盖：NOTIFY-01、NOTIFY-02、NOTIFY-03、SESS-12、APPROVAL-09
 1. 现有 `ChatNotificationPolicyTest`、`ChatNotificationRoutingTest`、`DshChatProtocolTest` 覆盖：true→false 回合完成、error、approval/question、去重、前台/可见会话抑制、正文最小文案。
 2. 新增：非法 id/超长/非 ASCII 丢弃；通知点击目标不在列表时保留 pending。
 3. 命令：`./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.ChatNotification*' --tests 'com.tanuki.DshChatProtocolTest'`。
 
 **A-NOTIFY-02（仪器）通知权限/渠道/点击**
+- 覆盖：NOTIFY-04、NOTIFY-05、NOTIFY-06、SET-08、APPROVAL-09、SESS-17
 1. 前置：Android 13+ 模拟器；安装 debug APK；授予/拒绝 `POST_NOTIFICATIONS` 各一次。
 2. 触发回合完成/错误/审批/提问合成事件；检查渠道、group/summary、正文、点击定位会话、总开关关闭后不提醒。
 3. 现有覆盖：`ChatNotification*`；新增 `ChatNotificationPresentationTest`。
 
 **A-NOTIFY-03（手工）后台/息屏/ROM**
+- 覆盖：NOTIFY-07
 1. 真实设备，App 退后台/息屏/省电模式/自启动限制下触发通知。
 2. 记录送达延迟、是否被拦截、点击是否定位；覆盖至少一个厂商 ROM。
 3. 用户暂停项恢复后执行。
 
+**A-NOTIFY-04（仪器）应用内 Toast/待处理徽标**
+- 覆盖：NOTIFY-06
+1. 前置：合成待审批/待回答/未读完成会话。
+2. 操作：观察侧栏/会话行 warning 点、未读完成标记、全局 Toast；处理后消失。
+3. 预期：徽标与官方投影一致；Toast 不遮挡输入；成功/失败提示可关闭。
+
 ### 4.12 技能/插件
 
 **A-SKILL-01（JVM）技能/命令协议**
+- 覆盖：SKILL-01、SKILL-08、INPUT-04
 1. 合成 `skills/list`、`commands/list`、`commands/execute`、`commands/change`。
 2. 断言技能元数据、路径预览、命令参数、错误码；未知技能/命令降级。
 3. 新增 `DshSkillProtocolTest`。
 
 **A-SKILL-02（仪器）技能/命令/插件管理 UI**
+- 覆盖：SKILL-02、SKILL-03、SKILL-04、SKILL-07、TOOL-08、SET-04
 1. 前置：同 A-SESS-03；合成技能与插件清单。
 2. 技能列表/详情/调用；斜杠命令；插件安装/启用/禁用/卸载/市场搜索；Agent preset 选择。
 3. 新增 `DshNativeSkillPresentationTest`。
 
 **A-SKILL-03（手工）真实插件安装/版本豁免/动态插件**
+- 覆盖：SKILL-05、SKILL-06、SKILL-09、TOOL-10
 1. 真实 DSH 安装一个测试插件，检查版本兼容、豁免、启用/禁用、卸载。
 2. 动态 Cordis 插件 inventory/invoke；失败时错误可读、可回滚。
 3. 用户暂停项恢复后执行。
@@ -540,16 +698,19 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 ### 4.13 远程
 
 **A-REMOTE-01（JVM）远程配置/隧道/隔离**
+- 覆盖：REMOTE-01、REMOTE-02、REMOTE-03、REMOTE-04、REMOTE-05
 1. 现有 `RemoteHostTest`、`DshRemoteIsolationTest` 覆盖：host/IPv6/域名、端口、密码/私钥、指纹确认/变更、远程优先/回退、Cookie 隔离、token 不日志。
 2. 新增：Keystore 失败不降级明文、远程端点存活时本地停止不清除、弱网/超时错误码。
 3. 命令：`./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.RemoteHostTest' --tests 'com.tanuki.DshRemoteIsolationTest'`。
 
 **A-REMOTE-02（仪器）远程设置/连接/回退**
+- 覆盖：REMOTE-01、REMOTE-03、SET-12
 1. 前置：同 A-SESS-03；本机/局域网 sshd（合成账号）与远程 DSH。
 2. 测试连接、首次指纹确认、保存并连接、断开/清除；远程失败回退本地；Cookie 两主机隔离。
 3. 新增 `RemoteHostPresentationTest`。
 
 **A-REMOTE-03（手工）真实 sshd/Keystore/token/Ed25519/中继**
+- 覆盖：REMOTE-05、REMOTE-06、REMOTE-07、REMOTE-08、REMOTE-09
 1. 真实 sshd（RSA/ECDSA/Ed25519）、真实 Keystore、真实远程 DSH token；弱网/断线/重连。
 2. 中继/配对/二维码（若 android_agent-48 落地）单独验收；当前未实现。
 3. 用户暂停项恢复后执行。
@@ -557,16 +718,19 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 ### 4.14 安全模式
 
 **A-SAFE-01（JVM）失败分类/重启/试用**
+- 覆盖：SAFE-01、SAFE-03、SAFE-04
 1. 现有 `RuntimeFailurePolicyTest` 覆盖分类、连续失败、probation、退避、KILLED/NO_SPACE、持久化恢复。
 2. 新增：143/137、ready 后 HTTP 超时、ENOSPC 优先级、进程重启后试用失败回安全模式。
 3. 命令：`./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.RuntimeFailurePolicyTest'`。
 
 **A-SAFE-02（仪器）安全模式/rescue/试用 UI**
+- 覆盖：SAFE-02、SAFE-03、SAFE-05
 1. 前置：同 A-SESS-03；预置失败状态/救援目录。
 2. 检查失败类型、安全模式说明、试用入口、退出试用、恢复入口；确认不加载用户插件、不删项目。
 3. 现有覆盖：`SetupPresentationTest`；新增 `RuntimeRecoveryPresentationTest`。
 
 **A-SAFE-03（手工）真实崩溃/磁盘满/OOM/rescue**
+- 覆盖：SAFE-06、SAFE-07、SAFE-08、SAFE-09、APPROVAL-04
 1. 真实设备/PRoot，注入启动失败、崩溃、ENOSPC、OOM；观察自动重启/安全模式/rescue。
 2. 检查 WebView 同源/Cookie/TLS、私有页面、凭据不出现在日志。
 3. 用户暂停项恢复后执行。
@@ -574,8 +738,9 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 ### 4.15 文档门禁
 
 **A-DOC-01（JVM/宿主）矩阵一致性**
+- 覆盖：—
 1. 运行 `python3 scripts/check-native-parity.py`（已接入 `.github/workflows/verify.yml` 的 Host job）。
-2. 断言：14 个功能域齐全、ID 唯一、每行有状态/优先级/验收用例、验收用例引用存在、引用的仓库路径存在。
+2. 断言：14 个功能域齐全、ID 唯一、每行有状态/优先级/验收用例；每行引用的用例必须在 `- 覆盖：` 中声明覆盖该行；覆盖声明只能引用存在的矩阵行；引用的仓库路径存在。
 3. 运行 `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md` 与 `python3 scripts/check-handoff.py`。
 
 ## 5. 自动化与设备前置
@@ -637,6 +802,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 **所有权**：矩阵与 `scripts/check-native-parity.py` 由 android_agent-47 唯一维护。其他 worker 完成项只提交 PR/commit/测试证据，由矩阵属主核对后更新状态；不得直接改矩阵或检查器，避免双写。
 
 1. 新增/修改官方协议方法时，先更新 `docs/INTERFACES.md`，再更新本矩阵的“官方”列与验收用例。
-2. 任何并行会话完成一个缺口后，把对应行的状态从 `仅官方/进行中` 改为 `原生完整/原生部分`，并补上 PR/commit 与已跑测试；没有实际测试不得写“已验证”。
-3. 每轮提交前运行 `python3 scripts/check-native-parity.py`、`python3 scripts/check-handoff.py`；文档链接变化同时跑 `python3 scripts/check-publication.py --git`。
-4. 若官方客户端升级导致行为变化，先记录版本与差异，再改矩阵；不要凭旧记忆更新。
+2. 新增矩阵行时必须同时指定至少一个覆盖该行的验收用例；新增/修改用例时必须更新 `- 覆盖：`，不能只写用例编号。
+3. 任何并行会话完成一个缺口后，把对应行的状态从 `仅官方/进行中` 改为 `原生完整/原生部分`，并补上 PR/commit 与已跑测试；没有实际测试不得写“已验证”。
+4. 每轮提交前运行 `python3 scripts/check-native-parity.py`、`python3 scripts/check-handoff.py`；文档链接变化同时跑 `python3 scripts/check-publication.py --git`。
+5. 若官方客户端升级导致行为变化，先记录版本与差异，再改矩阵；不要凭旧记忆更新。

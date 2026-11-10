@@ -18,6 +18,7 @@
 - 已验证：`python3 scripts/check-native-parity.py --self-test` PASS；`python3 scripts/check-native-parity.py` PASS（166 行、14 域）；`python3 -c "compile(...)"` 语法检查 PASS；`python3 scripts/check-handoff.py --record ...` 与无参数 `check-handoff.py` PASS（594 public files）。
 - 待验证：所有 JVM/仪器/手工验收用例均未执行；矩阵中的“原生现状”来自源码/既有测试与只读分支核对，不代表当前设备行为。
 - 当前目标包名、分支/无 Git 状态：分支 `ao/parity-audit/root`，基线 `0555c3c0`；无运行中产品任务；未安装 APK、未启动设备。
+- Review P2 已处理（2026-11-10）：SESS-14/15、SET-05/07/15 等缺口不再引用不覆盖它们的共享用例；新增 20 个缺口用例（goals、schedule、快捷键、语言、遥测、工作区管理、消息操作/链接/查找/滚动/中断、权限预设、Office/PDF、自动审查/CoT、账户配额、语音、计划模式、全局搜索、应用内徽标、文件管理器打开、应用更新、存储/备份），每个用例用 `- 覆盖：` 声明真正验证的矩阵行；检查器升级为拒绝“行引用了不覆盖该行的用例”。
 - 编排器范围确认（2026-11-10）：`android_agent-44` 是实现会话管理（DshSessionManagerActivity/Controller/Page、DshSessionAdminApi），不与本审计重复；`docs/NATIVE-PARITY.md` 与 `scripts/check-native-parity.py` 由 android_agent-47 唯一维护，其他 worker 只提交证据、不双写矩阵。P0 已拆到 INPUT-01/02/03、CHAT-15/11、SESS-02/04/12、APPROVAL-01/02/05/06 等行，并标注 42 聊天链路 / 45 审批 / 46 输入 / 44 会话管理。
 - 关键事实与可定位源码/公共文档：
   - 原生只读页：`app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt`、`DshNativeController.kt`、`app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt`；PR #26（android_agent-33）已合并 `d9b4aa2`。
@@ -29,8 +30,8 @@
 
 | 文件 | 改动与目的 |
 |---|---|
-| `docs/NATIVE-PARITY.md` | 新增功能对齐审计：状态/优先级图例、P0 拆解与 42/45/46/44 归属、14 类矩阵、44 个验收用例、自动化与设备前置、并行归属与阻塞、矩阵唯一所有权、不做/不宣称、维护规则。 |
-| `scripts/check-native-parity.py` | 新增只读文档门禁：校验 14 域、行 ID 唯一/归属正确、状态/优先级/验收引用、验收用例定义、反引号仓库路径存在；`--self-test` 用内置样例验证能发现坏行。 |
+| `docs/NATIVE-PARITY.md` | 新增功能对齐审计：状态/优先级图例、P0 拆解与 42/45/46/44 归属、14 类矩阵、64 个验收用例（每个声明覆盖行）、自动化与设备前置、并行归属与阻塞、矩阵唯一所有权、不做/不宣称、维护规则。 |
+| `scripts/check-native-parity.py` | 新增只读文档门禁：校验 14 域、行 ID 唯一/归属正确、状态/优先级、验收用例定义、每行引用的用例必须覆盖该行、覆盖声明只能引用存在的行、反引号仓库路径存在；`--self-test` 用内置样例验证能发现坏行与覆盖错配。 |
 | `.github/workflows/verify.yml` | 在 Host job 增加 `Check native parity matrix` 步骤，运行同一脚本，避免矩阵随代码漂移。 |
 | `docs/handoffs/20261110-1140-native-parity-audit.md` | 本记录。 |
 | `docs/AGENT-STATE.md` | 仅增加本审计记录链接；不改写当前状态、其他记录或印章。并发汇总仍由编排器指定的维护方完成。 |
@@ -50,6 +51,7 @@
 | 产品 JVM/仪器/设备 | 未执行 | 本任务为只读审计；不把历史测试当本轮结果。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只新跑矩阵检查器与自测；PR #22/#25/#29/#28/#23/#24 等是既有记录，未在本轮复跑。
+- Review P2 修复：新增 20 个缺口用例并补 `- 覆盖：` 声明；检查器从“编号存在”升级为“编号存在且覆盖该行”；`--self-test` 覆盖错配用例通过。矩阵仍 166 行、14 域、64 个用例。
 - 内容复核：修正 10 处措辞，区分 Tanuki 专有运行时/存储能力与官方网页能力，并把 android_agent-42 的 mux/follow 明确标为“未提交、进行中”；矩阵门禁复跑 PASS。
 - 范围确认后更新：新增 1.1 P0 拆解表，44 行矩阵补充 42/45/46/44 归属；矩阵仍为 166 行、14 域，门禁复跑 PASS。
 - 未测试、超时、失败和暂未复现的情况：所有产品验收用例未执行；真实模型/账号、真机、ROM、远程 sshd、Keystore 均未测试；矩阵中的 `进行中` 分支未提交，不能写成已实现。
