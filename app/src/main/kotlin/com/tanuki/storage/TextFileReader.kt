@@ -93,8 +93,15 @@ object TextFileReader {
     /** 二进制文件使用此占位编码，界面据此切换到二进制提示，不进入文本视图。 */
     const val BINARY_ENCODING = "二进制"
 
-    /** 查看器手动切换支持的编码；GB18030 覆盖 GBK/GB2312。 */
+    /** 查看器手动切换支持的可选编码；GB18030 覆盖 GBK/GB2312。 */
     val ENCODINGS = listOf("自动", "UTF-8", "GB18030", "UTF-16LE", "UTF-16BE", "UTF-16", "Big5", "ISO-8859-1")
+
+    /**
+     * 读取接口允许的编码 = 菜单项 + 自动探测可能返回的内部编码。
+     * Shift_JIS/UTF-32 不放入手动菜单，但查看器会把第一页的探测结果原样传给后续页，
+     * 因此读取校验必须接受它们，否则超过一页就会拒绝翻页。
+     */
+    private val READABLE_ENCODINGS = (ENCODINGS + listOf("Shift_JIS", "UTF-32", "UTF-32LE", "UTF-32BE")).toSet()
 
     data class Page(
         val text: String,
@@ -115,7 +122,7 @@ object TextFileReader {
     /** 调用方负责关闭 [source]；本函数只读取有界样本和当前页。 */
     internal fun read(source: SeekableInput, offset: Long = 0, encoding: String = "自动"): Page {
         require(offset >= 0) { "文本位置无效" }
-        require(encoding in ENCODINGS) { "不支持此文本编码" }
+        require(encoding in READABLE_ENCODINGS) { "不支持此文本编码" }
         val size = source.size
         check(size == null || offset <= size) { "文件已缩小，请重新打开" }
 
@@ -160,8 +167,8 @@ object TextFileReader {
             System.arraycopy(sample, from, buffer, 0, copied)
             filled = copied
         }
-        var eof = false
-        if (filled < capacity) {
+        var eof = size == null && sampleAtEof
+        if (filled < capacity && !eof) {
             source.seek(start + filled)
             while (filled < capacity) {
                 val read = source.read(buffer, filled, capacity - filled)
@@ -176,13 +183,10 @@ object TextFileReader {
         val atEof = if (size != null) start + filled >= size else eof
         val decoded = decodePage(buffer, filled, detected.encoding, atEof)
         val next = start + decoded.consumed
-        val hasMore = next < limit
-        // 未知大小且到达 4 MiB 上限时，保留“大小未知”而不是伪装成已读完。
-        val total = size ?: if (hasMore || next >= MAX_VIEW_BYTES) {
-            ExternalDocumentPolicy.UNKNOWN_SIZE
-        } else {
-            next
-        }
+        // 未知大小的顺序流读到 EOF 后必须停止分页，并把 EOF 处游标作为实际总大小；
+        // 未到 EOF 且未到 4 MiB 上限时才继续返回“大小未知”。
+        val hasMore = if (size == null && eof) false else next < limit
+        val total = size ?: if (eof) next else ExternalDocumentPolicy.UNKNOWN_SIZE
         return Page(decoded.text, offset, next, total, detected.encoding, hasMore, false)
     }
 

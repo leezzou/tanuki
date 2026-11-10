@@ -13,6 +13,7 @@ import java.io.ByteArrayInputStream
 import java.nio.channels.FileChannel
 import java.nio.charset.Charset
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
 class TextFileReaderTest {
@@ -272,6 +273,62 @@ class TextFileReaderTest {
         } finally { Files.delete(file) }
     }
 
+    @Test fun autoDetectedShiftJisAndUtf32CanContinuePaging() {
+        val file = Files.createTempFile("text-internal-encoding-pages", ".txt")
+        try {
+            // 查看器把第一页自动识别出的 encoding 原样传给后续页，内部编码必须在读取白名单中。
+            val sjis = "日本語のテスト。\n".repeat(20_000)
+            Files.write(file, sjis.toByteArray(Charset.forName("Shift_JIS")))
+            assertPagedWithDetectedEncoding(file, sjis, "Shift_JIS")
+
+            val utf32 = "UTF-32 中文跨页测试\n".repeat(5_000)
+            val le = byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x00, 0x00) +
+                utf32.toByteArray(Charset.forName("UTF-32LE"))
+            Files.write(file, le)
+            assertPagedWithDetectedEncoding(file, utf32, "UTF-32LE")
+
+            val be = byteArrayOf(0x00, 0x00, 0xfe.toByte(), 0xff.toByte()) +
+                utf32.toByteArray(Charset.forName("UTF-32BE"))
+            Files.write(file, be)
+            assertPagedWithDetectedEncoding(file, utf32, "UTF-32BE")
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun unknownSizeStreamStopsAtEofAndReportsActualTotal() {
+        val empty = TextFileReader.read(StreamSeekableInput(ByteArrayInputStream(byteArrayOf()), null), 0)
+        assertEquals("", empty.text)
+        assertEquals(0L, empty.nextOffset)
+        assertEquals(0L, empty.totalBytes)
+        assertFalse("空顺序流不能继续翻页", empty.hasMore)
+
+        val shortBytes = "abc".toByteArray()
+        val short = TextFileReader.read(StreamSeekableInput(ByteArrayInputStream(shortBytes), null), 0)
+        assertEquals("abc", short.text)
+        assertEquals(shortBytes.size.toLong(), short.nextOffset)
+        assertEquals(shortBytes.size.toLong(), short.totalBytes)
+        assertFalse("短顺序流读到 EOF 后不能继续翻页", short.hasMore)
+
+        val longBytes = ByteArray(TextFileReader.PAGE_BYTES * 2 + 100) { 'a'.code.toByte() }
+        var offset = 0L
+        var pages = 0
+        var finalTotal = -2L
+        while (true) {
+            val page = TextFileReader.read(
+                StreamSeekableInput(ByteArrayInputStream(longBytes), null),
+                offset,
+            )
+            assertTrue(page.nextOffset >= offset)
+            offset = page.nextOffset
+            pages++
+            finalTotal = page.totalBytes
+            if (!page.hasMore) break
+            assertTrue("未到 EOF 前应继续返回大小未知", page.totalBytes < 0)
+        }
+        assertEquals(longBytes.size.toLong(), offset)
+        assertEquals(3, pages)
+        assertEquals(longBytes.size.toLong(), finalTotal)
+    }
+
     @Test fun stopsAtFourMebibyteDisplayCap() {
         val file = Files.createTempFile("text-cap", ".txt")
         try {
@@ -374,6 +431,24 @@ class TextFileReaderTest {
             assertEquals("café", latin1.text)
             assertEquals("ISO-8859-1", latin1.encoding)
         } finally { Files.delete(file) }
+    }
+
+    /** 模拟查看器：第一页自动识别，后续页沿用第一页返回的具体编码。 */
+    private fun assertPagedWithDetectedEncoding(file: Path, original: String, expectedEncoding: String) {
+        val first = TextFileReader.read(file)
+        assertEquals(expectedEncoding, first.encoding)
+        assertTrue("测试样本必须跨页", first.hasMore)
+        val result = StringBuilder(first.text)
+        var offset = first.nextOffset
+        var hasMore = first.hasMore
+        while (hasMore) {
+            val next = TextFileReader.read(file, offset, first.encoding)
+            assertTrue(next.nextOffset > offset)
+            result.append(next.text)
+            offset = next.nextOffset
+            hasMore = next.hasMore
+        }
+        assertEquals(original, result.toString())
     }
 
     private class CountingSeekable(private val delegate: SeekableInput) : SeekableInput {
