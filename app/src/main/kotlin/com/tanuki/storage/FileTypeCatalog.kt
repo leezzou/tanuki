@@ -66,9 +66,9 @@ internal object FileTypeCatalog {
         "mka", "wma", "aiff", "aif",
     )
     private val videoExtensions = setOf(
-        // 注意：.ts 是 TypeScript 的文本扩展名，不放进视频集合，避免与 MPEG-TS 冲突。
+        // 注意：.ts/.mts 都是 TypeScript 的文本扩展名，不放进视频集合，避免与 MPEG-TS 冲突。
         "mp4", "m4v", "mkv", "webm", "mov", "qt", "avi", "3gp", "3gpp", "3g2", "mpg", "mpeg", "m2v",
-        "m2ts", "mts", "wmv", "flv", "ogv",
+        "m2ts", "wmv", "flv", "ogv",
     )
 
     /** 明确按二进制/归档/旧版 Office 处理，禁止再做“看起来像文本”的内容探测。 */
@@ -215,7 +215,7 @@ internal object FileTypeCatalog {
         put("mp4", "video/mp4"); put("m4v", "video/mp4"); put("mkv", "video/x-matroska"); put("webm", "video/webm")
         put("mov", "video/quicktime"); put("qt", "video/quicktime"); put("avi", "video/x-msvideo")
         put("3gp", "video/3gpp"); put("3gpp", "video/3gpp"); put("3g2", "video/3gpp2"); put("mpg", "video/mpeg")
-        put("mpeg", "video/mpeg"); put("m2v", "video/mpeg"); put("m2ts", "video/mp2t"); put("mts", "video/mp2t")
+        put("mpeg", "video/mpeg"); put("m2v", "video/mpeg"); put("m2ts", "video/mp2t")
         put("wmv", "video/x-ms-wmv"); put("flv", "video/x-flv"); put("ogv", "video/ogg")
         // 归档 / 二进制 / 字体
         put("zip", "application/zip"); put("tar", "application/x-tar"); put("gz", "application/gzip")

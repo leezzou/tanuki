@@ -31,6 +31,9 @@ class FileTypeCatalogTest {
         assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind("app.tsx", "text/plain"))
         assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind("main.c", "application/octet-stream"))
         assertEquals("text/typescript", FileTypeCatalog.mime("app.ts"))
+        // .mts 同样是 TypeScript 模块扩展名，不能落进 MPEG-TS 视频。
+        assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind("app.mts", "video/mp2t"))
+        assertEquals("text/typescript", FileTypeCatalog.mime("app.mts"))
     }
 
     @Test fun mapsCommonProgrammingLanguagesToText() {
