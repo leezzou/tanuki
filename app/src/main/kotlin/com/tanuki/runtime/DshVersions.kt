@@ -342,6 +342,17 @@ object DshUninstallRecovery {
     }
 }
 
+/**
+ * 组件事务日志写入栅栏：安装/重装必须先恢复未完成事务。
+ * 恢复抛错时不再执行写入，避免覆盖待清理的卸载日志；抽成纯 Kotlin 便于 JVM 验证顺序。
+ */
+internal object DshComponentJournal {
+    suspend fun <T> recoverThenWrite(recover: () -> Unit, write: suspend () -> T): T {
+        recover()
+        return write()
+    }
+}
+
 /** 切换前的本机状态与数据兼容规则；与文件系统解耦，便于 JVM 覆盖各拒绝分支。 */
 object DshSwitch {
     fun requireSwitchable(

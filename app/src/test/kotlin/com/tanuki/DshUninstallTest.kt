@@ -1,5 +1,6 @@
 package com.tanuki
 
+import com.tanuki.runtime.DshComponentJournal
 import com.tanuki.runtime.DshUninstall
 import com.tanuki.runtime.DshUninstallRecovery
 import com.tanuki.runtime.DshVersionGate
@@ -294,6 +295,34 @@ class DshUninstallTest {
         assertTrue("重装后的当前版本不能被卸载恢复删除", current.isDirectory)
         assertTrue(DshVersions.isInstalled(engines, "1.2.0"))
         assertFalse(quarantine.exists())
+
+        // 隔离目录清理后可以重新安装 A；两个版本都应可用。
+        seed(engines, "1.3.0")
+        assertTrue(DshVersions.isInstalled(engines, "1.2.0"))
+        assertTrue("清理隔离目录后应能重新安装 A", DshVersions.isInstalled(engines, "1.3.0"))
+    }
+
+    @Test
+    fun componentJournalRecoverFailureDoesNotOverwritePendingJournal() = runBlocking {
+        var journal = """{"action":"uninstall","phase":"committed"}"""
+        var wrote = false
+        val error = runCatching {
+            DshComponentJournal.recoverThenWrite({ throw IllegalStateException("存在待恢复的组件") }) {
+                journal = """{"phase":"switching"}"""
+                wrote = true
+            }
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertFalse("恢复失败时不能写新事务日志", wrote)
+        assertTrue("原卸载日志必须保留", journal.contains("uninstall"))
+    }
+
+    @Test
+    fun componentJournalRecoversBeforeWritingNewTransaction() = runBlocking {
+        val order = mutableListOf<String>()
+        DshComponentJournal.recoverThenWrite({ order += "recover" }) { order += "write" }
+        assertEquals("必须先把待处理事务恢复完，再写新日志", listOf("recover", "write"), order)
     }
 
     @Test

@@ -21,7 +21,7 @@
   - 卸载只处理 `engines/<version>` 与隔离目录；共享 `userdata`、`workspaces`、`backups`、下载缓存和用户会话不在删除范围；硬链接载荷只回收不再被引用的项。
   - 切换/卸载与安装、启动共用环境 mutation；切换/卸载与更新检查共用 `DshVersionGate`，锁顺序固定为 mutation → versionGate。
   - 主界面当前版本“卸载”入口改为“管理版本”；官方版本选择弹窗只对非当前已安装版本显示“卸载该备用版本”。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 15 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **550 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **573 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 17 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **552 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **575 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
 - PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建。Codex Review 的 3 条意见（删除后完整性、回滚日志保留、committed 误删 target）已在 `6c75914` 修复：删除开始后不再回滚，`prepared` 回滚失败保留日志，`DshUninstallRecovery` 让 committed 只清理隔离目录并保留可能重装的 target。第四轮发现 DSH 重装会覆盖共用 `component-transaction`：`replace()` 现在先 `recover()` 再写新日志，并补“卸载失败后重装另一版本，重启只清隔离目录、保留当前版本”的回归。review 修复新 head 以 PR 页面为准。
 - 待验证：review 修复后新 head 的 Host/Android CI、独立 Codex High Review 复核、真实设备上的版本列表/确认/卸载/回滚/清单刷新、真实 Node 降级/依赖锁损坏/进程中断恢复。
 - 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已合并 `origin/main=533eff4`（PR #34 文件查看器格式）解决 AGENT-STATE/CURRENT.json 冲突；合并后完整 JVM **573 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/94 warnings/1 hint；未启动设备，未切换/卸载真实 DSH。
@@ -32,14 +32,14 @@
 | 文件 | 改动与目的 |
 |---|---|
 | `app/src/main/kotlin/com/tanuki/runtime/DshVersions.kt` | 新增 `DshVersionGate`（切换/卸载/更新检查互斥）、`DshUninstall`（拒绝矩阵与两阶段事务）、`DshUninstallRecovery`（prepared 恢复/committed 只清隔离目录/旧协议兼容）；删除开始后不回滚，回滚失败保留 prepared 日志；`DshSwitch.requireSwitchable` 增加更新忙碌拒绝。 |
-| `app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt` | `uninstallDsh` 接入当前/运行/更新校验、版本窄锁与两阶段事务；`recover()` 改用 `DshUninstallRecovery`，committed 不再删除 engines 中可能重装的 target；`replace()` 写新组件事务前先 `recover()`，避免 DSH 安装/重装覆盖待恢复的卸载日志；`switchDsh` 接入版本窄锁与更新忙碌校验。 |
+| `app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt` | `uninstallDsh` 接入当前/运行/更新校验、版本窄锁与两阶段事务；`recover()` 改用 `DshUninstallRecovery`，committed 不再删除 engines 中可能重装的 target；`replace()` 通过 `DshComponentJournal.recoverThenWrite` 先恢复再写新日志，避免 DSH 安装/重装覆盖待恢复的卸载日志；`switchDsh` 接入版本窄锁与更新忙碌校验。 |
 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt` | 新增 `versionGate`；环境锁抢占失败时同时写入中文错误，避免按钮点击无反馈。 |
 | `app/src/main/kotlin/com/tanuki/runtime/State.kt` | 新增 `deleteState()`，用 `AtomicFile.delete()` 同时删除事务日志备份，避免下次启动恢复已完成的组件事务。 |
 | `app/src/main/kotlin/com/tanuki/update/UpdateManager.kt` | 手动更新检查在 `versionGate` 内执行，避免与切换/卸载并发读写版本状态。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshVersionManagerDialog.kt` | 清单文案改为“当前使用/备用”，卸载确认显示占用、安装时间、保留范围；当前版本/未知当前版本禁用操作并说明原因。 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 当前版本“卸载”改为“管理版本”；官方版本列表只允许卸载非当前已安装版本。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 卸载确认文案改为备用程序、保留数据、失败回滚、当前版本不可卸载。 |
-| `app/src/test/kotlin/com/tanuki/DshUninstallTest.kt` | 新增 15 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除保留隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 恢复保留已重装 target、prepared 恢复、旧协议兼容、并发锁与并发卸载；卸载失败后重装另一版本，重启恢复保留当前版本。 |
+| `app/src/test/kotlin/com/tanuki/DshUninstallTest.kt` | 新增 17 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除保留隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 恢复保留已重装 target、prepared 恢复、旧协议兼容、并发锁与并发卸载；卸载失败后重装另一版本，重启恢复保留当前版本；恢复失败不覆盖待处理日志；先恢复后写新日志。 |
 | `app/src/test/kotlin/com/tanuki/DshVersionsTest.kt` | 当前版本未知时禁用卸载的策略回归。 |
 | `app/src/test/kotlin/com/tanuki/DshSwitchTest.kt` | 更新检查/安装进行中拒绝切换。 |
 
@@ -47,14 +47,14 @@
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` | 通过（BUILD SUCCESSFUL） | 本 worktree，JDK17；34 tests / 0 failures / 0 errors / 0 skipped（卸载 15、版本 7、切换 12）。 |
-| `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m30s） | 66 个结果文件、**550 tests / 0 failures / 0 errors / 0 skipped**（合并前）；合并 `origin/main=533eff4` 后 **573 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；`lintModernDebug` **0 errors / 94 warnings / 1 hint**；不替代设备验收。 |
+| `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` | 通过（BUILD SUCCESSFUL） | 本 worktree，JDK17；36 tests / 0 failures / 0 errors / 0 skipped（卸载 17、版本 7、切换 12）。 |
+| `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，3m30s） | 66 个结果文件、**552 tests / 0 failures / 0 errors / 0 skipped**（合并前）；合并 `origin/main=533eff4` 后 **575 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；`lintModernDebug` **0 errors / 94 warnings / 1 hint**；不替代设备验收。 |
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest' --rerun-tasks` | 通过 | 首次完整运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未改该测试。 |
 | GitHub Actions 42756830044 / 42756838942 | 通过 | review 修复前 head `1fa66bd` 的 Host/Android 4/4 全绿；review 修复后的新 head CI 以 PR 页面为准。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1142-dsh-version-uninstall.md` | 通过 | 刷新 `CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：review 修复后的 34 项目标 JVM、完整 550 项与合并后 573 项、lint 为本次新跑；review 修复前的 28/544 项是历史结果；合并前的 550 项也不再代表合并后 head，以 573 项为准。
+- 哪些是前一轮结果，哪些是本次新验证：review 修复后的 36 项目标 JVM、完整 552 项与合并后 575 项、lint 为本次新跑；review 修复前的 28/544 项是历史结果；合并前的 552 项也不再代表合并后 head，以 575 项为准。
 - 未测试、超时、失败和暂未复现的情况：未跑 assemble、Android 仪器、真实设备；未在真实 userdata 上执行卸载；未验证进程在 `prepared`/`committed` 之间被杀后的 OEM 行为；review 修复后新 head 的 CI 待跑。
 
 ## 未完成与暂停项

@@ -337,29 +337,29 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         else -> error("未知组件替换事务")
     }
     internal suspend fun replaceEngine(version:String,block:suspend ()->Unit) = replace("dsh",version,block)
-    private suspend fun replace(name: String, version:String?=null, block: suspend ()->Unit) {
+    private suspend fun replace(name: String, version:String?=null, block: suspend ()->Unit) =
         // 安装/重装会重写 component-transaction；必须先恢复待处理的卸载或其他中断事务，
-        // 否则未完成的隔离目录会失去唯一恢复记录，重启后无法清理或回滚。
-        recover()
-        val (destination,previous)=swapTargets(name,version)
-        owned(destination);owned(previous)
-        check(!previous.exists()) { "存在待恢复的组件，请重新打开应用完成恢复" }
-        val journal=JSONObject().put("component",name).put("phase","switching").put("hadPrevious",destination.exists())
-        if(version!=null)journal.put("version",version)
-        paths.atomic("component-transaction",journal.toString())
-        try {
-            if(destination.exists())check(destination.renameTo(previous)) { "无法保留旧组件，未进行替换" }
-            block()
-            withContext(NonCancellable) {
-                paths.atomic("component-transaction",journal.put("phase","committed").toString())
-                remove(previous)
-                paths.deleteState("component-transaction")
+        // 恢复失败时不得覆盖旧日志。栅栏在同一个 mutation 内执行。
+        DshComponentJournal.recoverThenWrite({ recover() }) {
+            val (destination,previous)=swapTargets(name,version)
+            owned(destination);owned(previous)
+            check(!previous.exists()) { "存在待恢复的组件，请重新打开应用完成恢复" }
+            val journal=JSONObject().put("component",name).put("phase","switching").put("hadPrevious",destination.exists())
+            if(version!=null)journal.put("version",version)
+            paths.atomic("component-transaction",journal.toString())
+            try {
+                if(destination.exists())check(destination.renameTo(previous)) { "无法保留旧组件，未进行替换" }
+                block()
+                withContext(NonCancellable) {
+                    paths.atomic("component-transaction",journal.put("phase","committed").toString())
+                    remove(previous)
+                    paths.deleteState("component-transaction")
+                }
+            } catch(t:Throwable) {
+                withContext(NonCancellable) { recover() }
+                throw t
             }
-        } catch(t:Throwable) {
-            withContext(NonCancellable) { recover() }
-            throw t
         }
-    }
     suspend fun checkNodeRange(range:String?,nodeHome:File?=null,targetVersion:String?=null,label:String="DSH") {
         if(range.isNullOrBlank() || range=="未声明")return
         val script="const{createRequire}=require('node:module');const req=createRequire('/opt/node/lib/node_modules/npm/package.json');const semver=req('semver');const actual=process.argv[2]||process.versions.node;if(!semver.satisfies(actual,process.argv[1])){console.error('Node.js '+actual+' does not satisfy '+process.argv[1]);process.exit(42)}"
