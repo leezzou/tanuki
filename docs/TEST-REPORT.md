@@ -7,10 +7,27 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 范围：已安装 DSH 清单（当前使用/备用、占用、安装时间、校验）、非当前版本卸载确认、当前/运行/更新占用拒绝、两阶段卸载与失败回滚、共享数据保护、切换/卸载与安装/启动/更新检查互斥。基线 `origin/main=0555c3c0`，分支 `ao/android_agent-43/root`。
 - 实际执行：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` → BUILD SUCCESSFUL，36 tests / 0 failures / 0 errors / 0 skipped（卸载 17、版本 7、切换 12）。
-  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m30s），66 个结果文件、**552 tests / 0 failures / 0 errors / 0 skipped**；合并 `origin/main=2a4a050`（PR #34 文件查看器、PR #32 原生一致性审计、PR #35 文件复制界面稳定）后完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件）、`lintModernDebug` **0 errors / 95 warnings / 1 hint**。
+  - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（3m30s），66 个结果文件、**552 tests / 0 failures / 0 errors / 0 skipped**；合并 `origin/main=2a4a050`（PR #34 文件查看器、PR #32 原生一致性审计、PR #35 文件复制界面稳定）后完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**（72 个结果文件）、`lintModernDebug` **0 errors / 95 warnings / 1 hint**；合并 `origin/main=0068c87`（#36 远程中继）后的完整套件由 CI 在新 head 复跑，本记录不把 594 冒充合并后结果。
 - 新增回归 17 项（`DshUninstallTest`）：当前版本卸载被拒；运行中/活动子进程/更新检查/安装占用被拒；当前元数据缺失、非法版本、未安装版本被拒；卸载备用版本后程序目录消失、当前版本与 `userdata`/`workspaces`/`backups`/下载缓存保留、清单重扫只剩当前版本；删除普通依赖后两个标记仍在也不回滚、保留隔离目录与 committed 日志；删除已触及 `.installed` 后同样不回滚；提交日志失败时在删除前回滚；提交日志失败且回滚 move 失败时保留 prepared 日志，下次 prepared 恢复移回；committed 恢复只清理隔离目录并保留同版本重装的 target；prepared 恢复移回隔离目录；target 已存在时 prepared 只清理隔离副本；旧协议无 phase 仍删除 target；版本窄锁第二次 `tryEnter` 被拒且等待者串行；两个并发卸载同一版本只能成功一个；卸载失败后重装另一版本，重启恢复只清隔离目录并保留当前版本；恢复失败不覆盖待处理日志；先恢复后写新事务日志。
 - 首次完整 JVM 运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未修改该测试。
 - 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、独立 Review 复核。review 修复前 head `1fa66bd` 的 Host/Android CI 4/4 通过；review 修复后新 head 的 CI 以 PR 页面为准。JVM 与 lint 不能替代设备验收。
+
+## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
+
+- 范围：反向注册中继 + 既有 SSH 端到端最小切片；Kotlin 配对链接/帧/HMAC/TLS 钉扎/重连/loopback 桥；中继配置存储/控制器/设置页；Python 参考中继/主机端 agent；共享协议向量。基线 `origin/main=0555c3c0`，分支 `ao/tanuki-remote/relay-pairing`。
+- 实际执行（本轮新跑）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` → BUILD SUCCESSFUL，22 tests / 0 failures / 0 errors / 0 skipped。
+  - `cd scripts/remote-relay && python3 test_remote_relay.py` → OK，7 tests / 0 failures（回环自签名 TLS + pin、主机注册、JOIN/OPEN_OK/DATA 双向、2 MiB 慢消费者、错误 token、未知房间、明文拒绝、日志不含 token）。
+  - P1 修复前 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 合并 `origin/main=533eff4`（PR #34 文件查看器）后、P2 修复前完整 JVM/lint：2m20s，68 个结果文件，575 tests / 0 failures / 0 errors / 0 skipped。
+  - P2 修复后、合并 `2a4a050` 前完整 JVM/lint：2m17s，68 个结果文件，581 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 合并 `origin/main=2a4a050`（PR #35 文件复制界面稳定）后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（4m06s）；72 个结果文件，**600 tests / 0 failures / 0 errors / 0 skipped**（main 558 + 中继 23 + 复制界面 19）；lint **0 errors / 96 warnings / 1 hint**。
+  - PR [#36](https://github.com/leezzou/tanuki/pull/36) P1 修复提交 `ff8b706` 的 Host scripts 与 Android build/JVM/lint 两项 CI 均 pass；合并 main 后的新 head CI 以 PR 页面为准；CI 不替代独立 Review 或设备验收。
+- 新增覆盖：配对链接 IPv4/IPv6/域名往返与未知/重复/非规范字段拒绝；帧编解码/64 KiB/1 KiB/截断/未知类型；共享 HMAC host/client 向量；证书 DER SHA-256 钉扎；指数退避与仅瞬时错误重试；假中继配对 + 早期字节不丢失 + DATA 回声；错误 token；中继稳定 `relay:<hostId>` 身份/Cookie 作用域；token 加密存储/篡改拒绝/切回直连；控制器使用稳定身份跳过首次指纹探测。
+- 复审修复（PR #36 P1）：中继 Cookie 作用域从 `relay:<hostId>` 改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，同一服务换房间复用 Cookie，同一主机不同用户/DSH 端口分别保存，避免切回时把 A 的认证 Cookie 恢复给 B。`DshRemoteIsolationTest` 新增对应用户/端口分区与同服务换 room 回归；`RemoteRelayTest` 更新作用域断言。定向 `DshRemoteIsolationTest` + `RemoteRelayTest` 共 27 tests / 0 failures；P1 修复提交 `ff8b706` 的 Host/Android CI 均 pass。
+- 复审修复（PR #36 P2）：桥接/会话关闭不再等待 `writerLock`，先关闭底层 TLS socket 解除阻塞写，关闭路径不再同步写 CLOSE；`RelaySshTunnel.close` 先拆桥再关 JSch。`RemoteRelayTest` 新增对端不读、写阻塞时 `RelayBridge.close`/`RelayClientSession.close` 及时返回的回归。`relayRetry` 接入 `RelaySshTransport.join`，最多 4 次尝试、只重试瞬时错误、可取消；新增先失败后成功、耗尽、认证/钉扎/协议不重试、退避取消回归。Python 参考中继去掉 32 帧有损队列，改为每 peer 写锁内阻塞写并在释放 `room.lock` 后发送；新增 2 MiB 慢消费者完整传输回归。
+- 未执行：真实 Android 设备到真实中继/sshd/DSH、Android Keystore 真机、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN。JVM/Python 回环不能替代设备或公网验收。
 
 ## 文件复制界面稳定验证（2026-11-10，android_agent-40，非设备）
 

@@ -45,7 +45,17 @@ interface SshTransport {
  * - 本地转发绑定 127.0.0.1 的随机端口，远程 DSH 仍只看到 loopback；
  * - 私钥/密码只传给 JSch，不写日志。
  */
-class JschSshTransport(private val timeoutMs: Int = 15_000) : SshTransport {
+data class SshDialTarget(val host: String, val port: Int)
+
+class JschSshTransport(
+    private val timeoutMs: Int = 15_000,
+    /** 中继模式把 JSch 的 TCP 目标换成 127.0.0.1 的桥端口；主机密钥仍由指纹仓库校验。 */
+    private val dialTarget: ((RemoteHostConfig) -> SshDialTarget)? = null
+) : SshTransport {
+    /** 返回一个只替换 TCP 拨号目标的副本，供中继桥复用同一套 JSch 认证/转发逻辑。 */
+    fun dialing(host: String, port: Int): JschSshTransport =
+        JschSshTransport(timeoutMs) { SshDialTarget(host, port) }
+
     override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = withContext(Dispatchers.IO) {
         val session = newSession(JSch(), config)
         val observed = AtomicReference<String>()
@@ -96,8 +106,11 @@ class JschSshTransport(private val timeoutMs: Int = 15_000) : SshTransport {
     }
 
     private fun newSession(jsch: JSch, config: RemoteHostConfig): Session {
-        val host = config.normalizedHost() ?: throw RemoteHostFailure("远程主机格式无效")
-        val session = jsch.getSession(config.user, host, config.sshPort)
+        val target = dialTarget?.invoke(config) ?: run {
+            val host = config.normalizedHost() ?: throw RemoteHostFailure("远程主机格式无效")
+            SshDialTarget(host, config.sshPort)
+        }
+        val session = jsch.getSession(config.user, target.host, target.port)
         session.setConfig(
             Properties().apply {
                 setProperty("StrictHostKeyChecking", "yes")

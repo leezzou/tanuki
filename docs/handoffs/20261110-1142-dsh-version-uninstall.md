@@ -24,7 +24,7 @@
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 17 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **552 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**；合并 `origin/main=533eff4` 后完整 JVM **575 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
 - PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建。Codex Review 的 3 条意见（删除后完整性、回滚日志保留、committed 误删 target）已在 `6c75914` 修复：删除开始后不再回滚，`prepared` 回滚失败保留日志，`DshUninstallRecovery` 让 committed 只清理隔离目录并保留可能重装的 target。第四轮发现 DSH 重装会覆盖共用 `component-transaction`：`replace()` 现在先 `recover()` 再写新日志，并补“卸载失败后重装另一版本，重启只清隔离目录、保留当前版本”的回归。review 修复新 head 以 PR 页面为准。
 - 待验证：review 修复后新 head 的 Host/Android CI、独立 Codex High Review 复核、真实设备上的版本列表/确认/卸载/回滚/清单刷新、真实 Node 降级/依赖锁损坏/进程中断恢复。
-- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已合并 `origin/main=2a4a050`（含 PR #34 文件查看器格式、PR #32 原生一致性审计、PR #35 文件复制界面稳定）解决 AGENT-STATE/TEST-REPORT/CURRENT.json 冲突；合并后完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/95 warnings/1 hint；未启动设备，未切换/卸载真实 DSH。
+- 当前分支：`ao/version-uninstall/root`，基线 `origin/main=0555c3c0`；已合并 `origin/main=0068c87`（含 PR #32 原生一致性审计、#34 文件查看器、#35 文件复制界面稳定、#36 远程中继）解决 AGENT-STATE/TEST-REPORT/CURRENT.json 冲突；合并后完整 JVM 由 CI 复跑，本地最近一次合并 2a4a050 后为 **594 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors/95 warnings/1 hint；未启动设备，未切换/卸载真实 DSH。
 - 关键事实：卸载事务只接收程序目录和隔离目录；当前版本不提供任何后端卸载路径；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
 
 ## 本次改动

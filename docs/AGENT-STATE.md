@@ -1,8 +1,21 @@
-# Tanuki 当前状态
+当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 四轮 Codex Review 意见已修复，已合并 `origin/main=0068c87`（含 #32/#34/#35/#36），合并后完整 JVM 由 CI 复跑（本地最近 594/0/0/0），新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
 
-当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 四轮 Codex Review 意见已修复，已合并 `origin/main=2a4a050`（含 #34/#32/#35），新 head 的 CI/复核/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+并行交接（android_agent-36/40/41）：
 
-并行交接（android_agent-40/41）：
+## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
+
+- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）、`1cb7ad9`（原生能力对等审计）与 `2a4a050`（PR #35 文件复制界面稳定）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
+- 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
+- 已实现：
+  - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
+  - `RelayTransport`：生产 TLS 1.2/1.3 客户端（系统 CA + 主机名或证书 DER 钉扎）、客户端 JOIN/CHALLENGE/AUTH/QUEUED/OPEN_OK、只绑定 `127.0.0.1` 的 loopback 桥、DATA/CLOSE/PING/PONG；`RoutingSshTransport` 按配置在直连 SSH 与中继之间路由。
+  - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`（room 不参与，同一服务换房间复用，不同用户/端口隔离）；token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
+  - `scripts/remote-relay/`：Python 标准库参考中继、只出站的主机端 agent、0600 配对文件、自签名证书生成脚本、回环端到端自测；共享 HMAC 向量 `app/src/test/resources/relay-protocol-vectors.json`。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
+- Review P2 修复：桥接/会话关闭不再等待 `writerLock` 或同步写 CLOSE（先关底层 socket，`RelaySshTunnel` 先拆桥），补「对端不读、写阻塞时 close 及时返回」回归；`relayRetry` 接入 `RelaySshTransport.join`（最多 4 次尝试、可取消、只重试瞬时错误），补先失败后成功/耗尽/认证钉扎不重试/取消回归；Python 参考中继去掉 32 帧有损队列，改为阻塞写背压并在释放 room.lock 后发送，补 2 MiB 慢消费者完整传输回归。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 22 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 7 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；P1 修复前完整 JVM + lint 552/0/0/0；合并 `origin/main=533eff4` 后、P2 修复前 575/0/0/0；P2 修复后完整 JVM 581/0/0/0；合并 `origin/main=2a4a050` 后完整 JVM **600 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors / 96 warnings / 1 hint；PR #36 P2 修复提交 `049edcc` 的 Host/Android CI 均 pass；最终 merge head CI 以 PR 页面为准。
+- 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
+- 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 
 ### 文件复制界面稳定（android_agent-40，PR [#35](https://github.com/leezzou/tanuki/pull/35) 待审）
 
@@ -22,6 +35,7 @@
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 29 tests / 0 failures；完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件，0.1.10 基线 535 + 新增 23）、`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码组合 BUILD SUCCESSFUL（2m49s）。
 - 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR #34 的独立 Codex High Review 待办。
 - 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
+
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -211,7 +225,7 @@
 
 ## 已实现、已验证与待验证
 
-- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 36 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 17 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、卸载失败后重装另一版本后恢复保留当前版本、恢复失败不覆盖待处理日志、先恢复后写新日志、并发锁与并发卸载）；合并 `origin/main=2a4a050` 后完整 JVM **594 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 95 warnings / 1 hint**。未跑 assemble、仪器、真机。
+- 已验证（本轮 android_agent-43 新跑）：`-x buildNativeRuntime` 下 `compileModernDebugKotlin` BUILD SUCCESSFUL；review 修复后目标 JVM 36 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 17 项：拒绝矩阵、备用卸载保留共享数据、删除依赖后标记仍在仍不回滚、部分删除隔离、提交日志失败回滚、回滚 move 失败保留 prepared、committed 保留已重装 target、prepared/旧协议恢复、卸载失败后重装另一版本后恢复保留当前版本、恢复失败不覆盖待处理日志、先恢复后写新日志、并发锁与并发卸载）；合并 `origin/main=0068c87` 后完整 JVM 由 CI 复跑（本地最近一次合并 2a4a050 后为 **594 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 95 warnings / 1 hint**）。未跑 assemble、仪器、真机。
 - 已验证（本轮 android_agent-34 新跑）：`compileModernDebugKotlin`、`assembleModernDebug -x buildNativeRuntime`、远程分支 `testModernDebugUnitTest` 229/0/0/0；合入 `main=5fd1ab4` 后完整 JVM 289/0/0/0（41 结果文件）；合入冷启动/PDF/原生界面/温控/DOCX后完整 JVM 535/0/0/0（65 结果文件）、`lintModernDebug` 0 errors/95 warnings；新增 `RemoteHostTest` 24 项与 `DshRemoteIsolationTest` 4 项。未跑设备/真实 SSH/仪器。
 - 已验证（本轮 android_agent-31 新跑，merge `f5f3bf3` 后）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` BUILD SUCCESSFUL，494 tests / 0 failures / 0 errors / 0 skipped（main 424 - 旧 DOCX 文本测试 10 + 新增 80）；新增 DOCX 回归覆盖样式/列表/表格/图片/损坏包/zip bomb/超大文档/分页/图片预算/渲染预算。`lintModernDebug` 通过；未跑 assemble/仪器/真机。
 - 已验证（本轮 android_agent-30 合并 main 后新跑）：完整 `testModernDebugUnitTest` 与 `lintModernDebug` 组合 BUILD SUCCESSFUL（2m17s，35 tasks），424 tests / 0 failures / 0 errors / 0 skipped（59 个结果文件）；新增 `DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项与下载外部上限 1 项；lint 0 Error。未跑 assemble/仪器/真机。
@@ -239,7 +253,7 @@
 
 ## 环境与阻塞
 
-- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，四轮 Codex Review 意见已修复，已合并 `origin/main=1cb7ad9`；合并后 JVM 594/0、lint 0 errors，PR 新 head CI 以页面为准；本轮未启动设备。
+- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，四轮 Codex Review 意见已修复，已合并 `origin/main=0068c87`；合并后完整 JVM 由 CI 复跑（本地最近 594/0、lint 0 errors），PR 新 head CI 以页面为准；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。

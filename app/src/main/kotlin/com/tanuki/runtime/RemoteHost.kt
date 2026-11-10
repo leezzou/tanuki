@@ -22,34 +22,40 @@ data class RemoteHostConfig(
     val privateKey: String = "",
     val passphrase: String = "",
     val remoteDshPort: Int = 3080,
-    val token: String = ""
+    val token: String = "",
+    /** 非空表示经中继配对连接；此时 host 只作展示名，实际 SSH 连接走中继桥。 */
+    val relay: RemoteRelayPairing? = null
 ) {
-    /** 管理页 Cookie 的逻辑主机身份；同一 SSH/DSH 端口的不同用户也不共享认证 Cookie。 */
-    fun cookieScope(): String = "remote:${normalizedHost() ?: host.trim()}:$sshPort:$user:$remoteDshPort"
+    /**
+     * 管理页 Cookie 的逻辑服务身份。
+     *
+     * 中继用稳定 hostId + SSH 用户 + 远程 DSH 端口；room 不参与，所以同一服务换房间仍复用
+     * Cookie，但同一主机上的不同用户/DSH 端口必须隔离，避免把 A 的认证 Cookie 发给 B。
+     */
+    fun cookieScope(): String =
+        relay?.let { "relay:${it.hostId}:$user:$remoteDshPort" }
+            ?: "remote:${normalizedHost() ?: host.trim()}:$sshPort:$user:$remoteDshPort"
 
     /**
      * 规范化主机名：IPv4/域名返回小写形式，方括号 IPv6 去掉方括号。
      * 不允许协议、路径、端口或 userinfo，防止配置被拼成另一个 URL/主机。
      */
-    fun normalizedHost(): String? {
-        val value = host.trim()
-        if (value.isEmpty()) return null
-        if (value.startsWith("[") && value.endsWith("]")) {
-            val inner = value.substring(1, value.length - 1)
-            if (inner.length !in 2..45) return null
-            if (!inner.matches(Regex("[0-9A-Fa-f:.]+")) || !inner.contains(':')) return null
-            if (inner.contains(":::")) return null
-            return inner.lowercase()
-        }
-        if (value.length > 253) return null
-        if (!value.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?"))) return null
-        if (value.contains("..")) return null
-        return value.lowercase()
+    fun normalizedHost(): String? = RemoteHostAddress.normalize(host)
+
+    /** 展示名；中继模式下 host 可为空，回退到稳定 hostId 前缀。 */
+    fun displayName(): String = if (relay != null) {
+        host.trim().ifBlank { relay.displayName() }
+    } else {
+        host.trim()
     }
 
     /** 返回中文校验错误；成功返回 null。错误信息只描述字段，不回显字段值。 */
     fun validationError(): String? {
-        if (normalizedHost() == null) {
+        if (relay != null) {
+            relay.validationError()?.let { return it }
+            if (host.length > 128) return "远程主机展示名过长（上限 128 字符）"
+            if (host.any { it.isISOControl() }) return "远程主机展示名不能包含控制字符"
+        } else if (normalizedHost() == null) {
             return "远程主机格式无效；请填写 IPv4、IPv6 或域名，不要包含协议、路径或端口"
         }
         if (sshPort !in 1..65535) return "SSH 端口必须在 1-65535 之间"
@@ -77,17 +83,16 @@ data class RemoteHostConfig(
         return null
     }
 
-    /** 连接身份用于 known_hosts 查询；使用规范化主机和 SSH 端口。 */
-    fun hostIdentity(): String? {
-        val host = normalizedHost() ?: return null
-        return "$host:$sshPort"
-    }
+    /** 连接身份用于 known_hosts 查询；中继模式用稳定 hostId，换房间仍沿用同一主机密钥信任。 */
+    fun hostIdentity(): String? =
+        relay?.let { "relay:${it.hostId}" } ?: normalizedHost()?.let { "$it:$sshPort" }
 
     fun endpointFor(localPort: Int): RemoteEndpoint? = RemoteEndpoint.loopback(localPort, token)
 
     override fun toString(): String =
         "RemoteHostConfig(host=$host, sshPort=$sshPort, user=$user, auth=$auth, " +
-            "remoteDshPort=$remoteDshPort, credentials=<redacted>, token=<redacted>)"
+            "remoteDshPort=$remoteDshPort, relay=${relay?.endpointLabel() ?: "<none>"}, " +
+            "credentials=<redacted>, token=<redacted>)"
 
     companion object {
         const val MAX_PASSWORD_CHARS = 1024
