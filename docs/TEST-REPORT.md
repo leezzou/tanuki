@@ -2,6 +2,19 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 0.1.11 发布准备验证（2026-11-10，android_agent-49，非设备）
+
+- 范围：`0.1.11/code13` workspacecheck 候选准备，基线 `main=1f7222d0e4ac`（#40 待合并）；同步版本/发布/取包/更新/兼容性文档，精简 `AGENT-STATE`，修正 #38 交接断链并重建印章。不改产品代码/协议。
+- 实际执行：
+  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest` → BUILD SUCCESSFUL（1m35s），**794 tests / 90 个结果文件 / 0 failures / 0 errors / 0 skipped**（最终 main/#40；JDK17、Android SDK、macOS ARM64）。
+  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:lintModernDebug` → BUILD SUCCESSFUL（2m5s），**0 errors / 102 warnings / 1 hint**。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1636-release-0.1.11.md` → 通过，刷新 schema 2 印章（671 公开文件）。
+  - `python3 scripts/check-handoff.py --release`、`python3 scripts/check-handoff.py --pr` → 通过。
+  - `python3 scripts/check-publication.py --git` → 0 findings（672 public files / 671 index entries）。
+  - `python3 scripts/package-source.py` → 生成 `Tanuki-0.1.11-source.zip` 与 `SOURCE-SHA256SUMS`；最终源码 ZIP 字节/SHA 以 `RELEASE-SHA256SUMS` 为准。
+  - `python3 scripts/prepare-app-release.py --version 0.1.11 --version-code 13 --channel workspacecheck` → 按最终 main（#40）重建中；旧候选 34fd8d85.../11,890,210 字节不含 #40，已作废；新 APK/SHA 与六附件重建后回填。
+- 未执行：设备/模拟器安装、升级覆盖、真机/MIUI/低 API；临时 transport 替换仍为后续清理。0.1.10 的 535 tests 与 0.1.9 发布附件均为历史，不冒充 0.1.11 结果。
+
 ## 原生界面可交互切片验证（2026-11-10，android_agent-42，非设备）
 
 - 范围：原生界面发送/停止/会话切换/实时流/错误/审批；官方 `/api/remote.mux` 的 `$events` + `session/follow`，一元 `session/prompt|cancel` 与 `$events/result`；通知目标重连、远程 origin 与安全模式兼容；未改官方 WebView 路径/同源策略。基线 `origin/main=0555c3c`。
