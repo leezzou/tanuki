@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-54（DSH Worker）
 - 时间：2026-11-10 17:37 CST（开始），2026-11-10 19:20 CST（追加 P0/P1 本地实现）
-- 状态：跟进中（PR #50 已由编排合并；第二轮 review 的 3 项 P2 已修复并推送到跟进 PR #56，head `3cfd73a`，CI 4 项通过；待新 head 复审；P0-2 真实数据仍依赖公共协议决策；本会话未合并、未发布）
+- 状态：跟进中（PR #50 已由编排合并；第二轮 review 的 3 项 P2 已修复并推送到跟进 PR #56，PR #56 最新 head，CI 通过；待新 head 复审；P0-2 真实数据仍依赖公共协议决策；本会话未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -31,11 +31,11 @@
 - 已验证（本地）：
   - `:app:compileModernDebugKotlin` 成功（新增 host/tab/分组代码后）。
   - 定向 `DshSessionManagerControllerTest`：37 tests / 0 failures / 0 errors；含延迟失败、200/201 上限、批量挂起进度回归。
-  - 完整 `:app:testModernDebugUnitTest`：813 tests / 90 文件 / 0 failures / 0 errors / 0 skipped。
-  - `:app:lintModernDebug`：BUILD SUCCESSFUL，0 errors / 93 warnings / 1 hint。
+  - 完整 `:app:testModernDebugUnitTest`：936 tests / 101 文件 / 0 failures / 0 errors / 0 skipped。
+  - `:app:lintModernDebug`：BUILD SUCCESSFUL，0 errors / 94 warnings / 1 hint。
   - 旧 head `30da86d` 的 GitHub CI 两个 run 均 success（不含本轮新改动）。
 - 待验证：Android 仪器/真机、真实 DSH 的 cwd 分组/批量归档/主机切换/模型权限。
-- 当前分支/提交/PR：跟进分支 `ao/session-settings/fix-batch-host`（从最新 `origin/main=7757b38` 创建），head `3cfd73a`（产品修复 `9a020c0`）；跟进 PR https://github.com/leezzou/tanuki/pull/56 ，CI 4 项通过。PR #50 已合并。
+- 当前分支/提交/PR：跟进分支 `ao/session-settings/fix-batch-host`（从最新 `origin/main=7757b38` 创建），PR #56 最新 head（产品修复 `9a020c0`）；跟进 PR https://github.com/leezzou/tanuki/pull/56 ，CI 4 项通过。PR #50 已合并。
 - 基线：`4f2a3717d6d795fd6b94cdb695878d8119f818c1`；远端 `origin/main` 已到 `326726c`（仅文档 #45），未 rebase。
 
 ## 本次改动
@@ -62,21 +62,21 @@
 | `source scripts/ao-worktree-env.sh` | 通过 | worktree 本地 Gradle/JDK/SDK |
 | `:app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 新增分组/host/tab 后编译通过 |
 | `:app:testModernDebugUnitTest --tests com.tanuki.DshSessionManagerControllerTest` | BUILD SUCCESSFUL；37 tests / 0 failures / 0 errors | 含延迟失败、200/201、挂起进度回归 |
-| `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL；813 tests / 90 文件 / 0 failures / 0 errors / 0 skipped | 本轮新改动 |
-| `:app:lintModernDebug` | BUILD SUCCESSFUL；0 errors / 93 warnings / 1 hint | 警告为既有/工具链提示 |
+| `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL；936 tests / 101 文件 / 0 failures / 0 errors / 0 skipped | 本轮新改动 |
+| `:app:lintModernDebug` | BUILD SUCCESSFUL；0 errors / 94 warnings / 1 hint | 警告为既有/工具链提示 |
 | 旧 head `30da86d` PR CI | pull_request + push 两个 run 均 success | 旧 head 结果 |
 | 新 head `9b6ddf9` PR CI | pull_request + push 两个 run 均 success（4 项检查） | 历史 head 结果 |
-| 跟进 PR #56 `3cfd73a` CI | pull_request + push 两个 run 均 success（4 项检查） | 3 项 P2 修复后的 head |
+| 跟进 PR #56 CI | pull_request + push 两个 run 均 success（4 项检查） | 3 项 P2 修复后的 head |
 | `python3 scripts/check-handoff.py --pr`、`check-publication.py --git` | 本轮最终改动后重跑 | 见收尾输出 |
 
-- 哪些是前一轮结果，哪些是本次新验证：旧 head CI 为前一轮；本轮 37 定向 tests、813 全量 JVM、lint 为第二轮 P2 修复的新验证。
+- 哪些是前一轮结果，哪些是本次新验证：旧 head CI 为前一轮；本轮 37 定向 tests、936 全量 JVM、lint 为第二轮 P2 修复的新验证。
 - 未测试、超时、失败和暂未复现：Android 仪器/真机、真实 DSH 的 goals/workspaceFiles/artifacts、主机切换失败回退、批量归档部分失败的真实官方行为。
 
 ## 未完成与暂停项
 
 - 阻塞/待协调：
   - 第二轮 review 已对 `9b6ddf9` 返回 3 项 P2（批量进度不可见、主机连接反馈丢失、200 上限静默截断）；修复已 cherry-pick 到跟进分支，待新 PR 复审。
-  - P0-2 真实数据需要公共协议扩展：`DshSessionAdminSource` 目前没有 `goals/*`、`artifacts`、`workspaceFiles/*` 的字段契约；docs 只有方法名。未获协调前只能保留“暂不支持”tab。
+  - P0-2 真实数据需要公共协议/目录扩展：未在本地核对到官方 0.2.1-rc.5 的 `goals/*`、`artifacts`、`workspaceFiles/*` 字段契约（docs 只有方法名）；`RuntimePaths` 也没有向会话管理暴露本地 artifacts 目录。按“不得编造字段”的要求保留“暂不支持”tab，待拿到契约或只读 artifacts 目录后再接。
   - 多远程主机列表需要共享 runtime 类型扩展；当前只支持“本机 + 一个已保存远程”。
 - 未完成：批量硬删除（官方无端点）、归档撤销、语言切换、手动主题切换（归通用主题属主）、设备/仪器/assemble 验证、第二轮修复的新 head 复审。
 - 外部阻塞：无。
@@ -84,14 +84,16 @@
 
 ## 下一步
 
-1. 请编排对跟进 PR #56 的新 head `3cfd73a` 独立评审。
+1. 请编排对跟进 PR #56 的最新 head 独立评审。
 2. 等待编排对公共协议扩展的决定：若获批，扩展 `DshSessionAdminSource`/`DshSessionAdminApi`（goals/artifacts/workspaceFiles）并替换 P0-2 的“暂不支持”内容；若未获批，保留如实说明并在 PR 标注边界。
 3. 由独立 QA 补设备/真实 DSH 验证；未获合并/发布授权不合并、不发布。
+4. 向 android_agent-56 请求通用主题 hook（由 51 接线）；向编排请求 `goals/*`、`artifacts`、`workspaceFiles/*` 字段契约或只读 artifacts 目录。
 
 ## 约束与风险
 
 - 数据/设备/权限边界：不读取/输出真实 Key、Cookie、token、会话或备份；不跑设备任务；不合并、不发布；不自动切换 `danger-full-access`。
 - 关键决策：
+  - 主题撤回后由通用主题属主 56 提供 hook、由 51 接线；本 PR 设置页只显示“跟随系统（手动切换暂不支持）”，不改 MainActivity。
   - 置顶/未读为本机偏好；文件夹分组只读官方 `cwd`，不写回。
   - 批量归档逐个调用官方接口，部分失败不回滚已成功项；硬删除没有端点，只说明不伪造。
   - 主机切换复用共享 `RemoteHostController`；只支持当前一个已保存远程配置，多主机明确列为后续。
@@ -102,6 +104,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP：本轮不构建、不更新。
-- PR #50：https://github.com/leezzou/tanuki/pull/50 （已由编排合并）；跟进 PR #56：https://github.com/leezzou/tanuki/pull/56 （head `3cfd73a`，CI 4 项通过；待复审；本会话未合并、未发布）。
+- PR #50：https://github.com/leezzou/tanuki/pull/50 （已由编排合并）；跟进 PR #56：https://github.com/leezzou/tanuki/pull/56 （PR #56 最新 head，CI 通过；待复审；本会话未合并、未发布）。
 - 过期记录：未删除历史交接；本记录保留本轮证据。
 - 普通 PR 不刷新共享状态/印章；集成维护方批量合并后统一 `--integrate`。

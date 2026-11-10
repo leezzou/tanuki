@@ -1377,7 +1377,7 @@ private fun DetailProgressTab(session: DshAdminSession) {
 private fun DetailArtifactsTab() {
     DetailUnavailable(
         title = "产物列表与预览暂不支持",
-        detail = "官方 artifacts/workspaceFiles 契约尚未接入原生会话管理；本页不会生成假产物或空预览。项目文件仍保存在工作区，可在文件页查看。"
+        detail = "官方 artifacts/workspaceFiles 字段契约尚未核对接入；当前运行时也没有向会话管理暴露本地 artifacts 目录。本页不会生成假产物或空预览；后续拿到只读目录后只读列出、不复制。"
     )
 }
 
