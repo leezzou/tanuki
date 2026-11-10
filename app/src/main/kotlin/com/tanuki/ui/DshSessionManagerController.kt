@@ -19,9 +19,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
 
-/** 单次批量归档上限；超过上限时只处理前 200 个，避免一次点击制造不可控的串行网络请求。 */
-private const val MAX_BATCH_ARCHIVE = 200
-
 /** 会话列表筛选；未读是本机记录，不是官方字段。 */
 enum class DshSessionFilter(val label: String) {
     ALL("全部"), RUNNING("运行中"), UNREAD("未读")
@@ -155,6 +152,11 @@ class DshSessionManagerController(
         DshSessionManagerState(pinnedIds = runCatching { pinStore.pinnedIds() }.getOrDefault(emptySet()))
     )
     val state: StateFlow<DshSessionManagerState> = _state.asStateFlow()
+
+    companion object {
+        /** 单次批量归档上限；超过时拒绝并保留选择，不能静默截断。 */
+        const val MAX_BATCH_ARCHIVE = 200
+    }
 
     private var listJob: Job? = null
     private var actionJob: Job? = null
@@ -383,10 +385,17 @@ class DshSessionManagerController(
      * `stopRunning=true` 时先请求停止。部分失败不回滚已成功的归档，列表刷新后
      * 保留未归档项，并给出失败数量与短原因。硬删除没有端点，本方法不伪造删除。
      */
-    fun archiveSessions(sessionIds: Collection<String>, stopRunning: Boolean) {
-        val ids = sessionIds.filter(::validId).distinct().take(MAX_BATCH_ARCHIVE)
-        if (ids.isEmpty()) return
-        if (!beginAction()) return
+    fun archiveSessions(sessionIds: Collection<String>, stopRunning: Boolean): Boolean {
+        val ids = sessionIds.filter(::validId).distinct()
+        if (ids.isEmpty()) return false
+        if (ids.size > MAX_BATCH_ARCHIVE) {
+            // 不能静默截断已确认的集合：拒绝请求并保留调用方选择，让用户减少数量。
+            _state.update {
+                it.copy(error = "一次最多归档 $MAX_BATCH_ARCHIVE 个会话，请减少选择后重试；当前选择已保留")
+            }
+            return false
+        }
+        if (!beginAction()) return false
         val runningById = _state.value.sessions.associate { it.id to it.running }
         _state.update { it.copy(batchDone = 0, batchTotal = ids.size) }
         actionJob = scope.launch {
@@ -413,6 +422,7 @@ class DshSessionManagerController(
                 _state.update { it.copy(error = "未归档：$summary$suffix") }
             }
         }
+        return true
     }
 
     fun searchContent() {

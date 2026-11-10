@@ -7,6 +7,7 @@ import com.tanuki.ui.DshSessionCapabilities
 import com.tanuki.ui.DshSessionFilter
 import com.tanuki.ui.DshSessionFiltering
 import com.tanuki.ui.DshSessionGrouping
+import com.tanuki.ui.DshSessionHostFeedback
 import com.tanuki.ui.DshSessionHosts
 import com.tanuki.ui.DshSessionManagerController
 import com.tanuki.ui.DshSessionPinStore
@@ -334,6 +335,64 @@ class DshSessionManagerControllerTest {
         assertTrue(controller.state.value.error.orEmpty().contains("只读"))
     }
 
+    @Test fun batchArchiveRejectsOverLimitAndKeepsSelection() {
+        val many = (0..DshSessionManagerController.MAX_BATCH_ARCHIVE).map { index ->
+            session("s$index", "会话 $index", 1_000L + index)
+        }
+        val source = FakeSource()
+        source.sessionsResult = Result.success(many)
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+
+        val accepted = controller.archiveSessions(many.map { it.id }, stopRunning = true)
+
+        assertFalse(accepted)
+        assertTrue(source.calls.isEmpty())
+        assertTrue(controller.state.value.error.orEmpty().contains("最多归档 200"))
+        assertEquals(0, controller.state.value.batchTotal)
+        assertEquals(many.size, controller.state.value.sessions.size)
+    }
+
+    @Test fun batchArchiveAcceptsExactlyLimit() {
+        val many = (0 until DshSessionManagerController.MAX_BATCH_ARCHIVE).map { index ->
+            session("s$index", "会话 $index", 1_000L + index)
+        }
+        val source = FakeSource()
+        source.sessionsResult = Result.success(many)
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+
+        val accepted = controller.archiveSessions(many.map { it.id }, stopRunning = true)
+
+        assertTrue(accepted)
+        assertEquals(DshSessionManagerController.MAX_BATCH_ARCHIVE, source.calls.size)
+        assertEquals(0, controller.state.value.batchTotal)
+        assertTrue(controller.state.value.sessions.isEmpty())
+    }
+
+    @Test fun batchArchiveProgressRemainsWhileRequestsAreSuspended() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(
+            session("s1", "甲", 2_000L),
+            session("s2", "乙", 1_000L)
+        ))
+        source.archiveAwait = CompletableDeferred()
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+
+        assertTrue(controller.archiveSessions(listOf("s1", "s2"), stopRunning = true))
+
+        val running = controller.state.value
+        assertTrue(running.busy)
+        assertEquals(2, running.batchTotal)
+        assertEquals(0, running.batchDone)
+
+        source.archiveAwait?.complete(Unit)
+        source.archiveAwait = null
+        assertEquals(0, controller.state.value.batchTotal)
+        assertEquals(0, controller.state.value.batchDone)
+    }
+
     @Test fun hostListShowsLocalAndSavedRemoteStates() {
         val localOnly = DshSessionHosts.list(
             localRunning = true,
@@ -358,6 +417,16 @@ class DshSessionManagerControllerTest {
         assertEquals("已连接", connected[1].detail)
         assertTrue(connected[1].active)
         assertFalse(connected[0].active)
+
+        val failed = DshSessionHostFeedback.forState(
+            busy = false,
+            message = "已回退本地",
+            error = "SSH 认证失败"
+        )
+        assertEquals("远程主机连接失败：SSH 认证失败", failed?.message)
+        assertTrue(failed?.error == true)
+        assertEquals("正在连接远程主机…", DshSessionHostFeedback.forState(true, "", "")?.message)
+        assertNull(DshSessionHostFeedback.forState(false, "", ""))
     }
 
     @Test fun hostListMarksConnectingRemoteBusyAndUnselectable() {
@@ -758,6 +827,7 @@ class DshSessionManagerControllerTest {
         var permissionsAwait: CompletableDeferred<Unit>? = null
         var selectModelAwait: CompletableDeferred<Unit>? = null
         var selectPermissionAwait: CompletableDeferred<Unit>? = null
+        var archiveAwait: CompletableDeferred<Unit>? = null
         var skillsAwait: CompletableDeferred<Unit>? = null
         var sessionsFailureAtCall: Int? = null
         private var sessionsCalls = 0
@@ -788,6 +858,7 @@ class DshSessionManagerControllerTest {
 
         override suspend fun archiveSession(sessionId: String, stopActivity: Boolean): Result<List<String>> {
             calls += "archive:$sessionId:$stopActivity"
+            archiveAwait?.await()
             if (sessionId in archiveFailureIds) return Result.failure(DshApiException("workspace/session-active"))
             return archiveResult.map {
                 sessionsResult = Result.success(sessionsResult.getOrNull().orEmpty().filterNot { item -> item.id == sessionId })

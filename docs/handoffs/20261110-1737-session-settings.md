@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-54（DSH Worker）
 - 时间：2026-11-10 17:37 CST（开始），2026-11-10 19:20 CST（追加 P0/P1 本地实现）
-- 状态：进行中（新 head `9b6ddf9` 已推送，PR CI 4 项通过；评审 P2 已修复，P0-1/P0-3/P1 已完成，P0-2 真实数据仍依赖公共协议决策；待新 head 复审与设备 QA；未合并、未发布）
+- 状态：进行中（第二轮 review 的 3 项 P2 已在本地修复并通过完整 JVM/lint；`7f09601` 为已推送旧 head，新修复待提交/推送与复审；P0-2 真实数据仍依赖公共协议决策；未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -30,12 +30,12 @@
   - P0-2：详情 sheet 增加概览/进度/产物/文件四 tab；进度/产物/文件在协议未接入处明确“暂不支持”，文件 tab 展示真实 `cwd` 并支持复制，不生成假进度/假产物/假文件树。
 - 已验证（本地）：
   - `:app:compileModernDebugKotlin` 成功（新增 host/tab/分组代码后）。
-  - 定向 `DshSessionManagerControllerTest`：34 tests / 0 failures / 0 errors；新增“延迟模型/权限失败在关闭详情后仍可见且绑定会话”回归。
-  - 完整 `:app:testModernDebugUnitTest`：810 tests / 90 文件 / 0 failures / 0 errors / 0 skipped。
+  - 定向 `DshSessionManagerControllerTest`：37 tests / 0 failures / 0 errors；含延迟失败、200/201 上限、批量挂起进度回归。
+  - 完整 `:app:testModernDebugUnitTest`：813 tests / 90 文件 / 0 failures / 0 errors / 0 skipped。
   - `:app:lintModernDebug`：BUILD SUCCESSFUL，0 errors / 93 warnings / 1 hint。
   - 旧 head `30da86d` 的 GitHub CI 两个 run 均 success（不含本轮新改动）。
 - 待验证：Android 仪器/真机、真实 DSH 的 cwd 分组/批量归档/主机切换/模型权限。
-- 当前分支/提交/PR：`ao/session-settings/root`；已推送 head `9b6ddf9`（PR #50）；新 head 的 pull_request + push CI 均 success；未合并、未发布。
+- 当前分支/提交/PR：`ao/session-settings/root`；已推送 head `7f09601`（PR #50，产品代码同 `9b6ddf9`）；第二轮 review 3 项 P2 的修复仅在本地，待提交/推送；未合并、未发布。
 - 基线：`4f2a3717d6d795fd6b94cdb695878d8119f818c1`；远端 `origin/main` 已到 `326726c`（仅文档 #45），未 rebase。
 
 ## 本次改动
@@ -61,29 +61,29 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh` | 通过 | worktree 本地 Gradle/JDK/SDK |
 | `:app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 新增分组/host/tab 后编译通过 |
-| `:app:testModernDebugUnitTest --tests com.tanuki.DshSessionManagerControllerTest` | BUILD SUCCESSFUL；34 tests / 0 failures / 0 errors | 含延迟失败回归 |
-| `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL；810 tests / 90 文件 / 0 failures / 0 errors / 0 skipped | 本轮新改动 |
+| `:app:testModernDebugUnitTest --tests com.tanuki.DshSessionManagerControllerTest` | BUILD SUCCESSFUL；37 tests / 0 failures / 0 errors | 含延迟失败、200/201、挂起进度回归 |
+| `:app:testModernDebugUnitTest` | BUILD SUCCESSFUL；813 tests / 90 文件 / 0 failures / 0 errors / 0 skipped | 本轮新改动 |
 | `:app:lintModernDebug` | BUILD SUCCESSFUL；0 errors / 93 warnings / 1 hint | 警告为既有/工具链提示 |
 | 旧 head `30da86d` PR CI | pull_request + push 两个 run 均 success | 旧 head 结果 |
 | 新 head `9b6ddf9` PR CI | pull_request + push 两个 run 均 success（4 项检查） | 新 head 结果 |
 | `python3 scripts/check-handoff.py --pr`、`check-publication.py --git` | 本轮最终改动后重跑 | 见收尾输出 |
 
-- 哪些是前一轮结果，哪些是本次新验证：旧 head CI 为前一轮；本轮 34 定向 tests、810 全量 JVM、lint、主题撤回与新 head CI 为新验证。
+- 哪些是前一轮结果，哪些是本次新验证：旧 head CI 为前一轮；本轮 37 定向 tests、813 全量 JVM、lint 为第二轮 P2 修复的新验证。
 - 未测试、超时、失败和暂未复现：Android 仪器/真机、真实 DSH 的 goals/workspaceFiles/artifacts、主机切换失败回退、批量归档部分失败的真实官方行为。
 
 ## 未完成与暂停项
 
 - 阻塞/待协调：
-  - AO review 已对 `30da86d` 返回 changes_requested（P2 延迟失败反馈），本轮已修复并推送 `9b6ddf9`；需对新 head 重新评审。
+  - 第二轮 review 已对 `9b6ddf9` 返回 3 项 P2（批量进度不可见、主机连接反馈丢失、200 上限静默截断）；本轮已在本地修复，待提交/推送后复审。
   - P0-2 真实数据需要公共协议扩展：`DshSessionAdminSource` 目前没有 `goals/*`、`artifacts`、`workspaceFiles/*` 的字段契约；docs 只有方法名。未获协调前只能保留“暂不支持”tab。
   - 多远程主机列表需要共享 runtime 类型扩展；当前只支持“本机 + 一个已保存远程”。
-- 未完成：批量硬删除（官方无端点）、归档撤销、语言切换、手动主题切换（归通用主题属主）、设备/仪器/assemble 验证、新 head 复审。
+- 未完成：批量硬删除（官方无端点）、归档撤销、语言切换、手动主题切换（归通用主题属主）、设备/仪器/assemble 验证、第二轮修复的新 head 复审。
 - 外部阻塞：无。
 - 用户暂停：API Key、真实模型/账号、真机验收；不合并、不发布。
 
 ## 下一步
 
-1. 请编排对 `9b6ddf9` 重新触发独立评审；新 head 已通过本地 JVM/lint 与 PR CI。
+1. 提交/推送第二轮 P2 修复，运行新 head CI，并请编排重新触发独立评审。
 2. 等待编排对公共协议扩展的决定：若获批，扩展 `DshSessionAdminSource`/`DshSessionAdminApi`（goals/artifacts/workspaceFiles）并替换 P0-2 的“暂不支持”内容；若未获批，保留如实说明并在 PR 标注边界。
 3. 由独立 QA 补设备/真实 DSH 验证；未获合并/发布授权不合并、不发布。
 
@@ -101,6 +101,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP：本轮不构建、不更新。
-- PR：https://github.com/leezzou/tanuki/pull/50 （新 head `9b6ddf9`，CI 4 项通过；未合并、未发布）。
+- PR：https://github.com/leezzou/tanuki/pull/50 （旧 head `7f09601`；第二轮 P2 修复待推送；未合并、未发布）。
 - 过期记录：未删除历史交接；本记录保留本轮证据。
 - 普通 PR 不刷新共享状态/印章；集成维护方批量合并后统一 `--integrate`。

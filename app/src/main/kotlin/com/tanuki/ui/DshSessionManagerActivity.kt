@@ -82,6 +82,8 @@ class DshSessionManagerActivity : ComponentActivity() {
                     readOnly = readOnly,
                     hosts = hosts,
                     hostBusy = remoteUi.busy,
+                    hostMessage = remoteUi.message,
+                    hostError = remoteUi.error,
                     onSelectHost = { id ->
                         when (id) {
                             DshSessionHosts.LOCAL_ID -> if (remoteUi.status.connected) runtime.remoteHost.disconnect()
