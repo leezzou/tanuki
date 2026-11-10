@@ -2,7 +2,7 @@
 
 ## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
 
-- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
+- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）与 `1cb7ad9`（原生能力对等审计）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
 - 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
 - 已实现：
   - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
@@ -243,13 +243,13 @@
 
 1. 无公网 IP 中继切片 PR [#36](https://github.com/leezzou/tanuki/pull/36)：以最终 head/CI 为准，等待独立 Review；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
-2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
-3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
-4. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
-5. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
-6. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
-7. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
-8. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
+3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
+4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
+5. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
+6. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
+7. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
+8. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
+9. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
 1. DOCX 预览 PR [#28](https://github.com/leezzou/tanuki/pull/28)：已 merge `main=f5f3bf3`，等待当前完整 SHA 的独立 Codex High Review 与设备 QA（双指缩放、横向滚动、复杂 DOCX、超大文档）；不合并、不触发 AO Review。
 2. 温控 PR [#21](https://github.com/leezzou/tanuki/pull/21) 已合并为 `f5f3bf3`：真机温控/低电/低内存、WorkManager 调度与重启恢复由独立 QA 另行授权。
 3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并为 `d9b4aa2`：真机/PRoot 原生界面切换、通知点击与失败回退验收另行授权。
@@ -264,3 +264,7 @@
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
+
+## 并发审计记录
+
+- [原生界面与官方网页版功能对齐审计](handoffs/20261110-1140-native-parity-audit.md)（android_agent-47，只读审计 + 验收清单；未改产品代码，待编排器汇总）。

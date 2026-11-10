@@ -23,6 +23,7 @@
   - 合并 `origin/main=533eff4` 后、P2 修复前完整 JVM/lint：BUILD SUCCESSFUL（2m20s）；575 tests / 0 failures / 0 errors / 0 skipped（68 个结果文件）。
   - P2 修复后完整 JVM/lint：BUILD SUCCESSFUL（2m17s）；**581 tests / 0 failures / 0 errors / 0 skipped**（68 个结果文件）；lint **0 errors / 95 warnings / 1 hint**。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；独立 Codex High Review、合并/发布未授权。
+- 主线同步：已合并 `origin/main=533eff4`、`1cb7ad9`，解决 `AGENT-STATE`/`CURRENT.json`/`verify.yml` 冲突；合并后的 app 代码与 `049edcc` 相同。
 - 当前目标包名、分支/无 Git 状态、是否有运行中任务：分支 `ao/tanuki-remote/relay-pairing`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#36](https://github.com/leezzou/tanuki/pull/36) 已创建，base `main`；无运行中任务。
 - 关键事实与可定位源码/公共文档：方案/资源/流程见 `docs/REMOTE-CONNECT.md`；契约见 `docs/INTERFACES.md` 1.6；实现见 `app/src/main/kotlin/com/tanuki/runtime/{RemoteRelay,RelayTransport,RemoteHost,RemoteHostStorage,RemoteHostController}.kt`；参考中继/agent 见 `scripts/remote-relay/`；JVM 回归见 `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt`。
 
