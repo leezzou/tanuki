@@ -22,7 +22,7 @@
 - 原生能力：发送/停止、切换会话、实时增量、运行状态、错误提示、审批单次允许/拒绝、提问只读+跳官方；输入栏（多行/草稿/附件/粘贴/拖入/@/斜杠命令）与 Markdown/代码块/基础表格/图片占位已接线；完整功能清单见 [原生界面功能对齐清单](NATIVE-PARITY.md)。模型/推理、工具卡、历史向前分页、会话管理、工作区、设置、技能/插件、自动重连仍未实现。
 - 安全与兼容：只连精确 loopback origin；WebSocket 握手校验/掩码/ping-pong；token/Cookie 不落日志/状态；取消实时收集立即关闭 socket；发送绑定发起会话代次；列表失败回退官方，实时/单次失败只提示；通知目标会重连；远程 origin 复用同一 loopback 转发地址；安全模式与 WebView 路径未改。
 - 组件契约：`DshTransport` 已冻结（connection/call/live/reset），输入/审批/会话管理共用；`DshNativeComposerRemote` 只转发 call/reset。P1 两条 Review 已修。
-- 已验证（本轮）：目标协议/客户端/控制器/WebSocket/Markdown/composer 回归 96 项通过；合并 `main=2a4a050` 后完整 `testModernDebugUnitTest` **645 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 95 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
+- 已验证（本轮）：目标协议/客户端/控制器/WebSocket/Markdown/composer 回归 96 项通过；合并 `main=0068c87` 后完整 `testModernDebugUnitTest` **668 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 96 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
 - 详细端点、未实现项与设备验收清单见 [原生界面](NATIVE-UI.md)。
 
 ### 文件复制界面稳定（android_agent-40，PR #35 已合并）
