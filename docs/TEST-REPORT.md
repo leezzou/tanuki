@@ -112,7 +112,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
 
-- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
 - 新增：`DshApprovalProtocol`（帧/回答信封/风险/本次运行记忆）、`DshWebSocketClient`（最小 RFC6455）、`DshApprovalSession`（`/connect`→`$events`→`$events/result`，401 重认证）、`DshToolTimeline`（工具/命令/diff/文件变更）、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`；`DshNativeApi`/`DshNativeController`/`DshNativePage`/`MainActivity` 只做增量接线。
 - 新增 JVM 回归 34 项：`DshApprovalProtocolTest` 9、`DshToolTimelineTest` 8、`DshWebSocketTest` 5、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 7。覆盖 ready/waterfall/cancel/error 帧、字段白名单、官方回答信封、风险分级、本次运行记忆、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
 - 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：

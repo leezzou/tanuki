@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-45（AO worker）
 - 时间：2026-11-10 11:39–14:00 CST
-- 状态：实现与 JVM/lint 验证完成；设备未验证；PR 待创建；未合并、未发布
+- 状态：实现与 JVM/lint 验证完成；设备未验证；PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；未合并、未发布
 - 前一记录：[原生界面与官方界面切换](20261109-1829-native-ui-switch.md)
 
 ## 用户目标与范围
@@ -69,14 +69,14 @@
 
 ## 未完成与暂停项
 
-- 未完成：创建 PR（用户要求 PR，不合并、不发布）；真实设备 QA 另行授权。
+- 未完成：PR 已创建（[#41](https://github.com/leezzou/tanuki/pull/41)），等待审查；不合并、不发布。真实设备 QA 另行授权。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收。
 
 ## 下一步
 
 1. 提交前清理过期交接（按 `docs/PUBLICATION.md` 评估），运行 `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1139-native-approval-tools.md`、`python3 scripts/check-handoff.py`，必要时刷新 `CURRENT.json`/源码包。
-2. 以 `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/tool-approval/root`，创建 PR；不合并、不发布。
+2. PR [#41](https://github.com/leezzou/tanuki/pull/41) 已创建；等待独立审查与 CI，不合并、不发布。
 3. 真实设备/PRoot 审批与工具卡片验收由独立 QA 另行授权；远程 SSH 隧道与安全模式 rescue 同样待验。
 
 ## 约束与风险
