@@ -6,8 +6,20 @@ import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.horizontalScroll
@@ -18,28 +30,34 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -49,24 +67,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draganddrop.DragAndDropEvent
@@ -79,6 +105,7 @@ import com.tanuki.web.DshCommand
 import com.tanuki.web.DshComposerDragPolicy
 import com.tanuki.web.DshComposerPolicy
 import com.tanuki.web.DshComposerProtocol
+import com.tanuki.web.DshTextEdit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -104,6 +131,15 @@ fun DshComposerBar(
     var preview by remember { mutableStateOf<DshDraftAttachment?>(null) }
     var imagePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
     var filePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
+    var mentionIndex by remember { mutableIntStateOf(0) }
+    var commandIndex by remember { mutableIntStateOf(0) }
+    // 选择器/粘贴/拖入读取期间显示不定进度；官方读取没有可用的字节级回调。
+    var readingAttachments by remember { mutableIntStateOf(0) }
+    // 用实际文本布局行数驱动胶囊圆角与高度，避免按字符数猜测换行。
+    var lineCount by remember { mutableIntStateOf(1) }
+    val mentionListState = rememberLazyListState()
+    val commandListState = rememberLazyListState()
+    val focusRequester = remember { FocusRequester() }
     val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.sessionId) {
@@ -118,6 +154,70 @@ fun DshComposerBar(
             delay(2_000)
             controller.clearNotice()
         }
+    }
+
+    // 当前 @ 查询以状态机里的 start/end 为准；斜杠查询直接跟随最新光标/选区末端。
+    val slash = DshComposerPolicy.slashQuery(value.text, value.selection.max)
+    val mentionMenuVisible = state.mentionQuery != null && state.mentionCandidates.isNotEmpty()
+    val commandMenuVisible = slash != null && state.commandCandidates.isNotEmpty()
+
+    LaunchedEffect(state.mentionQuery?.query, state.mentionCandidates.size) {
+        mentionIndex = 0
+    }
+    LaunchedEffect(slash, state.commandCandidates.size) {
+        commandIndex = 0
+    }
+    LaunchedEffect(mentionIndex, state.mentionCandidates.size, mentionMenuVisible) {
+        if (mentionMenuVisible && state.mentionCandidates.isNotEmpty()) {
+            mentionListState.scrollToItem(mentionIndex.coerceIn(0, state.mentionCandidates.lastIndex))
+        }
+    }
+    LaunchedEffect(commandIndex, state.commandCandidates.size, commandMenuVisible) {
+        if (commandMenuVisible && state.commandCandidates.isNotEmpty()) {
+            commandListState.scrollToItem(commandIndex.coerceIn(0, state.commandCandidates.lastIndex))
+        }
+    }
+
+    fun focusInput() {
+        // 部分宿主在输入法收起/重建时可能暂时没有可聚焦节点；失败不应影响发送结果。
+        runCatching { focusRequester.requestFocus() }
+    }
+
+    fun applyEdit(edit: DshTextEdit) {
+        value = TextFieldValue(edit.text, TextRange(edit.cursor))
+        controller.updateText(edit.text, edit.cursor)
+    }
+
+    fun pickMention(candidate: DshMentionCandidate) {
+        val query = state.mentionQuery ?: return
+        val directory = candidate is DshMentionCandidate.File && candidate.reference.kind == "directory"
+        // 仅在后面还没有空白时补分隔空格，避免覆盖已有空格造成双空格。
+        val separator = !directory && (query.end >= value.text.length || !value.text[query.end].isWhitespace())
+        val insertion = candidate.insertion + if (separator) " " else ""
+        applyEdit(DshComposerPolicy.insertMention(value.text, query, insertion))
+        // 目录引用保持补全打开；文件/会话引用插入后结束本次 @ 查询。
+        if (!directory) controller.clearMention()
+        focusInput()
+    }
+
+    fun pickCommand(command: DshCommand) {
+        applyEdit(DshComposerPolicy.insertCommand(value.text, value.selection.max, command.name))
+        controller.clearCommandCandidates()
+        focusInput()
+    }
+
+    fun insertToken(token: String) {
+        insertAtCursor(token, value) { next, cursor ->
+            value = TextFieldValue(next, TextRange(cursor))
+            controller.updateText(next, cursor)
+        }
+        focusInput()
+    }
+
+    fun submit() {
+        controller.send()
+        // 点击发送按钮或快捷键后把焦点还给输入框，连续输入/失败重发不需要再点一次。
+        focusInput()
     }
 
     fun budgetFor(kind: DshAttachmentKind): DshAttachmentReadBudget {
@@ -181,8 +281,13 @@ fun DshComposerBar(
                 controller.showNotice("无法确认附件所属会话，已丢弃选择结果")
                 return@launch
             }
-            val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.IMAGE, budgetFor(DshAttachmentKind.IMAGE))
+            readingAttachments += 1
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    DshAttachmentReader.readUris(context, uris, DshAttachmentKind.IMAGE, budgetFor(DshAttachmentKind.IMAGE))
+                }
+            } finally {
+                readingAttachments = (readingAttachments - 1).coerceAtLeast(0)
             }
             applyRead(result, DshAttachmentKind.IMAGE, token)
         }
@@ -195,8 +300,13 @@ fun DshComposerBar(
                 controller.showNotice("无法确认附件所属会话，已丢弃选择结果")
                 return@launch
             }
-            val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.FILE, budgetFor(DshAttachmentKind.FILE))
+            readingAttachments += 1
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    DshAttachmentReader.readUris(context, uris, DshAttachmentKind.FILE, budgetFor(DshAttachmentKind.FILE))
+                }
+            } finally {
+                readingAttachments = (readingAttachments - 1).coerceAtLeast(0)
             }
             applyRead(result, DshAttachmentKind.FILE, token)
         }
@@ -205,8 +315,13 @@ fun DshComposerBar(
     fun pasteImage() {
         val token = controller.captureSessionToken()
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readClipboard(context, budgetFor(DshAttachmentKind.IMAGE))
+            readingAttachments += 1
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    DshAttachmentReader.readClipboard(context, budgetFor(DshAttachmentKind.IMAGE))
+                }
+            } finally {
+                readingAttachments = (readingAttachments - 1).coerceAtLeast(0)
             }
             applyRead(result, DshAttachmentKind.IMAGE, token)
         }
@@ -241,8 +356,13 @@ fun DshComposerBar(
                 val fileBudget = budgetFor(DshAttachmentKind.FILE)
                 scope.launch {
                     try {
-                        val result = withContext(Dispatchers.IO) {
-                            DshAttachmentReader.readDrop(context, clip, imageBudget, fileBudget)
+                        readingAttachments += 1
+                        val result = try {
+                            withContext(Dispatchers.IO) {
+                                DshAttachmentReader.readDrop(context, clip, imageBudget, fileBudget)
+                            }
+                        } finally {
+                            readingAttachments = (readingAttachments - 1).coerceAtLeast(0)
                         }
                         if (!controller.isCurrentSession(token)) {
                             controller.showNotice("会话已切换，已丢弃上次拖入的附件")
@@ -273,12 +393,27 @@ fun DshComposerBar(
         target = dropTarget
     )
 
+    val capsuleCorner by animateDpAsState(
+        targetValue = if (lineCount > 1) 18.dp else 28.dp,
+        animationSpec = tween(durationMillis = 160),
+        label = "composer-corner"
+    )
+    val showStop = state.generationRunning || state.stopping
+    val sendStopEnabled = if (showStop) !state.stopping else state.canSend
+    val sendStopContainer = if (sendStopEnabled) {
+        MaterialTheme.colorScheme.primary
+    } else MaterialTheme.colorScheme.surfaceVariant
+    val sendStopContent = if (sendStopEnabled) {
+        MaterialTheme.colorScheme.onPrimary
+    } else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
-        tonalElevation = 2.dp,
+        color = Color.Transparent,
+        shape = RoundedCornerShape(0.dp),
+        tonalElevation = 0.dp,
         border = if (dragActive) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = modifier.fillMaxWidth().then(dragModifier)
+        // 作为独立组件也保证软键盘不遮住输入框；父级已消费的 IME inset 不会重复叠加。
+        modifier = modifier.fillMaxWidth().imePadding().then(dragModifier)
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             state.error?.let { message ->
@@ -297,6 +432,22 @@ fun DshComposerBar(
             state.notice?.let { message ->
                 Text(message, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // 停止结果独立显示，避免底部操作行在窄屏把状态文案挤掉。
+            state.stopOutcome?.takeIf { state.notice == null }?.let { outcome ->
+                val text = when {
+                    state.stopping -> "正在停止，等待官方确认"
+                    outcome == DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
+                    outcome == DshStopOutcome.STOPPED -> "已停止当前回合"
+                    else -> "停止失败，可重试"
+                }
+                val color = when {
+                    state.stopping || outcome == DshStopOutcome.REQUESTED ->
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    outcome == DshStopOutcome.STOPPED -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+            }
             if (state.attachments.isNotEmpty()) {
                 AttachmentRail(
                     attachments = state.attachments,
@@ -305,114 +456,235 @@ fun DshComposerBar(
                     onPreview = { preview = it }
                 )
             }
-            val mention = state.mentionQuery
-            if (mention != null) {
+            if (state.mentionQuery != null) {
                 MentionMenu(
                     state = state,
-                    onPick = { candidate ->
-                        val insertion = candidate.insertion + if (candidate is DshMentionCandidate.File && candidate.reference.kind == "directory") "" else " "
-                        val next = value.text.replaceRange(mention.start, mention.end, insertion)
-                        val cursor = mention.start + insertion.length
-                        value = TextFieldValue(next, TextRange(cursor))
-                        controller.updateText(next, cursor)
-                        // 目录引用保持补全打开；文件/会话引用插入后结束本次 @ 查询。
-                        if (candidate !is DshMentionCandidate.File || candidate.reference.kind != "directory") {
-                            controller.clearMention()
-                        }
-                    }
+                    selectedIndex = mentionIndex,
+                    listState = mentionListState,
+                    onPick = ::pickMention
                 )
             }
-            val slash = DshComposerPolicy.slashQuery(value.text, value.selection.start)
-            if (slash != null && state.commandCandidates.isNotEmpty()) {
+            if (commandMenuVisible) {
                 CommandMenu(
                     commands = state.commandCandidates,
-                    onPick = { command ->
-                        val end = value.text.indexOfFirst { it.isWhitespace() }.let { if (it < 0) value.text.length else it }
-                        val rest = value.text.substring(end).trimStart()
-                        val insertion = "/${command.name} " + rest
-                        value = TextFieldValue(insertion, TextRange(insertion.length))
-                        controller.updateText(insertion, insertion.length)
-                        controller.clearCommandCandidates()
-                    }
+                    selectedIndex = commandIndex,
+                    listState = commandListState,
+                    onPick = ::pickCommand
                 )
             }
-            TextField(
-                value = value,
-                onValueChange = { next ->
-                    value = next
-                    controller.updateText(next.text, next.selection.start)
-                },
-                modifier = Modifier.fillMaxWidth().onKeyEvent { event ->
-                    // Ctrl/⌘ + Enter 发送；普通 Enter 保留换行，避免移动端多行输入误发。
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Enter &&
-                        (event.isCtrlPressed || event.isMetaPressed)
+            // 胶囊输入条：单行 48dp、圆角 28；多行随文本布局增高，圆角收紧并让两侧圆键贴底。
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(capsuleCorner),
+                tonalElevation = 2.dp,
+                border = BorderStroke(
+                    1.dp,
+                    if (dragActive) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                ),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).animateContentSize()
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box {
+                        ComposerCircleButton(
+                            description = "添加附件",
+                            onClick = { attachMenu = true },
+                            container = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
+                            Text("+", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+                        }
+                        DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("选择图片") },
+                                onClick = {
+                                    attachMenu = false
+                                    imagePickerToken = controller.captureSessionToken()
+                                    imagePicker.launch(arrayOf("image/*"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("选择文件") },
+                                onClick = {
+                                    attachMenu = false
+                                    filePickerToken = controller.captureSessionToken()
+                                    filePicker.launch(arrayOf("*/*"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("粘贴图片") },
+                                onClick = {
+                                    attachMenu = false
+                                    pasteImage()
+                                }
+                            )
+                        }
+                    }
+                    BasicTextField(
+                        value = value,
+                        onValueChange = { next ->
+                            value = next
+                            // 有选区时以选区末端作为 @ 查询终点，插入时整段替换。
+                            controller.updateText(next.text, next.selection.max)
+                        },
+                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
+                            .focusRequester(focusRequester).onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                // Ctrl/⌘ + Enter 发送；普通 Enter 保留换行，避免移动端多行输入误发。
+                                if (event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)) {
+                                    submit()
+                                    return@onPreviewKeyEvent true
+                                }
+                                if (mentionMenuVisible) {
+                                    when (event.key) {
+                                        Key.DirectionDown -> {
+                                            mentionIndex = DshComposerPolicy.moveCandidate(
+                                                mentionIndex, state.mentionCandidates.size, 1
+                                            )
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.DirectionUp -> {
+                                            mentionIndex = DshComposerPolicy.moveCandidate(
+                                                mentionIndex, state.mentionCandidates.size, -1
+                                            )
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.Enter, Key.Tab -> {
+                                            state.mentionCandidates.getOrNull(mentionIndex)?.let(::pickMention)
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.Escape -> {
+                                            controller.clearMention()
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        else -> Unit
+                                    }
+                                }
+                                if (commandMenuVisible) {
+                                    when (event.key) {
+                                        Key.DirectionDown -> {
+                                            commandIndex = DshComposerPolicy.moveCandidate(
+                                                commandIndex, state.commandCandidates.size, 1
+                                            )
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.DirectionUp -> {
+                                            commandIndex = DshComposerPolicy.moveCandidate(
+                                                commandIndex, state.commandCandidates.size, -1
+                                            )
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.Enter, Key.Tab -> {
+                                            state.commandCandidates.getOrNull(commandIndex)?.let(::pickCommand)
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        Key.Escape -> {
+                                            controller.clearCommandCandidates()
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        else -> Unit
+                                    }
+                                }
+                                false
+                            },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        // 随内容自动增高到 6 行，超过后在输入框内部滚动。
+                        minLines = 1,
+                        maxLines = 6,
+                        onTextLayout = { lineCount = it.lineCount.coerceAtLeast(1) },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences
+                        ),
+                        decorationBox = { inner ->
+                            Box(
+                                Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)
+                            ) {
+                                if (value.text.isEmpty()) {
+                                    Text(
+                                        "输入消息，@ 引用会话或文件，/ 查看命令",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                inner()
+                            }
+                        }
+                    )
+                    ComposerCircleButton(
+                        description = if (showStop) "停止生成" else "发送",
+                        enabled = sendStopEnabled,
+                        onClick = {
+                            if (showStop) controller.requestStop() else submit()
+                        },
+                        container = sendStopContainer,
+                        contentColor = sendStopContent
                     ) {
-                        controller.send()
-                        true
-                    } else false
-                },
-                placeholder = { Text("输入消息，@ 引用会话或文件，/ 查看命令；可粘贴图片或拖入文件") },
-                minLines = 1,
-                maxLines = 6,
-                shape = RoundedCornerShape(18.dp),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent
-                )
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                Box {
-                    TextButton(onClick = { attachMenu = true }) { Text("+ 附件") }
-                    DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("选择图片") },
-                            onClick = {
-                                attachMenu = false
-                                imagePickerToken = controller.captureSessionToken()
-                                imagePicker.launch(arrayOf("image/*"))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("选择文件") },
-                            onClick = {
-                                attachMenu = false
-                                filePickerToken = controller.captureSessionToken()
-                                filePicker.launch(arrayOf("*/*"))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("粘贴图片") },
-                            onClick = {
-                                attachMenu = false
-                                pasteImage()
-                            }
-                        )
+                        // 只让图标形变，避免整条输入框闪烁。
+                        AnimatedContent(
+                            targetState = showStop,
+                            transitionSpec = {
+                                (
+                                    fadeIn(tween(120)) + scaleIn(initialScale = 0.65f) +
+                                        slideInVertically { it / 2 }
+                                    ) togetherWith (
+                                    fadeOut(tween(90)) + scaleOut(targetScale = 0.65f) +
+                                        slideOutVertically { -it / 2 }
+                                    )
+                            },
+                            label = "composer-send-stop"
+                        ) { stopping ->
+                            Text(
+                                if (stopping) "■" else "↑",
+                                fontSize = if (stopping) 13.sp else 20.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
-                TextButton(onClick = { insertAtCursor("@", value) { next, cursor -> value = TextFieldValue(next, TextRange(cursor)); controller.updateText(next, cursor) } }) { Text("@") }
-                TextButton(onClick = { insertAtCursor("/", value) { next, cursor -> value = TextFieldValue(next, TextRange(cursor)); controller.updateText(next, cursor) } }) { Text("/") }
-                if (state.uploadBusy) {
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                TextButton(onClick = { insertToken("@") }) { Text("@") }
+                TextButton(onClick = { insertToken("/") }) { Text("/") }
+                // 运行态静默降级：只额外开放发送，不夺走主键上的停止能力。
+                if (state.runStateStale && state.generationRunning && !state.stopping) {
+                    TextButton(onClick = ::submit, enabled = state.canSend) { Text("继续发送") }
+                }
+                if (readingAttachments > 0 || state.uploadBusy || state.stopping || state.sending) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(6.dp))
                 }
+                val statusText = when {
+                    readingAttachments > 0 -> "正在读取附件…"
+                    state.stopping -> "正在停止…"
+                    state.uploadBusy -> "附件上传中（可取消）"
+                    state.stopOutcome == DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
+                    state.stopOutcome == DshStopOutcome.STOPPED -> "已停止当前回合"
+                    state.stopOutcome == DshStopOutcome.FAILED -> "停止失败，可重试"
+                    state.sendFailed -> "发送失败，内容已保留，可重发"
+                    state.sending -> "发送中…"
+                    state.runStateStale -> "长时间无运行事件；可继续发送，停止仍可用"
+                    else -> "Ctrl/⌘+Enter 发送"
+                }
+                val statusFailed = state.sendFailed || state.stopOutcome == DshStopOutcome.FAILED
                 Text(
-                    if (state.uploadBusy) "附件上传中" else "Ctrl/⌘+Enter 发送",
+                    statusText,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (statusFailed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(Modifier.width(6.dp))
-                Button(onClick = controller::send, enabled = state.canSend) {
-                    Text(if (state.sending) "发送中" else "发送")
-                }
             }
         }
     }
@@ -436,6 +708,28 @@ private fun insertAtCursor(
     val end = maxOf(value.selection.start, value.selection.end).coerceIn(start, value.text.length)
     val next = value.text.substring(0, start) + text + value.text.substring(end)
     apply(next, start + text.length)
+}
+
+/** 胶囊输入条两侧的 36dp 圆键；禁用时保留低对比底色但不再响应点击。 */
+@Composable
+private fun ComposerCircleButton(
+    description: String,
+    onClick: () -> Unit,
+    container: Color,
+    contentColor: Color,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    Box(
+        Modifier.size(36.dp)
+            .clip(CircleShape)
+            .background(if (enabled) container else container.copy(alpha = 0.7f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) { content() }
+    }
 }
 
 @Composable
@@ -502,7 +796,7 @@ private fun AttachmentCard(
                         append(
                             when (attachment.status) {
                                 DshAttachmentStatus.READY -> "待发送"
-                                DshAttachmentStatus.UPLOADING -> "上传中"
+                                DshAttachmentStatus.UPLOADING -> "上传中（可取消）"
                                 DshAttachmentStatus.UPLOADED -> "已上传"
                                 DshAttachmentStatus.FAILED -> "上传失败"
                             }
@@ -515,11 +809,17 @@ private fun AttachmentCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (attachment.status == DshAttachmentStatus.UPLOADING) {
+                    // 官方 unary 上传没有字节级回调，使用不定进度，不伪造百分比。
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
                 if (attachment.status == DshAttachmentStatus.FAILED) {
                     TextButton(onClick = { onRetry(attachment.id) }) { Text("重试") }
                 }
             }
-            TextButton(onClick = { onRemove(attachment.id) }) { Text("×") }
+            TextButton(onClick = { onRemove(attachment.id) }) {
+                Text(if (attachment.status == DshAttachmentStatus.UPLOADING) "取消" else "×")
+            }
         }
     }
 }
@@ -546,7 +846,12 @@ private fun AttachmentThumbnail(attachment: DshDraftAttachment, modifier: Modifi
 }
 
 @Composable
-private fun MentionMenu(state: DshComposerState, onPick: (DshMentionCandidate) -> Unit) {
+private fun MentionMenu(
+    state: DshComposerState,
+    selectedIndex: Int,
+    listState: LazyListState,
+    onPick: (DshMentionCandidate) -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(14.dp),
@@ -557,16 +862,19 @@ private fun MentionMenu(state: DshComposerState, onPick: (DshMentionCandidate) -
                 Text("正在查找引用…", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
             } else if (state.mentionCandidates.isEmpty()) {
                 Text(
-                    state.mentionError ?: "没有匹配的文件或会话",
+                    state.mentionError ?: "没有匹配的文件或会话，继续输入可搜索",
                     Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyColumn(Modifier.heightIn(max = 220.dp)) {
-                    items(state.mentionCandidates, key = { it.insertion }) { candidate ->
+                LazyColumn(Modifier.heightIn(max = 220.dp), state = listState) {
+                    itemsIndexed(state.mentionCandidates, key = { _, candidate -> candidate.insertion }) { index, candidate ->
+                        val selected = index == selectedIndex
                         Row(
-                            Modifier.fillMaxWidth().clickable { onPick(candidate) }
+                            Modifier.fillMaxWidth()
+                                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                .clickable { onPick(candidate) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -586,16 +894,24 @@ private fun MentionMenu(state: DshComposerState, onPick: (DshMentionCandidate) -
 }
 
 @Composable
-private fun CommandMenu(commands: List<DshCommand>, onPick: (DshCommand) -> Unit) {
+private fun CommandMenu(
+    commands: List<DshCommand>,
+    selectedIndex: Int,
+    listState: LazyListState,
+    onPick: (DshCommand) -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        LazyColumn(Modifier.heightIn(max = 220.dp).padding(vertical = 4.dp)) {
-            items(commands, key = { it.name }) { command ->
+        LazyColumn(Modifier.heightIn(max = 220.dp).padding(vertical = 4.dp), state = listState) {
+            itemsIndexed(commands, key = { _, command -> command.name }) { index, command ->
+                val selected = index == selectedIndex
                 Row(
-                    Modifier.fillMaxWidth().clickable { onPick(command) }
+                    Modifier.fillMaxWidth()
+                        .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .clickable { onPick(command) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

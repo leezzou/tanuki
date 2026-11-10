@@ -19,16 +19,27 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.TimeZone
 import java.util.UUID
 
 enum class DshAttachmentStatus { READY, UPLOADING, UPLOADED, FAILED }
+
+/**
+ * 停止生成的结果。
+ *
+ * [REQUESTED] 只表示官方已接受停止请求，回合可能仍在收尾；必须等官方
+ * `running=false` 确认后才能进入 [STOPPED]，不能把 accepted 回执当成已停止。
+ */
+enum class DshStopOutcome { REQUESTED, STOPPED, FAILED }
 
 /** 已读取到内存的待发送附件；previewUri 只用于本地缩略图，不进入发送协议。 */
 data class DshDraftAttachment(
@@ -92,7 +103,17 @@ data class DshComposerState(
     val mentionLoading: Boolean = false,
     val mentionError: String? = null,
     val sending: Boolean = false,
+    val sendFailed: Boolean = false,
     val uploadBusy: Boolean = false,
+    /** 当前回合是否在运行；由发送成功置位，页面接入官方 running 状态后同步复位。 */
+    val generationRunning: Boolean = false,
+    /**
+     * 长时间没有运行事件时的 UI 降级：额外开放“继续发送”，但不改变官方运行态，
+     * 停止入口与停止能力继续保留，避免把静默误判成已结束。
+     */
+    val runStateStale: Boolean = false,
+    val stopping: Boolean = false,
+    val stopOutcome: DshStopOutcome? = null,
     val error: String? = null,
     val notice: String? = null
 ) {
@@ -112,17 +133,30 @@ class DshComposerController(
     private val drafts: DshDraftStore,
     private val scope: CoroutineScope,
     private val onSent: (String) -> Unit = {},
-    private val timeZoneProvider: () -> String? = { TimeZone.getDefault().id }
+    private val timeZoneProvider: () -> String? = { TimeZone.getDefault().id },
+    /** accepted 后等待官方 idle 的确认窗口；超时只提示仍在收尾，不伪造已停止。 */
+    private val stopConfirmTimeoutMillis: Long = 4_000L,
+    /** 运行态兜底窗口；超过该时长没有新的 running/stream 事件就恢复发送入口。 */
+    private val runningStaleTimeoutMillis: Long = 30_000L
 ) {
     private val _state = MutableStateFlow(DshComposerState())
     val state: StateFlow<DshComposerState> = _state.asStateFlow()
 
     private var generation = 0L
+    /** 页面是否已把官方 running 状态接入；未接入时不把提交回执当成回合运行态。 */
+    private var generationStateBound = false
+    /** 官方 running 状态版本；提交回执只在版本未变化时更新运行态，避免覆盖已确认的 idle。 */
+    private var officialStateVersion = 0L
     private var draftJob: Job? = null
     private var mentionJob: Job? = null
     private var commandJob: Job? = null
     private var uploadJob: Job? = null
     private var sendJob: Job? = null
+    private var stopJob: Job? = null
+    private var stopTimeoutJob: Job? = null
+    private var runningWatchdogJob: Job? = null
+    /** 上传串行锁：取消后立即重启 worker 时，旧请求必须结束后新请求才能开始。 */
+    private val uploadLock = Mutex()
 
     /** 切换会话先落盘旧草稿，再读取新草稿；附件不跨会话保留。 */
     fun setSession(sessionId: String?) {
@@ -135,6 +169,9 @@ class DshComposerController(
         commandJob?.cancel()
         uploadJob?.cancel()
         sendJob?.cancel()
+        stopJob?.cancel()
+        stopTimeoutJob?.cancel()
+        runningWatchdogJob?.cancel()
         _state.value = DshComposerState(
             sessionId = normalized,
             text = normalized?.let(drafts::read).orEmpty().take(DshComposerProtocol.MAX_TEXT_CHARS)
@@ -287,8 +324,28 @@ class DshComposerController(
         }
     }
 
+    /**
+     * 移除附件；若正在上传则同时取消上传任务并立刻移除卡片。
+     * 官方上传是 unary 调用，没有字节级取消回执；这里保证晚到的成功/失败结果
+     * 不会把已取消的附件重新写回草稿，也不在本地留下半成品。
+     */
     fun removeAttachment(id: String) {
-        _state.update { state -> state.copy(attachments = state.attachments.filterNot { it.id == id }) }
+        val target = _state.value.attachments.firstOrNull { it.id == id } ?: return
+        val wasUploading = target.status == DshAttachmentStatus.UPLOADING
+        if (wasUploading) {
+            uploadJob?.cancel()
+            uploadJob = null
+        }
+        _state.update { state ->
+            val remaining = state.attachments.filterNot { it.id == id }
+            state.copy(
+                attachments = remaining,
+                uploadBusy = remaining.any { it.status == DshAttachmentStatus.UPLOADING },
+                notice = if (wasUploading) "已取消上传，未保留残缺文件" else state.notice
+            )
+        }
+        // 当前项被取消后，队列里其他待上传文件继续处理。
+        if (wasUploading) ensureUploadWorker()
     }
 
     fun retryAttachment(id: String) {
@@ -329,10 +386,23 @@ class DshComposerController(
             return
         }
         val attachments = current.attachments
+        // 发送时快照：成功返回后只清理这份快照，等待期间的编辑/新附件必须保留。
         val submittedText = current.text
         val submittedAttachmentIds = attachments.map { it.id }.toSet()
         val requestGeneration = generation
-        _state.update { it.copy(sending = true, error = null, notice = null) }
+        val officialVersionAtSend = officialStateVersion
+        _state.update {
+            it.copy(
+                sending = true,
+                sendFailed = false,
+                error = null,
+                notice = null,
+                // 已在收尾的停止请求不能被新一次提交清掉；它是独立于提交回执的状态。
+                stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
+                    DshStopOutcome.REQUESTED
+                } else null
+            )
+        }
         sendJob?.cancel()
         sendJob = scope.launch {
             // 图片 base64 与文件编码可能达到数十 MB，放到 Default 线程，避免卡住输入与滚动。
@@ -390,15 +460,197 @@ class DshComposerController(
                         text = keepText,
                         attachments = keepAttachments,
                         sending = false,
+                        sendFailed = false,
+                        runStateStale = false,
+                        // 提交回执只负责提交状态/草稿清理：官方 running 状态在等待期间
+                        // 已变化时，回执不能覆盖已确认的 idle；未接线时也不能把发送键
+                        // 永久换成停止键。
+                        generationRunning = if (officialStateVersion != officialVersionAtSend) {
+                            it.generationRunning
+                        } else {
+                            command == null && generationStateBound &&
+                                it.stopOutcome != DshStopOutcome.STOPPED
+                        },
+                        // 停止回执/已确认 idle 与 prompt 回执可能交错；保留更强状态。
+                        stopOutcome = when (it.stopOutcome) {
+                            DshStopOutcome.STOPPED -> DshStopOutcome.STOPPED
+                            DshStopOutcome.REQUESTED -> DshStopOutcome.REQUESTED
+                            else -> null
+                        },
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
                         notice = if (keptEdits) "已发送；发送期间的新编辑已保留" else "已发送"
                     )
                 }
+                if (_state.value.generationRunning) scheduleRunningWatchdog()
                 onSent(sessionId)
             }.onFailure { error ->
-                _state.update { it.copy(sending = false, error = messageOf(error)) }
+                // 失败保留文本与附件，界面显示“重发”；用户可直接再次发送。
+                _state.update {
+                    it.copy(sending = false, sendFailed = true, error = messageOf(error))
+                }
+            }
+        }
+    }
+
+    /**
+     * 页面把官方 `running` 状态同步进来。
+     *
+     * `running=false` 才是停止完成的唯一确认：若此前已接受停止请求，这里才切到
+     * [DshStopOutcome.STOPPED]；单纯收到 `session/cancel` 的 accepted 回执不改变
+     * 运行状态，避免隐藏仍在收尾的停止入口。
+     */
+    fun setGenerationRunning(running: Boolean) {
+        generationStateBound = true
+        officialStateVersion++
+        if (running) {
+            _state.update { state ->
+                // 官方确认新回合运行：旧的“已停止”不再适用；仍在收尾的停止请求保留。
+                state.copy(
+                    generationRunning = true,
+                    runStateStale = false,
+                    stopOutcome = if (state.stopOutcome == DshStopOutcome.STOPPED) null else state.stopOutcome
+                )
+            }
+            // 每个 running/stream 事件都重置兜底窗口；长时间无事件会自动恢复发送。
+            scheduleRunningWatchdog()
+        } else {
+            runningWatchdogJob?.cancel()
+            _state.update { state ->
+                stopTimeoutJob?.cancel()
+                val awaitingStop = state.stopping || state.stopOutcome == DshStopOutcome.REQUESTED
+                if (!awaitingStop && !state.generationRunning) return@update state
+                state.copy(
+                    generationRunning = false,
+                    runStateStale = false,
+                    stopping = false,
+                    stopOutcome = if (awaitingStop) DshStopOutcome.STOPPED else state.stopOutcome,
+                    notice = if (awaitingStop) "已停止当前回合" else state.notice
+                )
+            }
+        }
+    }
+
+    /**
+     * 请求停止当前活动回合；只影响生成，不取消在途 prompt 的提交回执。
+     *
+     * accepted 回执表示官方已受理停止请求，回合仍可能在收尾；此期间保留
+     * `generationRunning` 与停止入口，等 [setGenerationRunning] 收到官方 idle 再显示“已停止”。
+     */
+    fun requestStop() {
+        val current = _state.value
+        val sessionId = current.sessionId ?: run {
+            _state.update { it.copy(error = "请先选择会话") }
+            return
+        }
+        if (current.stopping) return
+        if (!current.generationRunning && !current.sending) {
+            _state.update { it.copy(notice = "当前没有运行中的回合") }
+            return
+        }
+        val requestGeneration = generation
+        stopTimeoutJob?.cancel()
+        _state.update {
+            it.copy(
+                stopping = true,
+                // 已受理的停止请求在重试期间保持“收尾中”，不要退回空闲。
+                stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
+                    DshStopOutcome.REQUESTED
+                } else null,
+                error = null,
+                notice = null
+            )
+        }
+        stopJob?.cancel()
+        stopJob = scope.launch {
+            val result = client.cancel(sessionId)
+            // 旧代次的停止回执可能已被取消但被 runCatching 包成失败；切走再切回同会话时
+            // 仅比较 sessionId 会放过它，必须用代次拒绝，避免污染新状态/新定时器。
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
+            result.onSuccess {
+                // 停止只影响生成；在途 prompt 的回执必须继续走完，不能在这里 cancel sendJob。
+                val latest = _state.value
+                if (latest.stopOutcome == DshStopOutcome.STOPPED && !latest.generationRunning) {
+                    // 官方 idle 已先到；迟到的 accepted 不能把已确认的停止重新打开。
+                    _state.update { it.copy(stopping = false) }
+                    return@onSuccess
+                }
+                // 只要回合仍在运行或还有提交回执在途，就不能把 accepted 当成“已停止”。
+                val awaitingOfficial = latest.generationRunning || latest.sending
+                if (awaitingOfficial) {
+                    _state.update {
+                        it.copy(
+                            // accepted 后先保持“正在停止”，超时再降级为“仍在收尾”。
+                            stopping = true,
+                            stopOutcome = DshStopOutcome.REQUESTED,
+                            notice = "正在停止，等待官方确认"
+                        )
+                    }
+                    scheduleStopTimeout(sessionId, requestGeneration)
+                } else {
+                    _state.update {
+                        it.copy(
+                            stopping = false,
+                            stopOutcome = DshStopOutcome.STOPPED,
+                            notice = "已停止当前回合"
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                stopTimeoutJob?.cancel()
+                val latest = _state.value
+                if (latest.stopOutcome == DshStopOutcome.STOPPED && !latest.generationRunning) {
+                    _state.update { it.copy(stopping = false) }
+                    return@onFailure
+                }
+                val stillActive = latest.generationRunning || latest.sending
+                _state.update {
+                    it.copy(
+                        stopping = false,
+                        stopOutcome = if (stillActive) DshStopOutcome.FAILED else DshStopOutcome.STOPPED,
+                        error = if (stillActive) "停止失败：${messageOf(error)}" else it.error,
+                        notice = if (stillActive) it.notice else "回合已结束"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 运行态兜底：一段时间内没有任何新的 running/stream 事件时，恢复发送入口。
+     * 这避免页面忘记接线或 live 事件中断后，发送键被永久替换成停止键。
+     */
+    private fun scheduleRunningWatchdog() {
+        runningWatchdogJob?.cancel()
+        val sessionId = _state.value.sessionId ?: return
+        val requestGeneration = generation
+        val versionAtSchedule = officialStateVersion
+        runningWatchdogJob = scope.launch {
+            delay(runningStaleTimeoutMillis.coerceAtLeast(1L))
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
+            _state.update { state ->
+                if (state.generationRunning && officialStateVersion == versionAtSchedule) {
+                    // 只进入 UI 降级，不推测回合结束；停止入口和 requestStop 仍然可用。
+                    state.copy(
+                        runStateStale = true,
+                        notice = "长时间未收到运行事件，可继续发送；停止仍可用"
+                    )
+                } else state
+            }
+        }
+    }
+
+    /** accepted 后若官方迟迟未给 idle，超时只降级提示并重新开放停止入口，不宣称已停止。 */
+    private fun scheduleStopTimeout(sessionId: String, requestGeneration: Long) {
+        stopTimeoutJob?.cancel()
+        stopTimeoutJob = scope.launch {
+            delay(stopConfirmTimeoutMillis.coerceAtLeast(1L))
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
+            _state.update { state ->
+                if (state.stopping && state.stopOutcome == DshStopOutcome.REQUESTED) {
+                    state.copy(stopping = false, notice = "停止请求已发送，仍在收尾")
+                } else state
             }
         }
     }
@@ -427,6 +679,9 @@ class DshComposerController(
         commandJob?.cancel()
         uploadJob?.cancel()
         sendJob?.cancel()
+        stopJob?.cancel()
+        stopTimeoutJob?.cancel()
+        runningWatchdogJob?.cancel()
         client.reset()
         _state.value = DshComposerState()
     }
@@ -466,7 +721,10 @@ class DshComposerController(
         val sessionId = _state.value.sessionId ?: return
         mentionJob?.cancel()
         val requestGeneration = generation
-        _state.update { it.copy(mentionLoading = true, mentionError = null) }
+        // 查询变化后旧候选不再对应当前文本，先清空避免键盘误选到过期结果。
+        _state.update {
+            it.copy(mentionLoading = true, mentionError = null, mentionCandidates = emptyList())
+        }
         mentionJob = scope.launch {
             delay(160)
             val fileResult = client.fileReferences(sessionId, query)
@@ -491,10 +749,8 @@ class DshComposerController(
         }
     }
 
-    private fun filterCommands(commands: List<DshCommand>, query: String): List<DshCommand> {
-        if (query.isEmpty()) return commands
-        return commands.filter { it.name.startsWith(query, ignoreCase = true) }
-    }
+    private fun filterCommands(commands: List<DshCommand>, query: String): List<DshCommand> =
+        DshComposerPolicy.searchCommands(commands, query)
 
     private fun scheduleDraftSave() {
         draftJob?.cancel()
@@ -516,39 +772,50 @@ class DshComposerController(
         val requestGeneration = generation
         uploadJob = scope.launch {
             while (true) {
-                val next = _state.value.attachments.firstOrNull {
-                    it.kind == DshAttachmentKind.FILE && it.status == DshAttachmentStatus.READY
-                } ?: break
-                _state.update { state ->
-                    state.copy(attachments = state.attachments.map {
-                        if (it.id == next.id) it.copy(status = DshAttachmentStatus.UPLOADING, error = null) else it
-                    }, uploadBusy = true)
-                }
-                val result = client.uploadFile(sessionId, next.name, next.bytes)
-                if (requestGeneration != generation) return@launch
-                result.onSuccess { uploaded ->
+                // 取消后重启 worker 时，旧调用可能还没返回；锁保证同一时刻只有一个上传，
+                // 新 worker 不会重复上传旧任务或并发占内存。
+                val hasMore = uploadLock.withLock {
+                    val next = _state.value.attachments.firstOrNull {
+                        it.kind == DshAttachmentKind.FILE && it.status == DshAttachmentStatus.READY
+                    } ?: return@withLock false
                     _state.update { state ->
                         state.copy(attachments = state.attachments.map {
-                            if (it.id == next.id) it.copy(
-                                status = DshAttachmentStatus.UPLOADED,
-                                receiptId = uploaded.receiptId,
-                                name = uploaded.name,
-                                error = null
-                            ) else it
-                        })
+                            if (it.id == next.id) it.copy(status = DshAttachmentStatus.UPLOADING, error = null) else it
+                        }, uploadBusy = true)
                     }
-                }.onFailure { error ->
-                    _state.update { state ->
-                        state.copy(attachments = state.attachments.map {
-                            if (it.id == next.id) it.copy(
-                                status = DshAttachmentStatus.FAILED,
-                                error = messageOf(error)
-                            ) else it
-                        })
+                    val result = client.uploadFile(sessionId, next.name, next.bytes)
+                    // 取消上传会 cancel 当前 worker；晚到的响应不得继续写回状态。
+                    coroutineContext.ensureActive()
+                    if (requestGeneration != generation) return@launch
+                    if (_state.value.attachments.none { it.id == next.id }) return@withLock true
+                    result.onSuccess { uploaded ->
+                        _state.update { state ->
+                            state.copy(attachments = state.attachments.map {
+                                if (it.id == next.id) it.copy(
+                                    status = DshAttachmentStatus.UPLOADED,
+                                    receiptId = uploaded.receiptId,
+                                    name = uploaded.name,
+                                    error = null
+                                ) else it
+                            })
+                        }
+                    }.onFailure { error ->
+                        _state.update { state ->
+                            state.copy(attachments = state.attachments.map {
+                                if (it.id == next.id) it.copy(
+                                    status = DshAttachmentStatus.FAILED,
+                                    error = messageOf(error)
+                                ) else it
+                            })
+                        }
                     }
+                    true
                 }
+                if (!hasMore) break
             }
-            _state.update { it.copy(uploadBusy = false) }
+            _state.update { state ->
+                state.copy(uploadBusy = state.attachments.any { it.status == DshAttachmentStatus.UPLOADING })
+            }
         }
     }
 

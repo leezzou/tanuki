@@ -4,6 +4,7 @@ import com.tanuki.ui.DshAttachmentStatus
 import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.DshComposerState
 import com.tanuki.ui.DshPickedAttachment
+import com.tanuki.ui.DshStopOutcome
 import com.tanuki.ui.MemoryDshDraftStore
 import com.tanuki.web.DshAttachmentKind
 import com.tanuki.web.DshComposerClient
@@ -41,6 +42,9 @@ class DshComposerControllerTest {
         var promptDelayMillis = 0L
         var promptFailure: Throwable? = null
         var promptAccepted = true
+        var cancelDelayMillis = 0L
+        var cancelFailure: Throwable? = null
+        var cancelAccepted = true
 
         override suspend fun call(method: String, args: JSONObject): Any? {
             calls += Call(method, args)
@@ -72,6 +76,11 @@ class DshComposerControllerTest {
                     promptFailure?.let { throw it }
                     JSONObject().put("accepted", promptAccepted)
                 }
+                "session/cancel" -> {
+                    if (cancelDelayMillis > 0) delay(cancelDelayMillis)
+                    cancelFailure?.let { throw it }
+                    JSONObject().put("accepted", cancelAccepted)
+                }
                 "commands/execute" -> JSONObject().put("commandId", "c1")
                     .put("result", JSONObject().put("kind", "success"))
                 else -> null
@@ -82,13 +91,17 @@ class DshComposerControllerTest {
     private fun controller(
         remote: FakeRemote,
         store: MemoryDshDraftStore = MemoryDshDraftStore(),
-        onSent: (String) -> Unit = {}
+        onSent: (String) -> Unit = {},
+        stopConfirmTimeoutMillis: Long = 4_000L,
+        runningStaleTimeoutMillis: Long = 30_000L
     ): DshComposerController = DshComposerController(
         client = DshComposerClient(remote),
         drafts = store,
         scope = CoroutineScope(Dispatchers.Unconfined),
         onSent = onSent,
-        timeZoneProvider = { "Asia/Shanghai" }
+        timeZoneProvider = { "Asia/Shanghai" },
+        stopConfirmTimeoutMillis = stopConfirmTimeoutMillis,
+        runningStaleTimeoutMillis = runningStaleTimeoutMillis
     )
 
     @Test fun draftIsKeptPerSessionAndFlushedOnSwitch() {
@@ -150,8 +163,9 @@ class DshComposerControllerTest {
             ),
             controller.captureSessionToken()
         )
+        // 上传成功与 worker 收尾是两个状态更新，必须一起等待，避免 CI 上读到中间态。
         val uploaded = awaitState(controller) {
-            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADED
+            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADED && !it.uploadBusy
         }
         assertEquals("receipt-1", uploaded.attachments.single().receiptId)
         assertFalse(uploaded.uploadBusy)
@@ -204,7 +218,9 @@ class DshComposerControllerTest {
 
         controller.removeAttachment(controller.state.value.attachments.single().id)
         controller.send()
-        awaitState(controller) { it.notice == "已发送" }
+        val compactState = awaitState(controller) { it.notice == "已发送" }
+        // 斜杠命令不一定产生生成回合，不能凭命令成功就显示停止入口。
+        assertFalse(compactState.generationRunning)
         val compact = remote.calls.first { it.method == "commands/execute" }
         assertEquals("/compact", compact.args.getString("line"))
         assertEquals(0, compact.args.getJSONArray("submittedAttachments").length())
@@ -332,6 +348,306 @@ class DshComposerControllerTest {
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
         assertEquals("s1", sent)
+    }
+
+    @Test fun failedSendCanBeResentWithoutLosingDraft() {
+        val remote = FakeRemote().apply { promptFailure = IOException("网络请求失败") }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("重试内容", 4)
+        controller.send()
+        val failed = awaitState(controller) { it.sendFailed }
+        assertTrue(failed.error.orEmpty().contains("网络请求失败"))
+        assertEquals("重试内容", failed.text)
+        assertFalse(failed.sending)
+
+        remote.promptFailure = null
+        controller.send()
+        val sent = awaitState(controller) { it.notice == "已发送" }
+        assertTrue(sent.text.isEmpty())
+        assertFalse(sent.sendFailed)
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+    }
+
+    @Test fun switchingSessionDoesNotCarryAttachmentsOrOtherDraft() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        controller.updateText("会话一草稿", 5)
+        controller.addImages(listOf(image(png(20, 20), "a.png")), controller.captureSessionToken())
+        assertEquals(1, controller.state.value.attachments.size)
+
+        controller.setSession("s2")
+        assertTrue(controller.state.value.text.isEmpty())
+        assertTrue(controller.state.value.attachments.isEmpty())
+        controller.updateText("会话二草稿", 5)
+
+        controller.setSession("s1")
+        assertEquals("会话一草稿", controller.state.value.text)
+        // 附件不跨会话保留，避免把上一个会话的图片发到新会话。
+        assertTrue(controller.state.value.attachments.isEmpty())
+    }
+
+    @Test fun cancelingUploadRemovesAttachmentAndLateResultDoesNotReturn() {
+        val remote = FakeRemote().apply { uploadDelayMillis = 200 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.addFiles(
+            listOf(
+                DshPickedAttachment(
+                    name = "a.txt",
+                    mediaType = "text/plain",
+                    bytes = "hello".toByteArray(),
+                    kind = DshAttachmentKind.FILE
+                )
+            ),
+            controller.captureSessionToken()
+        )
+        val uploading = awaitState(controller) {
+            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADING
+        }
+        val id = uploading.attachments.single().id
+        controller.removeAttachment(id)
+        assertTrue(controller.state.value.attachments.isEmpty())
+        assertTrue(controller.state.value.notice.orEmpty().contains("已取消上传"))
+        Thread.sleep(350)
+        assertTrue(controller.state.value.attachments.isEmpty())
+        assertFalse(controller.state.value.uploadBusy)
+    }
+
+    @Test fun stopAcceptedWaitsForOfficialIdleBeforeStopped() {
+        val remote = FakeRemote()
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        assertTrue(controller.state.value.generationRunning)
+
+        controller.requestStop()
+        // accepted 后先保持“正在停止”，不能立刻隐藏停止入口或宣称已停止。
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertTrue(requested.generationRunning)
+        assertTrue(requested.stopping)
+        assertTrue(requested.notice.orEmpty().contains("正在停止"))
+        assertTrue(remote.calls.any { it.method == "session/cancel" })
+
+        controller.setGenerationRunning(false)
+        val stopped = awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
+        assertFalse(stopped.generationRunning)
+        assertFalse(stopped.stopping)
+        assertTrue(stopped.notice.orEmpty().contains("已停止"))
+    }
+
+    @Test fun stopTimeoutReopensStopEntryAndKeepsRequested() {
+        val remote = FakeRemote()
+        val controller = controller(remote, stopConfirmTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+
+        controller.requestStop()
+        awaitState(controller) { it.stopping && it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 官方迟迟未给 idle：超时后停止入口重新可用，但状态仍是“仍在收尾”。
+        val timedOut = awaitState(controller) {
+            !it.stopping && it.stopOutcome == DshStopOutcome.REQUESTED
+        }
+        assertTrue(timedOut.generationRunning)
+        assertTrue(timedOut.notice.orEmpty().contains("仍在收尾"))
+
+        controller.setGenerationRunning(false)
+        awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
+    }
+
+    @Test fun staleStopResponseDoesNotAffectReenteredSession() {
+        val remote = FakeRemote().apply { cancelDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("A")
+        controller.setGenerationRunning(false)
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        controller.requestStop()
+
+        // 停止请求还在等待时切到 B 再切回 A；旧回执必须被代次拒绝。
+        controller.setSession("B")
+        controller.setSession("A")
+        Thread.sleep(220)
+        assertNull(controller.state.value.stopOutcome)
+        assertNull(controller.state.value.error)
+        assertFalse(controller.state.value.stopping)
+
+        controller.setGenerationRunning(true)
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertNull(requested.error)
+    }
+
+    @Test fun stopDoesNotCancelDelayedPromptReceipt() {
+        val remote = FakeRemote().apply { promptDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("B", 1)
+        controller.send()
+        assertTrue(controller.state.value.sending)
+
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 停止请求在 prompt 回执前被接受；提交回执必须继续走完，不能被 cancel。
+        assertTrue(requested.sending)
+
+        val sent = awaitState(controller) { it.notice == "已发送" }
+        assertFalse(sent.sending)
+        assertFalse(sent.sendFailed)
+        assertEquals(1, remote.calls.count { it.method == "session/prompt" })
+        // prompt 回执不能把仍在收尾的停止状态清掉。
+        assertEquals(DshStopOutcome.REQUESTED, sent.stopOutcome)
+
+        controller.setGenerationRunning(false)
+        awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
+    }
+
+    @Test fun stopFailureKeepsRunningAndShowsFailure() {
+        val remote = FakeRemote().apply { cancelAccepted = false }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+
+        controller.requestStop()
+        val failed = awaitState(controller) { it.stopOutcome == DshStopOutcome.FAILED }
+        assertTrue(failed.error.orEmpty().contains("停止失败"))
+        assertTrue(failed.generationRunning)
+    }
+
+    @Test fun unboundControllerKeepsSendPathAfterPromptAccepted() {
+        val remote = FakeRemote()
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        // 未接入官方 running 时不能把唯一发送键永久换成停止键。
+        assertFalse(controller.state.value.generationRunning)
+
+        controller.clearNotice()
+        controller.updateText("B", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+        assertFalse(controller.state.value.generationRunning)
+    }
+
+    @Test fun runningWatchdogRestoresSendAfterNoEvents() {
+        val remote = FakeRemote()
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning }
+
+        // 接入了 running 但长时间没有新事件：只进入 UI 降级，不推测回合结束。
+        val stale = awaitState(controller) { it.runStateStale && it.generationRunning }
+        assertTrue(stale.generationRunning)
+        assertTrue(stale.notice.orEmpty().contains("继续发送"))
+
+        controller.clearNotice()
+        controller.updateText("B", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+        assertFalse(controller.state.value.runStateStale)
+    }
+
+    @Test fun silentTimeoutKeepsStopAvailable() {
+        val remote = FakeRemote()
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning && it.runStateStale }
+
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 静默超时不能被当成已停止：官方运行态和停止能力都要保留。
+        assertTrue(requested.generationRunning)
+        assertFalse(requested.stopOutcome == DshStopOutcome.STOPPED)
+    }
+
+    @Test fun watchdogBeforeCancelAcceptedDoesNotMarkStopped() {
+        val remote = FakeRemote().apply { cancelDelayMillis = 120 }
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning }
+        controller.requestStop()
+
+        // watchdog 先于 cancel accepted 触发：仍应保留运行态与 stopping。
+        val stale = awaitState(controller) { it.runStateStale && it.stopping }
+        assertTrue(stale.generationRunning)
+        val accepted = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertTrue(accepted.generationRunning)
+        assertFalse(accepted.stopOutcome == DshStopOutcome.STOPPED)
+    }
+
+    @Test fun runningStateTogglesWithOfficialEvents() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        controller.setGenerationRunning(true)
+        assertTrue(controller.state.value.generationRunning)
+        controller.setGenerationRunning(false)
+        assertFalse(controller.state.value.generationRunning)
+    }
+
+    @Test fun latePromptReceiptDoesNotReopenConfirmedStop() {
+        val remote = FakeRemote().apply { promptDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("B", 1)
+        controller.send()
+        controller.requestStop()
+        val requested = awaitState(controller) {
+            it.stopOutcome == DshStopOutcome.REQUESTED && it.stopping
+        }
+        assertTrue(requested.sending)
+
+        // cancel accepted 后先确认 idle，再让延迟的 prompt accepted 到达。
+        controller.setGenerationRunning(false)
+        val stopped = awaitState(controller) {
+            it.stopOutcome == DshStopOutcome.STOPPED && !it.generationRunning
+        }
+        assertTrue(stopped.sending)
+        val sent = awaitState(controller) {
+            it.notice == "已发送" && !it.sending && !it.generationRunning
+        }
+        assertEquals(DshStopOutcome.STOPPED, sent.stopOutcome)
+        assertEquals(1, remote.calls.count { it.method == "session/prompt" })
+    }
+
+    @Test fun commandCandidatesSearchNameAndDescription() {
+        val remote = FakeRemote().apply {
+            commands = JSONArray()
+                .put(JSONObject().put("name", "compact").put("description", "压缩上下文"))
+                .put(JSONObject().put("name", "goal").put("description", "查看长期目标"))
+        }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        awaitState(controller) { it.commands.size == 2 }
+
+        controller.updateText("/目", 2)
+        assertEquals(listOf("goal"), controller.state.value.commandCandidates.map { it.name })
+        controller.updateText("/comp", 5)
+        assertEquals(listOf("compact"), controller.state.value.commandCandidates.map { it.name })
     }
 
     private fun awaitState(

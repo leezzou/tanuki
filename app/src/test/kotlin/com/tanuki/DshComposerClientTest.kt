@@ -151,6 +151,18 @@ class DshComposerClientTest {
         )
     }
 
+    @Test fun cancelSendsSessionCancelAndRequiresAccepted() {
+        val remote = FakeRemote { method, args ->
+            assertEquals("session/cancel", method)
+            assertEquals("s1", args.getJSONObject("request").getString("sessionId"))
+            JSONObject().put("accepted", true)
+        }
+        assertTrue(kotlinx.coroutines.runBlocking { DshComposerClient(remote).cancel("s1") }.isSuccess)
+
+        val rejected = DshComposerClient(FakeRemote { _, _ -> JSONObject().put("accepted", false) })
+        assertTrue(kotlinx.coroutines.runBlocking { rejected.cancel("s1") }.isFailure)
+    }
+
     @Test fun resetDelegatesToTransport() {
         val remote = FakeRemote { _, _ -> null }
         DshComposerClient(remote).reset()

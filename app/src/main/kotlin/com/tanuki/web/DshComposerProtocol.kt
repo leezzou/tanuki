@@ -103,6 +103,9 @@ data class DshMentionQuery(
     val quoted: Boolean
 )
 
+/** 输入栏一次纯文本替换结果；cursor 用于把光标放到插入内容之后。 */
+data class DshTextEdit(val text: String, val cursor: Int)
+
 /**
  * 官方 DSH 输入/附件协议封装。
  *
@@ -131,6 +134,9 @@ object DshComposerProtocol {
     private val COMMAND_NAME = Regex("[a-z0-9][a-z0-9_-]{0,63}")
 
     fun validSessionId(value: String?): Boolean = value != null && SESSION_ID.matches(value)
+
+    /** 官方斜杠命令名；插入候选前用它拒绝异常名称。 */
+    fun validCommandName(value: String?): Boolean = value != null && COMMAND_NAME.matches(value)
 
     fun validRequestId(value: String?): Boolean =
         value != null && value.length in 1..MAX_REQUEST_ID_CHARS && value.all { it.code in 0x21..0x7e }
@@ -191,6 +197,12 @@ object DshComposerProtocol {
 
     /** 读取单会话投影；输入栏只用其中的图片上限，不改写任何会话内容。 */
     fun projectionArgs(sessionId: String): JSONObject {
+        require(validSessionId(sessionId)) { "会话标识无效" }
+        return JSONObject().put("request", JSONObject().put("sessionId", sessionId))
+    }
+
+    /** 官方 `session/cancel` 只取消当前活动回合，不清空官方待处理队列。 */
+    fun cancelArgs(sessionId: String): JSONObject {
         require(validSessionId(sessionId)) { "会话标识无效" }
         return JSONObject().put("request", JSONObject().put("sessionId", sessionId))
     }
@@ -569,6 +581,49 @@ object DshComposerPolicy {
         val token = prefix.drop(1)
         if (token.length > 64) return null
         return token
+    }
+
+    /** 用候选替换当前 @ 查询；只替换 start..end，保留前后文与选区后的输入。 */
+    fun insertMention(text: String, query: DshMentionQuery, insertion: String): DshTextEdit {
+        val start = query.start.coerceIn(0, text.length)
+        val end = query.end.coerceIn(start, text.length)
+        val next = text.substring(0, start) + insertion + text.substring(end)
+        return DshTextEdit(next, (start + insertion.length).coerceIn(0, next.length))
+    }
+
+    /**
+     * 用完整命令名替换首行命令 token，并保留已有参数/换行。
+     * 无参数时补一个空格，方便继续输入；光标放到插入内容末尾。
+     */
+    fun insertCommand(text: String, cursor: Int, name: String): DshTextEdit {
+        if (!DshComposerProtocol.validCommandName(name)) return DshTextEdit(text, cursor.coerceIn(0, text.length))
+        if (!text.startsWith('/')) return DshTextEdit(text, cursor.coerceIn(0, text.length))
+        val tokenEnd = text.indexOfFirst { it.isWhitespace() }.let { if (it < 0) text.length else it }
+        val tail = text.substring(tokenEnd)
+        val insertion = "/$name" + if (tail.isEmpty()) " " else tail
+        return DshTextEdit(insertion, insertion.length)
+    }
+
+    /** 候选菜单键盘上下移动；越界时循环，列表为空返回 0。 */
+    fun moveCandidate(index: Int, size: Int, delta: Int): Int {
+        if (size <= 0) return 0
+        val normalized = index.coerceIn(0, size - 1)
+        return ((normalized + delta) % size + size) % size
+    }
+
+    /** 斜杠候选搜索：命令名前缀优先，其次名称包含，最后描述/参数提示包含。 */
+    fun searchCommands(commands: List<DshCommand>, query: String): List<DshCommand> {
+        if (query.isEmpty()) return commands
+        return commands.mapNotNull { command ->
+            val rank = when {
+                command.name.startsWith(query, ignoreCase = true) -> 0
+                command.name.contains(query, ignoreCase = true) -> 1
+                command.description.contains(query, ignoreCase = true) -> 2
+                command.inputHint.orEmpty().contains(query, ignoreCase = true) -> 3
+                else -> null
+            }
+            rank?.let { it to command }
+        }.sortedWith(compareBy({ it.first }, { it.second.name })).map { it.second }
     }
 
     /** 已识别的首行斜杠命令；未知命令仍作为普通提示词发送。 */

@@ -74,6 +74,13 @@ class DshComposerClient(private val remote: DshComposerRemote) {
         )
     }
 
+    /** 官方 `session/cancel`；只取消当前活动回合，不停止 DSH 服务。 */
+    suspend fun cancel(sessionId: String): Result<Unit> = runCatching {
+        val value = remote.call("session/cancel", DshComposerProtocol.cancelArgs(sessionId))
+        val root = value as? JSONObject ?: throw IllegalArgumentException("停止响应格式不正确")
+        if (!root.optBoolean("accepted", false)) throw IOException("官方接口未接受停止请求")
+    }
+
     suspend fun sendPrompt(
         sessionId: String,
         requestId: String,
