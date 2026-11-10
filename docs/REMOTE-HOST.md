@@ -74,7 +74,7 @@ WebRTC/TURN、远程 DSH 启停和多主机管理尚未实现。
 
 ## 6. 验证与未验证
 
-已执行（JVM）：配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、测试连接不切换 origin、HTTP 探测 200/302/401/500 与连接拒绝、错误信息不包含密码、Cookie 分区（本地/两台远程互不串读）、活动端点认证/重试策略。中继切片新增 `RemoteRelayTest` 16 项（配对链接、帧、HMAC 向量、TLS 钉扎、重连、假中继 DATA 回声、错误 token、加密存储、稳定身份/Cookie 作用域）。Python 参考实现 6 项回环端到端自测通过。完整 JVM 结果见 [测试报告](TEST-REPORT.md)。
+已执行（JVM）：配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、测试连接不切换 origin、HTTP 探测 200/302/401/500 与连接拒绝、错误信息不包含密码、Cookie 分区（本地/两台远程互不串读）、活动端点认证/重试策略。中继切片新增 `RemoteRelayTest` 16 项（配对链接、帧、HMAC 向量、TLS 钉扎、重连、假中继 DATA 回声、错误 token、加密存储、稳定身份/Cookie 作用域）；`DshRemoteIsolationTest` 新增同一 hostId 下不同 SSH 用户/远程 DSH 端口的 Cookie 分区与同服务换 room 复用回归。Python 参考实现 6 项回环端到端自测通过。完整 JVM 结果见 [测试报告](TEST-REPORT.md)。
 
 未验证：真实 Android 设备到真实 sshd/中继的端到端、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、真实公网中继/证书、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。新增 Cookie 隔离/Keystore 设备回归仅编译，未运行；设备/真实主机验收需要独立 QA 会话和明确目标。
 

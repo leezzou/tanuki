@@ -9,9 +9,10 @@
 - 已实现：
   - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
   - `RelayTransport`：生产 TLS 1.2/1.3 客户端（系统 CA + 主机名或证书 DER 钉扎）、客户端 JOIN/CHALLENGE/AUTH/QUEUED/OPEN_OK、只绑定 `127.0.0.1` 的 loopback 桥、DATA/CLOSE/PING/PONG；`RoutingSshTransport` 按配置在直连 SSH 与中继之间路由。
-  - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键与 Cookie 作用域、token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
+  - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`（room 不参与，同一服务换房间复用，不同用户/端口隔离）；token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
   - `scripts/remote-relay/`：Python 标准库参考中继、只出站的主机端 agent、0600 配对文件、自签名证书生成脚本、回环端到端自测；共享 HMAC 向量 `app/src/test/resources/relay-protocol-vectors.json`。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 6 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；完整 JVM + lint BUILD SUCCESSFUL，551 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 95 warnings / 1 hint；PR #36 head `67a00e3` 的 Host/Android CI 均 pass。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 6 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；完整 JVM + lint BUILD SUCCESSFUL，552 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 95 warnings / 1 hint；PR #36 head `67a00e3` 的 Host/Android CI 均 pass。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
 - 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 
@@ -56,6 +57,7 @@
 - 无锁解析：npmmirror 优先、官方兜底；npm `fetch-timeout=15000ms`，命令上限 180s；镜像生成的锁把 `resolved` 归一化回官方 registry，SRI 不变。
 - 下载：自动模式国内镜像优先、官方最后；401/403/404/410 快速换源，429/408/425/5xx 在单请求内 500ms/1000ms 指数退避后降级源；单请求 connect/read 30s，Range/206 续传，临时文件 SHA-512 通过后原子 rename。
 - 并发：默认 8 路，连续成功后升至 16；每 host 信号量上限 8；已校验归档跨重试保留。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；rebase 后完整 `testModernDebugUnitTest` 205 tests / 0 failures / 0 errors / 0 skipped；目标 Npm/Download 回归 61 项通过，`NpmAdaptiveWorkerPoolTest` 升降档 2/2。
 - 待验证：真实 Android 设备/PRoot 首次 DSH 安装、弱网与镜像 404/429 注入、4000 包端到端吞吐；未跑 lint/assemble/仪器/真机。
 
@@ -86,6 +88,7 @@
 - 阅读器改为单 `PdfRenderer` 会话 + 连续纵向 `LazyColumn`；同屏可见页全部优先加载，再在可见范围外预加载相邻页；按字节 LRU 缓存（堆的 1/8，24–64 MiB），单页渲染受长边 2048、4,000,000 像素与「缓存预算 ÷ (渲染计划页 + 1 在途) ÷ 4」限制，受保护页总字节不超预算；正在组合中绘制的位图延迟回收，离开组合/关闭文档时回收。
 - 交互：适应宽度/适应页面切换、双指 1–5x、双击 1x/2.5x、放大后横向平移、页码/总页数、跳页对话框（支持 `12`、`12/50`、`第12页`）；纵向滚动始终可用。放大时按缩放补上下边缘留白，首尾页文字在 1–5× 均可触达；纵向补偿按未缩放列表坐标计算，并延迟到新留白完成测量后执行；放大层由未缩放的阅读视口 `clipToBounds()` 裁剪。
 - 错误与限制：512 MiB 文件打开上限、加密/损坏/无页面/内存不足中文提示、单页渲染失败可重试；仍为只读预览，不接 WebView/外部 App，不做编辑/搜索/文本选择。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 365 tests / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 通过；新增 59 项 PDF 策略测试，`ZoomPolicyTest` 6 项与 `PdfRenderPolicyTest` 4 项不回归。Codex P2（缩放首尾可达、非 1× 纵向补偿、同屏 >3 页可见页加载、渲染集合内存预算、固定视口裁剪、分配前驻留预留、预留失败原子性）已修复并补回归。
 - 待验证：真机/模拟器大文档连续滚动与内存曲线、捏合/双击/平移手感、视口裁剪截图、5x 清晰度、真实加密/损坏 PDF、深色主题；assemble/Android 仪器未跑。PR 与 head 以 GitHub 页面为准。
 ### 设备温控与省电策略（android_agent-30，PR #21 已合并为 f5f3bf3）
@@ -94,6 +97,7 @@
 - 新增纯策略 `DeviceConditionPolicy` 与 Android 采样/持久化 `DeviceConditionMonitor`：状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`，来源为 `PowerManager` thermal status、电池电量/充电和系统低内存；热状态按进入阈值升级、按更低退出边界并持续 30 秒降级，低电用进入/退出阈值（默认 20%/25%）迟滞，低内存有 60 秒解除迟滞。
 - 降级：后台更新检查在 HOT/CRITICAL/LOW_BATTERY 由被阻塞的具体 Worker 登记 APK/DSH 待办，恢复后只补跑实际登记过的检查，WorkManager 确认入队且待办代次未变化后才清除（无 Worker 跳过时不发请求，失败保留重试，确认期间重新登记的新待办不被误删，代次计数确认后仍单调递增不复用）；DSH 依赖下载并发按 16/8/4/2/4 降档，自适应池只让多出的 worker 在完成当前归档后退休；日志展示 80/60/40/20/40 行；PDF 预览长边 2048/1600/1280/1024/1280、像素 4M/2.5M/1.6M/1M/1.6M。DSH 任务和前台交互始终 `RUN`，策略不调用取消。
 - 兼容：保留原两个唯一周期任务、联网约束、前台服务与唤醒锁；设置入口 `设置 · 运行与后台` 提供总开关与 10/15/20/25/30% 低电阈值；主线程/电池/热回调只向后台合并队列投递刷新请求，采样与写盘在后台串行完成，设置通过单一后台写入器串行保存；冷启动 Worker/设置通过一次性屏障等待 restore 完成，避免默认状态覆盖磁盘待办；状态与实际被跳过的检查写 `files/state/device-condition.json`，设置写 `device-condition-settings.json`，进程重启先恢复再校正。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`DeviceConditionPolicyTest` 25 项、`DeviceConditionConfigWriterTest` 1 项、`DeviceConditionRefreshQueueTest` 2 项、`DeviceConditionInitializationTest` 2 项、`NpmDownloadPolicyTest` 7 项、`NpmAdaptiveWorkerPoolTest` 2 项全过；完整 JVM 结果见 [测试报告](TEST-REPORT.md)。
 - 待验证：真机/模拟器温控回调、电池广播、低内存、WorkManager 真实调度与重启恢复、通知、设置页 UI、PDF 降级实际像素、assemble/仪器；独立 Review、合并与发布未授权/未完成。
 - 状态表、工作矩阵与接入细节见 [设备温控与省电策略](DEVICE-CONDITION-POLICY.md)。

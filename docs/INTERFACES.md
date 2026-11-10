@@ -172,7 +172,7 @@ HTTP 200..399 或 401 → 存活
 | 证明 | `hostProof=HMAC-SHA256(token,"tanuki-relay-v1|host|room|hostId|hostNonce|serverNonce")`；`clientProof=HMAC-SHA256(token,"tanuki-relay-v1|client|room|clientNonce|serverNonce")`；无 padding base64url，常量时间比较 |
 | 数据 | `OPEN_OK` 后同一 TLS 流只承载 `DATA/CLOSE/PING/PONG/ERROR`；`DATA` 就是 SSH 密文，中继不解析 |
 | 错误码 | `room_not_found`、`bad_token`、`room_busy`、`host_offline`、`host_timeout`、`expired`、`too_large`、`protocol`、`internal`；客户端映射中文，不回显原始载荷 |
-| 身份与 Cookie | SSH 主机密钥仍按 `SHA256:` 首次确认/后续比对；中继模式 known_hosts 键为 `relay:<hostId>`，Cookie 作用域为 `relay:<hostId>`，换房间不串 Cookie |
+| 身份与 Cookie | SSH 主机密钥仍按 `SHA256:` 首次确认/后续比对；中继模式 known_hosts 键为 `relay:<hostId>`；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`，room 不参与，同一服务换房间复用 Cookie，不同用户/DSH 端口必须隔离 |
 | origin | 中继模式仍只暴露 `http://127.0.0.1:<本地转发端口>`；`OriginPolicy`、TLS/明文策略、Cookie 校验和 Blob 导出边界不变 |
 | 重连 | 控制握手仅对网络/房间忙/主机离线按指数退避（最多 4 次）；认证/钉扎/协议错误立即失败；已建立 SSH 会话不透明迁移，隧道断开回退本地 |
 | 资源 | 中继需一个双方可达的 TLS 端口；无公网服务器时降级为局域网直连、全局 IPv6、用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连 |

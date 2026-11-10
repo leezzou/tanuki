@@ -315,7 +315,7 @@ class RemoteRelayTest {
             assertTrue(result is com.tanuki.runtime.RemoteAttemptResult.Success)
             assertEquals(0, transport.probeCalls)
             assertEquals(1, transport.openCalls)
-            assertEquals("relay:${value.relay!!.hostId}", value.cookieScope())
+            assertEquals("relay:${value.relay!!.hostId}:${value.user}:${value.remoteDshPort}", value.cookieScope())
             assertEquals(RemotePhase.REMOTE, machine.status.phase)
             assertEquals("relay-display", machine.status.host)
         } finally {

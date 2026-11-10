@@ -19,7 +19,7 @@
   - `compileModernDebugKotlin` BUILD SUCCESSFUL。
   - `RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped。
   - Python 参考实现 6 项回环端到端自测 OK。
-  - 完整 JVM/lint：BUILD SUCCESSFUL（3m28s）；551 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 完整 JVM/lint：BUILD SUCCESSFUL（2m32s）；552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；独立 Codex High Review、合并/发布未授权。
 - 当前目标包名、分支/无 Git 状态、是否有运行中任务：分支 `ao/tanuki-remote/relay-pairing`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#36](https://github.com/leezzou/tanuki/pull/36) 已创建，base `main`；无运行中任务。
 - 关键事实与可定位源码/公共文档：方案/资源/流程见 `docs/REMOTE-CONNECT.md`；契约见 `docs/INTERFACES.md` 1.6；实现见 `app/src/main/kotlin/com/tanuki/runtime/{RemoteRelay,RelayTransport,RemoteHost,RemoteHostStorage,RemoteHostController}.kt`；参考中继/agent 见 `scripts/remote-relay/`；JVM 回归见 `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt`。
@@ -41,6 +41,7 @@
 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt` | 生产接线改为 `RoutingSshTransport` |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` | 新增配对链接输入、解析失败提示、中继状态展示、说明文案 |
 | `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt` | 新增 16 项 JVM 回归 |
+| `app/src/test/kotlin/com/tanuki/DshRemoteIsolationTest.kt` | Review P1：新增中继 Cookie 按 hostId + 用户 + 远程 DSH 端口分区、同服务换 room 复用的回归 |
 | `app/src/test/resources/relay-protocol-vectors.json` | Kotlin/Python 共用 HMAC 向量 |
 | `scripts/remote-relay/protocol.py` | 线协议、HMAC、配对链接、证书钉扎的 Python 参考实现 |
 | `scripts/remote-relay/relay.py` | TLS 中继：房间注册/挑战、客户端加入、字节转发、TTL/上限 |
@@ -50,6 +51,11 @@
 | `.github/workflows/verify.yml` | Host job 增加 Python 中继回环自测步骤 |
 | `docs/AGENT-STATE.md` | 新增本轮状态小节、更新当前交接链接与下一步 |
 
+### Review 修复
+
+- PR #36 [P1 discussion r4521208579](https://github.com/leezzou/tanuki/pull/36#discussion_r4521208579)：中继 Cookie 作用域原来只有 `relay:<hostId>`，同一主机不同 SSH 用户/远程 DSH 端口会共用 Cookie jar，切换时可能恢复上一服务的认证 Cookie。已改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，因此同一服务换房间仍复用 Cookie，不同用户/DSH 端口隔离。
+- 回归：`DshRemoteIsolationTest` 覆盖同 hostId 下不同用户/端口分区、同服务换 room 复用；`RemoteRelayTest` 断言更新为新作用域。同步修正 `INTERFACES` 1.6、`REMOTE-CONNECT`、`REMOTE-HOST`、`SECURITY` 与状态文档。
+
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
@@ -57,10 +63,11 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL（约 3m53s；含既有告警） | 仅 Kotlin 编译；未跑设备 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` | BUILD SUCCESSFUL；16 tests / 0 failures / 0 errors / 0 skipped | 覆盖配对链接、帧、HMAC 向量、钉扎、重连、假中继 DATA 回声、错误 token、存储、身份/Cookie、控制器 |
 | `cd scripts/remote-relay && python3 test_remote_relay.py` | OK；6 tests / 0 failures | 自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA、错误 token、未知房间、明文拒绝、日志不含 token；仅回环；已加入 CI Host job |
-| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m28s）；66 个结果文件，551 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 16；lint 告警数与基线相同，无新增 Error |
+| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.DshRemoteIsolationTest' --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` | BUILD SUCCESSFUL；21 tests / 0 failures / 0 errors / 0 skipped | P1 修复后定向回归；含 Cookie 用户/端口分区与同服务换 room |
+| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 17；lint 告警数与基线相同，无新增 Error |
 | `python3 scripts/check-handoff.py --record ...` / 无参检查 | 通过；602 public files | 本轮结束刷新印章 |
 | `python3 scripts/check-publication.py --git` | 0 findings | 实际暂存内容检查 |
-| PR #36 当前 head `67a00e3` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；不替代独立 Review/设备验收 |
+| PR #36 修复前 head `67a00e3` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；P1 修复后的新 head CI 待跑 |
 | `python3 scripts/package-source.py` | 待执行 | 仅检查源码包，不提交 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只记录上表本轮实际执行；0.1.10 的 535 tests 与旧 PR 结果未复跑，不作为本轮结论。

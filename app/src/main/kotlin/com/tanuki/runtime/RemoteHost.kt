@@ -26,9 +26,14 @@ data class RemoteHostConfig(
     /** 非空表示经中继配对连接；此时 host 只作展示名，实际 SSH 连接走中继桥。 */
     val relay: RemoteRelayPairing? = null
 ) {
-    /** 管理页 Cookie 的逻辑主机身份；中继配对按稳定 hostId 隔离，同一主机换房间也不串 Cookie。 */
+    /**
+     * 管理页 Cookie 的逻辑服务身份。
+     *
+     * 中继用稳定 hostId + SSH 用户 + 远程 DSH 端口；room 不参与，所以同一服务换房间仍复用
+     * Cookie，但同一主机上的不同用户/DSH 端口必须隔离，避免把 A 的认证 Cookie 发给 B。
+     */
     fun cookieScope(): String =
-        relay?.let { "relay:${it.hostId}" }
+        relay?.let { "relay:${it.hostId}:$user:$remoteDshPort" }
             ?: "remote:${normalizedHost() ?: host.trim()}:$sshPort:$user:$remoteDshPort"
 
     /**

@@ -48,7 +48,7 @@
 2. 手机与中继建立 TLS：有 `pin` 时只信任该证书 DER 的 SHA-256（仍检查有效期）；没有 `pin` 时必须走系统 CA + 主机名校验。两者都没有合法结果就失败，不存在“忽略证书”开关。
 3. 手机收到 `CHALLENGE` 后用 token 计算 `AUTH`，中继校验通过后返回 `QUEUED`；主机端连接本机 `127.0.0.1:sshd`，中继回 `OPEN_OK`。
 4. 手机把中继字节流桥接到 **只监听 127.0.0.1** 的临时 TCP 端口；JSch 连接该端口，执行既有 SSH 主机密钥确认/比对、密码或私钥认证、`direct-tcpip` 本地转发。中继无法替代或关闭这些检查。
-5. 远程 DSH 仍只监听远程 `127.0.0.1:<port>`；手机管理 WebView 的 origin 仍是 `http://127.0.0.1:<本地转发端口>`。Cookie 按 `relay:<hostId>` 逻辑主机隔离，换房间不串 Cookie。
+5. 远程 DSH 仍只监听远程 `127.0.0.1:<port>`；手机管理 WebView 的 origin 仍是 `http://127.0.0.1:<本地转发端口>`。Cookie 按 `relay:<hostId>:<user>:<remoteDshPort>` 逻辑服务隔离：room 不参与，同一服务换房间复用 Cookie；同一主机上的不同用户/DSH 端口分别保存，切换时不会恢复上一服务的认证 Cookie。
 
 ### 2.3 身份与指纹
 
@@ -56,7 +56,7 @@
 |---|---|---|
 | 中继 TLS | 系统 CA + 主机名，或配对链接中的 `sha256-<base64url(证书 DER SHA-256)>` 钉扎 | 握手失败/钉扎不匹配直接拒绝，不回退明文 |
 | 房间 | 32 字节随机 token；中继用 HMAC-SHA256 证明校验；token 只在 TLS 内传输/存储 | `bad_token`、`room_not_found`、`room_busy`、`host_offline` 中文错误 |
-| 主机稳定身份 | 16 字节随机 `hostId`（配对链接携带）；用于 known_hosts 信任键和 Cookie 作用域 | 缺失/非法则拒绝配对 |
+| 主机稳定身份 | 16 字节随机 `hostId`（配对链接携带）；用于 known_hosts 信任键；Cookie 作用域在其后追加 SSH 用户与远程 DSH 端口 | 缺失/非法则拒绝配对 |
 | SSH 主机密钥 | 既有 `SHA256:` 首次确认 + 后续比对，按 `relay:<hostId>` 保存 | 指纹变化直接拒绝 |
 | SSH 用户认证 | 既有密码/私钥；凭据只经 Android Keystore 加密保存 | 认证失败关闭隧道并回退本地 |
 | 远程 DSH token | 可选，只拼到本机 loopback 启动 URL，经 SSH 隧道发送 | 不写日志、不导出 |
@@ -126,7 +126,7 @@
 - **房间 token**：256 位随机；中继只存内存；手机加密保存；不写日志、不出现在 `toString()`/错误消息；配对文件 0600。token 泄露可让攻击者占用房间（DoS），但仍需通过 SSH 用户认证，不能直接获得 DSH。
 - **端到端 SSH**：SSH 密钥交换/认证/主机密钥校验在手机与远程 sshd 之间完成；中继只看到 TLS 内的 SSH 密文和流量大小。中继被攻破可以拒绝服务、观察元数据或尝试替换房间对端，但不能解密 SSH，也不能让手机接受未确认的新主机密钥。
 - **主机端 agent**：不监听、不执行命令、不读项目文件；只连中继和本机回环 sshd。中继不能让它连接任意地址/端口（目标由本地参数固定）。
-- **管理页**：origin 仍是精确 `http://127.0.0.1:<本地端口>`；TLS/明文策略、Cookie 校验、Blob 导出边界不因中继而放宽；Cookie 按 `relay:<hostId>` 隔离。
+- **管理页**：origin 仍是精确 `http://127.0.0.1:<本地端口>`；TLS/明文策略、Cookie 校验、Blob 导出边界不因中继而放宽；Cookie 按 `relay:<hostId>:<user>:<remoteDshPort>` 隔离，同一主机不同用户/DSH 端口不能互相恢复认证 Cookie。
 - **参考实现限制**：不防同 UID 恶意代码、不提供发布者签名验证、不做 Relay 高可用/限流/审计；不是恶意远程主机沙箱。
 
 ## 6. 实现位置
@@ -146,6 +146,7 @@
 已执行（JVM/宿主）：
 
 - `RemoteRelayTest` 16 项：配对链接往返/拒绝未知字段/非规范 base64url；帧编解码/上限/截断/未知类型；共享 HMAC 向量；证书钉扎；重连策略；loopback 假中继的配对 + DATA 回声 + 早期字节不丢失；错误 token；中继配置身份/Cookie 作用域；加密存储往返/篡改拒绝/切回直连；控制器使用稳定 `relay:<hostId>` 信任键。
+- `DshRemoteIsolationTest` 新增中继 Cookie 分区：同一 hostId/user/DSH 端口换 room 复用同一分区；不同用户、不同 DSH 端口分别保存，互不恢复认证 Cookie。
 - Python 参考实现 6 项回环端到端：自签名 TLS + pin、主机注册、客户端 JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文连接不获得协议响应、共享向量一致、日志不泄露 token。
 
 未验证：
