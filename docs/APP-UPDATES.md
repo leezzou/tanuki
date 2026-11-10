@@ -1,6 +1,6 @@
 # 应用内更新
 
-当前已发布 **0.1.9/code11** 为 Pre-release：`v0.1.9` tag 为 `5c680b9`，APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；0.1.9 没有随版本记录完整设备验收。**0.1.11/code13** 为当前发布候选（基线 `main=1f7222d0e4ac`，#40 合并后 rebase；候选 APK SHA-256 `34fd8d85...e4bf55`）；0.1.10/code12 为历史本地候选，未发布。状态以[交接](AGENT-STATE.md)为准。
+当前已发布 **0.1.9/code11** 为 Pre-release：`v0.1.9` tag 为 `5c680b9`，APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；0.1.9 没有随版本记录完整设备验收。**0.1.11/code13** 为当前发布候选（基线 `main=1f7222d0e4ac`，#40 合并后 rebase；候选 APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`）；0.1.10/code12 为历史本地候选，未发布。状态以[交接](AGENT-STATE.md)为准。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 

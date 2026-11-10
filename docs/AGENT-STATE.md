@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.11 发布准备与交接集成](handoffs/20261110-1636-release-0.1.11.md)（android_agent-49，基线 `main=1f7222d0e4ac`，#40 已合并；0.1.11/code13 workspacecheck 候选重建中，未推送、未发布）。上一次集成：2026-11-10，`main=1f7222d0e4ac`。
+当前交接：[0.1.11 发布准备与交接集成](handoffs/20261110-1636-release-0.1.11.md)（android_agent-49，基线 `main=1f7222d0e4ac`，#40 已合并；0.1.11/code13 workspacecheck 候选已核验，PR #44 待合并，未推送、未发布）。上一次集成：2026-11-10，`main=1f7222d0e4ac`。
 
 ## 最近 5 条交接
 
