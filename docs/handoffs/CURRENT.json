@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261110-1140-native-parity-audit.md",
-  "recordSha256": "ac30af31863888b4aa4439d4582550d03f158d00e2f13c762644771fd4563306",
-  "sourceFingerprint": "527f28f76d345c6b75b12c879cef09ff35edc87e178ee796a9d4decd5f62ef0c",
-  "fileCount": 599
+  "record": "docs/handoffs/20261110-0330-copy-flicker.md",
+  "recordSha256": "94ede45a3a5229820be27a4bb90d9669be9ccd175edacc98bb0be4051af5c597",
+  "sourceFingerprint": "f3bf1d760a884d1c5a96f82b2f0b931a5a5dcaac6f110f93657c11e9bdc49436",
+  "fileCount": 607
 }

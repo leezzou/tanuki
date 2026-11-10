@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AtomicFile
 import android.webkit.URLUtil
 import com.tanuki.runtime.FileTransfers
+import com.tanuki.storage.ExportCleanup
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -204,16 +205,28 @@ class BrowserLibrary(context: Context, val transfers: FileTransfers = FileTransf
     }
     fun export(context: Context, id: String, destination: android.net.Uri, notice: (String) -> Unit) {
         scope.launch {
-            val message = try {
+            var message = ""
+            try {
                 val source = file(id)
                 transfers.track("导出浏览器文件", source.length()) { transfer ->
                     context.contentResolver.openOutputStream(destination, "w")!!.use { output ->
                         source.inputStream().use { input -> transfers.copy(input, output, transfer, source.length()) }
                     }
                 }
-                "文件已导出"
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { "导出失败，应用内原文件仍保留" }
+                message = "文件已导出"
+            } catch (cancelled: CancellationException) {
+                // 取消/失败都不能把空文件或截断文件留在系统目标位置。
+                val cleaned = ExportCleanup.discard {
+                    android.provider.DocumentsContract.deleteDocument(context.contentResolver, destination)
+                }
+                withContext(NonCancellable + Dispatchers.Main) { notice(ExportCleanup.cancelledNotice(cleaned)) }
+                throw cancelled
+            } catch (_: Exception) {
+                val cleaned = ExportCleanup.discard {
+                    android.provider.DocumentsContract.deleteDocument(context.contentResolver, destination)
+                }
+                message = ExportCleanup.failureNotice(cleaned)
+            }
             withContext(Dispatchers.Main) { notice(message) }
         }
     }
