@@ -46,15 +46,19 @@ internal object FileTypeCatalog {
         "pem", "crt", "cer", "csr", "key", "pub",
     )
 
-    /** 没有扩展名或点号开头的常见文本文件；全部小写比较。 */
+    /** 没有扩展名或明确点号配置的常见文本文件；全部小写比较，不收录任意隐藏文件。 */
     private val textNames = setOf(
         "dockerfile", "containerfile", "makefile", "gnumakefile", "cmakelists.txt", "rakefile", "gemfile", "vagrantfile",
         "jenkinsfile", "procfile", "brewfile", "podfile", "fastfile", "justfile", "taskfile", "license", "licence",
         "notice", "copying", "authors", "readme", "changelog", "changes", "todo", "version", "go.mod", "go.sum",
         "cargo.lock", "cargo.toml", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json",
-        ".gitignore", ".gitattributes", ".gitmodules", ".editorconfig", ".npmrc", ".yarnrc", ".babelrc", ".env",
+        ".gitignore", ".gitattributes", ".gitmodules", ".gitkeep", ".editorconfig", ".npmrc", ".npmignore", ".yarnrc",
+        ".babelrc", ".eslintrc", ".prettierrc", ".env", ".envrc", ".dockerignore", ".htaccess", ".vimrc",
         ".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile", ".inputrc", ".wgetrc", ".curlrc",
     )
+
+    /** 没有扩展名但明确是二进制/系统元数据的隐藏文件；不做文本内容探测。 */
+    private val binaryNames = setOf(".ds_store")
 
     /** 已知媒体扩展名；不依赖系统 MIME 表，缺少 MIME 时仍能进入对应查看器。 */
     private val imageExtensions = setOf(
@@ -106,12 +110,15 @@ internal object FileTypeCatalog {
         val lowerName = name.substringAfterLast('/').lowercase(Locale.ROOT)
         val extension = extension(lowerName)
         explicitKinds[extension]?.let { return it }
-        if (extension in binaryExtensions) return FileKind.OTHER
-        // 文本扩展名先于媒体 MIME（.ts 冲突）；媒体扩展名再于文本判断，避免 PNG/MP4 落进 OTHER。
-        if (extension in textExtensions || lowerName in textNames || isDotConfig(lowerName)) return FileKind.TEXT
+        if (lowerName in binaryNames || extension in binaryExtensions) return FileKind.OTHER
+        // 先按扩展名判定：文本扩展名优先于媒体 MIME（.ts 冲突），媒体扩展名优先于文件名规则，
+        // 避免 `.env-image.png` 这类“配置前缀 + 媒体后缀”被当成文本。
+        if (extension in textExtensions) return FileKind.TEXT
         if (extension in imageExtensions) return FileKind.IMAGE
         if (extension in audioExtensions) return FileKind.AUDIO
         if (extension in videoExtensions) return FileKind.VIDEO
+        // 文件名规则只覆盖明确的无扩展名文本与已知点号配置，不抢占未知隐藏文件。
+        if (lowerName in textNames || isDotConfig(lowerName)) return FileKind.TEXT
 
         val type = normalizeMime(mime) ?: return FileKind.OTHER
         return when {
@@ -134,21 +141,29 @@ internal object FileTypeCatalog {
     /** 已知扩展名的规范 MIME；未知返回 `null`，由调用方回退系统 MIME 表。 */
     fun mime(name: String): String? = mimeByExtension[extension(name)]
 
-    /** 是否为明确二进制/归档/旧版 Office 扩展名；用于跳过昂贵且易误判的内容探测。 */
-    fun isBinaryExtension(name: String): Boolean = extension(name) in binaryExtensions
+    /** 是否为明确二进制/归档/旧版 Office；用于跳过昂贵且易误判的内容探测。 */
+    fun isBinaryExtension(name: String): Boolean {
+        val lowerName = name.substringAfterLast('/').lowercase(Locale.ROOT)
+        return lowerName in binaryNames || extension(lowerName) in binaryExtensions
+    }
 
     /** 是否为本目录认作文本的文件；只看文件名/扩展名，不做内容读取。 */
     fun isTextName(name: String): Boolean {
         val lowerName = name.substringAfterLast('/').lowercase(Locale.ROOT)
         val extension = extension(lowerName)
+        if (lowerName in binaryNames || extension in binaryExtensions) return false
+        if (extension in imageExtensions || extension in audioExtensions || extension in videoExtensions) return false
         return extension in textExtensions || lowerName in textNames || isDotConfig(lowerName)
     }
 
     fun normalizeMime(mime: String?): String? = mime?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)?.ifEmpty { null }
 
-    /** 点号开头的配置文本文档，例如 `.env`、`.env.local`、`.npmrc`。 */
+    /**
+     * 只匹配明确的 `.env` 与 `.env.*` 变体（如 `.env.local`）。
+     * `.env-image.png`、`.DS_Store` 等隐藏文件不能仅因点号开头或 `.env` 前缀就当作文本。
+     */
     private fun isDotConfig(lowerName: String): Boolean =
-        lowerName.startsWith(".env") || (lowerName.startsWith(".") && !lowerName.drop(1).contains('.'))
+        lowerName == ".env" || lowerName.startsWith(".env.")
 
     private val mimeByExtension: Map<String, String> = buildMap {
         // 文档

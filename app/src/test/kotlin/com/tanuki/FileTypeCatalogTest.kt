@@ -112,12 +112,37 @@ class FileTypeCatalogTest {
 
     @Test fun recognizesExtensionlessNamesAndDotConfigFiles() {
         for (name in listOf("Dockerfile", "Makefile", "CMakeLists.txt", "LICENSE", "README", "CHANGELOG", "Jenkinsfile",
-            ".gitignore", ".gitattributes", ".editorconfig", ".env", ".env.local", ".npmrc", ".bashrc", ".profile")) {
+            ".gitignore", ".gitattributes", ".editorconfig", ".env", ".env.local", ".env.production", ".envrc",
+            ".npmrc", ".bashrc", ".profile")) {
             assertEquals("无扩展名文本必须可查看：$name", FileKind.TEXT, WorkspaceFileManager.classifyFileKind(name, null))
             assertTrue(FileTypeCatalog.isTextName(name))
         }
         assertFalse(FileTypeCatalog.isTextName("photo.png"))
         assertNull("无扩展名不强行给 MIME，由调用方回退 text/plain", FileTypeCatalog.mime("Dockerfile"))
+    }
+
+    @Test fun doesNotTreatHiddenBinariesOrEnvPrefixedMediaAsText() {
+        // `.DS_Store` 没有扩展名，但明确是系统二进制，不能进入文本阅读器。
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind(".DS_Store", null))
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind(".DS_Store", "application/octet-stream"))
+        assertTrue(FileTypeCatalog.isBinaryExtension(".DS_Store"))
+        assertFalse(FileTypeCatalog.isTextName(".DS_Store"))
+
+        // 未知隐藏文件继续走 MIME/有界内容探测，不能仅因点号开头就被判为文本。
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind(".hidden.unknown", null))
+        assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind(".env-image", null))
+        assertFalse(FileTypeCatalog.isTextName(".hidden.unknown"))
+        assertFalse(FileTypeCatalog.isTextName(".env-image"))
+
+        // `.env` 前缀后接媒体扩展名时，媒体扩展名优先。
+        assertEquals(FileKind.IMAGE, WorkspaceFileManager.classifyFileKind(".env-image.png", "image/png"))
+        assertEquals(FileKind.IMAGE, WorkspaceFileManager.classifyFileKind(".env-image.png", null))
+        assertFalse(FileTypeCatalog.isTextName(".env-image.png"))
+
+        // 明确的 .env 变体仍按文本查看。
+        assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind(".env", null))
+        assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind(".env.local", null))
+        assertEquals(FileKind.TEXT, WorkspaceFileManager.classifyFileKind(".env.production.local", null))
     }
 
     @Test fun handlesUppercaseMixedPathsAndCompoundExtensions() {
