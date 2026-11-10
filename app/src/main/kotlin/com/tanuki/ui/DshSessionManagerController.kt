@@ -111,6 +111,8 @@ class DshSessionManagerController(
     private var permissionJob: Job? = null
     private var catalogJob: Job? = null
 
+    /** 当前会话管理页绑定的实际 loopback origin；端点变化时清空目录缓存。 */
+    private var endpointIdentity: String? = null
     private var listGeneration = 0
     private var searchGeneration = 0
     private var modelGeneration = 0
@@ -423,6 +425,7 @@ class DshSessionManagerController(
     /** 服务停止时清空列表与选中状态，保留安全模式标记；Cookie 在 close() 中一并丢弃。 */
     fun clearForStopped() {
         close()
+        endpointIdentity = null
         _state.value = DshSessionManagerState(readOnly = _state.value.readOnly)
     }
 
@@ -439,7 +442,64 @@ class DshSessionManagerController(
         permissionJob?.cancel()
         catalogJob?.cancel()
         source.reset()
-        _state.update { it.copy(loading = false, busy = false, contentSearching = false) }
+        _state.update {
+            it.copy(
+                loading = false,
+                busy = false,
+                contentSearching = false,
+                modelsLoading = false,
+                permissionsLoading = false,
+                catalogLoading = false
+            )
+        }
+    }
+
+    /**
+     * 端点切换（远程→本地、本地→远程、端口变化）时丢弃旧端点的会话/目录缓存，
+     * 取消在途请求并递增代次，避免旧响应发布到新端点界面。
+     */
+    fun onEndpointChanged(endpoint: String?) {
+        if (endpoint == endpointIdentity) return
+        endpointIdentity = endpoint
+        listGeneration++
+        searchGeneration++
+        modelGeneration++
+        permissionGeneration++
+        catalogGeneration++
+        listJob?.cancel()
+        actionJob?.cancel()
+        searchJob?.cancel()
+        modelJob?.cancel()
+        permissionJob?.cancel()
+        catalogJob?.cancel()
+        source.reset()
+        _state.update {
+            it.copy(
+                available = false,
+                hasLoaded = false,
+                loading = false,
+                busy = false,
+                sessions = emptyList(),
+                unreadIds = emptySet(),
+                selectedId = null,
+                contentHits = emptyList(),
+                contentHasMore = false,
+                contentSearching = false,
+                contentSearched = false,
+                models = null,
+                modelsLoading = false,
+                modelsError = null,
+                permissions = null,
+                permissionsLoading = false,
+                permissionsError = null,
+                skills = emptyList(),
+                commands = emptyList(),
+                catalogLoading = false,
+                catalogError = null,
+                error = null,
+                notice = null
+            )
+        }
     }
 
     private fun beginAction(): Boolean {
@@ -452,12 +512,13 @@ class DshSessionManagerController(
         listGeneration++
         listJob?.cancel()
         actionJob?.cancel()
-        _state.update { it.copy(busy = true, error = null, notice = null) }
+        // 已取消的列表读取不能继续显示加载态，否则失败后刷新按钮会被永久禁用。
+        _state.update { it.copy(busy = true, loading = false, error = null, notice = null) }
         return true
     }
 
     private fun failAction(error: Throwable) {
-        _state.update { it.copy(busy = false, error = messageOf(error)) }
+        _state.update { it.copy(busy = false, loading = false, error = messageOf(error)) }
     }
 
     private suspend fun loadAfterAction(
@@ -479,6 +540,7 @@ class DshSessionManagerController(
                 _state.update {
                     it.copy(
                         busy = false,
+                        loading = false,
                         selectedId = selectedId ?: it.selectedId,
                         notice = notice,
                         error = "操作已完成，但列表刷新失败：${messageOf(error)}"

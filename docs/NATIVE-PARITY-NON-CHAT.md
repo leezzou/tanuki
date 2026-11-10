@@ -94,7 +94,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/web/DshSessionAdminApi.kt` | 官方会话管理一元协议：认证、请求、响应解析、纯数据模型与可替换数据源 |
+| `app/src/main/kotlin/com/tanuki/web/DshSessionAdminApi.kt` | 官方会话管理一元协议：method/参数构造、响应解析、纯数据模型；`DshAdminTransport` 薄接口与临时 `DshHttpAdminTransport` |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话管理状态机：列表/过滤/搜索/新建/重命名/归档/未读/模型/权限/技能/命令 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 原生会话管理 Compose 页与详情面板 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立入口 Activity；复用 RuntimeManager 的 origin 与状态，安全模式只读 |
@@ -107,7 +107,7 @@
 |---|---|---|
 | `app/src/main/AndroidManifest.xml` | 新增 `DshSessionManagerActivity` 声明，`exported=false` | 与其他新增 Activity/Provider 的声明并列，不改现有组件 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | `TanukiUiCallbacks` 增加 `openSessionManager` 默认回调；设置 → 网页与兼容性增加一行入口 | 只加字段/一行 UI，不改导航与聊天页 |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 回调启动独立管理 Activity | 只加一个回调赋值 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 回调启动独立管理 Activity | 本次仅 import + 一个回调赋值，已由编排器放行；后续不再修改，入口 hook 由 42 集成 |
 
 ### 4.3 明确不修改
 
@@ -119,7 +119,7 @@
 
 ## 5. 契约冲突点与合并顺序
 
-1. **一元 transport 复用**：本切片在 `DshSessionAdminApi.kt` 内自带最小一元 transport，避免修改并行切片正在重写的 `DshNativeApi.kt`。它复用 `DshApiProtocol.validOrigin/apiUrl/requestBody/checkEnvelope` 与 `DshEndpoint`，但独立持有 API Cookie。并行切片落地后，应由编排器决定是否把 transport 合并到统一客户端；合并前不得出现两套不同的 origin/Cookie 规则。
+1. **一元 transport 复用**：`DshSessionAdminClient` 已收敛到 `DshAdminTransport`（`suspend call(method,args): Any?` + `reset()`），只保留 method/参数、解析和中文错误。当前 `DshHttpAdminTransport` 是临时 HTTP 栈；PR #40 的 `DshTransport`（`connection`、`call`、`live`、`reset`）合并后，改为 `DshAdminTransportAdapter(transport::call, transport::reset)`。会话管理不需要 `live`，也不复制认证/Cookie/URL；切换前不得出现两套不同的 origin/Cookie 规则。
 2. **`/connect` 参数**：本切片固定使用 `interactions=none` 的只读一元 Peer，不建立 WebSocket；聊天切片可使用自己的 `answer` Peer。两者 Cookie 绑定同一启动地址但彼此独立。
 3. **权限切换**：通过官方 `commands/execute` 执行 `/permission <preset>`，不直接写 `sandbox/mode`/`approval/policy` 事件，不绕过官方权限服务。
 4. **归档**：只调用 `workspace/archiveSession`，不直接删 `userdata/dsh` 文件；归档恢复列表需要 WebSocket，留给后续切片。

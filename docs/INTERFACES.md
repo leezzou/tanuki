@@ -226,6 +226,18 @@ HTTP 200..399 或 401 → 存活
 
 原生会话管理页复用同一启动 token 与精确 loopback origin，单独换取 `interactions=none` 的一元 API Peer；不建立 WebSocket，不修改聊天页客户端。当前使用的官方 method：
 
+**临时 transport 边界**：`DshSessionAdminClient` 只构造官方 method/参数、解析响应和映射中文错误；网络/认证/Cookie/超时收敛到 `DshAdminTransport`：
+
+```kotlin
+interface DshAdminTransport {
+    suspend fun call(method: String, args: JSONObject): Any? // 返回 result.value；业务错误抛 DshApiException
+    fun reset()
+}
+```
+
+当前生产实现 `DshHttpAdminTransport` 是**临时 HTTP 栈**。PR #40 的 `DshTransport`（`connection: StateFlow<DshConnectionState>`、`suspend call(method,args): Any?`、`live(sessionId): Flow<DshLiveEvent>`、`reset()`）合并后，应改为 `DshAdminTransportAdapter(transport::call, transport::reset)`，会话管理逻辑不复制认证/Cookie/URL，也不需要 `live`。
+
+
 | 能力 | method | 参数 / 返回要点 |
 |---|---|---|
 | 会话列表 | `session/list` | `_request:{}`；`items[]` 含 `sessionId/updatedAt/running/blank/agentAvailable/projections` |

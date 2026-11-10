@@ -86,6 +86,7 @@
 - 原生会话管理是独立页面（设置 → 网页与兼容性 → 原生会话管理），不替换聊天页；列表/新建/重命名/归档/模型/权限/Skills/命令都调用官方一元 Remote，不直接改 `userdata/dsh`。
 - 会话硬删除官方未提供；本页只归档。归档恢复列表需要 `workspace/follow` 流，未实现；未读是本机 `updatedAt` 比较，不是官方未读。
 - 安全模式/试用模式下管理页只读；远程 DSH 连接时按 `RuntimeManager.origin` 使用 SSH 隧道端点，本地恢复状态不覆盖远程。
+- 端点身份（origin）变化时清理模型/权限/Skills 缓存并递增请求代次，旧端点响应不能发布到新端点界面。
 
 ## 5. 安全边界
 
@@ -96,7 +97,7 @@
 - 业务错误只显示短错误码；其他异常经 `Redact.text` 截断；`DshEndpoint.toString()` 显式脱敏 launch URL，避免误日志带出 token。
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
 - 请求不带 `Origin` 头；与官方“工具客户端”语义一致。
-- 会话管理客户端独立持有 `interactions=none` API Cookie，不复用聊天页的 `answer` Peer；两者都不把 Cookie/token 写入日志、状态或网页脚本。
+- 会话管理客户端独立持有 `interactions=none` API Cookie，不复用聊天页的 `answer` Peer；两者都不把 Cookie/token 写入日志、状态或网页脚本。网络/认证已收敛到 `DshAdminTransport` 薄接口；`DshHttpAdminTransport` 是临时实现，PR #40 的 `DshTransport` 合并后改用 `DshAdminTransportAdapter(transport::call, transport::reset)`。
 - 模型目录的 provider 失败信息展示前经 `Redact.text` 截断，避免把 provider 错误中的敏感细节直接铺到界面。
 
 ## 6. 验证

@@ -15,6 +15,7 @@ import com.tanuki.web.DshPermissionOption
 import com.tanuki.web.DshSessionAdminSource
 import com.tanuki.web.DshSessionSearchResult
 import com.tanuki.web.DshSkill
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -249,6 +250,119 @@ class DshSessionManagerControllerTest {
         assertFalse(controller.state.value.busy)
     }
 
+    @Test fun closeResetsInFlightDirectoryLoadingAndAllowsRetry() {
+        val source = FakeSource()
+        source.modelsAwait = CompletableDeferred()
+        source.permissionsAwait = CompletableDeferred()
+        source.skillsAwait = CompletableDeferred()
+        val controller = controller(source, MemoryReadStore())
+
+        controller.loadModels()
+        controller.loadPermissions()
+        controller.loadSessionCatalog("s1")
+        assertTrue(controller.state.value.modelsLoading)
+        assertTrue(controller.state.value.permissionsLoading)
+        assertTrue(controller.state.value.catalogLoading)
+
+        controller.close()
+        assertFalse(controller.state.value.modelsLoading)
+        assertFalse(controller.state.value.permissionsLoading)
+        assertFalse(controller.state.value.catalogLoading)
+
+        source.modelsAwait?.complete(Unit)
+        source.permissionsAwait?.complete(Unit)
+        source.skillsAwait?.complete(Unit)
+        source.modelsAwait = null
+        source.permissionsAwait = null
+        source.skillsAwait = null
+        source.modelsResult = Result.success(DshModelCatalog(DshModelSelection("local", "chat"), emptyList(), emptyList()))
+        source.permissionsResult = Result.success(DshPermissionCatalog(emptyList(), emptyList(), "read-only"))
+        source.skillsResult = Result.success(listOf(DshSkill("local-review", "本地", null, true, null)))
+
+        controller.loadModels()
+        controller.loadPermissions()
+        controller.loadSessionCatalog("s1")
+        assertEquals("local", controller.state.value.models?.default?.provider)
+        assertEquals("read-only", controller.state.value.permissions?.defaultPreset)
+        assertEquals("local-review", controller.state.value.skills.single().name)
+    }
+
+    @Test fun slowListCreateFailureClearsLoadingAndUnlocksRefresh() {
+        val source = FakeSource()
+        source.sessionsAwait = CompletableDeferred()
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+        assertTrue(controller.state.value.loading)
+
+        source.createResult = Result.failure(DshApiException("session/conflict"))
+        controller.createSession("")
+
+        assertFalse(controller.state.value.loading)
+        assertFalse(controller.state.value.busy)
+        assertTrue(controller.state.value.error.orEmpty().contains("会话目录冲突"))
+        source.sessionsAwait?.complete(Unit)
+        source.sessionsAwait = null
+    }
+
+    @Test fun writeRefreshFailureClearsBusyAndLoading() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 1_000L)))
+        source.createResult = Result.success("new")
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+        source.sessionsFailureAtCall = 2
+
+        controller.createSession("")
+
+        assertFalse(controller.state.value.busy)
+        assertFalse(controller.state.value.loading)
+        assertTrue(controller.state.value.error.orEmpty().contains("列表刷新失败"))
+    }
+
+    @Test fun endpointChangeClearsRemoteCatalogsAndDropsInFlightResponse() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 1_000L)))
+        source.modelsResult = Result.success(DshModelCatalog(DshModelSelection("remote", "chat"), emptyList(), emptyList()))
+        source.permissionsResult = Result.success(DshPermissionCatalog(
+            options = listOf(DshPermissionOption("read-only", "只读", null)),
+            defaultOptions = emptyList(),
+            defaultPreset = "read-only"
+        ))
+        val controller = controller(source, MemoryReadStore())
+        controller.onEndpointChanged("remote-origin")
+        controller.refresh()
+        controller.loadModels()
+        controller.loadPermissions()
+        assertEquals("remote", controller.state.value.models?.default?.provider)
+
+        source.skillsAwait = CompletableDeferred()
+        controller.loadSessionCatalog("s1")
+        assertTrue(controller.state.value.catalogLoading)
+        source.resetCalled = false
+
+        controller.onEndpointChanged("local-origin")
+
+        assertNull(controller.state.value.models)
+        assertNull(controller.state.value.permissions)
+        assertTrue(controller.state.value.skills.isEmpty())
+        assertFalse(controller.state.value.catalogLoading)
+        assertTrue(source.resetCalled)
+
+        source.skillsAwait?.complete(Unit)
+        source.skillsAwait = null
+        assertTrue(controller.state.value.skills.isEmpty())
+
+        source.modelsResult = Result.success(DshModelCatalog(DshModelSelection("local", "chat"), emptyList(), emptyList()))
+        source.permissionsResult = Result.success(DshPermissionCatalog(emptyList(), emptyList(), "workspace-write"))
+        source.skillsResult = Result.success(listOf(DshSkill("local-review", "本地", null, true, null)))
+        controller.loadModels()
+        controller.loadPermissions()
+        controller.loadSessionCatalog("s1")
+        assertEquals("local", controller.state.value.models?.default?.provider)
+        assertEquals("workspace-write", controller.state.value.permissions?.defaultPreset)
+        assertEquals("local-review", controller.state.value.skills.single().name)
+    }
+
     private fun controller(source: DshSessionAdminSource, read: DshReadStore) =
         DshSessionManagerController(source, read, CoroutineScope(Dispatchers.Unconfined))
 
@@ -295,8 +409,19 @@ class DshSessionManagerControllerTest {
         var skillsResult: Result<List<DshSkill>> = Result.success(emptyList())
         var commandsResult: Result<List<DshCommand>> = Result.success(emptyList())
         var resetCalled = false
+        var sessionsAwait: CompletableDeferred<Unit>? = null
+        var modelsAwait: CompletableDeferred<Unit>? = null
+        var permissionsAwait: CompletableDeferred<Unit>? = null
+        var skillsAwait: CompletableDeferred<Unit>? = null
+        var sessionsFailureAtCall: Int? = null
+        private var sessionsCalls = 0
 
-        override suspend fun sessions(): Result<List<DshAdminSession>> = sessionsResult
+        override suspend fun sessions(): Result<List<DshAdminSession>> {
+            sessionsCalls++
+            sessionsAwait?.await()
+            if (sessionsFailureAtCall == sessionsCalls) return Result.failure(DshApiException("session/conflict"))
+            return sessionsResult
+        }
 
         override suspend fun createSession(): Result<String> {
             calls += "create"
@@ -328,7 +453,10 @@ class DshSessionManagerControllerTest {
             return searchResult
         }
 
-        override suspend fun models(): Result<DshModelCatalog> = modelsResult
+        override suspend fun models(): Result<DshModelCatalog> {
+            modelsAwait?.await()
+            return modelsResult
+        }
 
         override suspend fun selectModel(sessionId: String, selection: DshModelSelection): Result<DshModelSelection> {
             calls += "selectModel:$sessionId:${selection.provider}/${selection.model}/${selection.reasoningEffort.orEmpty()}"
@@ -340,7 +468,10 @@ class DshSessionManagerControllerTest {
             }
         }
 
-        override suspend fun permissions(): Result<DshPermissionCatalog> = permissionsResult
+        override suspend fun permissions(): Result<DshPermissionCatalog> {
+            permissionsAwait?.await()
+            return permissionsResult
+        }
 
         override suspend fun selectPermission(sessionId: String, preset: String): Result<Unit> {
             calls += "selectPermission:$sessionId:$preset"
@@ -351,7 +482,10 @@ class DshSessionManagerControllerTest {
             }
         }
 
-        override suspend fun skills(sessionId: String): Result<List<DshSkill>> = skillsResult
+        override suspend fun skills(sessionId: String): Result<List<DshSkill>> {
+            skillsAwait?.await()
+            return skillsResult
+        }
 
         override suspend fun commands(sessionId: String): Result<List<DshCommand>> = commandsResult
 

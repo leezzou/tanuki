@@ -280,6 +280,19 @@ object DshSessionAdminProtocol {
         return result
     }
 
+    /** transport 边界返回 `result.value`，这里重新包装成现有解析器使用的官方信封。 */
+    fun successEnvelope(value: Any?): String = JSONObject()
+        .put("type", "server-response")
+        .put("rpcId", "transport")
+        .put("result", JSONObject().put("ok", true).put("value", value ?: JSONObject.NULL))
+        .toString()
+
+    /** 从官方 HTTP 信封中取出 `result.value`；业务错误仍抛短错误码。 */
+    fun resultValue(body: String): Any? {
+        val result = successValue(body)
+        return if (result.has("value")) result.opt("value") else null
+    }
+
     /** `commands/execute` 只有在命令真实返回 success 时才算成功；缺 value 表示未匹配命令。 */
     fun commandAccepted(body: String): Boolean {
         val result = successValue(body)
@@ -342,28 +355,37 @@ interface DshSessionAdminSource {
     fun reset() {}
 }
 
+/** 临时一元 transport 边界；42 的 `DshTransport` 落地后由适配器替换网络实现。 */
+interface DshAdminTransport {
+    /** 返回官方 `result.value`；业务错误抛 `DshApiException`，认证/网络失败抛 `IOException`。 */
+    suspend fun call(method: String, args: JSONObject): Any?
+
+    fun reset()
+}
+
+/**
+ * 把任意 call/reset 实现适配为 [DshAdminTransport]。
+ *
+ * 42 的 transport 冻结后可直接接线，不复制认证/Cookie/URL：
+ * `DshAdminTransportAdapter(transport::call, transport::reset)`。
+ */
+class DshAdminTransportAdapter(
+    private val callImpl: suspend (String, JSONObject) -> Any?,
+    private val resetImpl: () -> Unit = {}
+) : DshAdminTransport {
+    override suspend fun call(method: String, args: JSONObject): Any? = callImpl(method, args)
+    override fun reset() = resetImpl()
+}
+
 /**
  * 官方会话管理一元客户端。
  *
- * 与原生聊天页共用同一 `DshEndpoint` 与启动 token，但独立换取
- * `interactions=none` 的只读 API Cookie，不建立 WebSocket，也不修改聊天切片
- * 正在维护的 `DshNativeApi.kt`。Cookie 只保存在内存，不写日志或异常文本。
+ * 只负责官方 method/参数构造、响应解析和中文错误；网络、认证、Cookie 与超时
+ * 全部由 [DshAdminTransport] 提供。当前生产实现是临时 HTTP transport，
+ * 待 42 的 `DshTransport` 合并后改为适配器注入。
  */
-class DshSessionAdminClient(private val endpointProvider: () -> DshEndpoint?) : DshSessionAdminSource {
-    private val stateLock = Any()
-    private var cookie: String? = null
-    private var boundOrigin: String? = null
-    private var boundLaunchUrl: String? = null
-    private var authGeneration = 0L
-
-    override fun reset() {
-        synchronized(stateLock) {
-            authGeneration++
-            cookie = null
-            boundOrigin = null
-            boundLaunchUrl = null
-        }
-    }
+class DshSessionAdminClient(private val transport: DshAdminTransport) : DshSessionAdminSource {
+    override fun reset() = transport.reset()
 
     override suspend fun sessions(): Result<List<DshAdminSession>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -471,7 +493,35 @@ class DshSessionAdminClient(private val endpointProvider: () -> DshEndpoint?) : 
         }
     }
 
-    private fun call(method: String, args: JSONObject): String {
+    /** 临时把 transport 的 `result.value` 重新包装成现有解析器使用的官方信封。 */
+    private suspend fun call(method: String, args: JSONObject): String =
+        DshSessionAdminProtocol.successEnvelope(transport.call(method, args))
+}
+
+/**
+ * 临时 HTTP 一元 transport：认证、Cookie、loopback URL、超时与脱敏都在这里。
+ *
+ * 待 42 的 `DshTransport`（PR #40）合并后，用
+ * `DshAdminTransportAdapter(transport::call, transport::reset)` 替换本类；
+ * SessionAdmin 的请求/解析逻辑不变。
+ */
+class DshHttpAdminTransport(private val endpointProvider: () -> DshEndpoint?) : DshAdminTransport {
+    private val stateLock = Any()
+    private var cookie: String? = null
+    private var boundOrigin: String? = null
+    private var boundLaunchUrl: String? = null
+    private var authGeneration = 0L
+
+    override fun reset() {
+        synchronized(stateLock) {
+            authGeneration++
+            cookie = null
+            boundOrigin = null
+            boundLaunchUrl = null
+        }
+    }
+
+    override suspend fun call(method: String, args: JSONObject): Any? = withContext(Dispatchers.IO) {
         val endpoint = endpointProvider() ?: throw IOException("DSH 服务地址尚未就绪")
         var requestGeneration = synchronized(stateLock) { authGeneration }
         var currentCookie = ensureCookie(endpoint, requestGeneration)
@@ -500,7 +550,7 @@ class DshSessionAdminClient(private val endpointProvider: () -> DshEndpoint?) : 
                     if (requestGeneration != authGeneration) throw IOException("DSH 接口认证已取消")
                 }
                 DshApiProtocol.checkEnvelope(text, rpcId)
-                return text
+                return@withContext DshSessionAdminProtocol.resultValue(text)
             } finally {
                 connection.disconnect()
             }

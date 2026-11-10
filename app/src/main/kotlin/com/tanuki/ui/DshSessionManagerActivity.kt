@@ -16,6 +16,7 @@ import com.tanuki.TanukiApp
 import com.tanuki.runtime.RecoveryMode
 import com.tanuki.runtime.ServiceState
 import com.tanuki.web.DshEndpoint
+import com.tanuki.web.DshHttpAdminTransport
 import com.tanuki.web.DshSessionAdminClient
 
 /**
@@ -30,11 +31,13 @@ class DshSessionManagerActivity : ComponentActivity() {
 
     private val controller: DshSessionManagerController by lazy {
         DshSessionManagerController(
-            source = DshSessionAdminClient {
-                val origin = runtime.origin
-                val launchUrl = runtime.authenticatedUrl
-                if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
-            },
+            source = DshSessionAdminClient(
+                DshHttpAdminTransport {
+                    val origin = runtime.origin
+                    val launchUrl = runtime.authenticatedUrl
+                    if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
+                }
+            ),
             readStore = DshPreferencesReadStore(this),
             scope = lifecycleScope
         )
@@ -53,8 +56,11 @@ class DshSessionManagerActivity : ComponentActivity() {
                 val running = snapshot.service == ServiceState.RUNNING || snapshot.remote.connected
                 // 远程端点有自己的恢复状态；本地安全模式只约束本地会话。
                 val readOnly = !snapshot.remote.connected && snapshot.recovery.mode != RecoveryMode.NORMAL
-                LaunchedEffect(running, readOnly, snapshot.remote.connected, resumeTick) {
+                // origin 是端点身份：远程断开回退本地时端口会变化，必须清空旧目录缓存。
+                val endpoint = runtime.origin
+                LaunchedEffect(running, readOnly, snapshot.remote.connected, endpoint, resumeTick) {
                     controller.setReadOnly(readOnly)
+                    controller.onEndpointChanged(endpoint)
                     if (running) controller.refresh() else controller.clearForStopped()
                 }
                 LaunchedEffect(requestedSession, running) {

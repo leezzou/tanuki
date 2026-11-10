@@ -3,6 +3,8 @@ package com.tanuki
 import com.tanuki.web.DshApiException
 import com.tanuki.web.DshEndpoint
 import com.tanuki.web.DshModelSelection
+import com.tanuki.web.DshAdminTransportAdapter
+import com.tanuki.web.DshHttpAdminTransport
 import com.tanuki.web.DshSessionAdminClient
 import com.tanuki.web.DshSessionAdminProtocol
 import kotlinx.coroutines.runBlocking
@@ -160,7 +162,7 @@ class DshSessionAdminApiTest {
                 else -> TestResponse(404, emptyList(), "not found")
             }
         }.use { server ->
-            val client = DshSessionAdminClient { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            val client = DshSessionAdminClient(DshHttpAdminTransport { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") })
             val sessions = runBlocking { client.sessions() }
             assertTrue(sessions.exceptionOrNull()?.toString(), sessions.isSuccess)
             assertEquals("s1", sessions.getOrThrow().single().id)
@@ -217,7 +219,7 @@ class DshSessionAdminApiTest {
             requests += request
             TestResponse(302, listOf("Set-Cookie" to "dsh-session=abc; Path=/"), "")
         }.use { server ->
-            val client = DshSessionAdminClient { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            val client = DshSessionAdminClient(DshHttpAdminTransport { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") })
             val result = runBlocking { client.selectPermission("s1", "bad preset") }
             assertTrue(result.isFailure)
             assertTrue(requests.none { it.path == "/api/commands/execute" })
@@ -232,13 +234,36 @@ class DshSessionAdminApiTest {
                 TestResponse(404, emptyList(), "not found")
             }
         }.use { server ->
-            val client = DshSessionAdminClient { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            val client = DshSessionAdminClient(DshHttpAdminTransport { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") })
             val result = runBlocking { client.sessions() }
             assertTrue(result.isFailure)
             val text = result.exceptionOrNull()?.message.orEmpty()
             assertFalse(text.contains("top-secret"))
             assertTrue(text.contains("HTTP 404"))
         }
+    }
+
+    @Test fun lambdaTransportAdapterForwardsCallAndResetWithoutOwningHttpStack() {
+        var method = ""
+        var args: JSONObject? = null
+        var resets = 0
+        val client = DshSessionAdminClient(
+            DshAdminTransportAdapter(
+                callImpl = { called, params ->
+                    method = called
+                    args = params
+                    JSONObject().put("items", JSONArray())
+                },
+                resetImpl = { resets++ }
+            )
+        )
+
+        val result = runBlocking { client.sessions() }
+        assertTrue(result.exceptionOrNull()?.toString(), result.isSuccess)
+        assertEquals("session/list", method)
+        assertEquals(0, args!!.getJSONObject("_request").length())
+        client.reset()
+        assertEquals(1, resets)
     }
 
     private fun session(

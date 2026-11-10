@@ -17,10 +17,11 @@
 
 ### 原生界面对齐：非聊天主链路（android_agent-44，PR #38 待审）
 
-- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）、`1cb7ad9`（原生对齐审计矩阵）、`2a4a050`（文件复制稳定）与 `0068c87`（远程中继）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33`，Host/Android CI 全绿；最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
+- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）、`1cb7ad9`（原生对齐审计矩阵）、`2a4a050`（文件复制稳定）与 `0068c87`（远程中继）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38)。按编排器暂停要求，P2 修复推送前不再合 main；评审修复前 CI 全绿 head 为 `1e40b33`，最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
 - 已实现：会话列表/标题过滤/官方内容搜索/新建/重命名/归档/本机未读/运行状态；会话级模型选择与权限模式（完全权限二次确认）；Skills 与斜杠命令只读目录；安全模式只读；远程 SSH 隧道 origin 复用；设置 → 网页与兼容性 → 原生会话管理。
 - 官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`，不直接改 `userdata/dsh`；归档恢复列表需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
-- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；新增 `DshSessionAdminApiTest` 7 项与 `DshSessionManagerControllerTest` 14 项；预合并完整 `testModernDebugUnitTest` 556/0/0/0；合并 `533eff4`/`1cb7ad9`/`2a4a050`/`0068c87` 后 **74 个结果文件、621 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 97 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。
+- 已实现（评审修复）：`DshSessionAdminApiTest` 8 项、`DshSessionManagerControllerTest` 18 项；完整 `testModernDebugUnitTest` **74 个结果文件、626 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 97 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。三项 Codex P2 已修：close/取消请求复位目录 loading、写操作取消列表读取清除 loading、origin 变化清理旧端点目录并使在途请求失效。
+- 网络已收敛到 `DshAdminTransport`；`DshHttpAdminTransport` 为临时 HTTP 栈，42 的 PR #40 `DshTransport` 合并后改用 `DshAdminTransportAdapter(transport::call, transport::reset)`。MainActivity 归 42 独占，本 PR 仅保留已放行的两行入口。
 - 待验证：真实 Android/PRoot DSH 的 `/connect`、会话新建/重命名/搜索/归档、`/permission` 命令、模型目录；设备 UI/深色/大字体；远程 SSH 端点；Android 仪器。
 - 未完成/后续：独立审查/合并授权、工作区全局搜索/diff、插件列表与启用、斜杠命令执行、应用内语言/主题、归档列表恢复。
 
