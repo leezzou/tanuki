@@ -49,8 +49,9 @@
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest -x buildNativeRuntime` | 通过：**820 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**（1m22s） | 含新增 `RemoteWizardTest` 26 项；既有 `RemoteHostTest`/`RemoteRelayTest`/`DshRemoteIsolationTest` 通过 |
 | 同上，单独 `--tests com.tanuki.RemoteWizardTest` | 通过：26 tests / 0 failures | 新增回归定向结果 |
 | `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:lintModernDebug -x buildNativeRuntime` | 通过：**0 errors / 102 warnings / 1 hint**（3m58s） | 仅 JVM/lint，不含设备 |
-| `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 待提交前运行 | 普通 PR 模式 |
-| `python3 scripts/check-publication.py --git` | 待提交前运行 | 上传检查 |
+| 最终自查修复（完成页空配置、隧道断开/存储错误不再误报阶段）后重跑 JVM + lint | 通过：820 tests / 0 failures；lint 0 errors / 102 warnings / 1 hint | 最终 head `c017488`；本轮修复提交也附带本交接记录更新 |
+| `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 通过 | 普通 PR 模式 |
+| `python3 scripts/check-publication.py --git` | 通过：677 public files / 672 index entries / 0 findings | 上传检查 |
 
 - 哪些是前一轮结果，哪些是本次新验证：以上编译/JVM/lint 均为本次新验证；前一轮 0.1.11 的 794 tests 不应与新数字混算。
 - 未测试、超时、失败和暂未复现的情况：`NpmAdaptiveWorkerPoolTest` 在首次完整套件和单独复跑时曾出现一次 8/9 并发时序失败；随后完整套件通过，未修改该测试，不能据此宣称该测试稳定。真实设备/真实 SSH/中继/DSH、系统文件选择器、Keystore 真机、弱网/断线、深色/大字体均未执行。
