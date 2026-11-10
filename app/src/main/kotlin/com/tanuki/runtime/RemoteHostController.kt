@@ -11,9 +11,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.IOException
 
-/** 远程主机设置面板状态；saved 只保存在进程内，落盘由加密存储负责。 */
+/** 远程主机设置面板状态；saved 是当前活动配置，profiles 是命名连接库。 */
 data class RemoteHostUiState(
     val saved: RemoteHostConfig? = null,
     val status: RemoteHostStatus = RemoteHostStatus(),
@@ -21,7 +20,14 @@ data class RemoteHostUiState(
     val message: String = "",
     val error: String = "",
     val pendingFingerprint: String? = null,
-    val pendingHost: String = ""
+    val pendingHost: String = "",
+    val profiles: List<RemoteHostProfile> = emptyList(),
+    val activeProfileId: String? = null,
+    val stage: RemoteConnectionStage? = null,
+    val completedStages: Set<RemoteConnectionStage> = emptySet(),
+    val failure: RemoteFailureInfo? = null,
+    val attemptSucceeded: Boolean = false,
+    val localPort: Int? = null
 )
 
 sealed interface RemoteAttemptResult {
@@ -34,6 +40,7 @@ sealed interface RemoteAttemptResult {
  * 远程主机连接流程：校验配置 -> 首次主机密钥确认 -> SSH 认证/端口转发 -> 远程 DSH 探测 -> 切换 origin。
  *
  * 任何失败都会关闭隧道并回退本地；token 只用于本机 loopback 启动 URL，不写日志。
+ * 阶段进度与结构化错误只用于展示，不改变严格的主机密钥校验。
  */
 class RemoteHostController(
     private val storage: RemoteHostStorage,
@@ -43,7 +50,9 @@ class RemoteHostController(
     private val onStatus: (RemoteHostStatus) -> Unit = {},
     private val httpProbe: (Int) -> Boolean = { RemoteHttpProbe.probe(it) },
     /** 在切换管理页端点前交换 Cookie 容器；失败时拒绝远程连接/回退。 */
-    private val activateScope: (String) -> Unit = {}
+    private val activateScope: (String) -> Unit = {},
+    /** 命名连接库；为空时仍可连接，只是不能保存到“我的连接”。 */
+    private val profileStore: RemoteHostProfileStore? = null
 ) {
     private val mutex = Mutex()
     private val mutableUi = MutableStateFlow(RemoteHostUiState(status = machine.status))
@@ -56,16 +65,80 @@ class RemoteHostController(
     init {
         scope.launch {
             val saved = runCatching { storage.load() }.getOrElse { error ->
-                mutableUi.update { it.copy(error = "已保存的远程配置无法读取：${friendly(error)}") }
+                mutableUi.update { it.copy(error = "已保存的远程配置无法读取：${friendlyStorage(error)}") }
                 null
             }
             mutableUi.update { it.copy(saved = saved) }
+            refreshProfiles()
         }
     }
 
     fun test(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = false)
 
     fun connect(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = true)
+
+    /** 连接命名连接：先标记“上次使用”，再走与手动配置相同的严格流程。 */
+    fun connectProfile(profile: RemoteHostProfile) {
+        scope.launch {
+            runCatching { profileStore?.activate(profile.id) }
+            refreshProfiles()
+            connect(profile.config)
+        }
+    }
+
+    /**
+     * 保存命名连接。
+     *
+     * @param connect 保存后立即连接；连接仍会重新执行主机密钥/认证/DSH 探测。
+     */
+    fun saveProfile(name: String, config: RemoteHostConfig, id: String?, connect: Boolean) {
+        scope.launch {
+            val store = profileStore
+            if (store == null) {
+                mutableUi.update { it.copy(error = "命名连接库不可用，未保存；本次仍可直接连接") }
+                if (connect) connect(config)
+                return@launch
+            }
+            val profile = runCatching { store.save(name, config, id) }.getOrElse { error ->
+                mutableUi.update { it.copy(error = error.message ?: "保存连接失败，请重试") }
+                return@launch
+            }
+            runCatching { store.activate(profile.id) }
+            refreshProfiles()
+            mutableUi.update {
+                it.copy(
+                    message = "已保存连接“${profile.name}”",
+                    error = "",
+                    activeProfileId = profile.id
+                )
+            }
+            if (connect) connect(config)
+        }
+    }
+
+    /** 删除命名连接及加密凭据；当前已建立的远程会话不受影响，直到用户断开。 */
+    fun deleteProfile(id: String) {
+        scope.launch {
+            val store = profileStore ?: return@launch
+            val removed = runCatching { store.list().firstOrNull { it.id == id } }.getOrNull()
+            runCatching { store.delete(id) }.getOrElse { error ->
+                mutableUi.update { it.copy(error = error.message ?: "删除连接失败，请重试") }
+                return@launch
+            }
+            val identity = removed?.config?.hostIdentity()
+            if (identity != null && !store.identityUsedByOthers(identity, id)) {
+                // 只有没有其他连接复用同一主机身份时才清理信任指纹，避免误伤。
+                runCatching { storage.forgetFingerprint(identity) }
+            }
+            refreshProfiles()
+            mutableUi.update {
+                it.copy(
+                    message = "已删除连接${removed?.name?.let { name -> "“$name”" } ?: ""}；当前远程会话不受影响",
+                    error = ""
+                )
+            }
+        }
+    }
 
     /** 用户核对指纹后继续首次连接；仅在成功认证并探测到 DSH 后写入信任。 */
     fun confirmHostKey() {
@@ -80,9 +153,18 @@ class RemoteHostController(
     }
 
     fun cancelHostKey() {
-        val value = pending
+        val value = pending ?: return
         pending = null
-        mutableUi.update { it.copy(pendingFingerprint = null, pendingHost = "") }
+        mutableUi.update {
+            it.copy(
+                pendingFingerprint = null,
+                pendingHost = "",
+                busy = false,
+                failure = null,
+                stage = null,
+                completedStages = emptySet()
+            )
+        }
         if (value != null && !value.keepTunnel && machine.remoteActive) {
             // 测试连接不改变活动端点；取消测试必须保留原来的远程 A。
             publish(machine.status, message = "已取消连接测试，继续使用当前远程连接")
@@ -136,7 +218,20 @@ class RemoteHostController(
 
     private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean) {
         if (mutableUi.value.busy) return
-        mutableUi.update { it.copy(busy = true, error = "", message = "正在校验远程主机配置…", pendingFingerprint = null, pendingHost = "") }
+        mutableUi.update {
+            it.copy(
+                busy = true,
+                error = "",
+                message = "正在校验远程主机配置…",
+                pendingFingerprint = null,
+                pendingHost = "",
+                stage = RemoteConnectionStage.TCP,
+                completedStages = emptySet(),
+                failure = null,
+                attemptSucceeded = false,
+                localPort = null
+            )
+        }
         scope.launch { attempt(config, keepTunnel) }
     }
 
@@ -148,8 +243,9 @@ class RemoteHostController(
         pending = null
         val problem = config.validationError()
         // 配置本身无效时不要拆掉已经连着的远程隧道。
-        if (problem != null) return fail(problem, keepTunnel = false)
-        val identity = config.hostIdentity() ?: return fail("远程主机身份无效", keepTunnel = false)
+        if (problem != null) return failWith(RemoteConnectionErrors.validation(problem), keepTunnel = false)
+        val identity = config.hostIdentity()
+            ?: return failWith(RemoteConnectionErrors.validation("远程主机身份无效"), keepTunnel = false)
         val host = config.displayName()
 
         mutableUi.update {
@@ -161,14 +257,19 @@ class RemoteHostController(
                 } else {
                     "正在连接 ${config.user}@$host:${config.sshPort}…"
                 },
-                pendingFingerprint = null
+                pendingFingerprint = null,
+                stage = RemoteConnectionStage.TCP,
+                completedStages = emptySet(),
+                failure = null,
+                attemptSucceeded = false,
+                localPort = null
             )
         }
         if (keepTunnel) {
             // 先切到本地 Cookie 作用域，再撤销旧远程端点；失败时保留原连接。
             val cookieError = switchScope(DshCookieIsolation.LOCAL_SCOPE)
             if (cookieError != null) {
-                return fail(cookieError, keepTunnel = false)
+                return failWith(RemoteConnectionErrors.validation(cookieError), keepTunnel = false)
             }
             closeTunnel()
             machine.remoteConnecting(host)
@@ -177,21 +278,27 @@ class RemoteHostController(
         try {
             val trusted = forcedFingerprint ?: storage.knownFingerprint(identity)
             if (trusted == null) {
-                val probe = transport.probeHostKey(config)
+                publishStage(RemoteConnectionStage.TCP)
+                val probe = probeHostKey(config)
                 pending = PendingConnection(config, keepTunnel, probe.fingerprint)
                 mutableUi.update {
                     it.copy(
                         busy = false,
                         pendingFingerprint = probe.fingerprint,
                         pendingHost = host,
-                        message = "首次连接 $host，请核对主机密钥指纹后确认"
+                        message = "首次连接 $host，请核对主机密钥指纹后确认",
+                        stage = RemoteConnectionStage.SSH_HANDSHAKE,
+                        completedStages = setOf(
+                            RemoteConnectionStage.TCP,
+                            RemoteConnectionStage.SSH_HANDSHAKE
+                        )
                     )
                 }
                 return RemoteAttemptResult.HostKeyConfirmation(probe.fingerprint)
             }
             openAndVerify(config, identity, trusted, keepTunnel)
         } catch (error: Throwable) {
-            fail(friendly(error), keepTunnel, error)
+            failWith(RemoteConnectionErrors.from(error, mutableUi.value.stage), keepTunnel, error)
         } finally {
             mutableUi.update { it.copy(busy = false) }
         }
@@ -209,31 +316,55 @@ class RemoteHostController(
                     "正在通过中继建立 SSH 通道并检测远程 DSH…"
                 } else {
                     "正在建立 SSH 隧道并检测远程 DSH…"
-                }
+                },
+                busy = true,
+                failure = null,
+                stage = RemoteConnectionStage.TCP,
+                completedStages = emptySet(),
+                attemptSucceeded = false,
+                localPort = null
             )
         }
+        publishStage(RemoteConnectionStage.TCP)
         var candidate: SshTunnel? = null
         try {
-            candidate = transport.open(config, fingerprint)
+            candidate = openTunnel(config, fingerprint)
+            publishStage(RemoteConnectionStage.PORT_FORWARD)
+            publishStage(RemoteConnectionStage.DSH_PROBE)
             if (!httpProbe(candidate.localPort)) {
-                throw RemoteHostFailure("远程 DSH 端口未响应；请确认远程 DSH 已启动并监听 127.0.0.1:${config.remoteDshPort}")
+                throw RemoteHostFailure(
+                    "远程 DSH 端口未响应；请确认远程 DSH 已启动并监听 127.0.0.1:${config.remoteDshPort}"
+                )
             }
             runCatching { storage.trustFingerprint(identity, fingerprint) }.getOrElse {
                 throw RemoteHostFailure("主机密钥信任记录无法保存，已取消远程连接")
             }
             if (!keepTunnel) {
+                val port = candidate.localPort
                 candidate.close()
                 candidate = null
+                publishStage(RemoteConnectionStage.COMPLETE)
                 val message = "连接测试成功：SSH 认证通过，远程 DSH 端口可达"
-                mutableUi.update { it.copy(busy = false, error = "", message = message) }
-                return RemoteAttemptResult.Success(message)
+                mutableUi.update {
+                    it.copy(
+                        busy = false,
+                        error = "",
+                        message = message,
+                        attemptSucceeded = true,
+                        localPort = port,
+                        stage = RemoteConnectionStage.COMPLETE,
+                        completedStages = RemoteConnectionStage.testStages.toSet(),
+                        failure = null
+                    )
+                }
+                return RemoteAttemptResult.Success(message, port)
             }
             runCatching { storage.save(config) }.getOrElse {
                 throw RemoteHostFailure("凭据无法加密保存，已取消远程连接")
             }
             val endpoint = config.endpointFor(candidate.localPort)
                 ?: throw RemoteHostFailure("本机 SSH 隧道端口无效")
-            if (keepTunnel && switchScope(config.cookieScope()) != null) {
+            if (switchScope(config.cookieScope()) != null) {
                 throw RemoteHostFailure("无法隔离管理网页 Cookie，已取消远程连接")
             }
             val established = candidate
@@ -247,11 +378,15 @@ class RemoteHostController(
                 fingerprint,
                 config.cookieScope()
             )
+            publishStage(RemoteConnectionStage.COMPLETE)
             publish(
                 machine.status,
                 message = machine.status.message,
                 saved = config,
-                error = ""
+                attemptSucceeded = true,
+                localPort = established.localPort,
+                stage = RemoteConnectionStage.COMPLETE,
+                completedStages = RemoteConnectionStage.testStages.toSet()
             )
             watchTunnel(established)
             return RemoteAttemptResult.Success(machine.status.message, established.localPort)
@@ -275,7 +410,17 @@ class RemoteHostController(
                             machine.remoteFailed(
                                 if (cookieError == null) "SSH 隧道已断开" else "SSH 隧道已断开；$cookieError"
                             )
-                            publish(machine.status, message = machine.status.message, error = machine.status.error)
+                            publish(
+                                machine.status,
+                                message = machine.status.message,
+                                error = machine.status.error,
+                                failure = RemoteFailureInfo(
+                                    stage = null,
+                                    kind = RemoteFailureKind.NETWORK,
+                                    reason = "SSH 隧道已断开",
+                                    suggestion = "已切回本地运行时；检查网络后重新连接远程主机"
+                                )
+                            )
                         }
                     }
                     return@launch
@@ -284,7 +429,12 @@ class RemoteHostController(
         }
     }
 
-    private fun fail(message: String, keepTunnel: Boolean, cause: Throwable? = null): RemoteAttemptResult {
+    private fun failWith(
+        info: RemoteFailureInfo,
+        keepTunnel: Boolean,
+        cause: Throwable? = null
+    ): RemoteAttemptResult {
+        val message = info.message
         val wasConnecting = machine.status.phase == RemotePhase.CONNECTING || machine.remoteActive
         if (keepTunnel && wasConnecting) {
             closeTunnel()
@@ -293,15 +443,33 @@ class RemoteHostController(
             publish(
                 machine.status,
                 message = machine.status.message,
-                error = machine.status.error
+                error = machine.status.error,
+                failure = info,
+                stage = info.stage ?: mutableUi.value.stage,
+                completedStages = mutableUi.value.completedStages
             )
         } else {
-            mutableUi.update { it.copy(busy = false, error = message, message = "") }
+            mutableUi.update {
+                it.copy(
+                    busy = false,
+                    error = message,
+                    message = "",
+                    failure = info,
+                    stage = if (info.kind == RemoteFailureKind.VALIDATION) null else info.stage ?: it.stage,
+                    completedStages = if (info.kind == RemoteFailureKind.VALIDATION) {
+                        emptySet()
+                    } else {
+                        it.completedStages
+                    },
+                    attemptSucceeded = false
+                )
+            }
         }
+        // cause 仅用于保留异常类型判断，错误文案已由映射器固定，不输出异常原文。
         if (cause is RemoteHostKeyChangedException) {
             mutableUi.update {
                 it.copy(
-                    error = "远程主机密钥已变化，已拒绝连接；如确认主机重装，请清除远程主机配置后重试"
+                    error = RemoteConnectionErrors.from(cause, info.stage).message
                 )
             }
         }
@@ -322,7 +490,12 @@ class RemoteHostController(
         status: RemoteHostStatus,
         message: String,
         saved: RemoteHostConfig? = mutableUi.value.saved,
-        error: String = ""
+        error: String = "",
+        failure: RemoteFailureInfo? = null,
+        stage: RemoteConnectionStage? = null,
+        completedStages: Set<RemoteConnectionStage> = emptySet(),
+        attemptSucceeded: Boolean = false,
+        localPort: Int? = null
     ) {
         mutableUi.update {
             it.copy(
@@ -332,47 +505,69 @@ class RemoteHostController(
                 message = message,
                 error = error,
                 pendingFingerprint = null,
-                pendingHost = ""
+                pendingHost = "",
+                failure = failure,
+                stage = stage,
+                completedStages = completedStages,
+                attemptSucceeded = attemptSucceeded,
+                localPort = localPort
             )
         }
         onStatus(status)
     }
+
+    private fun publishStage(stage: RemoteConnectionStage) {
+        mutableUi.update { current ->
+            val existing = current.stage
+            if (existing != null && existing.order > stage.order) {
+                current
+            } else {
+                current.copy(
+                    stage = stage,
+                    completedStages = current.completedStages +
+                        RemoteConnectionStage.entries.filter { it.order < stage.order }
+                )
+            }
+        }
+    }
+
+    private suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe {
+        val staged = transport as? StagedSshTransport
+        return if (staged != null) {
+            staged.probeHostKey(config) { publishStage(it) }
+        } else {
+            publishStage(RemoteConnectionStage.TCP)
+            transport.probeHostKey(config).also { publishStage(RemoteConnectionStage.SSH_HANDSHAKE) }
+        }
+    }
+
+    private suspend fun openTunnel(config: RemoteHostConfig, fingerprint: String): SshTunnel {
+        val staged = transport as? StagedSshTransport
+        return if (staged != null) {
+            staged.open(config, fingerprint) { publishStage(it) }
+        } else {
+            publishStage(RemoteConnectionStage.TCP)
+            publishStage(RemoteConnectionStage.SSH_HANDSHAKE)
+            publishStage(RemoteConnectionStage.AUTHENTICATION)
+            transport.open(config, fingerprint).also { publishStage(RemoteConnectionStage.PORT_FORWARD) }
+        }
+    }
+
+    private fun refreshProfiles() {
+        val store = profileStore ?: return
+        val profiles = runCatching { store.list() }.getOrElse { emptyList() }
+        val active = runCatching { store.activeId() }.getOrNull()
+        mutableUi.update { it.copy(profiles = profiles, activeProfileId = active) }
+    }
+
+    /** 存储层异常可能包含路径等本机信息；这里只保留可操作的中文原因。 */
+    private fun friendlyStorage(error: Throwable): String =
+        error.message?.takeIf { it.startsWith("连接") || it.startsWith("中继") || it.startsWith("已保存") }
+            ?: "请重试，或删除本机远程配置后重新添加"
 
     private data class PendingConnection(
         val config: RemoteHostConfig,
         val keepTunnel: Boolean,
         val fingerprint: String
     )
-
-    private fun friendly(error: Throwable): String {
-        if (error is RemoteRelayException) return error.message ?: "中继连接失败"
-        if (error is RemoteHostFailure) return error.message ?: "远程主机连接失败"
-        if (error is RemoteHostKeyChangedException) {
-            return "远程主机密钥已变化（新指纹 ${error.actualFingerprint}），已拒绝连接；如确认主机重装，请清除远程主机配置后重试"
-        }
-        val text = (error.message ?: "").lowercase()
-        return when {
-            error is java.net.UnknownHostException || text.contains("unknownhost") ->
-                "无法解析远程主机地址"
-            error is java.net.SocketTimeoutException || text.contains("timeout") ->
-                "SSH 连接超时；请检查主机、端口、网络或防火墙"
-            error is java.net.ConnectException || text.contains("connection refused") ->
-                "无法连接远程 SSH 端口；请确认 sshd 已启动且端口正确"
-            text.contains("auth fail") || text.contains("auth cancel") || text.contains("userauth") ->
-                "SSH 认证失败；请检查用户名与密码/私钥是否正确"
-            text.contains("privatekey") || text.contains("invalid key") || text.contains("passphrase") ->
-                "私钥无法读取；请检查私钥格式和口令"
-            text.contains("hostkey") || text.contains("host key") ->
-                "远程主机密钥校验失败，已拒绝连接"
-            text.contains("forward") ->
-                "SSH 隧道端口转发失败；请确认远程 DSH 端口正确"
-            text.contains("algorithm negotiation") || text.contains("ed25519") ||
-                text.contains("eddsa") || text.contains("unsupported") ->
-                "SSH 算法协商失败；当前切片仅支持 RSA/ECDSA 主机密钥与私钥，Ed25519 待后续"
-            error is IOException ->
-                "SSH 连接失败；请检查网络后重试"
-            else ->
-                "远程主机连接失败；请检查配置后重试"
-        }
-    }
 }

@@ -38,6 +38,25 @@ interface SshTransport {
 }
 
 /**
+ * 可选的分阶段回调。
+ *
+ * 实现该接口的传输会在连接过程中报告 TCP、SSH 握手、认证、端口转发等阶段；
+ * 未实现的测试假传输仍走 [SshTransport]，控制器退化为粗粒度进度。
+ */
+interface StagedSshTransport : SshTransport {
+    suspend fun probeHostKey(
+        config: RemoteHostConfig,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): HostKeyProbe
+
+    suspend fun open(
+        config: RemoteHostConfig,
+        expectedFingerprint: String,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): SshTunnel
+}
+
+/**
  * 基于 JSch 的直连 SSH 实现。
  *
  * - 只连接配置中的 SSH 主机/端口，不做中继；
@@ -51,15 +70,24 @@ class JschSshTransport(
     private val timeoutMs: Int = 15_000,
     /** 中继模式把 JSch 的 TCP 目标换成 127.0.0.1 的桥端口；主机密钥仍由指纹仓库校验。 */
     private val dialTarget: ((RemoteHostConfig) -> SshDialTarget)? = null
-) : SshTransport {
+) : StagedSshTransport {
     /** 返回一个只替换 TCP 拨号目标的副本，供中继桥复用同一套 JSch 认证/转发逻辑。 */
     fun dialing(host: String, port: Int): JschSshTransport =
         JschSshTransport(timeoutMs) { SshDialTarget(host, port) }
 
-    override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = withContext(Dispatchers.IO) {
+    override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = probeHostKey(config) {}
+
+    override suspend fun probeHostKey(
+        config: RemoteHostConfig,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): HostKeyProbe = withContext(Dispatchers.IO) {
+        onStage(RemoteConnectionStage.TCP)
         val session = newSession(JSch(), config)
         val observed = AtomicReference<String>()
-        session.hostKeyRepository = recordingRepository(observed)
+        session.hostKeyRepository = recordingRepository(observed) {
+            // 只有完成密钥交换并拿到主机公钥，才把 SSH 握手标记为完成。
+            onStage(RemoteConnectionStage.SSH_HANDSHAKE)
+        }
         try {
             // 未确认主机时 StrictHostKeyChecking=yes 会在认证前拒绝连接。
             session.connect(timeoutMs)
@@ -74,10 +102,23 @@ class JschSshTransport(
         HostKeyProbe(fingerprint)
     }
 
-    override suspend fun open(config: RemoteHostConfig, expectedFingerprint: String): SshTunnel = withContext(Dispatchers.IO) {
+    override suspend fun open(
+        config: RemoteHostConfig,
+        expectedFingerprint: String
+    ): SshTunnel = open(config, expectedFingerprint) {}
+
+    override suspend fun open(
+        config: RemoteHostConfig,
+        expectedFingerprint: String,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): SshTunnel = withContext(Dispatchers.IO) {
+        onStage(RemoteConnectionStage.TCP)
         val jsch = JSch()
         val session = newSession(jsch, config)
-        val repository = checkingRepository(expectedFingerprint)
+        val repository = checkingRepository(expectedFingerprint) {
+            onStage(RemoteConnectionStage.SSH_HANDSHAKE)
+            onStage(RemoteConnectionStage.AUTHENTICATION)
+        }
         session.hostKeyRepository = repository
         try {
             // 私钥解析也可能在连接前失败；与 connect 共用清理路径，避免残留会话。
@@ -93,6 +134,7 @@ class JschSshTransport(
                 session.setPassword(config.password.toByteArray(Charsets.UTF_8))
             }
             session.connect(timeoutMs)
+            onStage(RemoteConnectionStage.PORT_FORWARD)
             val localPort = session.setPortForwardingL(0, "127.0.0.1", config.remoteDshPort)
             JschTunnel(session, localPort)
         } catch (error: JSchException) {
@@ -132,10 +174,14 @@ class JschSshTransport(
         return session
     }
 
-    private fun recordingRepository(observed: AtomicReference<String>): HostKeyRepository =
+    private fun recordingRepository(
+        observed: AtomicReference<String>,
+        onHostKey: () -> Unit
+    ): HostKeyRepository =
         object : HostKeyRepository {
             override fun check(host: String, key: ByteArray): Int {
                 observed.compareAndSet(null, HostKeyFingerprint.of(key))
+                if (observed.get() != null) onHostKey()
                 return HostKeyRepository.NOT_INCLUDED
             }
 
@@ -147,17 +193,25 @@ class JschSshTransport(
             override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
         }
 
-    private fun checkingRepository(expectedFingerprint: String): CheckingHostKeyRepository =
-        CheckingHostKeyRepository(expectedFingerprint)
+    private fun checkingRepository(
+        expectedFingerprint: String,
+        onAccepted: () -> Unit
+    ): CheckingHostKeyRepository = CheckingHostKeyRepository(expectedFingerprint, onAccepted)
 
-    private class CheckingHostKeyRepository(private val expected: String) : HostKeyRepository {
+    private class CheckingHostKeyRepository(
+        private val expected: String,
+        private val onAccepted: () -> Unit
+    ) : HostKeyRepository {
         @Volatile var changed: Boolean = false
         @Volatile var actualFingerprint: String = ""
 
         override fun check(host: String, key: ByteArray): Int {
             val actual = HostKeyFingerprint.of(key)
             actualFingerprint = actual
-            if (actual == expected) return HostKeyRepository.OK
+            if (actual == expected) {
+                onAccepted()
+                return HostKeyRepository.OK
+            }
             changed = true
             return HostKeyRepository.CHANGED
         }
