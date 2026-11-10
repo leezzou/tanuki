@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-54（DSH Worker）
 - 时间：2026-11-10 17:37 CST（开始），2026-11-10 19:20 CST（追加 P0/P1 本地实现）
-- 状态：跟进中（PR #50 已由编排合并；第二轮 review 的 3 项 P2 已修复并 cherry-pick 到跟进分支 `ao/session-settings/fix-batch-host`，待推送/新建 PR 与复审；P0-2 真实数据仍依赖公共协议决策；本会话未合并、未发布）
+- 状态：跟进中（PR #50 已由编排合并；第二轮 review 的 3 项 P2 已修复并推送到跟进 PR #56，待 CI 与新 head 复审；P0-2 真实数据仍依赖公共协议决策；本会话未合并、未发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -35,7 +35,7 @@
   - `:app:lintModernDebug`：BUILD SUCCESSFUL，0 errors / 93 warnings / 1 hint。
   - 旧 head `30da86d` 的 GitHub CI 两个 run 均 success（不含本轮新改动）。
 - 待验证：Android 仪器/真机、真实 DSH 的 cwd 分组/批量归档/主机切换/模型权限。
-- 当前分支/提交/PR：跟进分支 `ao/session-settings/fix-batch-host`（从最新 `origin/main=7757b38` 创建），本地 commit `4e186cc` 为第二轮 3 项 P2 修复；PR #50 已合并，跟进 PR 待创建。
+- 当前分支/提交/PR：跟进分支 `ao/session-settings/fix-batch-host`（从最新 `origin/main=7757b38` 创建），head `9a020c0`；跟进 PR https://github.com/leezzou/tanuki/pull/56 。PR #50 已合并。
 - 基线：`4f2a3717d6d795fd6b94cdb695878d8119f818c1`；远端 `origin/main` 已到 `326726c`（仅文档 #45），未 rebase。
 
 ## 本次改动
@@ -83,7 +83,7 @@
 
 ## 下一步
 
-1. 推送跟进分支并创建新 PR，运行 CI，请编排对新 head 独立评审。
+1. 等待跟进 PR #56 的 CI，并请编排对新 head `9a020c0` 独立评审。
 2. 等待编排对公共协议扩展的决定：若获批，扩展 `DshSessionAdminSource`/`DshSessionAdminApi`（goals/artifacts/workspaceFiles）并替换 P0-2 的“暂不支持”内容；若未获批，保留如实说明并在 PR 标注边界。
 3. 由独立 QA 补设备/真实 DSH 验证；未获合并/发布授权不合并、不发布。
 
@@ -101,6 +101,6 @@
 ## 产物与校验
 
 - 新/旧 APK、源码 ZIP：本轮不构建、不更新。
-- PR #50：https://github.com/leezzou/tanuki/pull/50 （已由编排合并）；第二轮 P2 修复的跟进 PR 待创建。本会话未合并、未发布。
+- PR #50：https://github.com/leezzou/tanuki/pull/50 （已由编排合并）；跟进 PR #56：https://github.com/leezzou/tanuki/pull/56 （待复审；本会话未合并、未发布）。
 - 过期记录：未删除历史交接；本记录保留本轮证据。
 - 普通 PR 不刷新共享状态/印章；集成维护方批量合并后统一 `--integrate`。
