@@ -2,6 +2,20 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 交接机制改造验证（2026-11-10，android_agent-49，非设备）
+
+- 范围：只改宿主脚本、CI 与交接文档，不改产品代码。`scripts/check-handoff.py` 新增普通 PR / 集成 / 发布三模式；普通 PR 只校验自己的记录，CI 用变更清单强制“公开文件有改动必须附带交接记录”；集成模式刷新 schema 2 印章，发布模式只读严格校验；新增 `docs/HANDOFFS.md` 与 `scripts/test-check-handoff.py`。基线 `main=1cb7ad95`，分支 `ao/handoff-conflicts/pr-mode`，不合并、不发布。
+- 实际执行：
+  - `python3 scripts/test-check-handoff.py` → 8 tests / 0 failures，覆盖 PR 容忍落后共享状态、记录缺失/空章节/占位符、路径与符号链接、变更集守卫、集成最新记录、发布篡改检测、目录移动可迁移。
+  - `python3 scripts/test-agent-workflow.py` → 19 tests / 0 failures（54.318s），含设备锁/模拟 ADB 离线回归，不访问真实设备。
+  - `python3 scripts/test-publication.py` → 19 tests / 0 failures；`python3 scripts/test-app-release.py` → 18 tests / 0 failures（并断言发布入口调用 `--release`）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过（共享状态允许落后）。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过，刷新 schema 2 印章（602 个公开文件指纹）。
+  - `python3 scripts/check-handoff.py --release` → 通过（记录哈希、公开源码指纹、证据指纹与最新记录一致）。
+  - `python3 scripts/check-publication.py --git` → 0 findings；`python3 scripts/package-source.py` → 源码包生成成功。
+  - `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` → YAML_OK；`bash -n scripts/verify-workspace.sh` 与 Python 内存语法检查通过。
+- 未执行：Android 构建/JVM/lint、仪器/设备、GitHub Actions 实际运行、PR 独立审查、合并、`AGENT-STATE` 指针 + 最近 N 条实际精简、APK/发布附件。源码包 SHA 会随最终文档改动变化，以最后一次输出为准，不回填到记录形成循环。
+
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
 
 - 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。

@@ -1,7 +1,8 @@
 {
-  "schema": 1,
-  "record": "docs/handoffs/20261110-1140-native-parity-audit.md",
-  "recordSha256": "ac30af31863888b4aa4439d4582550d03f158d00e2f13c762644771fd4563306",
-  "sourceFingerprint": "527f28f76d345c6b75b12c879cef09ff35edc87e178ee796a9d4decd5f62ef0c",
-  "fileCount": 599
+  "schema": 2,
+  "record": "docs/handoffs/20261110-1333-handoff-pr-mode.md",
+  "recordSha256": "69553d5c5cc339f50b524b5103ecd514afbb72b040ef3693d7f9a6f6478f5bdf",
+  "sourceFingerprint": "9855984f333860da92bbe7f65c846e231bbefc9a32e64508b5d7442457b94abd",
+  "evidenceFingerprint": "58a9457ab5ebce20d1c979b23a61a46d0b2ad0a4b762cc6d5a34feeacef041b9",
+  "fileCount": 602
 }

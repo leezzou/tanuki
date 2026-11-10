@@ -786,7 +786,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 - 覆盖：—
 1. 运行 `python3 scripts/check-native-parity.py`（已接入 `.github/workflows/verify.yml` 的 Host job）。
 2. 断言：14 个功能域齐全、ID 唯一、每行有状态/优先级/验收用例；每行引用的用例必须在 `- 覆盖：` 中声明覆盖该行；覆盖声明只能引用存在的矩阵行；跨功能域复用必须有 `- 跨域：` 理由；引用的仓库路径存在。
-3. 运行 `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md` 与 `python3 scripts/check-handoff.py`。
+3. 运行 `python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md`；共享状态由集成维护方刷新。
 
 ## 5. 自动化与设备前置
 
@@ -849,5 +849,5 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 1. 新增/修改官方协议方法时，先更新 `docs/INTERFACES.md`，再更新本矩阵的“官方”列与验收用例。
 2. 新增矩阵行时必须同时指定至少一个覆盖该行的验收用例；新增/修改用例时必须更新 `- 覆盖：`，不能只写用例编号；跨功能域复用时必须写 `- 跨域：` 理由。
 3. 任何并行会话完成一个缺口后，把对应行的状态从 `仅官方/进行中` 改为 `原生完整/原生部分`，并补上 PR/commit 与已跑测试；没有实际测试不得写“已验证”。
-4. 每轮提交前运行 `python3 scripts/check-native-parity.py`、`python3 scripts/check-handoff.py`；文档链接变化同时跑 `python3 scripts/check-publication.py --git`。
+4. 每轮提交前运行 `python3 scripts/check-native-parity.py`、`python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md`；文档链接变化同时跑 `python3 scripts/check-publication.py --git`。
 5. 若官方客户端升级导致行为变化，先记录版本与差异，再改矩阵；不要凭旧记忆更新。

@@ -9,6 +9,7 @@
 运行以下脚本，任一步失败即门禁失败：
 
 ```bash
+python3 scripts/test-check-handoff.py
 python3 scripts/test-agent-workflow.py
 python3 scripts/test-app-release.py
 python3 scripts/test-publication.py
@@ -16,10 +17,18 @@ python3 scripts/test-development-gates.py
 python3 scripts/check-rpc-contract.py
 node scripts/test-browser-client.mjs
 node scripts/test-phone-client.mjs
-python3 scripts/check-handoff.py
+python3 scripts/check-handoff.py --pr --changed-from <变更清单>
 ```
 
-Host job 使用 Python 3.12 与 Node 22。`check-handoff.py` 放在最后：W1 的交接恢复记录尚未合并时它会失败，但前面的独立协议与客户端回归仍会完整执行；该步骤不会被跳过或标记为 `continue-on-error`。
+Host job 使用 Python 3.12 与 Node 22。`check-handoff.py` 放在最后：普通 PR 模式只校验本次新增/修改的交接记录与变更集，前面的独立协议与客户端回归仍会完整执行；该步骤不会被跳过或标记为 `continue-on-error`。
+
+CI 用 `git diff --name-only --diff-filter=AMR <base>...HEAD` 生成变更清单并传给 `--changed-from`。规则是：
+
+- 只改交接记录或共享状态：允许，不要求新记录；
+- 改了公开文件（`app/src`、`scripts`、`docs` 等）：本次必须同时新增/修改 `docs/handoffs/YYYYMMDD-HHMM-topic.md`；
+- 普通 PR 不要求 `AGENT-STATE` 链接或 `CURRENT.json` 最新。
+
+`workflow_dispatch` 可把 `handoff_mode` 设为 `release`，在同一 Host job 中改跑 `python3 scripts/check-handoff.py --release`，用于发布前严格核对；日常 push/PR 固定为 PR 模式。
 
 其中 `check-rpc-contract.py` 同时比对 Browser/Phone 的客户端与原生方法集、`/rpc`、Bearer、token 正则、请求/响应大小上限和错误码格式；任何一侧单独扩展协议都会失败。`test-browser-client.mjs` 与 `test-phone-client.mjs` 使用本机回环 mock server，不依赖真实浏览器、设备或用户能力配置。
 
@@ -58,7 +67,7 @@ python3 scripts/check-development-gates.py --pr <PR> --session <实现 worker> [
 
 ## 已知依赖
 
-- Host job 的交接检查依赖 `docs/handoffs/CURRENT.json` 与当前公开源码指纹一致。新增或修改 `scripts/`、`app/src/` 等公共文件后，需要由交接维护方刷新记录与印章；CI 不会跳过该检查。
+- Host job 的日常交接检查是 PR 模式，不要求 `CURRENT.json` 与当前公开源码指纹一致；共享状态由集成维护方在批量合并后刷新。发布前必须运行 `--release`，它要求印章、记录哈希、公开源码指纹和最新记录全部一致。CI 不会跳过交接检查。
 - Android job 不生成原生运行时，涉及 `libproot`/`libsupervisor` 的行为必须由本地构建与设备验证覆盖。
 
 ## 本地准备

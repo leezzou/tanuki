@@ -110,6 +110,9 @@ class AppReleaseTests(unittest.TestCase):
 
         def run(command, label, **kwargs):
             calls.append(label)
+            if label == "确认最新交接":
+                # 发布入口必须使用只读严格模式，而不是普通 PR 模式。
+                self.assertIn("--release", command)
             if label == "构建指定渠道":
                 target = release.build_apk_path(root, "workspacecheck", "0.1.1")
                 target.parent.mkdir(parents=True)

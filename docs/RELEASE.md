@@ -22,7 +22,7 @@ python3 scripts/prepare-app-release.py --version 0.1.10 --version-code 12 --chan
 
 两个verified参数必须成对，哈希必须完整匹配。脚本先复制到私有临时文件固定字节，仍检查实际包名、版本、SDK和签名，封装副本再次核hash；只跳过重新编译。此方式避免推送改变AGP提交号元数据后生成另一份未测APK，不能用来宣称未经测试的包已通过。普通构建入口仍保留。
 
-脚本先校验参数与当前交接；verified模式直接核对已测APK的字节和真实包名/版本/SDK/证书，普通模式才重新构建。输出 **`artifacts/releases/0.1.10/`**（只从此目录取本版发布附件；分类与历史归档见[取包说明](ARTIFACTS.md)）：
+脚本先以发布严格模式校验当前交接（`check-handoff.py --release`，要求印章、记录哈希、公开源码指纹与最新记录一致）；verified模式直接核对已测APK的字节和真实包名/版本/SDK/证书，普通模式才重新构建。输出 **`artifacts/releases/0.1.10/`**（只从此目录取本版发布附件；分类与历史归档见[取包说明](ARTIFACTS.md)）：
 
 - `Tanuki-0.1.10-workspacecheck-arm64-release.apk`
 - `app-update.json`：应用内更新所需清单；不是手写的可信证书来源。

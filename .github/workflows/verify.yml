@@ -5,6 +5,17 @@ on:
   push:
   pull_request:
     branches: [main]
+  # 发布前可手动选择严格模式；日常 push/PR 固定走普通 PR 模式。
+  workflow_dispatch:
+    inputs:
+      handoff_mode:
+        description: '交接检查模式：pr（日常）或 release（发布前严格）'
+        required: true
+        default: pr
+        type: choice
+        options:
+          - pr
+          - release
 
 permissions:
   contents: read
@@ -23,12 +34,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR 模式需要基线提交才能算出本次变更清单；仓库很小，取完整历史。
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Test handoff checker
+        run: python3 scripts/test-check-handoff.py
       - name: Test agent workflow
         run: python3 scripts/test-agent-workflow.py
       - name: Test app release
@@ -49,10 +65,29 @@ jobs:
         run: node scripts/test-chat-session-open.mjs
       - name: Check native parity matrix
         run: python3 scripts/check-native-parity.py
-      # 交接门禁放在最后：W1 的恢复记录未合并前它必然失败，
-      # 但独立协议/客户端回归仍应完整执行并留下结果；该步骤不会被跳过。
-      - name: Check handoff consistency
-        run: python3 scripts/check-handoff.py
+      # 交接门禁放在最后，前面的独立协议/客户端回归仍会完整执行并留下结果。
+      # 普通 PR 只校验本次新增记录；共享状态由集成方刷新，允许暂时落后。
+      - name: Check handoff records
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HANDOFF_MODE: ${{ github.event.inputs.handoff_mode || 'pr' }}
+        run: |
+          set -euo pipefail
+          if [ "$HANDOFF_MODE" = "release" ]; then
+            # 发布前严格模式：CURRENT.json、记录哈希与公开源码指纹必须全部最新。
+            python3 scripts/check-handoff.py --release
+            exit 0
+          fi
+          changed="$(mktemp)"
+          : > "$changed"
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            # 只取新增/修改/重命名；删除旧记录不需要为删除本身再写一条记录。
+            git diff --name-only --diff-filter=AMR "$BASE_SHA"...HEAD > "$changed"
+          else
+            echo "无法确定基线提交；仅校验最新交接记录结构（PR 模式）。"
+          fi
+          python3 scripts/check-handoff.py --pr --changed-from "$changed"
 
   android-build:
     name: Android build, JVM tests and lint
