@@ -34,6 +34,7 @@ import com.tanuki.storage.ExportCleanup
 import com.tanuki.storage.ExternalDocumentAccess
 import com.tanuki.storage.ExternalDocumentDescriptor
 import com.tanuki.storage.ExternalDocumentPolicy
+import com.tanuki.storage.ExternalDocumentSaveState
 import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
@@ -300,7 +301,6 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         consumeBrowserIntent(intent)
         consumeChatIntent(intent)
-        externalConsumedRequest = savedInstanceState?.getString("externalConsumedRequest")
         restoreExternalDocument(savedInstanceState)
         consumeExternalDocumentIntent(intent, restored = savedInstanceState != null)
         browser = DshWebView(this, manager,
@@ -906,14 +906,17 @@ class MainActivity : ComponentActivity() {
     /** 进程重建后从 Activity 状态恢复同一 URI；实际读取仍会重新校验权限。 */
     private fun restoreExternalDocument(state: Bundle?) {
         if (state == null) return
-        val descriptor = ExternalDocumentDescriptor.restore(
+        val saved = ExternalDocumentSaveState.restore(
             uri = state.getString("externalUri"),
             name = state.getString("externalName"),
             mime = state.getString("externalMime"),
             bytes = state.getLong("externalBytes", ExternalDocumentPolicy.UNKNOWN_SIZE),
             persisted = state.getBoolean("externalPersisted", false),
             openToken = state.getLong("externalOpenToken", 0),
-        ) ?: return
+            consumedRequest = state.getString("externalConsumedRequest"),
+        )
+        externalConsumedRequest = saved.consumedRequest
+        val descriptor = saved.descriptor ?: return
         externalDescriptor = descriptor
         // 恢复后下一次 increment 必须大于已恢复 token，避免首次重选复用同一个 key。
         externalOpenSequence.set(
@@ -1068,14 +1071,13 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         val b = Bundle(); browser.save(b); outState.putBundle("web", b)
         agentBrowser?.let { controller -> val state = Bundle(); controller.saveState(state); outState.putBundle("agentBrowser", state) }
-        externalDescriptor?.let { descriptor ->
-            outState.putString("externalUri", descriptor.uri)
-            outState.putString("externalName", descriptor.displayName)
-            outState.putString("externalMime", descriptor.mimeType)
-            outState.putLong("externalBytes", descriptor.bytes)
-            outState.putBoolean("externalPersisted", descriptor.persistedRead)
-            outState.putLong("externalOpenToken", descriptor.openToken)
-            outState.putString("externalConsumedRequest", externalConsumedRequest)
+        // 关闭查看器后 descriptor 为空，已消费请求仍必须保存，避免恢复时重放旧 Intent。
+        ExternalDocumentSaveState(externalDescriptor, externalConsumedRequest).entries().forEach { (key, value) ->
+            when (value) {
+                is String -> outState.putString(key, value)
+                is Long -> outState.putLong(key, value)
+                is Boolean -> outState.putBoolean(key, value)
+            }
         }
     }
     override fun onPause() {

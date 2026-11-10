@@ -3,6 +3,7 @@ package com.tanuki
 import com.tanuki.storage.BoundedCopy
 import com.tanuki.storage.ExternalDocumentDescriptor
 import com.tanuki.storage.ExternalDocumentPolicy
+import com.tanuki.storage.ExternalDocumentSaveState
 import com.tanuki.storage.WorkspaceFileManager.FileKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -140,6 +141,27 @@ class ExternalDocumentPolicyTest {
         assertTrue(ExternalDocumentPolicy.shouldConsume(false, requestA, requestA))
         assertNull(ExternalDocumentPolicy.requestId("android.intent.action.MAIN", null, null))
         assertNull(ExternalDocumentPolicy.requestId("android.intent.action.VIEW", "file:///sdcard/a.pdf", null))
+    }
+
+    @Test fun closedDocumentStillSavesConsumedRequestForRestore() {
+        val requestA = ExternalDocumentPolicy.requestId("android.intent.action.VIEW", good, null)
+        assertNotNull(requestA)
+        // 查看器已关闭：descriptor 为空，但已消费请求必须随 Activity 状态保存。
+        val entries = ExternalDocumentSaveState(descriptor = null, consumedRequest = requestA).entries()
+        assertEquals(requestA, entries["externalConsumedRequest"])
+        assertFalse(entries.containsKey("externalUri"))
+        val restored = ExternalDocumentSaveState.restore(
+            uri = entries["externalUri"] as String?,
+            name = entries["externalName"] as String?,
+            mime = entries["externalMime"] as String?,
+            bytes = entries["externalBytes"] as? Long ?: -1L,
+            persisted = entries["externalPersisted"] as? Boolean ?: false,
+            openToken = entries["externalOpenToken"] as? Long ?: 0L,
+            consumedRequest = entries["externalConsumedRequest"] as String?,
+        )
+        assertNull(restored.descriptor)
+        assertEquals(requestA, restored.consumedRequest)
+        assertFalse(ExternalDocumentPolicy.shouldConsume(true, restored.consumedRequest, requestA))
     }
 
     @Test fun oversizedPreviewStillAllowsOriginalUriTransfer() {

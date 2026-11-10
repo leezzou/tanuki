@@ -14,7 +14,7 @@
 ## 当前状态
 
 - 已实现：外部 content URI 直开与回退逻辑、查看器文档源抽象、文本分页流式读取、PDF/图片/DOCX/XLSX/音视频直开接线、Activity 进程重建描述恢复、系统 ACTION_VIEW/ACTION_SEND 过滤器与 `singleTop`。
-- 已验证：`compileModernDebugKotlin`；rebase 到 `origin/main=7593805` 后完整 `testModernDebugUnitTest` 618 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 101 warnings / 1 hint；新增/扩展回归见下。
+- 已验证：`compileModernDebugKotlin`；rebase 到 `origin/main=7593805` 后完整 `testModernDebugUnitTest` 619 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 101 warnings / 1 hint；新增/扩展回归见下。
 - 待验证：真实设备/模拟器 SAF 提供方、系统「打开方式/分享」、真实 `takePersistableUriPermission` 与撤销、旋转/进程被杀、权限失效后重新选择、真实大文件/低内存/弱网、DOCX/XLSX 私有缓存清理、音视频直开。
 - 当前分支：`ao/saf-file-open/root`；原基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已 rebase 到 `origin/main=7593805`（PR #42 交接 PR 模式，含 #34/#32/#35/#36）；独立 worktree；PR [#37](https://github.com/leezzou/tanuki/pull/37) 待审。
 
@@ -47,7 +47,7 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` | BUILD SUCCESSFUL | 宿主 macOS，JDK17，SDK36，跳过 `buildNativeRuntime`；只有既有弃用/平台告警。 |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | BUILD SUCCESSFUL；74 个结果文件，618 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 101 warnings / 1 hint | 完整 JVM 与 lint；不是设备/仪器验证。 |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | BUILD SUCCESSFUL；74 个结果文件，619 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 101 warnings / 1 hint | 完整 JVM 与 lint；不是设备/仪器验证。 |
 | `./gradlew ... :app:compileModernDebugAndroidTestKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL | 修正 `WorkspaceVideoPresentationTest` 对旧查看器签名的调用；仅编译，未运行仪器测试。 |
 | `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.ExternalDocumentPolicyTest' --tests 'com.tanuki.BoundedCopyTest' --tests 'com.tanuki.WorkspaceFileKindTest'` | BUILD SUCCESSFUL | 新增/扩展目标回归全部通过。 |
 | rebase 到 `origin/main=7593805` 后 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` | BUILD SUCCESSFUL | 解决 `WorkspaceFileManager`/`WorkspaceFileViewer` 与 main 的 `FileTypeCatalog`、行号/截断 UI 冲突；Android 测试源码同时编译。 |
@@ -64,7 +64,7 @@
 - **重新选择同一 URI 不刷新**：`ExternalDocumentDescriptor.openToken` 每次成功打开/重新选择递增，`ContentDocument.key` 使用 `contentKey(uri, token)`；查看器和 PDF/DOCX/XLSX/文本子预览都以该 key 重置 `remember`/`LaunchedEffect`，同一 URI 重新授权后也会重新读取。
 - **超限文件无法转交外部打开**：`ContentDocument.describe()` 只读取元数据，不再因内置预览上限抛错；PDF/图片/DOCX/XLSX 的大小限制只保留在各自解码/解析路径。`prepareOpen()` 与 `export()` 只看 URI 是否合法，因此 65 MiB DOCX 或 >512 MiB PDF 仍能「使用其他应用打开」或导出。
 - **重建重放已消费 Intent**：`ExternalDocumentPolicy.requestId`/`shouldConsume` 记录 ACTION_VIEW/SEND 的已消费身份；`MainActivity` 在 `onCreate` 重建时跳过已消费的原始 Intent，`onNewIntent` 始终消费新请求，关闭后重建也不会重开旧文件。已消费身份写入 saved state 与私有 SharedPreferences，任务真正结束时清除。
-- 回归：`ExternalDocumentPolicyTest` 新增同一 URI 新 token、已消费 Intent 不重放、超限仍可转交原 URI 3 项；完整 JVM 618 tests / 0 failures，lint 0 errors / 101 warnings / 1 hint。
+- 回归：`ExternalDocumentPolicyTest` 新增同一 URI 新 token、已消费 Intent 不重放、超限仍可转交原 URI 3 项；完整 JVM 619 tests / 0 failures，lint 0 errors / 101 warnings / 1 hint。
 - 按冲突处理要求 squash-rebase 到最新 `main=7593805`（PR #42 之后的 PR 模式），保留三项 P2 修复；本 PR 不修改 `AGENT-STATE.md`/`CURRENT.json`，共享状态由集成阶段统一刷新。
 
 ## 第二轮 Review 修复（3 项 P2，2026-11-10）
@@ -72,7 +72,9 @@
 - **remember 键遗漏 openToken**：`MainActivity` 创建 `ContentDocument` 的 `remember` 已加入 `current.openToken`；`ContentDocument.key` 改由 `ExternalDocumentPolicy.viewerKey(descriptor)` 派生，同一 URI/元数据但新 token 会得到不同 key，查看器及子预览重新读取。
 - **恢复后 token 计数器归零**：新增 `restoredTokenSequence(current, restoredToken)`，Activity 恢复时把 `externalOpenSequence` 推进到至少已恢复 token；恢复 token=1 后第一次重选得到 2，不会复用旧 key。
 - **持久标记误判新启动为恢复**：移除 `externalConsumedRequest` 的 SharedPreferences 持久标记与 `onDestroy` 清理，只使用 `savedInstanceState` 中的已消费请求。`savedInstanceState == null` 的新 ACTION_VIEW/SEND 即使同一 URI 也会正常打开；有 saved state 的重建仍跳过已消费请求。
-- 回归：`ExternalDocumentPolicyTest` 增加 `viewerKey` 同 URI 不同 token、`restoredTokenSequence(0,1)+1==2`、无恢复状态同一请求仍消费；完整 JVM 618 tests / 0 failures，lint 0 errors / 101 warnings / 1 hint。
+- 回归：`ExternalDocumentPolicyTest` 增加 `viewerKey` 同 URI 不同 token、`restoredTokenSequence(0,1)+1==2`、无恢复状态同一请求仍消费；完整 JVM 619 tests / 0 failures，lint 0 errors / 101 warnings / 1 hint。
+
+- **关闭后丢失已消费请求**：新增纯 Kotlin `ExternalDocumentSaveState`，把 descriptor 与 consumedRequest 分开序列化；`MainActivity.onSaveInstanceState` 不再把 consumedRequest 放在 descriptor 非空分支内。补充「关闭查看器→保存/恢复→不重放原 Intent」回归。完整 JVM 619 tests / 0 failures，lint 0 errors / 101 warnings / 1 hint。
 
 ## 未完成与暂停项
 

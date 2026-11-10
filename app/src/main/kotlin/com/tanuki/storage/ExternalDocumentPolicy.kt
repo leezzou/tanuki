@@ -55,6 +55,39 @@ internal data class ExternalDocumentDescriptor(
     }
 }
 
+/** Activity 保存/恢复的完整状态；即使查看器已关闭，也保留已消费的启动请求。 */
+internal data class ExternalDocumentSaveState(
+    val descriptor: ExternalDocumentDescriptor? = null,
+    val consumedRequest: String? = null,
+) {
+    fun entries(): Map<String, Any> = linkedMapOf<String, Any>().apply {
+        descriptor?.let { descriptor ->
+            put("externalUri", descriptor.uri)
+            put("externalName", descriptor.displayName)
+            put("externalMime", descriptor.mimeType)
+            put("externalBytes", descriptor.bytes)
+            put("externalPersisted", descriptor.persistedRead)
+            put("externalOpenToken", descriptor.openToken)
+        }
+        consumedRequest?.let { put("externalConsumedRequest", it) }
+    }
+
+    companion object {
+        fun restore(
+            uri: String?,
+            name: String?,
+            mime: String?,
+            bytes: Long,
+            persisted: Boolean,
+            openToken: Long,
+            consumedRequest: String?,
+        ): ExternalDocumentSaveState = ExternalDocumentSaveState(
+            descriptor = ExternalDocumentDescriptor.restore(uri, name, mime, bytes, persisted, openToken),
+            consumedRequest = consumedRequest,
+        )
+    }
+}
+
 internal object ExternalDocumentPolicy {
     const val MAX_URI_LENGTH = 4096
     const val MAX_DISPLAY_NAME = 255
