@@ -435,9 +435,9 @@ class DshComposerController(
                         attachments = keepAttachments,
                         sending = false,
                         sendFailed = false,
-                        // 官方已接受本轮 prompt，停止入口从这里开始可用；页面接入
-                        // 官方 running 状态后通过 setGenerationRunning(false) 复位。
-                        generationRunning = true,
+                        // 普通 prompt 被接受后本轮进入运行；斜杠命令不一定产生回合，
+                        // 不默认置运行中，页面仍可用官方 running 状态纠正。
+                        generationRunning = command == null,
                         stopOutcome = null,
                         mentionQuery = null,
                         mentionCandidates = emptyList(),

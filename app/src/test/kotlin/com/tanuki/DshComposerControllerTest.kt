@@ -213,7 +213,9 @@ class DshComposerControllerTest {
 
         controller.removeAttachment(controller.state.value.attachments.single().id)
         controller.send()
-        awaitState(controller) { it.notice == "已发送" }
+        val compactState = awaitState(controller) { it.notice == "已发送" }
+        // 斜杠命令不一定产生生成回合，不能凭命令成功就显示停止入口。
+        assertFalse(compactState.generationRunning)
         val compact = remote.calls.first { it.method == "commands/execute" }
         assertEquals("/compact", compact.args.getString("line"))
         assertEquals(0, compact.args.getJSONArray("submittedAttachments").length())
