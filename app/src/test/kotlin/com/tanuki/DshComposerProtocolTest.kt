@@ -76,6 +76,47 @@ class DshComposerProtocolTest {
         )
     }
 
+    @Test fun cancelArgsScopesToSessionRequest() {
+        val args = DshComposerProtocol.cancelArgs("session-1")
+        assertEquals("session-1", args.getJSONObject("request").getString("sessionId"))
+        assertFails { DshComposerProtocol.cancelArgs("bad id") }
+    }
+
+    @Test fun mentionInsertionOnlyReplacesActiveQuery() {
+        val text = "前 @sr 后"
+        val query = DshComposerPolicy.mentionQuery(text, 5)!!
+        val edit = DshComposerPolicy.insertMention(text, query, "@src/Main.kt")
+        assertEquals("前 @src/Main.kt 后", edit.text)
+        assertEquals(14, edit.cursor)
+        // 查询后面的正文不能被吞掉；替换只发生在 @ 到当前光标之间。
+        assertTrue(edit.text.endsWith(" 后"))
+    }
+
+    @Test fun commandInsertionPreservesArgumentsAndNewlines() {
+        assertEquals("/compact ", DshComposerPolicy.insertCommand("/co", 3, "compact").text)
+        assertEquals(
+            "/compact extra\n下一行",
+            DshComposerPolicy.insertCommand("/co extra\n下一行", 3, "compact").text
+        )
+        // 非法命令名不会破坏输入框内容，只保持原样。
+        val unchanged = DshComposerPolicy.insertCommand("/co", 3, "bad name")
+        assertEquals("/co", unchanged.text)
+        assertEquals(3, unchanged.cursor)
+    }
+
+    @Test fun commandSearchMatchesNameAndDescriptionAndCandidateMoveWraps() {
+        val commands = listOf(
+            com.tanuki.web.DshCommand("compact", "压缩上下文", null, false),
+            com.tanuki.web.DshCommand("goal", "查看长期目标", null, false),
+            com.tanuki.web.DshCommand("export", "导出", "目标文件", false)
+        )
+        assertEquals(listOf("compact"), DshComposerPolicy.searchCommands(commands, "comp").map { it.name })
+        assertEquals(listOf("goal", "export"), DshComposerPolicy.searchCommands(commands, "目标").map { it.name })
+        assertEquals(0, DshComposerPolicy.moveCandidate(2, 3, 1))
+        assertEquals(2, DshComposerPolicy.moveCandidate(0, 3, -1))
+        assertEquals(0, DshComposerPolicy.moveCandidate(0, 0, 1))
+    }
+
     @Test fun commandExecuteRejectsTextParts() {
         val args = DshComposerProtocol.commandExecuteArgs(
             "session-1",

@@ -19,16 +19,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.TimeZone
 import java.util.UUID
 
 enum class DshAttachmentStatus { READY, UPLOADING, UPLOADED, FAILED }
+
+/** 停止生成的结果；界面据此区分“已停止”和“停止失败”，不把失败当成功。 */
+enum class DshStopOutcome { STOPPED, FAILED }
 
 /** 已读取到内存的待发送附件；previewUri 只用于本地缩略图，不进入发送协议。 */
 data class DshDraftAttachment(
@@ -92,7 +98,12 @@ data class DshComposerState(
     val mentionLoading: Boolean = false,
     val mentionError: String? = null,
     val sending: Boolean = false,
+    val sendFailed: Boolean = false,
     val uploadBusy: Boolean = false,
+    /** 当前回合是否在运行；由发送成功置位，页面接入官方 running 状态后同步复位。 */
+    val generationRunning: Boolean = false,
+    val stopping: Boolean = false,
+    val stopOutcome: DshStopOutcome? = null,
     val error: String? = null,
     val notice: String? = null
 ) {
@@ -123,6 +134,9 @@ class DshComposerController(
     private var commandJob: Job? = null
     private var uploadJob: Job? = null
     private var sendJob: Job? = null
+    private var stopJob: Job? = null
+    /** 上传串行锁：取消后立即重启 worker 时，旧请求必须结束后新请求才能开始。 */
+    private val uploadLock = Mutex()
 
     /** 切换会话先落盘旧草稿，再读取新草稿；附件不跨会话保留。 */
     fun setSession(sessionId: String?) {
@@ -135,6 +149,7 @@ class DshComposerController(
         commandJob?.cancel()
         uploadJob?.cancel()
         sendJob?.cancel()
+        stopJob?.cancel()
         _state.value = DshComposerState(
             sessionId = normalized,
             text = normalized?.let(drafts::read).orEmpty().take(DshComposerProtocol.MAX_TEXT_CHARS)
@@ -287,8 +302,28 @@ class DshComposerController(
         }
     }
 
+    /**
+     * 移除附件；若正在上传则同时取消上传任务并立刻移除卡片。
+     * 官方上传是 unary 调用，没有字节级取消回执；这里保证晚到的成功/失败结果
+     * 不会把已取消的附件重新写回草稿，也不在本地留下半成品。
+     */
     fun removeAttachment(id: String) {
-        _state.update { state -> state.copy(attachments = state.attachments.filterNot { it.id == id }) }
+        val target = _state.value.attachments.firstOrNull { it.id == id } ?: return
+        val wasUploading = target.status == DshAttachmentStatus.UPLOADING
+        if (wasUploading) {
+            uploadJob?.cancel()
+            uploadJob = null
+        }
+        _state.update { state ->
+            val remaining = state.attachments.filterNot { it.id == id }
+            state.copy(
+                attachments = remaining,
+                uploadBusy = remaining.any { it.status == DshAttachmentStatus.UPLOADING },
+                notice = if (wasUploading) "已取消上传，未保留残缺文件" else state.notice
+            )
+        }
+        // 当前项被取消后，队列里其他待上传文件继续处理。
+        if (wasUploading) ensureUploadWorker()
     }
 
     fun retryAttachment(id: String) {
@@ -329,10 +364,19 @@ class DshComposerController(
             return
         }
         val attachments = current.attachments
+        // 发送时快照：成功返回后只清理这份快照，等待期间的编辑/新附件必须保留。
         val submittedText = current.text
         val submittedAttachmentIds = attachments.map { it.id }.toSet()
         val requestGeneration = generation
-        _state.update { it.copy(sending = true, error = null, notice = null) }
+        _state.update {
+            it.copy(
+                sending = true,
+                sendFailed = false,
+                error = null,
+                notice = null,
+                stopOutcome = null
+            )
+        }
         sendJob?.cancel()
         sendJob = scope.launch {
             // 图片 base64 与文件编码可能达到数十 MB，放到 Default 线程，避免卡住输入与滚动。
@@ -390,6 +434,11 @@ class DshComposerController(
                         text = keepText,
                         attachments = keepAttachments,
                         sending = false,
+                        sendFailed = false,
+                        // 官方已接受本轮 prompt，停止入口从这里开始可用；页面接入
+                        // 官方 running 状态后通过 setGenerationRunning(false) 复位。
+                        generationRunning = true,
+                        stopOutcome = null,
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
@@ -398,7 +447,64 @@ class DshComposerController(
                 }
                 onSent(sessionId)
             }.onFailure { error ->
-                _state.update { it.copy(sending = false, error = messageOf(error)) }
+                // 失败保留文本与附件，界面显示“重发”；用户可直接再次发送。
+                _state.update {
+                    it.copy(sending = false, sendFailed = true, error = messageOf(error))
+                }
+            }
+        }
+    }
+
+    /**
+     * 页面把官方 `running` 状态同步进来；运行结束后停止入口消失。
+     * 未接线时发送成功会先置为运行中，用户仍可从输入栏停止当前回合。
+     */
+    fun setGenerationRunning(running: Boolean) {
+        _state.update { state ->
+            if (state.generationRunning == running) state
+            else state.copy(generationRunning = running)
+        }
+    }
+
+    /** 停止当前活动回合；成功显示“已停止”，失败显示“停止失败”，不伪造成功。 */
+    fun requestStop() {
+        val current = _state.value
+        val sessionId = current.sessionId ?: run {
+            _state.update { it.copy(error = "请先选择会话") }
+            return
+        }
+        if (current.stopping) return
+        if (!current.generationRunning && !current.sending) {
+            _state.update { it.copy(notice = "当前没有运行中的回合") }
+            return
+        }
+        _state.update {
+            it.copy(stopping = true, stopOutcome = null, error = null, notice = null)
+        }
+        stopJob?.cancel()
+        stopJob = scope.launch {
+            val result = client.cancel(sessionId)
+            if (sessionId != _state.value.sessionId) return@launch
+            result.onSuccess {
+                // 发送请求可能仍在等待返回；停止后不再让晚到的成功结果清空草稿。
+                sendJob?.cancel()
+                _state.update {
+                    it.copy(
+                        stopping = false,
+                        sending = false,
+                        generationRunning = false,
+                        stopOutcome = DshStopOutcome.STOPPED,
+                        notice = "已停止当前回合"
+                    )
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        stopping = false,
+                        stopOutcome = DshStopOutcome.FAILED,
+                        error = "停止失败：${messageOf(error)}"
+                    )
+                }
             }
         }
     }
@@ -427,6 +533,7 @@ class DshComposerController(
         commandJob?.cancel()
         uploadJob?.cancel()
         sendJob?.cancel()
+        stopJob?.cancel()
         client.reset()
         _state.value = DshComposerState()
     }
@@ -466,7 +573,10 @@ class DshComposerController(
         val sessionId = _state.value.sessionId ?: return
         mentionJob?.cancel()
         val requestGeneration = generation
-        _state.update { it.copy(mentionLoading = true, mentionError = null) }
+        // 查询变化后旧候选不再对应当前文本，先清空避免键盘误选到过期结果。
+        _state.update {
+            it.copy(mentionLoading = true, mentionError = null, mentionCandidates = emptyList())
+        }
         mentionJob = scope.launch {
             delay(160)
             val fileResult = client.fileReferences(sessionId, query)
@@ -491,10 +601,8 @@ class DshComposerController(
         }
     }
 
-    private fun filterCommands(commands: List<DshCommand>, query: String): List<DshCommand> {
-        if (query.isEmpty()) return commands
-        return commands.filter { it.name.startsWith(query, ignoreCase = true) }
-    }
+    private fun filterCommands(commands: List<DshCommand>, query: String): List<DshCommand> =
+        DshComposerPolicy.searchCommands(commands, query)
 
     private fun scheduleDraftSave() {
         draftJob?.cancel()
@@ -516,39 +624,50 @@ class DshComposerController(
         val requestGeneration = generation
         uploadJob = scope.launch {
             while (true) {
-                val next = _state.value.attachments.firstOrNull {
-                    it.kind == DshAttachmentKind.FILE && it.status == DshAttachmentStatus.READY
-                } ?: break
-                _state.update { state ->
-                    state.copy(attachments = state.attachments.map {
-                        if (it.id == next.id) it.copy(status = DshAttachmentStatus.UPLOADING, error = null) else it
-                    }, uploadBusy = true)
-                }
-                val result = client.uploadFile(sessionId, next.name, next.bytes)
-                if (requestGeneration != generation) return@launch
-                result.onSuccess { uploaded ->
+                // 取消后重启 worker 时，旧调用可能还没返回；锁保证同一时刻只有一个上传，
+                // 新 worker 不会重复上传旧任务或并发占内存。
+                val hasMore = uploadLock.withLock {
+                    val next = _state.value.attachments.firstOrNull {
+                        it.kind == DshAttachmentKind.FILE && it.status == DshAttachmentStatus.READY
+                    } ?: return@withLock false
                     _state.update { state ->
                         state.copy(attachments = state.attachments.map {
-                            if (it.id == next.id) it.copy(
-                                status = DshAttachmentStatus.UPLOADED,
-                                receiptId = uploaded.receiptId,
-                                name = uploaded.name,
-                                error = null
-                            ) else it
-                        })
+                            if (it.id == next.id) it.copy(status = DshAttachmentStatus.UPLOADING, error = null) else it
+                        }, uploadBusy = true)
                     }
-                }.onFailure { error ->
-                    _state.update { state ->
-                        state.copy(attachments = state.attachments.map {
-                            if (it.id == next.id) it.copy(
-                                status = DshAttachmentStatus.FAILED,
-                                error = messageOf(error)
-                            ) else it
-                        })
+                    val result = client.uploadFile(sessionId, next.name, next.bytes)
+                    // 取消上传会 cancel 当前 worker；晚到的响应不得继续写回状态。
+                    coroutineContext.ensureActive()
+                    if (requestGeneration != generation) return@launch
+                    if (_state.value.attachments.none { it.id == next.id }) return@withLock true
+                    result.onSuccess { uploaded ->
+                        _state.update { state ->
+                            state.copy(attachments = state.attachments.map {
+                                if (it.id == next.id) it.copy(
+                                    status = DshAttachmentStatus.UPLOADED,
+                                    receiptId = uploaded.receiptId,
+                                    name = uploaded.name,
+                                    error = null
+                                ) else it
+                            })
+                        }
+                    }.onFailure { error ->
+                        _state.update { state ->
+                            state.copy(attachments = state.attachments.map {
+                                if (it.id == next.id) it.copy(
+                                    status = DshAttachmentStatus.FAILED,
+                                    error = messageOf(error)
+                                ) else it
+                            })
+                        }
                     }
+                    true
                 }
+                if (!hasMore) break
             }
-            _state.update { it.copy(uploadBusy = false) }
+            _state.update { state ->
+                state.copy(uploadBusy = state.attachments.any { it.status == DshAttachmentStatus.UPLOADING })
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import com.tanuki.ui.DshAttachmentStatus
 import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.DshComposerState
 import com.tanuki.ui.DshPickedAttachment
+import com.tanuki.ui.DshStopOutcome
 import com.tanuki.ui.MemoryDshDraftStore
 import com.tanuki.web.DshAttachmentKind
 import com.tanuki.web.DshComposerClient
@@ -41,6 +42,9 @@ class DshComposerControllerTest {
         var promptDelayMillis = 0L
         var promptFailure: Throwable? = null
         var promptAccepted = true
+        var cancelDelayMillis = 0L
+        var cancelFailure: Throwable? = null
+        var cancelAccepted = true
 
         override suspend fun call(method: String, args: JSONObject): Any? {
             calls += Call(method, args)
@@ -71,6 +75,11 @@ class DshComposerControllerTest {
                     if (promptDelayMillis > 0) delay(promptDelayMillis)
                     promptFailure?.let { throw it }
                     JSONObject().put("accepted", promptAccepted)
+                }
+                "session/cancel" -> {
+                    if (cancelDelayMillis > 0) delay(cancelDelayMillis)
+                    cancelFailure?.let { throw it }
+                    JSONObject().put("accepted", cancelAccepted)
                 }
                 "commands/execute" -> JSONObject().put("commandId", "c1")
                     .put("result", JSONObject().put("kind", "success"))
@@ -332,6 +341,116 @@ class DshComposerControllerTest {
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
         assertEquals("s1", sent)
+    }
+
+    @Test fun failedSendCanBeResentWithoutLosingDraft() {
+        val remote = FakeRemote().apply { promptFailure = IOException("网络请求失败") }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("重试内容", 4)
+        controller.send()
+        val failed = awaitState(controller) { it.sendFailed }
+        assertTrue(failed.error.orEmpty().contains("网络请求失败"))
+        assertEquals("重试内容", failed.text)
+        assertFalse(failed.sending)
+
+        remote.promptFailure = null
+        controller.send()
+        val sent = awaitState(controller) { it.notice == "已发送" }
+        assertTrue(sent.text.isEmpty())
+        assertFalse(sent.sendFailed)
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+    }
+
+    @Test fun switchingSessionDoesNotCarryAttachmentsOrOtherDraft() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        controller.updateText("会话一草稿", 5)
+        controller.addImages(listOf(image(png(20, 20), "a.png")), controller.captureSessionToken())
+        assertEquals(1, controller.state.value.attachments.size)
+
+        controller.setSession("s2")
+        assertTrue(controller.state.value.text.isEmpty())
+        assertTrue(controller.state.value.attachments.isEmpty())
+        controller.updateText("会话二草稿", 5)
+
+        controller.setSession("s1")
+        assertEquals("会话一草稿", controller.state.value.text)
+        // 附件不跨会话保留，避免把上一个会话的图片发到新会话。
+        assertTrue(controller.state.value.attachments.isEmpty())
+    }
+
+    @Test fun cancelingUploadRemovesAttachmentAndLateResultDoesNotReturn() {
+        val remote = FakeRemote().apply { uploadDelayMillis = 200 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.addFiles(
+            listOf(
+                DshPickedAttachment(
+                    name = "a.txt",
+                    mediaType = "text/plain",
+                    bytes = "hello".toByteArray(),
+                    kind = DshAttachmentKind.FILE
+                )
+            ),
+            controller.captureSessionToken()
+        )
+        val uploading = awaitState(controller) {
+            it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADING
+        }
+        val id = uploading.attachments.single().id
+        controller.removeAttachment(id)
+        assertTrue(controller.state.value.attachments.isEmpty())
+        assertTrue(controller.state.value.notice.orEmpty().contains("已取消上传"))
+        Thread.sleep(350)
+        assertTrue(controller.state.value.attachments.isEmpty())
+        assertFalse(controller.state.value.uploadBusy)
+    }
+
+    @Test fun stopSuccessMarksStoppedAndClearsRunning() {
+        val remote = FakeRemote()
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        assertTrue(controller.state.value.generationRunning)
+
+        controller.requestStop()
+        val stopped = awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
+        assertFalse(stopped.generationRunning)
+        assertTrue(stopped.notice.orEmpty().contains("已停止"))
+        assertTrue(remote.calls.any { it.method == "session/cancel" })
+    }
+
+    @Test fun stopFailureKeepsRunningAndShowsFailure() {
+        val remote = FakeRemote().apply { cancelAccepted = false }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("运行中", 3)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+
+        controller.requestStop()
+        val failed = awaitState(controller) { it.stopOutcome == DshStopOutcome.FAILED }
+        assertTrue(failed.error.orEmpty().contains("停止失败"))
+        assertTrue(failed.generationRunning)
+    }
+
+    @Test fun commandCandidatesSearchNameAndDescription() {
+        val remote = FakeRemote().apply {
+            commands = JSONArray()
+                .put(JSONObject().put("name", "compact").put("description", "压缩上下文"))
+                .put(JSONObject().put("name", "goal").put("description", "查看长期目标"))
+        }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        awaitState(controller) { it.commands.size == 2 }
+
+        controller.updateText("/目", 2)
+        assertEquals(listOf("goal"), controller.state.value.commandCandidates.map { it.name })
+        controller.updateText("/comp", 5)
+        assertEquals(listOf("compact"), controller.state.value.commandCandidates.map { it.name })
     }
 
     private fun awaitState(
