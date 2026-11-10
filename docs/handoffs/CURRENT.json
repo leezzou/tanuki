@@ -1,7 +1,8 @@
 {
-  "schema": 1,
-  "record": "docs/handoffs/20261110-1226-native-parity-non-chat.md",
-  "recordSha256": "3cdac6d1917e83dce9297a435a73b1c83d49b792c472d54bcdc414b96b46e502",
-  "sourceFingerprint": "354d8dbf0df655cf670df42abd6c607df82e5926e967637142c36a19d1a576b8",
-  "fileCount": 626
+  "schema": 2,
+  "record": "docs/handoffs/20261110-1333-handoff-pr-mode.md",
+  "recordSha256": "76f27edaf5d00ef196e5a2bf34ae995217a4a3823e32f14bda0c3f4e8f0218a4",
+  "sourceFingerprint": "88e1b9ead1f4c6b89c6aa027149292527bf8c3503cee7a29e7480fea5a2f3b99",
+  "evidenceFingerprint": "e38d814c481350e2c754b9217393a11c1bd28920cf7ca2e3d970e56e53ff9de0",
+  "fileCount": 621
 }

@@ -4,7 +4,7 @@
 
 ## 1. 每次接手先读
 
-1. [当前状态](docs/AGENT-STATE.md)：当前交付、暂停项、下一步及最新交接记录。
+1. [当前状态](docs/AGENT-STATE.md)：当前交付、暂停项、下一步及最新交接记录；交接分工与共享状态规则见 [交接机制](docs/HANDOFFS.md)。
 2. 当前状态指向的 `docs/handoffs/` 交接记录。
 3. [上手指南](docs/AGENT-QUICKSTART.md)：环境、构建、验证、模块地图。
 4. [README](README.md) 和任务相关文档。安全/运行改动先读 [SECURITY](docs/SECURITY.md)；测试结论对照 [TEST-REPORT](docs/TEST-REPORT.md)。
@@ -15,30 +15,43 @@
 
 ## 2. 每任 Agent 必须交接（包括未完成、受阻或只读任务）
 
-**开始时**创建本次唯一记录 `docs/handoffs/YYYYMMDD-HHMM-topic.md`，从 [模板](docs/handoffs/TEMPLATE.md) 复制，写明本次用户目标、范围和开始状态；更新 `docs/AGENT-STATE.md` 的最新记录链接。不要只写“继续上次”。
+交接分两层，不要混写：
+
+- **普通 PR**：只新增/补完本次唯一记录 `docs/handoffs/YYYYMMDD-HHMM-topic.md`，从 [模板](docs/handoffs/TEMPLATE.md) 复制。**不要修改 `docs/AGENT-STATE.md`，不要修改 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。
+- **集成维护方**（同一时间只有一人）：在一批 PR 合并后、发布前或状态明显落后时，更新 `AGENT-STATE.md` 的当前指针与最近 N 条，再运行 `--integrate` 重建印章。
+- **发布维护方**：打包前运行 `--release` 严格核对印章、记录哈希与公开源码指纹。
+
+**开始时**创建本次唯一记录，写明本次用户目标、范围和开始状态；不要只写“继续上次”。
 
 **结束、移交或预计中断前**必须：
 
 - 补完本次记录：改动文件与目的、实际验证命令及结果、未测试范围、失败和原因、关键决策、未完成/暂停项、下一步可执行动作、数据与产物边界。
-- 更新 `docs/AGENT-STATE.md` 的当前状态。明确区分：已实现、已验证、待验证、用户暂停、外部阻塞。不能把前任测试当成本次新跑的测试。
 - 更新受影响的 README/专题文档。结论必须能在源码/公共证据中定位，不能仅指向未打包的 `.build`。
-- 写完后运行：
+- 普通 PR 结束前运行：
   ```bash
-  python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md
-  python3 scripts/check-handoff.py
+  python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md
   ```
+  记录自身完整即可通过；`AGENT-STATE.md` 未链接、`CURRENT.json` 印章落后都是允许的，不要为了让检查通过去改共享文件。
+- 集成维护方在最新 main 上更新 `AGENT-STATE.md` 后运行：
+  ```bash
+  python3 scripts/check-handoff.py --integrate --record docs/handoffs/<最新记录>.md
+  python3 scripts/check-handoff.py --release
+  ```
+- 发布前必须 `--release` 通过；`scripts/prepare-app-release.py` 会强制执行。发布严格模式只读，不会自动补章。
 - 交付源码前再运行 `python3 scripts/package-source.py`，核对 `artifacts/SOURCE-SHA256SUMS`。修改文档也会改变源码包，不能继续发旧 ZIP。
+- 具体分工、时间点、迁移步骤与冲突处理见 [交接机制](docs/HANDOFFS.md)。
 
-只读权限的 Agent 不得违反权限去写文件：输出同模板的完整交接文本，明确“未落盘”，交由主 Agent 保存。并发子 Agent 返回结论和证据，由主 Agent 汇总；不要多人同时覆盖当前状态或印章。每轮只指定一名 `AGENT-STATE.md` / `CURRENT.json` 维护方，其他并发 Worker 只回报告；状态、印章和交接必须串行汇总。下一任 Agent 建立新记录，工作过程中保留旧记录，不无理由改写历史。
+只读权限的 Agent 不得违反权限去写文件：输出同模板的完整交接文本，明确“未落盘”，交由主 Agent 保存。并发子 Agent 返回结论和证据，由主 Agent 汇总；不要多人同时覆盖当前状态或印章。每轮只指定一名集成维护方处理 `AGENT-STATE.md` / `CURRENT.json`，其他并发 Worker 只回报告，绝不修改共享状态。下一任 Agent 建立新记录，工作过程中保留旧记录，不无理由改写历史。
 
 **每次 Git 提交或推送前，必须先清理已过期的交接文档**，不能只新增记录而持续堆积：
 
 - 过期指任务已完成或被替代，必要结论已完整归入当前状态、专题文档或 `docs/TEST-REPORT.md`，且没有独有的未完成事项；不能仅按日期或“不是最新”就删除。
 - 保留当前交接、`TEMPLATE.md`、`CURRENT.json`，以及仍被使用的验证依据和未完成记录；不要依赖 Git 历史或 `.build` 才能接手。
 - 先迁移仍有用的事实，再删除过期记录、修复所有受影响引用，并在本次记录写清清理范围、理由及保留位置。已跟踪文件的删除也须纳入本次明确暂存范围。
-- 清理后重新执行交接/上传检查、刷新印章、重打源码包并核对外部 SHA；实际暂存不能残留已判定过期的记录。具体顺序见 [上传检查](docs/PUBLICATION.md)。
+- 普通 PR 只清理本次确认过期、且属于本次范围的记录；跨 PR 清理和共享状态刷新由集成维护方执行。
+- 清理后普通 PR 重跑 `--pr`；集成方重跑 `--integrate` / `--release`，再重打源码包并核对外部 SHA。实际暂存不能残留已判定过期的记录。具体顺序见 [上传检查](docs/PUBLICATION.md)。
 
-交接检查使用公开源文件内容指纹，不依赖 Git、mtime 或本机路径。源码变化但交接未更新会失败，`verify-workspace.sh` 会先执行此检查。它不能证明自然语言内容真实，仍必须如实记录验证和未完成项。
+交接检查使用公开源文件内容指纹，不依赖 Git、mtime 或本机路径。普通 PR 模式校验本 PR 记录结构，并强制“公开文件有改动就必须附带交接记录”；集成/发布模式才校验共享状态与公开源码指纹。它不能证明自然语言内容真实，仍必须如实记录验证和未完成项。
 
 ## 3. 数据、安装和权限硬约束
 
@@ -83,7 +96,8 @@
 
 ```bash
 # 不操作设备；先按上手指南准备 JDK17、SDK36/Build Tools 35、NDK27.2.12479018。
-python3 scripts/check-handoff.py
+python3 scripts/check-handoff.py --pr          # 普通 PR 交接检查
+python3 scripts/check-handoff.py --release     # 仅集成/发布前：严格核对共享状态
 bash scripts/verify-workspace.sh
 
 # 仅确认无真实数据、已装运行环境、无安装任务的 ARM64 测试设备：

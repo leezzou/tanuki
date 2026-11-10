@@ -1,8 +1,10 @@
-当前交接：[原生界面对齐：非聊天主链路](handoffs/20261110-1226-native-parity-non-chat.md)（android_agent-44，PR [#38](https://github.com/leezzou/tanuki/pull/38)，基线 `main=0555c3c0`，第一批会话管理/模型权限/Skills 命令切片）。并行已合并记录：[远程中继](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，PR #36 已合并为 `0068c87`）、[文件复制界面稳定](handoffs/20261110-0330-copy-flicker.md)（android_agent-40，PR #35 已合并为 `2a4a050`）、[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，PR #34 已合并为 `533eff4`）；0.1.10 与历史记录保留在 `docs/handoffs/`。
+# Tanuki 当前状态
 
-## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 已合并为 `0068c87`）
+当前交接：[交接机制改造：普通 PR 不再改共享状态](handoffs/20261110-1333-handoff-pr-mode.md)（android_agent-49，基线 `main=0068c872`，分支 `ao/handoff-conflicts/pr-mode`，PR [#42](https://github.com/leezzou/tanuki/pull/42) 待审；脚本/文档非设备验证通过，不合并、不发布）。共享状态现由单一集成维护方在批量合并后统一刷新，规则、指针 + 最近 N 条目标格式与迁移步骤见 [交接机制](HANDOFFS.md)；本 PR 之后的普通 PR 只新增自己的 `docs/handoffs/<日期>-<主题>.md`，不再修改本文件或 `CURRENT.json`。上一记录：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，PR [#36](https://github.com/leezzou/tanuki/pull/36) 已合并为 `0068c872`）；文件复制、文件查看器、0.1.10 与并行历史保留在 `docs/handoffs/`。
 
-- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）、`1cb7ad9`（原生能力对等审计）与 `2a4a050`（PR #35 文件复制界面稳定）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，已合并为 `0068c87`，未发布、未触发 AO Review。
+## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
+
+- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）、`1cb7ad9`（原生能力对等审计）与 `2a4a050`（PR #35 文件复制界面稳定）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
 - 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
 - 已实现：
   - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
@@ -15,32 +17,23 @@
 - 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
 - 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 
-### 原生界面对齐：非聊天主链路（android_agent-44，PR #38 待审）
+### 文件复制界面稳定（android_agent-40，PR [#35](https://github.com/leezzou/tanuki/pull/35) 待审）
 
-- 基线 `origin/main=0555c3c0`，已合并 `origin/main=533eff4`（文件查看器）、`1cb7ad9`（原生对齐审计矩阵）、`2a4a050`（文件复制稳定）与 `0068c87`（远程中继）；分支 `ao/native-parity/session-admin`，PR [#38](https://github.com/leezzou/tanuki/pull/38)。按编排器暂停要求，P2 修复推送前不再合 main；评审修复前 CI 全绿 head 为 `1e40b33`，最终 head 以 PR 页面为准；未合并/未发布/未触发 AO Review。与 android_agent-42 分工：本切片不修改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`，新增独立一元会话管理客户端与独立 Activity；共享 `MainActivity.kt`/`TanukiUi.kt` 仅加法入口。
-- 已实现：会话列表/标题过滤/官方内容搜索/新建/重命名/归档/本机未读/运行状态；会话级模型选择与权限模式（完全权限二次确认）；Skills 与斜杠命令只读目录；安全模式只读；远程 SSH 隧道 origin 复用；设置 → 网页与兼容性 → 原生会话管理。
-- 官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`，不直接改 `userdata/dsh`；归档恢复列表需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
-- 已实现（评审修复）：`DshSessionAdminApiTest` 8 项、`DshSessionManagerControllerTest` 18 项；完整 `testModernDebugUnitTest` **74 个结果文件、626 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 97 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL（未安装设备）。三项 Codex P2 已修：close/取消请求复位目录 loading、写操作取消列表读取清除 loading、origin 变化清理旧端点目录并使在途请求失效。
-- 网络已收敛到 `DshAdminTransport`；`DshHttpAdminTransport` 为临时 HTTP 栈，42 的 PR #40 `DshTransport` 合并后改用 `DshAdminTransportAdapter(transport::call, transport::reset)`。MainActivity 归 42 独占，本 PR 仅保留已放行的两行入口。
-- 待验证：真实 Android/PRoot DSH 的 `/connect`、会话新建/重命名/搜索/归档、`/permission` 命令、模型目录；设备 UI/深色/大字体；远程 SSH 端点；Android 仪器。
-- 未完成/后续：独立审查/合并授权、工作区全局搜索/diff、插件列表与启用、斜杠命令执行、应用内语言/主题、归档列表恢复。
-
-### 文件复制界面稳定（android_agent-40，PR #35 已合并为 `2a4a050`）
-
-- 分支 `ao/copy-flicker/root`，基线 `origin/main=0555c3c0`，已合并 `main=533eff4`、`main=1cb7ad9` 解决文档冲突；PR [#35](https://github.com/leezzou/tanuki/pull/35) 已合并为 `2a4a050`，未发布、未触发 AO Review。
+- 分支 `ao/copy-flicker/root`，基线 `origin/main=0555c3c0`，已合并 `main=533eff4`、`main=1cb7ad9` 解决文档冲突；PR [#35](https://github.com/leezzou/tanuki/pull/35)，独立 worktree，未合并、未发布、未触发 AO Review。
 - 根因：`WorkspaceStorage.importFiles` 每 64 KiB 调 `onProgress`，`MainActivity` 在 `setContent` 根部 collect 传输流，`TanukiUiModel.transfers` 每个分块变化都让整个 `TanukiUi`（含文件列表）重组；导入 `track` 未传总量，只能显示不定进度；`WorkspaceFilesPage` 在重新筛选/排序期间把 `shown` 置空，Lazy 列表项数归零使滚动回顶部；`busy/sorting` 的进度条直接插入推动列表。
 - 修复：`FileTransfers` 集中合并中间进度（160ms）、总量变化/最终帧立即发布、同总量丢弃回退分块、新增协作取消与 `onCancel` 登记动作；`BlobDownloads` 等待回包阶段可取消并忽略晚到回包；Blob/URL/浏览器导出取消或失败时通过 `ExportCleanup` 删除未完成 SAF 目标并提示；导入先查询 `DISPLAY_NAME`/`SIZE`，只有全部大小有效才给真实总量；进度流只由 `OperationBanner` collect；`FileListPresentation` 同目录刷新保留旧条目、换目录清空、内容相等复用条目列表；`LazyListState`/`LazyGridState` 按目录保存并支持旋转恢复；固定 4dp 进度槽。
 - 已验证（本轮新跑，合入 main 前）：`compileModernDebugKotlin` BUILD SUCCESSFUL；完整 `testModernDebugUnitTest` 与 `lintModernDebug` BUILD SUCCESSFUL，554 tests / 0 failures / 0 errors / 0 skipped（0.1.10 基线 535 + 新增 19；main #34 自带 558）；合并后完整套件由 CI 在新 head 复跑；`compileModernDebugAndroidTestKotlin` BUILD SUCCESSFUL；新增仪器测试 `FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition` 与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport` 仅编译、未运行。
 - 待验证：真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；设备由独立 QA 独占。
 
-## 文件查看器格式支持扩展（android_agent-41，PR #34 已合并为 `533eff4`）
-- 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR #34 已合并为 `533eff4`，未发布、未创建 tag/Release。
+### 文件查看器格式支持扩展（android_agent-41，PR [#34](https://github.com/leezzou/tanuki/pull/34) 已合并为 `533eff4`）
+
+- 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并为 `main=533eff4`，未发布、未创建 tag/Release。
 - 新增纯 Kotlin `FileTypeCatalog` 集中维护扩展名、规范 MIME 与类别：C/C++/头文件（c、h、cpp、cc、cxx、hpp、hh、hxx、inl、ipp、m、mm、cu 等）、Java/Kotlin/Python/JS/TS/Go/Rust/Shell 及多种语言、JSON/XML/YAML/TOML/INI/属性/`.env` 等已知点号配置、Markdown/纯文本/日志、HTML/CSS/SQL/CSV/TSV、SVG；点号配置只匹配已知名称与 `.env`/`.env.*`，`.DS_Store` 归为隐藏二进制、`.env-image.png` 按媒体扩展名处理；图片/音频/视频扩展名在缺少系统 MIME 时仍能进入对应查看器；PDF/DOCX/XLSX 保持内置预览，`.doc` 保持旧版提示，`.xls`/`.xlsm`/`.pptx`/`.odt` 等归为不支持并回退。
 - 分类改为扩展名优先于 MIME，修复 `.ts` 在 Android 上可能被 `video/mp2t` 当成视频的问题；未知类型仅在非明确二进制/归档/旧版 Office 时做有界 UTF-8 内容探测，避免误判。
 - 文本查看器保留 64 KiB 分页，新增可开关行号（行号与正文同一段文本，自动换行不错位）、当前行范围与已显示字节、单次查看 4 MiB 上限与中文截断提示；仍为等宽字体、只读选择复制、搜索/编码切换。
 - 未知/不支持类型显示“暂不支持内置预览”中文说明，提供“用文本打开”“复制路径”和返回类型说明；读取失败显示错误兜底，不白屏。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 29 tests / 0 failures；完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件，0.1.10 基线 535 + 新增 23）、`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码组合 BUILD SUCCESSFUL（2m49s）。
-- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。PR #34 已合并，未发布；独立 Review/设备验证按原记录保留。
+- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR #34 的独立 Codex High Review 待办。
 - 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
 
 
@@ -247,7 +240,6 @@
 
 ## 环境与阻塞
 
-- 当前分支：原生非聊天主链路 `ao/native-parity/session-admin`（基线 `main=0555c3c0`），未提交/未推送；本会话共享工作区，分支 ref 由主仓库统一管理。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -278,7 +270,7 @@
 8. PDF 原生阅读 PR [#24](https://github.com/leezzou/tanuki/pull/24) 已合并为 `0ba11da`：大文档滚动/内存、加密/损坏样本与缩放手感 QA 另行授权。
 9. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
 10. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-11. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+11. 合并后由集成维护方先运行 `check-handoff.py --integrate --record <最新记录>`，再跑 `--release`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。

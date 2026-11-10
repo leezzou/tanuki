@@ -222,46 +222,7 @@ HTTP 200..399 或 401 → 存活
 - 实时流/审批：官方 `session/follow`、`session/control` 与审批 waterfall 只经 `/api/remote.mux` WebSocket；原生最小切片未实现，列表失败时回退官方界面。
 - 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebView 同源与 Cookie 策略不变。
 
-#### 1.7.1 原生会话管理（非聊天主链路）
-
-原生会话管理页复用同一启动 token 与精确 loopback origin，单独换取 `interactions=none` 的一元 API Peer；不建立 WebSocket，不修改聊天页客户端。当前使用的官方 method：
-
-**临时 transport 边界**：`DshSessionAdminClient` 只构造官方 method/参数、解析响应和映射中文错误；网络/认证/Cookie/超时收敛到 `DshAdminTransport`：
-
-```kotlin
-interface DshAdminTransport {
-    suspend fun call(method: String, args: JSONObject): Any? // 返回 result.value；业务错误抛 DshApiException
-    fun reset()
-}
-```
-
-当前生产实现 `DshHttpAdminTransport` 是**临时 HTTP 栈**。PR #40 的 `DshTransport`（`connection: StateFlow<DshConnectionState>`、`suspend call(method,args): Any?`、`live(sessionId): Flow<DshLiveEvent>`、`reset()`）合并后，应改为 `DshAdminTransportAdapter(transport::call, transport::reset)`，会话管理逻辑不复制认证/Cookie/URL，也不需要 `live`。
-
-
-| 能力 | method | 参数 / 返回要点 |
-|---|---|---|
-| 会话列表 | `session/list` | `_request:{}`；`items[]` 含 `sessionId/updatedAt/running/blank/agentAvailable/projections` |
-| 新建 | `session/create` | `request:{}`；返回实际 `sessionId` |
-| 重命名 | `session/rename` | `request:{sessionId,title}`；返回规范化标题 |
-| 内容搜索 | `session/search` | `request:{query}`；返回 `items[{sessionId,snippet}]`、`hasMore` |
-| 归档 | `workspace/archiveSession` | `request:{sessionId,stopActivity?}`；运行中不停止会被拒绝 |
-| 模型目录 | `session/modelCatalog` | 返回默认路由、provider 分组、失败 provider |
-| 选择模型 | `session/selectModel` | `request:{sessionId,provider,model,reasoningEffort?}` |
-| 权限目录 | `permissionPresets/catalog` | 返回可选/默认 preset |
-| 当前会话权限 | `commands/execute` | `agentId` + `line=/permission <preset>` + 空 `submittedAttachments` |
-| Skills | `skills/list` | `request:{sessionId}` |
-| 斜杠命令 | `commands/list` | `agentId:sessionId` |
-
-边界：
-
-- 官方 `0.2.1-rc.5` 没有会话硬删除端点；归档不是删除，项目文件与会话数据都不由原生删除。
-- 归档列表恢复来自 `workspace/follow` 流；未建立 WebSocket 时不提供“已归档列表”，不伪造本地归档库。
-- 未读是本机按最后查看 `updatedAt` 计算的提示，不是官方字段，不跨设备同步。
-- 完全权限 preset 必须由界面二次确认；控制器只有显式 `allowFullAccess=true` 才提交，不能自动切换 `danger-full-access`。
-- 安全模式/试用模式下写操作全部拒绝；远程 DSH 连接复用同一 SSH 隧道 origin，本地恢复状态不覆盖远程端点。
-- Cookie 只在内存与精确 origin 使用；不写日志/状态，不交给网页脚本，不新增 JavaScript Bridge。
-
-细节、文件边界与验证见 [原生界面对齐：非聊天主链路](NATIVE-PARITY-NON-CHAT.md) 和 [原生界面与官方界面切换](NATIVE-UI.md)。
+细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
 ## 2. 工具面：Browser RPC
 

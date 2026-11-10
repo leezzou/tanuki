@@ -38,12 +38,7 @@
 | `session/cancel` | 取消运行 | 未使用 |
 | `session/create` / `rename` / `selectModel` / `updateQueue` | 会话管理 | 未使用 |
 | `session/attachment` | 附件读取 | 未使用 |
-| `skills/list` | 技能目录 | 原生会话管理页使用；按选中会话读取 |
-| `session/create` / `rename` / `search` | 新建、重命名、内容搜索 | 原生会话管理页使用 |
-| `session/modelCatalog` / `selectModel` | 模型目录与会话级模型选择 | 原生会话管理页使用 |
-| `permissionPresets/catalog` / `commands/execute` | 权限目录与 `/permission` 切换 | 原生会话管理页使用；完全权限二次确认 |
-| `commands/list` | 斜杠命令目录 | 原生会话管理页只读展示 |
-| `workspace/archiveSession` | 归档会话 | 原生会话管理页使用；运行中需确认停止 |
+| `skills/list` | 技能目录 | 未使用 |
 | `session/follow` / `session/control` | 实时历史跟随 / 会话状态流 | 缺口：需要 WebSocket，本切片未实现 |
 | `approval/request`、`userQuestions.answer` | 审批、用户提问 | 缺口：审批是 Agent-scoped waterfall；提问回答需要 answer Peer 与事件通道，不能靠一元 HTTP 伪造 |
 
@@ -67,10 +62,6 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 原生只读页：会话条 + 文本消息 + 空态/错误态 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置开关、DSH 页原生/官方切换、回退提示与“重试” |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 偏好持久化、控制器接线、同一 token/同一 DSH 进程 |
-| `app/src/main/kotlin/com/tanuki/web/DshSessionAdminApi.kt` | 会话管理一元协议、独立 `interactions=none` API Peer、纯解析与数据源接口 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话管理状态机：列表/过滤/搜索/新建/重命名/归档/未读/模型/权限/技能/命令 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 原生会话管理页与详情面板 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立入口 Activity；复用 RuntimeManager 状态，安全模式只读，支持远程 origin |
 
 偏好文件 `ui`、键 `dsh-ui`，值 `official` / `native`；未知值回到 `official`。设置入口在“设置 → 网页与兼容性 → 界面：官方界面 / 原生界面”。
 
@@ -83,10 +74,6 @@
 - 通知点击：原生偏好下目标交给原生控制器；冷启动先加载列表再选中，已有原生页直接替换；原生列表失败不消费目标，回退官方后由 WebView 连接完成同一目标；通知点击当前会话会强制重读历史，不复用旧页缓存；只有本次通知已发起并完成刷新才消费目标。
 - 服务未运行时原生页不显示；停止服务会清空原生页内存 Cookie；再次启动由新 `origin` 自动重新认证。
 - 原生页只读，不调用 `session/prompt`、`session/cancel`、审批或文件写入，不修改 `userdata/dsh`。
-- 原生会话管理是独立页面（设置 → 网页与兼容性 → 原生会话管理），不替换聊天页；列表/新建/重命名/归档/模型/权限/Skills/命令都调用官方一元 Remote，不直接改 `userdata/dsh`。
-- 会话硬删除官方未提供；本页只归档。归档恢复列表需要 `workspace/follow` 流，未实现；未读是本机 `updatedAt` 比较，不是官方未读。
-- 安全模式/试用模式下管理页只读；远程 DSH 连接时按 `RuntimeManager.origin` 使用 SSH 隧道端点，本地恢复状态不覆盖远程。
-- 端点身份（origin）变化时清理模型/权限/Skills 缓存并递增请求代次，旧端点响应不能发布到新端点界面。
 
 ## 5. 安全边界
 
@@ -97,32 +84,23 @@
 - 业务错误只显示短错误码；其他异常经 `Redact.text` 截断；`DshEndpoint.toString()` 显式脱敏 launch URL，避免误日志带出 token。
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
 - 请求不带 `Origin` 头；与官方“工具客户端”语义一致。
-- 会话管理客户端独立持有 `interactions=none` API Cookie，不复用聊天页的 `answer` Peer；两者都不把 Cookie/token 写入日志、状态或网页脚本。网络/认证已收敛到 `DshAdminTransport` 薄接口；`DshHttpAdminTransport` 是临时实现，PR #40 的 `DshTransport` 合并后改用 `DshAdminTransportAdapter(transport::call, transport::reset)`。
-- 模型目录的 provider 失败信息展示前经 `Redact.text` 截断，避免把 provider 错误中的敏感细节直接铺到界面。
 
 ## 6. 验证
 
-本轮（2026-11-10，非聊天主链路）新跑：
-
-- `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- 新增 `DshSessionAdminApiTest` 7 项：会话权限/模型 projection、搜索/模型/权限/Skills/命令解析、业务错误短码、命令 success 判定、本地合成服务器验证 11 个官方 method 与 Cookie 只发 `/api`、非法权限 preset 不发网络、404 不含 token。
-- 新增 `DshSessionManagerControllerTest` 14 项：列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 stopActivity、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、custom 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie。
-- 预合并完整 `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，67 个结果文件、**556 tests / 0 failures / 0 errors / 0 skipped**；合并 `533eff4`/`1cb7ad9`/`2a4a050`/`0068c87` 后 **74 个结果文件、621 tests / 0 failures / 0 errors / 0 skipped**；lint 0 errors / 97 warnings / 1 hint。
-- `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint。
-- `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（3m29s；未安装设备）。
-
-历史（2026-11-09，android_agent-33）：
+本轮新跑：
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：rebase 到 `main=0ba11da` 后 393 tests / 0 failures / 0 errors / 0 skipped。
+- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，rebase 到 `main=0ba11da` 后 393 tests / 0 failures / 0 errors / 0 skipped。
 - `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（仅既有弃用/可读性告警）。
-- 新增 `DshUiSwitchTest` 10 项、`DshNativeControllerTest` 6 项、`DshNativeApiTest` 12 项。
+- PR 已 rebase 到 `main=0ba11da`（含 PDF、cold-start、XLSX、runtime-safe-mode 与 chat-notify）；rebase 后单一提交的最终 Host/Android CI 待推送后以 PR 页面为准；修复前 head 的 CI 4/4 通过。
+- 新增 `DshUiSwitchTest` 10 项：默认官方、原生需运行、回退不改偏好、`/connect` 同 token、拒绝非 loopback/坏 method、官方信封、端点脱敏。
+- 新增 `DshNativeControllerTest` 6 项：原生通知目标冷启动、已加载页面替换选择、目标不在列表仍可见、原生列表失败保留目标给官方回退、当前会话通知强制重读历史、通知决策+分发集成。
+- 新增 `DshNativeApiTest` 12 项：会话标题/切点、projection 仅 sequenced、只取 append-origin 文本/过滤 replace 与注入上下文、业务错误不回显、Cookie 提取、`rpcId` 关联、本地合成服务器验证端点顺序与 Cookie 只发 `/api`、404 错误不含 token、延迟认证期间 reset 不阻塞且旧 Cookie 不发布、reset 后旧 401 不复活、延迟 401 期间新请求不被旧请求清 Cookie。
 
 未验证：
 
-- 真实 Android 设备/模拟器上的原生页/会话管理页布局、暗色模式、长文本、大字体、全屏与返回。
+- 真实 Android 设备/模拟器上的原生页布局、暗色模式、长文本、全屏与返回。
 - 真实 PRoot 内 DSH `0.2.1-rc.5` 的 `/connect`、HTTP 一元调用与 Cookie 生命周期。
-- WebSocket `session/follow`、`session/control`、审批与提问；发送、取消、附件未实现；模型选择/权限切换已实现但未设备验证。
-- 真实 `session/create|rename|search`、`workspace/archiveSession`、`commands/execute` 的 `/permission` 结果与运行中停止语义。
+- WebSocket `session/follow`、`session/control`、审批与提问；发送、取消、附件、模型选择。
 - 服务重启/应用进程重建后的 Cookie 失效与重新认证；低版本 DSH 缺少 `session/list` 时的回退只在代码层验证。
-- Android 仪器测试、真机、APK 安装与合并/发布均未执行。
+- assemble、仪器测试、真机与合并/发布均未执行。

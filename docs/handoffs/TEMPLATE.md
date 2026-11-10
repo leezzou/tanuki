@@ -5,7 +5,7 @@
 - 状态：<进行中 / 已完成 / 部分完成 / 受阻 / 中断>
 - 前一记录：<有效链接；若已清理则填写结论所在专题文档，不保留断链；首条写无>
 
-> 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
+> 每任 Agent 创建唯一记录，不覆盖前任。普通 PR 只新增本记录，**不要改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。开始填写目标/范围；结束或中断前补齐证据、未测试范围与可执行下一步。只读 Agent 交回同格式文本，由主 Agent 保存。不要包含真实 Key、Cookie、token、会话/备份或私有原始日志。
 
 ## 用户目标与范围
 
@@ -54,12 +54,13 @@
 - 新/旧APK、源码ZIP及校验文件，哪些确实更新：
 - 是否覆盖安装 / 签名范围 / 未发布事项：
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置；仍需保留的验证/未完成记录：
-- 文档或脚本变化后仍需刷新交接印章、重新生成源码ZIP；不要把源码ZIP自身哈希写回归档内形成循环。
+- 普通 PR 不刷新共享状态/印章；集成维护方在批量合并后统一运行 `--integrate`。文档或脚本变化后重新生成源码 ZIP；不要把源码 ZIP 自身哈希写回归档内形成循环。
 
 结束前：
 
 ```bash
-python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md
-python3 scripts/check-handoff.py
+# 普通 PR：只校验本记录，共享状态允许落后
+python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md
+# 集成/发布由集成维护方执行，普通 PR 不运行写印章的命令
 python3 scripts/package-source.py
 ```

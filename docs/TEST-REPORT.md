@@ -2,6 +2,20 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 交接机制改造验证（2026-11-10，android_agent-49，非设备）
+
+- 范围：只改宿主脚本、CI 与交接文档，不改产品代码。`scripts/check-handoff.py` 新增普通 PR / 集成 / 发布三模式；普通 PR 只校验自己的记录，CI 用变更清单强制“公开文件有改动必须附带交接记录”；集成模式刷新 schema 2 印章，发布模式只读严格校验；新增 `docs/HANDOFFS.md` 与 `scripts/test-check-handoff.py`。基线创建于 `main=1cb7ad95`；PR 创建后连续合并 `main=2a4a0503`（PR #35）与 `main=0068c872`（PR #36 中继配对），解决交接文档冲突并按新树复跑宿主回归；分支 `ao/handoff-conflicts/pr-mode`，不合并、不发布。
+- 实际执行：
+  - `python3 scripts/test-check-handoff.py` → 8 tests / 0 failures，覆盖 PR 容忍落后共享状态、记录缺失/空章节/占位符、路径与符号链接、变更集守卫、集成最新记录、发布篡改检测、目录移动可迁移。
+  - `python3 scripts/test-agent-workflow.py` → 19 tests / 0 failures（54.318s），含设备锁/模拟 ADB 离线回归，不访问真实设备。
+  - `python3 scripts/test-publication.py` → 19 tests / 0 failures；`python3 scripts/test-app-release.py` → 18 tests / 0 failures（并断言发布入口调用 `--release`）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过（共享状态允许落后）。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建）。
+  - `python3 scripts/check-handoff.py --release` → 通过（记录哈希、公开源码指纹、证据指纹与最新记录一致）。
+  - `python3 scripts/check-publication.py --git` → 0 findings；`python3 scripts/package-source.py` → 源码包生成成功。
+  - `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` → YAML_OK；`bash -n scripts/verify-workspace.sh` 与 Python 内存语法检查通过。
+- 未执行：设备/仪器、PR 独立审查、合并、`AGENT-STATE` 指针 + 最近 N 条实际精简、APK/发布附件；Android 构建/JVM/lint 与 Host 已由 GitHub Actions 在 `c417daa` 验证通过，后续 head 以 PR 页面为准。源码包 SHA 会随最终文档改动变化，以最后一次输出为准，不回填到记录形成循环。
+
 ## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
 
 - 范围：反向注册中继 + 既有 SSH 端到端最小切片；Kotlin 配对链接/帧/HMAC/TLS 钉扎/重连/loopback 桥；中继配置存储/控制器/设置页；Python 参考中继/主机端 agent；共享协议向量。基线 `origin/main=0555c3c0`，分支 `ao/tanuki-remote/relay-pairing`。
@@ -40,24 +54,6 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - Review P2 修复一：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
 - Review P2 修复二：新开放取消的“保存网页 Blob 文件”“下载网页文件”“导出浏览器文件”在取消/失败时会留下零字节或截断的 SAF 目标；现统一通过 `ExportCleanup` 删除本次 `CreateDocument` 目标，删除失败明确提示，并新增“写入部分数据后取消删除截断目标”的 JVM 回归。
 - 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
-
-## 原生界面对齐：非聊天主链路验证（2026-11-10，android_agent-44，非设备）
-
-- 范围：官方 DSH `0.2.1-rc.5` 一元会话管理（列表/内容搜索/新建/重命名/归档/权限与模型 projection）、会话级模型选择、权限目录与 `/permission` 命令、Skills/斜杠命令目录、本机未读、独立原生管理页、设置入口、安全模式只读、远程 origin 复用。基线 `origin/main=0555c3c0`，分支 `ao/native-parity/session-admin`。
-- 实际执行：
-  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL（2m04s，仅既有弃用/可读性告警）。
-  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshSessionAdminApiTest' --tests 'com.tanuki.DshSessionManagerControllerTest'` → BUILD SUCCESSFUL，21 tests / 0 failures / 0 errors / 0 skipped。
-  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime` → BUILD SUCCESSFUL，67 个结果文件、**556 tests / 0 failures / 0 errors / 0 skipped**（含本轮新增 21 项）。
-  - `./gradlew :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**。
-  - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（3m29s，40 tasks；只验证打包与清单，未安装设备）。
-- 新增回归：`DshSessionAdminApiTest` 7 项（会话权限/模型 projection；搜索/模型/权限/Skills/命令解析；业务错误短码；命令 success 判定；本地合成服务器验证 `session/list|create|rename|search|modelCatalog|selectModel`、`permissionPresets/catalog`、`commands/execute|list`、`skills/list`、`workspace/archiveSession` 共 11 个 method 的参数与 Cookie 只发 `/api`；非法权限 preset 不发网络；404 不含 token）；`DshSessionManagerControllerTest` 14 项（列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 `stopActivity`、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、`custom` 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie）。
-- 合并 `origin/main=533eff4`（文件查看器 PR #34）、`1cb7ad9`（原生对齐审计）、`2a4a050`（文件复制稳定 PR #35）与 `0068c87`（远程中继 PR #36）后 `testModernDebugUnitTest` → BUILD SUCCESSFUL，**74 个结果文件、621 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 与 `assembleModernDebug` 同次 BUILD SUCCESSFUL，lint 0 errors / 97 warnings / 1 hint（合入 main 后新增 BlobDownloads 条件告警与远程中继告警各 1 条）。
-- Codex Review 三项 P2 修复后：完整 `testModernDebugUnitTest` → BUILD SUCCESSFUL，**74 个结果文件、626 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 0 errors / 97 warnings / 1 hint；`assembleModernDebug` BUILD SUCCESSFUL。新增 4 项控制器回归（close 复位 models/permissions/catalog loading、慢列表新建失败清 loading、写后刷新失败清 loading、远程→本地端点切换清目录并丢弃在途响应）与 1 项 transport 适配回归。
-- 网络调用已收敛到 `DshAdminTransport`（`call(method,args): Any?` + `reset()`）；当前 `DshHttpAdminTransport` 为临时 HTTP 栈，PR #40 的 `DshTransport` 合并后改用 `DshAdminTransportAdapter(transport::call, transport::reset)`。
-- 一次 `--rerun-tasks` 全量组合中 `NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 并发时序失败；该测试单独重跑与随后完整 JVM 重跑均通过（556/0/0/0），属既有并发 flake，本轮未修改该测试或下载代码。
-- 明确限制：`workspace/archiveSession` 的运行中停止由官方执行，本轮只用合成响应验证参数；官方 `0.2.1-rc.5` 无会话硬删除端点，归档恢复需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
-- PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33` 的 Host handoff 检查与 Android build/JVM/lint 均 pass；最终 head 以 PR 页面为准。
-- 未执行：真实 Android/PRoot DSH 的 `/connect` Cookie、真实 `commands/execute` `/permission` 结果、真实归档/停止、设备 UI/深色/大字体、远程 SSH 端点、Android 仪器、APK 安装。JVM、lint 与 assemble 不能替代设备验收。
 
 ## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
 

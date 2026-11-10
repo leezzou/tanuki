@@ -66,7 +66,8 @@ if [ "$run_device" = true ] && [ "${TANUKI_DEVICE_LOCK_HELD:-}" != "1" ]; then
 fi
 source "$(dirname "$0")/env.sh"
 cd "$TANUKI_PROJECT"
-python3 scripts/check-handoff.py
+# 构建/设备门禁按普通 PR 模式校验本分支交接；共享状态由集成方刷新。
+python3 scripts/check-handoff.py --pr
 app_id=com.tanuki.modern.workspacecheck
 app_apk=app/build/outputs/apk/modern/debug/app-modern-debug.apk
 test_apk=app/build/outputs/apk/androidTest/modern/debug/app-modern-debug-androidTest.apk

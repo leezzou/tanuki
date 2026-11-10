@@ -14,7 +14,7 @@
 
 1. 逐项核对记录的独有结论、验证、失败与未完成事项；将仍有效的信息归入当前状态、专题文档或 [TEST-REPORT](TEST-REPORT.md)，保留实际日期和未测边界。
 2. 删除已确认过期的记录，修复文档引用，在当前交接列出清理范围与保留依据。当前记录、`TEMPLATE.md`、`CURRENT.json`、仍需使用的验证依据和未完成记录保留；不按日期一刀切。
-3. 更新状态/本次记录，运行带 `--record` 的交接刷新和无参数检查；重打源码包、核对外部 SHA，并执行本地链接和公开归档检查。
+3. 普通 PR 只更新本次记录并运行 `check-handoff.py --pr --record ...`；共享状态、印章和跨 PR 清理由集成维护方在批量合并后统一运行 `--integrate` / `--release`。重打源码包、核对外部 SHA，并执行本地链接和公开归档检查。
 4. 只有获准提交时才按明确路径暂存，包括已跟踪旧记录的删除；复查实际暂存不残留过期记录，再运行 `check-publication.py --git`、`git diff --cached --check`。推送已有提交前，也需复查这一清理要求；不静默改写已经发布的历史。
 
 此步骤是每次提交/推送的必做人工流程；现有检查脚本验证指纹/公开边界，不会自动判断自然语言记录是否过期或自动删除。
@@ -25,7 +25,9 @@
 python3 scripts/test-agent-workflow.py
 python3 scripts/test-publication.py
 python3 scripts/check-publication.py --git
-python3 scripts/check-handoff.py
+python3 scripts/check-handoff.py --pr
+# 仅集成/发布前，由单一维护方执行：
+python3 scripts/check-handoff.py --release
 
 git status --short
 git diff --cached --stat
@@ -62,7 +64,7 @@ python3 scripts/check-publication.py --archive artifacts/sources/Tanuki-<版本>
 
 Git检出不依赖本机构建附件。源码ZIP按明确目录清单生成；可选原生对应源码附件齐全时一并包含，否则在分发原生二进制前先准备对应源码并审核GPL等义务，见 [第三方声明](../THIRD_PARTY_NOTICES) 和 [发布说明](RELEASE.md)。只保留 `scripts/package-source.py` 这一个打包入口，删除无独立用途的旧兼容脚本。
 
-修改任何公开文件后都要更新交接/指纹；已发布的 0.1.9 附件不回写，下一次交付前重新打源码包，旧ZIP不能当作新版本。APK、用户数据和原始日志不提交Git；需要正式Release时另行验收、签名与授权发布。
+修改任何公开文件后都要新增/更新本次交接记录；共享状态与指纹由集成方刷新。已发布的 0.1.9 附件不回写，下一次交付前重新打源码包，旧ZIP不能当作新版本。APK、用户数据和原始日志不提交Git；需要正式Release时另行验收、签名与授权发布。
 
 固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。0.1.9 已按该顺序交付到 `artifacts/releases/0.1.9/`，0.1.8及更早历史附件保持原样；后续发版仍由用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
 
