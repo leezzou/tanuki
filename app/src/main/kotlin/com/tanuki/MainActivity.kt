@@ -509,6 +509,11 @@ class MainActivity : ComponentActivity() {
                         DshNativePage(
                             controller = nativeController,
                             modifier = modifier,
+                            endpointProvider = {
+                                val origin = manager.origin
+                                val launchUrl = manager.authenticatedUrl
+                                if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
+                            },
                             onFallback = { reason -> nativeFallback = Redact.text(reason) },
                             onSwitchOfficial = { setNativePreference(false) }
                         )

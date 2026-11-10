@@ -26,33 +26,59 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tanuki.web.DshComposerClient
+import com.tanuki.web.DshEndpoint
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
+import com.tanuki.web.HttpDshComposerRemote
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 原生只读页：左侧交互是官方会话列表，右侧是官方历史事件中的文本消息。
+ * 原生页：会话列表、官方历史文本消息与底部输入栏。
  * 没有可靠数据时明确显示空态或错误，不生成占位聊天内容。
  */
 @Composable
 fun DshNativePage(
     controller: DshNativeController,
     modifier: Modifier = Modifier,
+    endpointProvider: (() -> DshEndpoint?)? = null,
     onFallback: (String) -> Unit,
     onSwitchOfficial: () -> Unit
 ) {
     val state by controller.state.collectAsState()
+    val context = LocalContext.current
+    val composerScope = rememberCoroutineScope()
+    val composer = remember {
+        endpointProvider?.let { provider ->
+            DshComposerController(
+                client = DshComposerClient(HttpDshComposerRemote(provider)),
+                drafts = SharedPreferencesDshDraftStore(context),
+                scope = composerScope,
+                onSent = { sessionId -> controller.select(sessionId, force = true) }
+            )
+        }
+    }
+    LaunchedEffect(state.selectedId, composer) {
+        composer?.setSession(state.selectedId)
+    }
+    DisposableEffect(composer) {
+        onDispose { composer?.close() }
+    }
     LaunchedEffect(state.unavailableReason) {
         state.unavailableReason?.let(onFallback)
     }
@@ -64,10 +90,10 @@ fun DshNativePage(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("原生界面", style = MaterialTheme.typography.titleMedium)
-                    StatusPill("只读", true)
+                    StatusPill("可输入", true)
                 }
                 Text(
-                    "会话与消息来自官方 DSH 接口；不修改官方数据",
+                    "会话与消息来自官方 DSH 接口；发送会写入官方会话",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -115,7 +141,7 @@ fun DshNativePage(
             )
         }
         LazyColumn(
-            Modifier.fillMaxSize(),
+            Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -123,7 +149,7 @@ fun DshNativePage(
                 item {
                     EmptyNativeState(
                         title = "该会话没有可读文本消息",
-                        detail = "原生页只读取官方 session/page 的 user/message 与 assistant/message 文本；工具调用、附件和审批不在本切片展示。",
+                        detail = "原生页只读取官方 session/page 的 user/message 与 assistant/message 文本；历史附件、工具调用和审批不在本切片展示。",
                         onRefresh = { state.selectedId?.let(controller::select) }
                     )
                 }
@@ -134,6 +160,9 @@ fun DshNativePage(
                     NativeCaption("仅显示最近一页消息；更早历史请在官方界面查看。")
                 }
             }
+        }
+        if (composer != null && state.selectedId != null) {
+            DshComposerBar(composer, Modifier.fillMaxWidth())
         }
     }
 }

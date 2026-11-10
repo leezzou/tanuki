@@ -12,6 +12,18 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
 - 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
 
+## 原生输入与附件验证（2026-11-10，android_agent-46，非设备）
+
+- 范围：原生页底部输入栏；多行输入、按会话文本草稿、`Ctrl/⌘+Enter` 发送、@ 文件/会话补全、斜杠命令目录/补全/执行；图片/文件选择、图片缩略图与大图预览、普通文件上传换 receipt、粘贴图片、拖入文件；官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 协议；图片/文件大小与类型限制中文错误。基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`，分支 `ao/input-attachments/root`。
+- 实际执行（`source scripts/ao-worktree-env.sh`，`-x buildNativeRuntime`）：
+  - `:app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
+  - `:app:testModernDebugUnitTest --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest' --tests 'com.tanuki.DshComposerHttpTest'` → BUILD SUCCESSFUL，**37 tests / 0 failures / 0 errors / 0 skipped**。
+  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，69 个结果文件、**572 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 37）。
+  - `:app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
+- 新增回归：`DshComposerProtocolTest` 15 项（prompt/upload/commands/引用参数、图片上限解析、命令/文件/会话候选解析、PNG/JPEG/GIF/WebP 嗅探与尺寸、图片/文件限制、@ 引号/目录/跨行/邮箱式文本、斜杠识别、文件名清洗、字节格式化）；`DshComposerClientTest` 8 项（projection/commands/引用端点、上传 receipt/base64、prompt accepted、命令成功/业务失败/未解析、reset、非法输入、远程 loopback 协议）；`DshComposerControllerTest` 11 项（按会话草稿、图片+文本发送、文件先上传、命令附件策略、图片超限中文错误、@ 双来源候选、发送失败/官方拒绝保留草稿、官方附件错误码中文化、onSent 会话）；`DshComposerHttpTest` 3 项（Cookie 只发 `/api`、token 不进请求体/错误、401 单次重试与 reset 重连）。
+- 未执行：真实 Android 设备/模拟器上的输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴、拖入、附件上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机。合成 loopback 与 JVM 测试不能替代设备/真实 DSH 验收。
+- 已知边界：附件不跨会话保留，只持久化文本草稿；普通文件串行上传；图片在发送时 base64 编码；历史附件仍不在原生消息区展示；未实现流式跟随、取消、审批/提问与模型选择。
+
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
 - 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。

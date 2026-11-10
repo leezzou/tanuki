@@ -196,9 +196,31 @@ HTTP 200..399 或 401 → 存活
 设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话，不另造协议：
 
 - 认证：同一启动 token 调 `GET /connect?token=...&interactions=none`，只取签名 API Cookie；不跟随 302。
-- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
+- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；读取使用 `session/list`、`session/projections`、`session/page`，输入/附件使用下节列出的官方方法。
 - 实时流/审批：官方 `session/follow`、`session/control` 与审批 waterfall 只经 `/api/remote.mux` WebSocket；原生最小切片未实现，列表失败时回退官方界面。
 - 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebView 同源与 Cookie 策略不变。
+
+#### 1.7.1 原生输入与附件
+
+原生输入栏只调用官方已声明的 Typert Remote 方法，不新增端点、不改官方 npm 包：
+
+| 方法 | args 形状 | 用途 |
+|---|---|---|
+| `session/prompt` | `{"request":{"requestId","sessionId","mode":"queue/steer","content":[text/image/file],"clientTimeZone"?}}` | 发送普通提示词；图片为 `{type:"image",mediaType,data(base64),name?}`，文件为 `{type:"file",receiptId}` |
+| `fileUploads/upload` | `{"agentId":sessionId,"request":{"data":base64,"name"?}}` | 普通文件先上传，返回 `receiptId` 与 `file{attachmentId,name,bytes}`；图片不预上传，随 prompt 发送 |
+| `commands/list` | `{"agentId":sessionId}` | 读取斜杠命令、描述、输入提示与 `input.attachments` |
+| `commands/execute` | `{"agentId":sessionId,"line":"/name ...","submittedAttachments":[image/file]}` | 执行已识别斜杠命令；附件是否允许由 `commands/list` 声明 |
+| `fileReferences/list` | `{"agentId":sessionId,"query"}` | `@` 文件/目录补全；文件插入 `@path`，含空白用 `@"path"`，目录保留 `@"path/` |
+| `sessionReferenceResolver/candidates` | `{"agentId":sessionId,"query"}` | `@` 会话补全；插入官方 `mention`（`@[label](dsh-session:...)`） |
+
+限制与错误：
+
+- 图片类型只接受 PNG/JPEG/WebP/GIF，按实际字节嗅探；宽高、像素、单张字节与每条消息图片数优先采用 `session/projections` 的 `values.imageLimits`。
+- 客户端内存硬上限：单张图片 20 MiB、图片总量 30 MiB、单文件 20 MiB、每条消息最多 5 个文件/10 个附件、附件总量 50 MiB；服务端更小限制仍单独生效。
+- 图片 base64 与文件上传在后台线程编码；文件串行上传，失败保留附件并给中文重试提示；发送失败保留草稿与附件。
+- 草稿按会话保存在应用私有 `dsh-composer` 偏好中，只保存文本，不保存临时 URI/文件字节；切换会话或通知点击先落盘旧草稿。
+- 附件只读取文档选择器/剪贴板/拖入提供的 `content://` 或受限 `data:` 图片；不接受 `file://`、App 私有文件或外部明文路径。
+- 输入栏不改变消息流式/渲染路径；发送成功后由现有原生页强制重读当前会话历史。
 
 细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
