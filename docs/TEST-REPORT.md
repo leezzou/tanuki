@@ -14,6 +14,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 未执行：模拟器/真机上的深色模式、大字体、360dp 窄屏、触控区实际尺寸、列表滚动锚定、底部 sheet 手势、TalkBack；未安装 APK，未做 Android 仪器测试、独立 Review、合并或发布。编译/JVM/lint 不能替代设备验收。
 - 复审 P2 修复（查看器内传输入口）：`WorkspaceFilesPage` 的 `externalDocument` / `openedEntry` 分支原先在 `FileTransferOverlay` 之前 return，查看器内导出/复制后进度被全局 banner 隐藏且无法取消。现把浮层放进两个查看器分支的共同父 `Box`，Snackbar 仍只在列表分支挂载，避免查看器错误行重复。新增 Compose 仪器回归 `viewerKeepsTransferPillAndCancelAvailable`：在查看器点“导出此文件”，注入 4 MiB 长传输（25%），断言浮层可见、取消后消失。
 - 复审修复后验证：`compileModernDebugKotlin`、`compileModernDebugAndroidTestKotlin`、`lintModernDebug` → BUILD SUCCESSFUL（6m07s），lint 0 errors / 104 warnings；新增仪器用例仅编译，当前无可用测试设备，未运行。
+- 复审 P2 修复（搜索态批量操作）：第二行原以搜索分支优先，搜索中选中文件后批量操作被遮住；关闭搜索又会清空 query，导致“全选”失去过滤。现把选择态提到搜索之前，保留 query 并在操作行显示“筛选：…”，`全选` 仍只作用于 `shown` 匹配结果。新增 Compose 仪器回归 `searchSelectionKeepsBatchActionsAndSelectsOnlyMatches`：搜索 `hello`→选择→断言已选 1、筛选保留、全选后仍为 1、取消选择后 query 仍为 `hello`；仅编译，无可用设备未运行。
 
 ## 文本编码识别与兜底验证（2026-11-10，android_agent-57，非设备）
 

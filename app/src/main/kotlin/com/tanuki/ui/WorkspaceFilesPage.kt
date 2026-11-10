@@ -307,8 +307,29 @@ internal fun WorkspaceFilesPage(
                     }
                     PermissionChip(access, onClick = { permissionSheet = true })
                 }
-                // 第二行只承载一种上下文：搜索、批量选择或可横向滚动的面包屑。
+                // 第二行只承载一种上下文：批量选择优先于搜索，保证选中后操作可达且不丢过滤条件。
                 when {
+                    selected.isNotEmpty() -> Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "取消选择") }
+                        Text("已选 ${selected.size}", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(end = 4.dp))
+                        if (query.isNotEmpty()) Text("筛选：$query", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp))
+                        TextButton(onClick = { selected = shown.map { it.path }.toSet() },
+                            modifier = Modifier.heightIn(min = 48.dp)) { Text("全选") }
+                        if (location.writable) listOf("复制", "移动", "删除").forEach { label ->
+                            TextButton(
+                                onClick = { begin(label, entries.filter { it.path in selected }) },
+                                enabled = !busy && !runtimeRunning,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text(label) }
+                        }
+                    }
                     searching -> Row(
                         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -328,24 +349,6 @@ internal fun WorkspaceFilesPage(
                                 }
                             },
                         )
-                    }
-                    selected.isNotEmpty() -> Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "取消选择") }
-                        Text("已选 ${selected.size}", style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(end = 4.dp))
-                        TextButton(onClick = { selected = shown.map { it.path }.toSet() },
-                            modifier = Modifier.heightIn(min = 48.dp)) { Text("全选") }
-                        if (location.writable) listOf("复制", "移动", "删除").forEach { label ->
-                            TextButton(
-                                onClick = { begin(label, entries.filter { it.path in selected }) },
-                                enabled = !busy && !runtimeRunning,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                            ) { Text(label) }
-                        }
                     }
                     else -> Row(
                         Modifier.fillMaxWidth().heightIn(min = 48.dp)

@@ -446,6 +446,34 @@ class FilesBrowserPresentationTest {
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
 
+    @Test fun searchSelectionKeepsBatchActionsAndSelectsOnlyMatches() {
+        val folder = fixture()
+        val activity = launch()
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme {
+                        WorkspaceFilesPage(WorkspaceFileManager(runtime.paths), {}, {},
+                            Modifier.fillMaxSize().safeDrawingPadding())
+                    }
+                }
+            }
+            click(folder.name)
+            click("搜索当前文件夹")
+            input("hello")
+            find("hello.txt")
+            click("hello.txt的操作"); click("选择")
+            // 选择态必须优先于搜索行，否则批量操作被遮住；query 仍保留。
+            find("已选 1"); find("筛选：hello")
+            find("全选"); find("复制"); find("移动"); find("删除")
+            click("全选")
+            find("已选 1")
+            click("取消选择")
+            await { nodes().any { it.isEditable && it.text?.toString() == "hello" } }
+            find("hello.txt")
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+
     @Test fun textViewerCanReadPastEditorLimitAndUnknownFilesOfferOpenWith() {
         val folder = fixture()
         File(folder, "large.txt").writeText("start of document\n" + "分段阅读内容\n".repeat(40000) + "end of document")
