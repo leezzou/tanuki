@@ -2,8 +2,9 @@
 
 - Agent/会话标识：android_agent-55
 - 时间：2026-11-10 17:36（UTC+8）
-- 状态：已完成（待推送、独立审查与 CI）
+- 状态：已完成（已推送 PR #52，待独立审查与 CI）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
+- PR：[#52](https://github.com/leezzou/tanuki/pull/52)
 
 > 每任 Agent 创建唯一记录，不覆盖前任。普通 PR 只新增本记录，**不要改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。开始填写目标/范围；结束或中断前补齐证据、未测试范围与可执行下一步。只读 Agent 交回同格式文本，由主 Agent 保存。不要包含真实 Key、Cookie、token、会话/备份或私有原始日志。
 
@@ -56,7 +57,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：推送分支、创建 PR、独立 Codex High 审查、CI、适用设备 QA。
+- 未完成：独立 Codex High 审查、CI、适用设备 QA。分支已推送，PR [#52](https://github.com/leezzou/tanuki/pull/52) 已创建。
 - 外部阻塞：无（设备与真实主机验收需要独立 QA 和明确目标）。
 - 用户暂停：合并/发布、真机/真实账号验收、API Key 保存。
 
