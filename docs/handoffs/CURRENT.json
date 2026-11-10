@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261110-1233-native-ui-chat.md",
-  "recordSha256": "336cb0a592cb8d778f52e52c6d4b8078082d58730130fb18d9e327695a9cf47e",
-  "sourceFingerprint": "da63e3fe8127a42e523ca3cf4289493ce6f0c2c2b2b41609af3ff6ca225f8f31",
-  "fileCount": 626
+  "record": "docs/handoffs/20261110-1138-remote-relay-pairing.md",
+  "recordSha256": "c197e9c8566b0361afda9a0849f6ce9ed093459f2db96b3f1bc0226d082bdc81",
+  "sourceFingerprint": "55d1da884650db1a4875c0f825342ed1377b75f4cbc5b6242ba9dc73e067b7d9",
+  "fileCount": 618
 }

@@ -4,6 +4,7 @@ import com.tanuki.runtime.DshCookie
 import com.tanuki.runtime.DshCookieIsolation
 import com.tanuki.runtime.DshCookieJar
 import com.tanuki.runtime.RemoteHostConfig
+import com.tanuki.runtime.RemoteRelayPairing
 import com.tanuki.web.DshConnectionPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -43,6 +44,45 @@ class DshRemoteIsolationTest {
         assertEquals("local", DshCookieIsolation.LOCAL_SCOPE)
         assertFalse(a.cookieScope() == b.cookieScope())
         assertFalse(a.cookieScope() == sameHostOtherUser.cookieScope())
+    }
+
+    @Test
+    fun relayCookieScopeKeepsUserAndDshPortSeparatedWhileAllowingRoomChanges() {
+        val pairing = RemoteRelayPairing(
+            relayHost = "relay.example.test",
+            relayPort = 8443,
+            roomId = "ICEiIyQlJicoKSorLC0uLw",
+            token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            hostId = "303132333435363738393a3b3c3d3e3f"
+        )
+        val base = RemoteHostConfig(
+            host = "relay-display",
+            sshPort = 22,
+            user = "alice",
+            remoteDshPort = 3080,
+            relay = pairing
+        )
+        val otherUser = base.copy(user = "bob")
+        val otherDshPort = base.copy(remoteDshPort = 3081)
+        val sameServiceOtherRoom = base.copy(relay = pairing.copy(roomId = "MDEyMzQ1Njc4OWFiY2RlZg"))
+
+        // room 不是服务身份：同一用户/端口换房间必须复用 Cookie。
+        assertEquals(base.cookieScope(), sameServiceOtherRoom.cookieScope())
+        // 用户或远程 DSH 端口变化必须是不同 Cookie 分区。
+        assertFalse(base.cookieScope() == otherUser.cookieScope())
+        assertFalse(base.cookieScope() == otherDshPort.cookieScope())
+
+        val jar = DshCookieJar()
+        jar.save(base.cookieScope(), listOf(cookie("alice-auth", "alice-secret")))
+        jar.save(otherUser.cookieScope(), listOf(cookie("bob-auth", "bob-secret")))
+        jar.save(otherDshPort.cookieScope(), listOf(cookie("port-auth", "port-secret")))
+
+        assertEquals(listOf("alice-auth"), jar.load(base.cookieScope()).map { it.name })
+        assertEquals(listOf("alice-auth"), jar.load(sameServiceOtherRoom.cookieScope()).map { it.name })
+        assertEquals(listOf("bob-auth"), jar.load(otherUser.cookieScope()).map { it.name })
+        assertEquals(listOf("port-auth"), jar.load(otherDshPort.cookieScope()).map { it.name })
+        assertTrue(jar.load(otherUser.cookieScope()).none { it.value.contains("alice-secret") })
+        assertTrue(jar.load(otherDshPort.cookieScope()).none { it.value.contains("alice-secret") })
     }
 
     @Test
