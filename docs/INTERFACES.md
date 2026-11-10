@@ -154,8 +154,12 @@ HTTP 200..399 或 401 → 存活
 | 就绪探测 | 隧道建立后 `GET http://127.0.0.1:<本地转发端口>/`，2xx/3xx/401 视为远程 DSH 可达；失败关闭隧道并回退本地 |
 | 切换 | `RemoteHostMachine` 同时保存本地与远程端点，远程优先；远程断开/失败自动恢复本地端点，本地 DSH 停止不清除仍存活的远程端点 |
 | Cookie 隔离 | 本地与每台远程 DSH 使用独立逻辑 Cookie 集合；切换前清空 CookieManager 并恢复目标集合，失败时页面不可用；Cookie 端口不参与作用域 |
-| 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文错误并关闭隧道；不自动重试、不静默降级为明文 |
-| 未实现 | 中继/WebRTC、远程 DSH 启停、多远程主机、Ed25519 私钥/主机密钥；均标注为后续切片 |
+| 连接向导 | 六步固定顺序 `METHOD → HOST_ACCOUNT → AUTHENTICATION → FINGERPRINT → TEST → DONE`；不可跳步，`FINGERPRINT` 只有在首次连接/信任缺失时出现，未勾选“已核对 SHA256”不能继续 |
+| 阶段进度 | `TCP → SSH_HANDSHAKE → AUTHENTICATION → PORT_FORWARD → DSH_PROBE → COMPLETE`；只前进不后退；控制器通过可选 `StagedSshTransport` 报告，未实现阶段回调的测试假传输退化为粗粒度 |
+| 错误契约 | `RemoteFailureInfo(stage, kind, reason, suggestion, retryable)`；中文原因 + 下一步建议；主机密钥变化 `retryable=false`；错误文案只使用固定中文或领域异常，不回显密码/私钥/token |
+| 命名连接 | 最多 50 条，名称 1-64 字符；非敏感字段与应用私有配置分离，密码/私钥/口令/token 只经 Android Keystore AES-256-GCM 保存；删除一条不影响其他连接；同一时间仍只允许一个活动远程连接 |
+| 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文阶段化错误并关闭隧道；不自动重试、不静默降级为明文 |
+| 未实现 | 中继/WebRTC、远程 DSH 启停、多台远程主机同时连接、Ed25519 私钥/主机密钥；均标注为后续切片 |
 
 ### 1.6 无公网 IP 中继配对（反向注册切片）
 

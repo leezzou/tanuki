@@ -2,6 +2,8 @@
 
 本文件记录“官方界面 / 原生界面”开关的接口发现、已实现最小切片、回退与安全边界。默认始终是官方界面；原生界面是可切换的交互层，复用官方 Typert Remote 读写会话；不修改官方 npm 包、DSH 数据目录、会话内容或 WebView 安全策略。
 
+导航、适配、三态、无障碍与冷启动的通用组件和接线清单见 [原生界面导航、适配与可用性打磨](NATIVE-UI-POLISH.md)。
+
 ## 1. 结论
 
 官方 DSH `0.2.1-rc.5` 没有 REST 会话列表端点，也没有 SSE。会话、消息、发送与审批都通过 **Typert Remote** 暴露：
@@ -72,10 +74,14 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshPlanCard.kt` | 计划卡片：多步骤状态、进度条、当前步骤、待审阅时“同意执行/要求修改”；不复用普通消息气泡 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 挂载 `DshToolCard`、输入栏、Markdown、审批入口条/抽屉；46 增加窗口化消息、滚动跟随、发送失败卡片；51 接入 `DshApprovalEntryBar`/`DshApprovalSheet` |
 | `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 46 渲染层：标题/嵌套列表/任务列表/引用/表格/分隔线/代码块/行内样式；代码横向滚动与可选行号、链接确认、图片/附件占位与查看器 |
-| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：消息窗口、底部跟随、流式增量合并、图片采样、composer 失败跟踪、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：消息窗口、底部跟随、流式增量合并、图片采样、composer 发送记录/失败跟踪、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析；51 已改用 `DshToolMerge.merge` 保留真实起止时间 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | **android_agent-44 独占**；设置开关、DSH 页原生/官方切换、回退提示与“重试” |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、单个与批量归档、写操作与中文错误 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 按 cwd 分组的会话列表、多选批量归档、主机切换、详情分页、模型/权限面板与确认交互 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立会话管理页入口、本机未读/置顶偏好与本机/远程主机切换 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 权限人话说明、删除能力、模型强度、cwd 分组与主机摘要的纯函数 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置入口、官方/原生 DSH 切换、回退提示与按域分组的设置页 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面；54 不改此文件；51 仅补 composer send recorder 与审批回调 |
 
 偏好文件 `ui`、键 `dsh-ui`，值 `official` / `native`；未知值回到 `official`。设置入口在“设置 → 网页与兼容性 → 界面：官方界面 / 原生界面”。
 
@@ -197,6 +203,20 @@
 - 服务未运行时原生页不显示；停止服务会清空原生页内存 Cookie；再次启动由新 `origin` 自动重新认证。
 - 原生页通过官方 `session/prompt`/`session/cancel` 发送与停止，附件走官方上传/引用；不直接写 `userdata/dsh`。审批只回答官方已下发的 `approval/request`，不主动创建审批。
 - “记住本次运行”不是官方持久授权：只在内存中按 `sessionId + toolName + 风险等级` 复用，关闭原生页/服务停止即清空；高风险与不同工具不会被低风险记忆自动放行。
+
+## 4.1 原生会话管理与设置（android_agent-54）
+
+原生会话管理页把官方 `session/*`、`workspace/archiveSession`、`permissionPresets/catalog` 与 `commands/execute "/permission <preset>"` 组合成一个独立界面；所有会话数据仍来自当前 DSH 实例，不建立第二套会话库。
+
+- 列表：首次读取显示骨架加载态；读取失败且无旧数据时显示可重试错误态；有旧数据时保留列表并提示刷新失败。搜索对标题/会话 ID 即时过滤，消息内容搜索仍需显式点击搜索图标。未读与置顶都是本机偏好：未读按本机最后查看的 `updatedAt` 计算，置顶只改变本页顺序并保存在应用私有偏好中，不写回官方会话。运行中标识来自官方 `running` 字段。
+- 分组与多选：按官方 `cwd` 把会话归入文件夹（空目录为“未分组”），组内保持置顶/更新时间顺序；顶部“选择”进入多选，可批量归档并显示逐个进度。官方没有会话硬删除端点，批量删除只显示不可用说明，不伪造删除。
+- 主机切换：列表头部 chip 显示当前主机与状态（本机运行中/未运行、远程已连接/连接中/未保存配置），点开底部 sheet 可在“本机 + 当前已保存远程主机”之间切换；切换只改变会话管理页的数据源，不删除本地/远程会话或项目文件。当前运行时只保存一个远程配置，多主机列表需共享 runtime 类型扩展。
+- 刷新：已有列表时使用下拉刷新，不再清空列表；首次读取才显示整页加载态。
+- 操作：新建、重命名、归档都有确认或明确的输入/后果说明；归档运行中会话会请求官方先停止当前回合、子代理、后台任务与提醒。官方当前没有会话硬删除端点，详情页只展示“删除会话（官方接口不支持）”，不提供假按钮；归档也没有本页撤销按钮。
+- 详情分页：概览、进度、产物、文件四个 tab。概览保留真实会话信息与设置入口；进度/产物/文件中的待办、目标、产物预览和文件树需要 `goals/*`、`artifacts`、`workspaceFiles/*` 契约，当前未接入，因此明确显示“暂不支持”并提供真实工作目录复制，不生成假进度、假产物或假文件树。
+- 模型与推理强度：展示官方模型目录、当前选择、模型默认推理强度和每个模型的强度选项；切换失败保留原选择并在面板内显示中文原因（如“所选模型不可用”）。
+- 权限模式：标准预设使用人话说明，并同时展示官方说明；`custom` 只展示、不能切换。`danger-full-access` 需要二次确认对话框、逐条风险说明和勾选确认后才提交，Tanuki 不会自动切换。
+- 设置：按「外观与语言 / 通知与后台 / 存储与空间 / 引擎与更新 / 远程主机 / 关于与诊断」六域分组；未接入的手动主题切换、语言切换、独立字号等明确写“暂不支持”，通知与存储沿用真实能力。
 
 ## 5. 安全边界
 

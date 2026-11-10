@@ -63,7 +63,8 @@ class RuntimeManager(val context: Context) {
                 )
             }
         },
-        activateScope = { scopeName -> cookieIsolation.switchTo(scopeName) }
+        activateScope = { scopeName -> cookieIsolation.switchTo(scopeName) },
+        profileStore = androidRemoteHostProfileStore(context)
     )
     val failurePolicy = RuntimeFailurePolicy()
     private val recoveryState = MutableStateFlow(RuntimeRecoveryState())
