@@ -18,8 +18,9 @@ class DshSwitchTest {
         targetLockVerified: Boolean = true,
         serviceStopped: Boolean = true,
         busy: Boolean = false,
-        liveChild: Boolean = false
-    ) = DshSwitch.requireSwitchable(target, current, installed, targetLockVerified, serviceStopped, busy, liveChild)
+        liveChild: Boolean = false,
+        updateBusy: Boolean = false
+    ) = DshSwitch.requireSwitchable(target, current, installed, targetLockVerified, serviceStopped, busy, liveChild, updateBusy)
 
     @Test
     fun rejectsCurrentVersion() {
@@ -44,6 +45,9 @@ class DshSwitchTest {
         assertTrue(assertThrows(IllegalStateException::class.java) {
             requireSwitchable("1.3.0", serviceStopped = false)
         }.message!!.contains("先停止 DSH 服务"))
+        assertTrue(assertThrows(IllegalStateException::class.java) {
+            requireSwitchable("1.3.0", updateBusy = true)
+        }.message!!.contains("更新检查或安装正在进行"))
     }
 
     @Test
