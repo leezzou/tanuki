@@ -5,7 +5,6 @@ import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.MemoryDshDraftStore
 import com.tanuki.ui.DshChatRenderPolicy
 import com.tanuki.ui.DshComposerDraftPolicy
-import com.tanuki.ui.DshComposerSendEvent
 import com.tanuki.ui.DshComposerSendRecorder
 import com.tanuki.ui.DshComposerSendTracker
 import com.tanuki.ui.DshFailedPrompt
@@ -20,12 +19,11 @@ import com.tanuki.ui.DshStreamFrame
 import com.tanuki.ui.DshStreamPolicy
 import com.tanuki.web.DshComposerClient
 import com.tanuki.web.DshComposerRemote
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -126,7 +124,7 @@ class DshChatRenderTest {
         }
     }
 
-    @Test fun realComposerSendFailureFlowsIntoFailureCardState() = runBlocking {
+    @Test fun realComposerSendFailureFlowsIntoPersistedFailureMap() = runBlocking {
         val remote = object : DshComposerRemote {
             override suspend fun call(method: String, args: JSONObject): Any? = when (method) {
                 "session/prompt" -> throw java.io.IOException("网络连接中断")
@@ -140,25 +138,58 @@ class DshChatRenderTest {
             drafts = MemoryDshDraftStore(),
             scope = CoroutineScope(Dispatchers.Unconfined)
         )
-        var failure: DshFailedPrompt? = null
-        val collector = launch(Dispatchers.Unconfined) {
-            recorder.events.collect { event ->
-                if (event is DshComposerSendEvent.Failed) {
-                    failure = DshFailedPrompt(event.text, event.error, event.time, event.attachmentCount)
-                }
-            }
-        }
         controller.setSession("session-A")
         withTimeout(2_000) { controller.state.first { it.sessionId == "session-A" } }
         controller.updateText("真实输入栏原文")
         controller.send()
-        withTimeout(2_000) {
-            while (failure == null) delay(10)
+        val failed = withTimeout(2_000) {
+            while (recorder.failures.value["session-A"] == null) delay(10)
+            recorder.failures.value.getValue("session-A")
         }
-        assertEquals("真实输入栏原文", failure!!.text)
-        assertTrue(failure!!.reason.contains("网络"))
-        collector.cancel()
+        assertEquals("真实输入栏原文", failed.text)
+        assertTrue(failed.reason.contains("网络"))
         controller.close()
+    }
+
+    @Test fun recorderRejectsBusinessFailureAndKeepsSessionsSeparate() = runBlocking {
+        val remote = object : DshComposerRemote {
+            override suspend fun call(method: String, args: JSONObject): Any? = when (method) {
+                "session/prompt" -> {
+                    val session = args.optJSONObject("request")?.optString("sessionId")
+                    JSONObject().put("accepted", session == "session-ok")
+                }
+                "commands/execute" -> JSONObject().put(
+                    "result",
+                    JSONObject().put("kind", "error").put("text", "命令失败")
+                )
+                else -> null
+            }
+        }
+        val recorder = DshComposerSendRecorder(remote)
+        recorder.call("session/prompt", promptArgs("session-a", "被拒绝"))
+        recorder.call("commands/execute", JSONObject().put("agentId", "session-b").put("line", "/bad"))
+        assertEquals("官方接口未接受该消息", recorder.failures.value.getValue("session-a").reason)
+        assertEquals("命令失败", recorder.failures.value.getValue("session-b").reason)
+        recorder.call("session/prompt", promptArgs("session-ok", "成功"))
+        assertFalse(recorder.failures.value.containsKey("session-ok"))
+    }
+
+    @Test fun cancellationDoesNotBecomeFailure() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val remote = object : DshComposerRemote {
+            override suspend fun call(method: String, args: JSONObject): Any? {
+                gate.await()
+                return JSONObject().put("accepted", true)
+            }
+        }
+        val recorder = DshComposerSendRecorder(remote)
+        val job = launch(Dispatchers.Unconfined) {
+            runCatching { recorder.call("session/prompt", promptArgs("session-cancel", "取消")) }
+        }
+        withTimeout(2_000) { while (!job.isActive) delay(1) }
+        job.cancel()
+        job.join()
+        assertTrue(recorder.failures.value.isEmpty())
     }
 
     @Test fun sendRecorderCapturesFastFailureWithoutUiFrames() = runBlocking {
@@ -167,27 +198,22 @@ class DshChatRenderTest {
                 throw java.io.IOException("连接立即失败")
         }
         val recorder = DshComposerSendRecorder(remote)
-        val events = ArrayList<DshComposerSendEvent>()
-        val collector = launch(Dispatchers.Unconfined) {
-            recorder.events.take(2).toList(events)
-        }
         val args = JSONObject().put(
             "request",
-            JSONObject().put(
-                "content",
-                JSONArray()
-                    .put(JSONObject().put("type", "text").put("text", "失败原文"))
-                    .put(JSONObject().put("type", "file").put("receiptId", "r-1"))
-            )
+            JSONObject()
+                .put("sessionId", "session-A")
+                .put(
+                    "content",
+                    JSONArray()
+                        .put(JSONObject().put("type", "text").put("text", "失败原文"))
+                        .put(JSONObject().put("type", "file").put("receiptId", "r-1"))
+                )
         )
         runCatching { recorder.call("session/prompt", args) }
-        withTimeout(2_000) { collector.join() }
-        assertEquals(2, events.size)
-        assertTrue(events[0] is DshComposerSendEvent.Started)
-        val failed = events[1] as DshComposerSendEvent.Failed
+        val failed = recorder.failures.value.getValue("session-A")
         assertEquals("失败原文", failed.text)
         assertEquals(1, failed.attachmentCount)
-        assertTrue(failed.error.contains("连接"))
+        assertTrue(failed.reason.contains("连接"))
     }
 
     @Test fun retryPolicyRequiresUnchangedTextOnlyDraft() {
@@ -287,4 +313,14 @@ class DshChatRenderTest {
         assertTrue(unknown.hint.isNotBlank())
         assertTrue(DshErrorPresenter.describe("会话已结束").detail.contains("会话已结束"))
     }
+
+    private fun promptArgs(sessionId: String, text: String): JSONObject = JSONObject().put(
+        "request",
+        JSONObject()
+            .put("sessionId", sessionId)
+            .put(
+                "content",
+                JSONArray().put(JSONObject().put("type", "text").put("text", text))
+            )
+    )
 }

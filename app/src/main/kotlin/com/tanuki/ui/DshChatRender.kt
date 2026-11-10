@@ -2,9 +2,11 @@ package com.tanuki.ui
 
 import com.tanuki.runtime.Redact
 import com.tanuki.web.DshComposerRemote
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.Locale
 
@@ -403,57 +405,70 @@ object DshTablePolicy {
     }
 }
 
-/** 输入栏发送记录：在 transport 边界产生，不依赖 Compose 是否看到 sending 的中间帧。 */
-sealed interface DshComposerSendEvent {
-    val text: String
-    val attachmentCount: Int
-
-    data class Started(
-        override val text: String,
-        override val attachmentCount: Int
-    ) : DshComposerSendEvent
-
-    data class Succeeded(override val text: String) : DshComposerSendEvent {
-        override val attachmentCount: Int get() = 0
-    }
-
-    data class Failed(
-        override val text: String,
-        val error: String,
-        override val attachmentCount: Int,
-        val time: Long = System.currentTimeMillis()
-    ) : DshComposerSendEvent
-}
+/** 输入栏一次发送失败的最终结果；按会话保存，页面离场/重入后仍可恢复。 */
+data class DshComposerSendResult(
+    val sessionId: String,
+    val text: String,
+    val reason: String,
+    val attachmentCount: Int,
+    val time: Long = System.currentTimeMillis()
+)
 
 /**
- * 包装官方 composer remote，在真正提交/返回的边界记录原文和附件数量。
+ * 包装官方 composer remote，在**最终业务结果**确定后记录失败；成功/取消会清除该会话旧失败。
  *
- * 这样即使服务地址未就绪、连接立即拒绝，页面也能拿到失败提交；不要求 UI 先观察
- * `sending=true`。记录器只旁路记录，不改变请求/响应、错误传播或附件语义。
+ * - `session/prompt` 只有在 `accepted=true` 时才算成功；`commands/execute` 只有在
+ *   `result.kind=success` 时才算成功，和 [DshComposerClient] 的校验保持一致。
+ * - 携带 sessionId 持久化到 StateFlow，页面切走/重入不会丢失败；取消不作为失败展示。
+ * - 只旁路记录，不改变请求/响应、错误传播或附件语义。
  */
 class DshComposerSendRecorder(
     private val delegate: DshComposerRemote
 ) : DshComposerRemote {
-    private val mutableEvents = MutableSharedFlow<DshComposerSendEvent>(extraBufferCapacity = 16)
-    val events: SharedFlow<DshComposerSendEvent> = mutableEvents.asSharedFlow()
+    private val mutableFailures = MutableStateFlow<Map<String, DshComposerSendResult>>(emptyMap())
+    val failures: StateFlow<Map<String, DshComposerSendResult>> = mutableFailures.asStateFlow()
 
     override suspend fun call(method: String, args: JSONObject): Any? {
         if (method != PROMPT_METHOD && method != COMMAND_METHOD) return delegate.call(method, args)
+        val sessionId = submittedSessionId(method, args)
         val text = submittedText(method, args)
         val attachments = submittedAttachmentCount(method, args)
-        mutableEvents.tryEmit(DshComposerSendEvent.Started(text, attachments))
+        if (sessionId.isNotBlank()) {
+            // 新一次提交先清掉该会话的旧失败卡，避免旧内容与新尝试混淆。
+            mutableFailures.update { it - sessionId }
+        }
         return try {
             val value = delegate.call(method, args)
-            mutableEvents.tryEmit(DshComposerSendEvent.Succeeded(text))
+            val businessError = businessFailure(method, value)
+            if (sessionId.isNotBlank()) {
+                if (businessError == null) {
+                    mutableFailures.update { it - sessionId }
+                } else {
+                    mutableFailures.update {
+                        it + (sessionId to DshComposerSendResult(
+                            sessionId = sessionId,
+                            text = text,
+                            reason = businessError,
+                            attachmentCount = attachments
+                        ))
+                    }
+                }
+            }
             value
+        } catch (cancelled: CancellationException) {
+            // 切换会话/关闭 composer 会取消发送；这不是失败，不能把 A 的取消写到 B。
+            throw cancelled
         } catch (error: Throwable) {
-            mutableEvents.tryEmit(
-                DshComposerSendEvent.Failed(
-                    text = text,
-                    error = Redact.text(error.message ?: "发送失败").take(240),
-                    attachmentCount = attachments
-                )
-            )
+            if (sessionId.isNotBlank()) {
+                mutableFailures.update {
+                    it + (sessionId to DshComposerSendResult(
+                        sessionId = sessionId,
+                        text = text,
+                        reason = Redact.text(error.message ?: "发送失败").take(240),
+                        attachmentCount = attachments
+                    ))
+                }
+            }
             throw error
         }
     }
@@ -461,6 +476,13 @@ class DshComposerSendRecorder(
     override fun reset() {
         delegate.reset()
     }
+
+    private fun submittedSessionId(method: String, args: JSONObject): String =
+        if (method == COMMAND_METHOD) {
+            args.optString("agentId")
+        } else {
+            args.optJSONObject("request")?.optString("sessionId").orEmpty()
+        }
 
     private fun submittedText(method: String, args: JSONObject): String {
         if (method == COMMAND_METHOD) return args.optString("line")
@@ -484,6 +506,21 @@ class DshComposerSendRecorder(
             if (part.optString("type") != "text") count++
         }
         return count
+    }
+
+    /** 与 DshComposerClient 的最终业务校验保持一致；null 表示成功。 */
+    private fun businessFailure(method: String, value: Any?): String? {
+        if (method == PROMPT_METHOD) {
+            val root = value as? JSONObject ?: return "发送响应格式不正确"
+            return if (root.optBoolean("accepted", false)) null else "官方接口未接受该消息"
+        }
+        val root = value as? JSONObject ?: return "未找到该斜杠命令"
+        val result = root.optJSONObject("result") ?: return "斜杠命令返回格式不正确"
+        return when (result.optString("kind")) {
+            "success" -> null
+            "error" -> result.optString("text").take(240).ifBlank { "斜杠命令执行失败" }
+            else -> "斜杠命令返回格式不正确"
+        }
     }
 
     private companion object {

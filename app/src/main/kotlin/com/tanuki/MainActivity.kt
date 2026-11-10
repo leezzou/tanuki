@@ -625,7 +625,7 @@ class MainActivity : ComponentActivity() {
                             onClearRemembered = approvalController::clearRemembered,
                             onForgetRemembered = approvalController::forgetRemembered,
                             onDismissNotice = approvalController::dismissNotice,
-                            composerSendEvents = composerRecorder.events
+                            composerSendFailures = composerRecorder.failures
                         )
                     },
                     browserOpenRequest = browserOpenRequest,

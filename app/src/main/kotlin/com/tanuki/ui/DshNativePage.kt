@@ -58,7 +58,8 @@ import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshTimelineItem
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,59 +82,45 @@ fun DshNativePage(
     onClearRemembered: () -> Unit = {},
     onForgetRemembered: (DshRememberedChoice) -> Unit = {},
     onDismissNotice: () -> Unit = {},
-    /** 输入栏 transport 边界的发送记录；有它时不依赖重组是否看到 sending 中间帧。 */
-    composerSendEvents: Flow<DshComposerSendEvent>? = null
+    /** 输入栏按会话持久化的失败结果；有它时页面重入也能恢复失败卡片。 */
+    composerSendFailures: StateFlow<Map<String, DshComposerSendResult>>? = null
 ) {
     val state by controller.state.collectAsState()
     val composerState by composer.state.collectAsState()
     val scope = rememberCoroutineScope()
     val sendTracker = remember(composer) { DshComposerSendTracker() }
-    var composerFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
+    var fallbackFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
     var composerPendingText by remember { mutableStateOf("") }
+    val emptyFailures = remember { MutableStateFlow<Map<String, DshComposerSendResult>>(emptyMap()) }
+    val recordedFailures by (composerSendFailures ?: emptyFailures).collectAsState()
+    val composerFailure = fallbackFailure ?: recordedFailures[state.selectedId]?.let {
+        DshFailedPrompt(it.text, it.reason, it.time, it.attachmentCount)
+    }
     var showApprovalSheet by rememberSaveable { mutableStateOf(false) }
-    // 直接收集 composer 状态（不经过重组），并在没有 recorder 时用它作为兜底。
-    LaunchedEffect(composer, composerSendEvents) {
+    // 直接收集 composer 状态（不经过重组）；recorder 存在时失败由持久化结果提供。
+    LaunchedEffect(composer, composerSendFailures) {
         var wasSending = false
         composer.state.collect { current ->
             if (current.sending) {
                 if (composerPendingText.isBlank()) composerPendingText = current.text
             } else {
                 composerPendingText = ""
-                if (wasSending && current.error == null) composerFailure = null
+                if (wasSending && current.error == null) fallbackFailure = null
             }
-            if (composerSendEvents == null) {
+            if (composerSendFailures == null) {
                 sendTracker.observe(
                     current.sending,
                     current.text,
                     current.error,
                     current.attachments.size
-                )?.let { composerFailure = it }
+                )?.let { fallbackFailure = it }
+                if (current.sending) fallbackFailure = null
             }
             wasSending = current.sending
         }
     }
-    LaunchedEffect(composerSendEvents) {
-        composerSendEvents?.collect { event ->
-            when (event) {
-                is DshComposerSendEvent.Started -> composerPendingText = event.text
-                is DshComposerSendEvent.Succeeded -> {
-                    composerPendingText = ""
-                    composerFailure = null
-                }
-                is DshComposerSendEvent.Failed -> {
-                    composerPendingText = ""
-                    composerFailure = DshFailedPrompt(
-                        text = event.text,
-                        reason = event.error,
-                        time = event.time,
-                        attachmentCount = event.attachmentCount
-                    )
-                }
-            }
-        }
-    }
     LaunchedEffect(state.selectedId) {
-        composerFailure = null
+        fallbackFailure = null
         composerPendingText = ""
         sendTracker.reset()
     }
