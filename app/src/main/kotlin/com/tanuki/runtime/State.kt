@@ -70,5 +70,10 @@ class Paths(context: Context) {
         try { out.write(text.toByteArray()); f.finishWrite(out) } catch (t: Throwable) { f.failWrite(out); throw t }
     }
     fun read(name: String): String? = runCatching { AtomicFile(File(state, name)).openRead().bufferedReader().use { it.readText() } }.getOrNull()
+
+    /** 同时删除 AtomicFile 的备份，避免下次读取把已完成的组件事务恢复回来。 */
+    fun deleteState(name: String) {
+        runCatching { AtomicFile(File(state, name)).delete() }
+    }
     fun metadata(): JSONObject = runCatching { JSONObject(read("installed.json") ?: "{}") }.getOrDefault(JSONObject())
 }

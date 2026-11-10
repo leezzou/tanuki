@@ -329,7 +329,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
                 else -> File(paths.runtime,"engine-install")
             })
         }
-        File(paths.state,"component-transaction").delete()
+        paths.deleteState("component-transaction")
     }
     private fun swapTargets(name:String,version:String?):Pair<File,File> = when(name) {
         "ubuntu" -> paths.root to File(paths.runtime,"ubuntu.previous")
@@ -354,7 +354,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
             withContext(NonCancellable) {
                 paths.atomic("component-transaction",journal.put("phase","committed").toString())
                 remove(previous)
-                File(paths.state,"component-transaction").delete()
+                paths.deleteState("component-transaction")
             }
         } catch(t:Throwable) {
             withContext(NonCancellable) { recover() }
@@ -481,7 +481,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
                 DshUninstall.apply(selected,target,quarantine,
                     journal={phase->paths.atomic("component-transaction",
                         JSONObject().put("component","dsh").put("action","uninstall").put("version",selected).put("phase",phase).toString())},
-                    clearJournal={File(paths.state,"component-transaction").delete()},
+                    clearJournal={paths.deleteState("component-transaction")},
                     delete={RuntimeManager.deleteTree(it)})
             } finally { runCatching { refresh(false) } }
             // 只回收不再被任何目录引用的硬链接载荷；共享 userdata/workspaces/backups 与安装归档不在此删除。
