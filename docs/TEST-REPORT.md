@@ -18,11 +18,25 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（`source scripts/ao-worktree-env.sh`，`-x buildNativeRuntime`）：
   - `:app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - `:app:testModernDebugUnitTest --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` → BUILD SUCCESSFUL，**34 tests / 0 failures / 0 errors / 0 skipped**。
-  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，68 个结果文件、**569 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 34）。
+  - `:app:testModernDebugUnitTest` → BUILD SUCCESSFUL，70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 本切片 34）。
   - `:app:lintModernDebug` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
 - 新增回归：`DshComposerProtocolTest` 15 项（prompt/upload/commands/引用参数、图片上限解析、命令/文件/会话候选解析、PNG/JPEG/GIF/WebP 嗅探与尺寸、图片/文件限制、@ 引号/目录/跨行/邮箱式文本、斜杠识别、文件名清洗、字节格式化）；`DshComposerClientTest` 8 项（projection/commands/引用端点、上传 receipt/base64、prompt accepted、命令成功/业务失败/未解析、reset、非法输入、远程 loopback 协议）；`DshComposerControllerTest` 11 项（按会话草稿、图片+文本发送、文件先上传、命令附件策略、图片超限中文错误、@ 双来源候选、发送失败/官方拒绝保留草稿、官方附件错误码中文化、onSent 会话）。
 - 未执行：真实 Android 设备/模拟器上的输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴、拖入、附件上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机。transport 认证/HTTP 由 42 统一接线，本分支未实现、未测试。JVM 测试不能替代设备/真实 DSH 验收。
 - 已知边界：附件不跨会话保留，只持久化文本草稿；普通文件串行上传；图片在发送时 base64 编码；历史附件仍不在原生消息区展示；未实现流式跟随、取消、审批/提问与模型选择。
+
+## 文件查看器格式支持扩展验证（2026-11-10，android_agent-41，非设备）
+
+- 范围：新增 `FileTypeCatalog`（扩展名/MIME/文件类别集中映射），文本查看器新增可开关行号、4 MiB 显示上限与截断提示，未知/不支持类型增加中文说明和“用文本打开/复制路径”回退；`WorkspaceFileManager` 分类、规范 MIME 与内容探测统一走目录；扩展 `TextFileReaderTest`，新增 `FileTypeCatalogTest`、`TextPageLayoutTest`。基线 `main=0555c3c0`，分支 `ao/file-viewer/formats`，PR [#34](https://github.com/leezzou/tanuki/pull/34)，未安装、未发布。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin` → BUILD SUCCESSFUL（1m05s，增量）。
+  - `... :app:testModernDebugUnitTest --tests 'com.tanuki.FileTypeCatalogTest' --tests 'com.tanuki.TextPageLayoutTest' --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.WorkspaceFileKindTest'` → BUILD SUCCESSFUL（2m39s），29 tests / 0 failures / 0 errors / 0 skipped。
+  - `... :app:testModernDebugUnitTest :app:lintModernDebug` → 最终代码 BUILD SUCCESSFUL（2m49s；此前同结果运行 6m23s/3m27s），**558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件），lint **0 errors / 95 warnings / 1 hint**。
+- 新增回归 23 项：`FileTypeCatalogTest` 11（C/C++/头文件、`.ts`/`.mts` 与 `video/mp2t` 冲突、常见语言、配置/标记/数据、图片/音频/视频扩展名与 MIME、PDF/DOCX/XLSX/旧版 Office、归档/二进制不探测、无扩展名与已知点号配置、隐藏二进制与 `.env` 前缀媒体、大小写/复合扩展名、纯 MIME 回退）；`TextPageLayoutTest` 9（行号宽度/空文本/末尾换行、关闭行号、搜索下标换算、跨段行号、4 MiB 上限、截断判定、行数统计）；`TextFileReaderTest` 增补 3（64 KiB 页与空文件边界、跨页多字节字符不拆分、UTF-16LE 不完整字符/ISO-8859-1/未知编码）。
+- 覆盖点：分类不依赖 Android `MimeTypeMap`，扩展名优先于 MIME；媒体扩展名在缺少 MIME 时仍进入正确查看器；未知类型只在非明确二进制时做有界 UTF-8 内容探测；行号与正文同一段文本，自动换行不错位；搜索仍以原始文本下标计算，再一次性批量换算为带行号下标（避免单字符搜索数千匹配时退化为 O(n×m)）；截断只在文件超过 4 MiB 且仍有内容时提示。
+- Review P2 修复：点号配置只匹配已知文件名与 `.env`/`.env.*` 变体；`.DS_Store` 明确归为隐藏二进制并跳过内容探测，`.env-image.png` 因媒体扩展名优先按图片处理；新增隐藏二进制/`.env` 前缀媒体回归（`FileTypeCatalogTest` 11 项），完整 JVM 558 tests 通过。
+- 首次定向运行有 2 项测试断言写错（`displayOffset(0)` 未计入行号前缀、无末尾换行的下一段行号多算 1），已修正测试并复跑通过；产品代码未因该失败改动。
+- 未执行：assemble、Android 仪器、设备/模拟器上的真实 `.c`/`.cpp`、行号像素对齐、深色主题、大日志截断与复制路径、真实未知类型文件；未复现用户设备上的原始失败，只以分类回归与构造用例覆盖。
+
 
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 

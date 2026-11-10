@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-46
 - 时间：2026-11-10 11:42 CST
-- 状态：部分完成（新文件与本地验证完成；42 接线待办；PR #39 已认领，边界修正已推送 head `4d03319`）
+- 状态：部分完成（新文件与本地验证完成；42 接线待办；PR #39 已认领，边界修正已推送；已合并最新 `main=533eff4` 解决共享文档冲突，合并提交随本提交推送）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -17,10 +17,10 @@
 ## 当前状态
 
 - 已实现：原生输入栏组件（多行、`Ctrl/⌘+Enter` 发送、按会话草稿）、@ 文件/会话补全、斜杠命令目录/补全/执行、图片/文件选择与预览、普通文件上传换 receipt、图片 base64 随 prompt、粘贴图片、拖入文件、大小/类型限制中文错误。
-- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 34 项全过；完整 JVM 569 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 95 warnings / 1 hint，新增文件无 lint 告警。
+- 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 34 项全过；完整 JVM 592 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 95 warnings / 1 hint，新增文件无 lint 告警。
 - 待验证：42 接线后的真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机；独立 Review、CI 与合并。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`（modern flavor 为 `com.tanuki.modern`）；分支 `ao/input-attachments/root`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#39](https://github.com/leezzou/tanuki/pull/39) 已认领；无设备/模拟器任务。
-- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。
+- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。最新 `main=533eff4` 已合入本分支，冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，两边记录均已保留。
 
 ## 本次改动
 
@@ -75,11 +75,11 @@
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL；仅既有弃用/平台告警 | 本 worktree `android_agent-46`；未跑原生 `buildNativeRuntime` |
 | `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**34 tests / 0 failures / 0 errors / 0 skipped** | 15 + 8 + 11；不含 transport 认证/HTTP |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；68 个结果文件、**569 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 95 warnings / 1 hint** | 基线 535 + 新增 34；新增文件无 lint 告警 |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 95 warnings / 1 hint** | 合并 main 后：0.1.10 基线 535 + 文件查看器 23 + 本切片 34；新增文件无 lint 告警 |
 | `git diff --check` | 无输出 | 无空白错误 |
 | PR #39 新 head `4d03319` CI | Host 29s、Android build+JVM+lint 6m24s，均 pass | 以 PR 页面当前 head 为准 |
 
-- 哪些是前一轮结果，哪些是本次新验证：569/0/0/0、lint 0 errors/95 warnings/1 hint、34 项目标回归均为边界修正后本次新跑；535 是 0.1.10 基线记录，不是本轮复跑；PR #39 首轮 CI pass 是修正前 head，不能作为新 head 依据。
+- 哪些是前一轮结果，哪些是本次新验证：592/0/0/0、lint 0 errors/95 warnings/1 hint、34 项目标回归均为合并 main 后本次新跑；535 是 0.1.10 基线记录，23 是文件查看器已合并到 main 的回归，34 是本切片新增；PR #39 旧 head CI 不能作为当前 head 依据。
 - 未测试、超时、失败和暂未复现的情况：42 接线后的真实设备 UI/键盘/选择器/粘贴/拖入/上传失败重试、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 交互没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试；transport 认证/HTTP 由 42 统一实现，本分支未测。
 
 ## 未完成与暂停项

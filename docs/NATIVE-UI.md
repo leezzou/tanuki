@@ -114,7 +114,7 @@
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL（`-x buildNativeRuntime`）。
 - 输入/附件目标回归 34 项（不含 transport 认证/HTTP；该层等待 42 统一接线）：`DshComposerProtocolTest` 15、`DshComposerClientTest` 8、`DshComposerControllerTest` 11；0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，68 个结果文件、**569 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 34）。
+- 完整 `:app:testModernDebugUnitTest`：BUILD SUCCESSFUL，70 个结果文件、**592 tests / 0 failures / 0 errors / 0 skipped**（0.1.10 基线 535 + 文件查看器 23 + 本切片 34）。
 - `:app:lintModernDebug`：BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**；新增文件无 lint 告警。
 - 覆盖：官方 `session/prompt`/`fileUploads/upload`/`commands/list|execute`/`fileReferences/list`/`sessionReferenceResolver/candidates` 参数与返回解析；图片类型嗅探与 PNG/JPEG/GIF/WebP 尺寸；图片字节/数量/总量/宽高/像素限制中文错误；文件 20 MiB/5 个/50 MiB 限制；@ 引号/目录/邮箱式文本；斜杠命令识别；按会话草稿；图片+文本发送；文件先上传后 receipt；命令附件策略；上传失败/发送失败保留草稿；官方附件错误码中文化。
 
