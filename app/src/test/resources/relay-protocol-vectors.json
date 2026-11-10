@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "room": "ICEiIyQlJicoKSorLC0uLw",
+  "hostId": "303132333435363738393a3b3c3d3e3f",
+  "clientNonce": "QEFCQ0RFRkdISUpLTE1OTw",
+  "serverNonce": "UFFSU1RVVldYWVpbXF1eXw",
+  "hostNonce": "YGFiY2RlZmdoaWprbG1ubw",
+  "clientProof": "vfbgmKqk_2b1UGZRGjM7o0gU-mdhUCi6vruY2BkzC_A",
+  "hostProof": "o57t2zcnqtuFwJyAEjmBj3c9rloDhtULhMOAjtMrXDM"
+}

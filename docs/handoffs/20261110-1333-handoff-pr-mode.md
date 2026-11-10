@@ -22,7 +22,7 @@
 - 已实现：`scripts/check-handoff.py` 支持 `--pr`（默认）、`--integrate`、`--release` 三种模式；PR 模式可接收变更清单，强制“公开文件有改动必须附带交接记录”；集成模式要求记录已链接且为最新并刷新 schema 2 印章；发布模式只读严格校验。新增 `scripts/test-check-handoff.py` 8 组离线回归。CI Host job 改为 PR 模式并支持 `workflow_dispatch` 选择 release 严格模式。`prepare-app-release.py` 改为 `--release`，`verify-workspace.sh` 明确 `--pr`。新增 `docs/HANDOFFS.md` 并同步 `AGENTS.md`、模板、QUICKSTART、PUBLICATION、CI、ORCHESTRATOR-RULES、LESSONS、code-standards、QA-GATES、RELEASE。
 - 已验证：`test-check-handoff.py` 8/8、`test-agent-workflow.py` 19/19、`test-publication.py` 19/19、`test-app-release.py` 18/18、PR/集成/发布三种模式、`check-publication.py --git` 0 findings、`package-source.py` 成功、脚本语法与 CI YAML 解析通过；具体命令与结果见“验证记录”。
 - 待验证：PR 的独立 Codex High 审查、GitHub PR CI、合并后的首次集成迁移。
-- 当前分支：`ao/handoff-conflicts/pr-mode`，创建时基线 `origin/main=1cb7ad95229c539231a64c103b581a477709e344`；PR [#42](https://github.com/leezzou/tanuki/pull/42) 创建后 main 前进到 `2a4a05034ca108b1889a5855ce1a3b044b6ad0ba`（PR #35），已合并最新 main 并解决 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json` 冲突；未合并、未发布、未创建 tag/Release。
+- 当前分支：`ao/handoff-conflicts/pr-mode`，创建时基线 `origin/main=1cb7ad95229c539231a64c103b581a477709e344`；PR [#42](https://github.com/leezzou/tanuki/pull/42) 创建后 main 两次前进：`2a4a0503`（PR #35）与 `0068c872`（PR #36 中继配对）；均已合并并解决 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json` 冲突，按新树重建印章；未合并、未发布、未创建 tag/Release。
 - 关键事实与定位：模式说明与迁移步骤见 [交接机制](../../docs/HANDOFFS.md)；脚本入口 `scripts/check-handoff.py`；自测 `scripts/test-check-handoff.py`；CI `.github/workflows/verify.yml`；发布入口 `scripts/prepare-app-release.py`。
 
 ## 本次改动
@@ -60,11 +60,12 @@
 | `python3 scripts/test-check-handoff.py` | 通过，8 tests / 0 failures | 临时目录合成 fixture；覆盖三模式、篡改、变更集、目录移动 |
 | `python3 scripts/test-agent-workflow.py` | 通过，19 tests / 0 failures（54.318s） | 含设备锁/模拟 ADB 离线回归，不访问真实设备 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` | 通过（共享状态可落后） | 本记录结构、占位符、未测声明 |
-| `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` | 通过，刷新 schema 2 印章（610 个公开文件） | 要求 AGENT-STATE 已链接且本记录最新；合并 main 后按新公开文件数重建 |
+| `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` | 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建） | 要求 AGENT-STATE 已链接且本记录最新；合并 main 后按新公开文件数重建 |
 | `python3 scripts/check-handoff.py --release` | 通过（记录哈希、公开指纹、证据指纹、最新记录一致） | 只读严格模式 |
 | `python3 scripts/check-publication.py --git` | 通过，0 findings | 检查公开候选、链接与身份/凭据模式；提交前最终复跑 |
 | `python3 scripts/package-source.py` | 通过，生成源码包与 `artifacts/SOURCE-SHA256SUMS` | 工作材料；最终文档改动后会再生成，SHA 以最后输出为准 |
 | `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` | `YAML_OK` | 只证明 YAML 可解析；GitHub Actions 表达式以 PR CI 为准 |
+| GitHub Actions（head `c417daa`） | Host scripts 41s pass；Android build/JVM/lint 5m38s pass；PR run 也 pass | 合并 main 后的新 head 以 PR 页面为准 |
 | `bash -n scripts/verify-workspace.sh`；Python 内存语法检查 | 通过 | 未执行真实 Gradle/设备 |
 | `python3 scripts/test-publication.py`、`test-app-release.py` | 19/19、18/18 通过 | Host CI 同套离线回归；发布入口断言 `--release` |
 
@@ -93,7 +94,7 @@
   - 用 CI 传入的变更清单补回“源码变化必须有交接”的质量守卫，弥补 PR 模式不再比较全局指纹的缺口。
   - 印章 schema 升到 2，新增 `evidenceFingerprint`（排除 `AGENT-STATE.md`），允许集成方只刷新共享状态而不被迫改写记录正文；发布仍校验包含状态的完整指纹。
   - 集成模式要求目标记录是文件名最新记录，确保 `AGENT-STATE`/`CURRENT.json` 不会指向旧交接。
-- 失败尝试与避免重复踩坑的结论：`py_compile` 在沙箱外写缓存失败，改用内存 `compile()`；自测 stub 最初未复刻 `jniLibs` 排除规则，补齐后通过。不要手工合并 `CURRENT.json`；冲突时取 main 后重新 `--integrate`。PR #42 创建后 main 前进到 `2a4a0503`，证实旧机制会在每个合并后制造冲突；本分支用 merge（非 rebase）更新基线，避免改写已推送历史。
+- 失败尝试与避免重复踩坑的结论：`py_compile` 在沙箱外写缓存失败，改用内存 `compile()`；自测 stub 最初未复刻 `jniLibs` 排除规则，补齐后通过。不要手工合并 `CURRENT.json`；冲突时取 main 后重新 `--integrate`。PR #42 创建后 main 连续前进到 `2a4a0503` 与 `0068c872`，证实旧机制会在每个合并后制造冲突；本分支用 merge 更新基线并解决共享文档冲突，未改写已推送历史。
 
 ## 产物与校验
 
