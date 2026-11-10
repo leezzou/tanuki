@@ -8,12 +8,13 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本 worktree，`-x buildNativeRuntime`）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
   - 目标回归 `DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest`、`DshWebSocketTest`、`DshMarkdownTest`、`DshComposer*` → BUILD SUCCESSFUL，96 tests / 0 failures / 0 errors / 0 skipped。
-  - 合并 `main=b075725`（#34/#35/#36/#37/#38/#41/#42/#43）并修审批路由后完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（1m58s）；89 个结果文件、**786 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。首次全量中 `NpmAdaptiveWorkerPoolTest` 出现一次 8/9 的时序抖动，单测重跑与全量重跑均通过。`check-handoff.py --pr` 通过。
-- 新增 45 项回归：
+  - 合并 `main=b075725`（#34/#35/#36/#37/#38/#41/#42/#43）后，本轮修复 next 转交失败恢复并补双 Peer 路由：定向 **29 tests / 0 failures / 0 errors / 0 skipped**；完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（1m54s），90 个结果文件、**794 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。前轮 `NpmAdaptiveWorkerPoolTest` 曾有一次 8/9 时序抖动，本轮完整套件未复现。
+- 本 PR 覆盖的回归（包含沿用 main 的组件测试，不按历史新增数字累加）：
   - `DshMuxProtocolTest` 10 项：mux open/item/end/cancel 形状、非法端点/流 id、下行 item/error/end、`$events` ready/waterfall/cancel/status、审批字段（不泄露工具参数）、提问只读字段、snapshot 过滤 replace/注入并按 seq 排序、`text-delta`/baseline 流式聚合与 committed 替换、append-origin 文本、RFC 握手 accept 与客户端掩码/长帧。
-  - `DshNativeLiveTest` 5 项：`session/prompt`/`session/cancel` 请求体与 `interactions=answer`、`accepted=false` 不当成功、合成 mux 的 snapshot/assistant text/status/approval、`$events/result` 的 `clientId/eventId/allowed-once`、未连接审批失败关闭。
-  - `DshWebSocketTest` 2 项：真实 loopback 握手 + 客户端掩码文本 + ping/pong、错误 `Sec-WebSocket-Accept` 拒绝。
-  - `DshNativeControllerTest` 新增 9 项：发送占位/成功清理、发送失败移除占位并显示官方错误码、停止、实时快照/流式文本、审批显示与回答、实时失败不触发官方回退、发送期间 A→B 切换成功/失败、重发上一条。
+  - `DshNativeLiveTest`：`session/prompt`/`session/cancel` 与 `accepted=false`、snapshot/assistant text/status、next 正常/重连转交；HTTP 503、401 不换 Peer 重试、业务拒绝、缺少 ready 均释放聊天 mux 并提示；取消未收到响应的 next 会中止 HTTP，传播取消且不产生伪失败。
+  - `DshApprovalRoutingTest`：真实 loopback HTTP/WS、两个 answer Peer 的先后就绪与聊天重连；校验 Cookie/clientId/事件所有者一致，聊天只 next，审批 Peer 的 pending 可见并裁决，状态通知仍可用。
+  - `DshMuxWebSocketTest`：真实 loopback 握手/掩码/ping-pong、错误 Accept 拒绝、空闲取消后第二连接；main 的 `DshWebSocketTest` 保留审批通道测试。
+  - `DshNativeControllerTest`：发送占位/错误/停止/重发、实时流、发送期间 A→B 成功/失败、工具结果合并、相同文本 seq 下迟到历史页不回退已完成工具；审批 UI/回答测试由 `DshApprovalControllerTest` 覆盖。
   - `DshMarkdownTest` 6 项、composer 客户端/协议/控制器 34 项、transport `call` 1 项、WebSocket 空闲取消 1 项：覆盖 Markdown 块/行内/表格/代码围栏、输入附件草稿/@/斜杠命令、官方 result.value 与业务短码、取消后第二连接。
 - 兼容回归：`DshNativeApiTest`/`DshUiSwitchTest` 的 `/connect` 断言更新为 `interactions=answer`，并保留显式 `none` 与非法模式拒绝；通知目标、列表失败回退、401 代次、Cookie 只发 `/api` 等既有用例未回归。
 - 未执行：真实 Android 设备/模拟器、PRoot 内 DSH `/connect`/WebSocket Upgrade、真实 `$events`/`session/follow`/审批 waterfall、发送/停止的设备输入法/长文本/深色/大字体、通知点击、远程主机隧道、安全模式 rescue、assemble、Android 仪器测试、真机、合并/发布。

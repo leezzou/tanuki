@@ -3,6 +3,7 @@ package com.tanuki.web
 import com.tanuki.runtime.Redact
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,8 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.util.UUID
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** 当前 DSH 进程的 loopback 地址与带启动 token 的官方入口地址。 */
 data class DshEndpoint(val origin: String, val launchUrl: String) {
@@ -294,7 +297,10 @@ class DshNativeClient(
     private var authGeneration = 0L
     private var muxGeneration = 0L
     private var activeSocket: DshMuxSocket? = null
-    private var eventsClientId: String? = null
+    /** 事件回答固定属于建立该 mux 的 Peer，不得在 401 后换 Cookie 重试旧 clientId。 */
+    private class EventsPeer(val endpoint: DshEndpoint, val cookie: String) {
+        var clientId: String? = null
+    }
     private val _connection = MutableStateFlow(DshConnectionState.DISCONNECTED)
     override val connection: StateFlow<DshConnectionState> = _connection.asStateFlow()
 
@@ -307,7 +313,6 @@ class DshNativeClient(
             cookie = null
             boundOrigin = null
             boundLaunchUrl = null
-            eventsClientId = null
             socket = activeSocket
             activeSocket = null
             _connection.value = DshConnectionState.DISCONNECTED
@@ -379,10 +384,7 @@ class DshNativeClient(
         }
     }
 
-    /**
-     * 通过官方 `$events/result` 回答审批。value 只使用官方闭集 `allowed-once`/`rejected`，
-     * 不读取或回传审批请求里的工具参数。
-     */
+    /** 聊天流接收状态通知；waterfall 只转交给负责审批 UI 的 Peer。 */
     override fun live(sessionId: String): Flow<DshLiveEvent> = flow {
         require(sessionId.isNotBlank()) { "会话标识为空" }
         muxLock.withLock {
@@ -401,7 +403,6 @@ class DshNativeClient(
                 synchronized(stateLock) {
                     if (generation != muxGeneration) throw IOException("实时连接已取消")
                     activeSocket = opened
-                    eventsClientId = null
                     _connection.value = DshConnectionState.CONNECTED
                 }
                 val eventsId = "events-${UUID.randomUUID()}"
@@ -410,10 +411,11 @@ class DshNativeClient(
                 opened.send(DshMuxProtocol.openFrame(followId, DshMuxProtocol.FOLLOW_ENDPOINT, DshMuxProtocol.followArgs(sessionId)))
                 emit(DshLiveEvent.Connected)
                 val followParser = DshFollowParser()
+                val eventsPeer = EventsPeer(endpoint, currentCookie)
                 opened.incoming().collect { text ->
                     when (val downlink = DshMuxProtocol.parseDownlink(text)) {
                         is DshMuxDownlink.Item -> when (downlink.streamId) {
-                            eventsId -> handleEvent(downlink.value, sessionId)?.let { emit(it) }
+                            eventsId -> handleEvent(downlink.value, sessionId, eventsPeer)?.let { emit(it) }
                             followId -> {
                                 // 工具事件从同一 follow 事件流增量合成；文本仍交给 follow 解析器。
                                 if (downlink.value.optString("type") == "event") {
@@ -448,6 +450,8 @@ class DshNativeClient(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                // 先释放回答者再提示错误，Host 才能继续 waterfall，不能留一个无 UI 的等待者。
+                runCatching { socket?.close() }
                 if (generation == 0L || generation == muxGeneration) {
                     _connection.value = DshConnectionState.FAILED
                 }
@@ -457,8 +461,7 @@ class DshNativeClient(
                 synchronized(stateLock) {
                     if (generation != 0L && generation == muxGeneration) {
                         activeSocket = null
-                        eventsClientId = null
-                            // 关闭物理 socket 会销毁该 API Peer，旧 Cookie 不可再用于 HTTP。
+                        // 关闭物理 socket 会销毁该 API Peer，旧 Cookie 不可再用于 HTTP。
                         cookie = null
                         boundOrigin = null
                         boundLaunchUrl = null
@@ -471,16 +474,16 @@ class DshNativeClient(
         }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun handleEvent(value: JSONObject, sessionId: String): DshLiveEvent? {
+    private suspend fun handleEvent(value: JSONObject, sessionId: String, peer: EventsPeer): DshLiveEvent? {
         val frame = DshMuxProtocol.parseEventFrame(value) ?: return null
         return when (frame) {
             is DshEventFrame.Ready -> {
-                synchronized(stateLock) { eventsClientId = frame.clientId }
+                peer.clientId = frame.clientId
                 null
             }
             is DshEventFrame.Waterfall -> {
                 // 聊天 Peer 不展示/回答审批；明确转交 next，让 Host 交给独立审批 Peer。
-                forwardWaterfallNext(frame.eventId)
+                forwardWaterfallNext(peer, frame.eventId)
                 null
             }
             is DshEventFrame.Cancelled -> null
@@ -500,17 +503,51 @@ class DshNativeClient(
         }
     }
 
-    /** 不负责审批 UI 的 Peer 只回 next；失败不打断聊天流，审批 Peer 仍可回答。 */
-    private suspend fun forwardWaterfallNext(eventId: String) {
-        val clientId = synchronized(stateLock) { eventsClientId } ?: return
-        runCatching {
-            call(
-                DshApprovalProtocol.RESULT_ENDPOINT,
-                JSONObject()
-                    .put("clientId", clientId)
-                    .put("eventId", eventId)
-                    .put("outcome", JSONObject().put("kind", "next"))
-            )
+    /**
+     * next 必须使用收到事件的 Cookie/clientId；401 不换 Peer 重试。
+     * 未送达时抛错，由 live 关闭 mux 释放回答者；取消同时断开正在等待的 HTTP。
+     */
+    private suspend fun forwardWaterfallNext(peer: EventsPeer, eventId: String) {
+        try {
+            val clientId = peer.clientId ?: throw IOException("事件流尚未就绪")
+            val method = DshApprovalProtocol.RESULT_ENDPOINT
+            val url = DshApiProtocol.apiUrl(peer.endpoint.origin, method)
+                ?: throw IOException("DSH 接口地址无效")
+            val connection = open(url)
+            suspendCancellableCoroutine<Unit> { continuation ->
+                continuation.invokeOnCancellation { connection.disconnect() }
+                try {
+                    if (!continuation.isActive) return@suspendCancellableCoroutine
+                    connection.requestMethod = "POST"
+                    connection.doOutput = true
+                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    connection.setRequestProperty("Accept", "application/json")
+                    connection.setRequestProperty("Cookie", peer.cookie)
+                    val rpcId = DshApiProtocol.newRpcId()
+                    val args = JSONObject()
+                        .put("clientId", clientId)
+                        .put("eventId", eventId)
+                        .put("outcome", JSONObject().put("kind", "next"))
+                    val body = DshApiProtocol.requestBody(rpcId, method, args).toByteArray(Charsets.UTF_8)
+                    connection.setFixedLengthStreamingMode(body.size)
+                    connection.outputStream.use { it.write(body) }
+                    val code = connection.responseCode
+                    if (code !in 200..299) throw IOException("HTTP $code")
+                    val text = readBounded(connection.inputStream)
+                    DshApiProtocol.checkEnvelope(text, rpcId)
+                    DshApiProtocol.parseValue(text)
+                    continuation.resume(Unit)
+                } catch (error: Exception) {
+                    continuation.resumeWithException(error)
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // 不回显响应正文/凭据；失败后断开聊天 Peer，让 Host 继续交给可见审批入口。
+            throw IOException("审批转交失败，已断开聊天实时连接；请刷新重连或切换官方界面处理")
         }
     }
 

@@ -130,11 +130,13 @@
 本轮（android_agent-42，合并 `main=b075725`，含 #34/#35/#36/#37/#38/#41/#42/#43）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**786 tests / 0 failures / 0 errors / 0 skipped**（89 个结果文件）。
+- 本轮定向 `DshNativeLiveTest`/`DshApprovalRoutingTest`/`DshNativeControllerTest`：29 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（1m54s），**794 tests / 0 failures / 0 errors / 0 skipped**（90 个结果文件）。
 - `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 101 warnings / 1 hint（既有弃用/可读性告警）。
 - 42 新增/覆盖：mux/`$events`/follow 协议、发送/停止/错误、发送 A→B 代次、WebSocket 空闲取消、Markdown、composer 客户端/协议/控制器、审批/工具事件与 `tools` 合并。
-- 审批路由：聊天 Peer 的 `$events` 只保留状态通知，收到 `approval/request` 明确回 `next`，不展示/回答；唯一 UI 与回答入口是 `DshApprovalPanel`/独立审批 Peer。首次连接与重连后均回 `next` 的回归已加入。
+- 审批路由：聊天 Peer 的 `$events` 保留状态通知，收到 waterfall 用该连接的固定 Cookie/clientId 回 `next`；唯一 UI 与回答入口是 `DshApprovalPanel`/独立审批 Peer。转交 HTTP/业务失败或未收到 ready 时先关闭聊天 mux 释放回答者，再显示中文错误；401 不换 Cookie 重试旧事件。取消会中止转交 HTTP 并传播，不伪装成失败。
 - 工具时间线：迟到历史页与实时 `tool/result` 并发时按 callId 非回退合并，已收到成功/失败终态不会被旧页 RUNNING 覆盖。
+- 路由回归包含真实 loopback HTTP/WS 的两个 answer Peer：聊天先就绪、审批先就绪、聊天断开后重新认证；检查 waterfall 的 Cookie/clientId/所属 Peer 一致，审批面板可见并能回答，聊天状态通知继续送达。
 - 45 审批/工具：`DshApprovalProtocolTest`、`DshToolTimelineTest`、`DshWebSocketTest`、`DshApprovalSessionTest`、`DshApprovalControllerTest` 随合并通过。
 - #43 composer：附件会话 token、发送快照保留后续编辑、批量读取预算、拖入元数据、图片/文件名额等回归随 main 合并通过；#40 不再保留重复副本。
 

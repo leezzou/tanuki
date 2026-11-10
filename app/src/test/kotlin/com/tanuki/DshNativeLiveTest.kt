@@ -1,6 +1,8 @@
 package com.tanuki
 
+import com.tanuki.web.DshConnectionState
 import com.tanuki.web.DshEndpoint
+import kotlinx.coroutines.CompletableDeferred
 import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMuxProtocol
 import com.tanuki.web.DshMuxSocket
@@ -20,8 +22,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketException
@@ -91,10 +93,13 @@ class DshNativeLiveTest {
         }
     }
 
-    @Test fun liveStreamsOfficialSnapshotAssistantTextAndApproval() = runBlocking {
+    @Test fun liveStreamsOfficialSnapshotAssistantTextAndForwardsApproval() = runBlocking {
         TestServer { request ->
-            if (request.target.startsWith("/connect?")) connectResponse()
-            else TestResponse(404, emptyList(), "not found")
+            when {
+                request.target.startsWith("/connect?") -> connectResponse()
+                request.target == "/api/\$events/result" -> nextResponse(request)
+                else -> TestResponse(404, emptyList(), "not found")
+            }
         }.use { server ->
             lateinit var socket: ScriptedMuxSocket
             socket = ScriptedMuxSocket { current, endpoint, streamId ->
@@ -295,6 +300,114 @@ class DshNativeLiveTest {
                 assertEquals("next", outcome.getString("kind"))
             }
         }
+    }
+
+    @Test fun rejectedNextClosesChatPeerAndReportsFailure() = assertNextFailure(status = 503)
+
+    @Test fun expiredNextDoesNotRetryOldClientIdWithNewCookie() = assertNextFailure(status = 401)
+
+    @Test fun businessRejectedNextClosesChatPeer() = assertNextFailure(status = 200, accepted = false)
+
+    private fun assertNextFailure(status: Int, accepted: Boolean = true) = runBlocking {
+        val requests = CopyOnWriteArrayList<TestRequest>()
+        TestServer { request ->
+            requests += request
+            when {
+                request.target.startsWith("/connect?") -> connectResponse()
+                request.target == "/api/\$events/result" -> nextResponse(request, status, accepted)
+                else -> TestResponse(404, emptyList(), "not found")
+            }
+        }.use { server ->
+            val socket = approvalSocket()
+            val client = DshNativeClient(
+                socketFactory = { socket },
+                endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            )
+            val events = withTimeout(3_000) { client.live("s1").toList() }
+            val failure = events.filterIsInstance<DshLiveEvent.Failure>().single()
+            assertTrue(failure.message, failure.message.contains("审批转交失败"))
+            assertFalse(failure.message.contains("top-secret"))
+            assertTrue("转交失败必须释放聊天回答者", socket.closed)
+            assertEquals(DshConnectionState.FAILED, client.connection.value)
+            assertEquals("不能用新 Peer 回答旧事件", 1, requests.count { it.target.startsWith("/connect?") })
+            assertEquals(1, requests.count { it.target == "/api/\$events/result" })
+        }
+    }
+
+    @Test fun cancelledNextPropagatesCancellationAndClosesChatSocket() = runBlocking {
+        val requestSeen = CompletableDeferred<Unit>()
+        val releaseResponse = CountDownLatch(1)
+        TestServer { request ->
+            when {
+                request.target.startsWith("/connect?") -> connectResponse()
+                request.target == "/api/\$events/result" -> {
+                    requestSeen.complete(Unit)
+                    // 模拟 Host 尚未接收 next：客户端取消应中止等待，不等服务端发回正文。
+                    check(releaseResponse.await(5, TimeUnit.SECONDS))
+                    nextResponse(request)
+                }
+                else -> TestResponse(404, emptyList(), "not found")
+            }
+        }.use { server ->
+            val socket = approvalSocket()
+            val client = DshNativeClient(
+                socketFactory = { socket },
+                endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            )
+            val events = CopyOnWriteArrayList<DshLiveEvent>()
+            val collector = launch(Dispatchers.IO) { client.live("s1").collect { events += it } }
+            try {
+                withTimeout(3_000) { requestSeen.await() }
+                withTimeout(2_000) { collector.cancelAndJoin() }
+                assertTrue(collector.isCancelled)
+                assertTrue(socket.closed)
+                assertTrue("取消不能伪装成转交失败", events.none { it is DshLiveEvent.Failure })
+                assertEquals(DshConnectionState.DISCONNECTED, client.connection.value)
+            } finally {
+                releaseResponse.countDown()
+                collector.cancelAndJoin()
+            }
+        }
+    }
+
+    @Test fun waterfallBeforeReadyReleasesPeerInsteadOfSilentlyDroppingIt() = runBlocking {
+        val requests = CopyOnWriteArrayList<TestRequest>()
+        TestServer { request ->
+            requests += request
+            connectResponse()
+        }.use { server ->
+            val socket = approvalSocket(sendReady = false)
+            val client = DshNativeClient(
+                socketFactory = { socket },
+                endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            )
+            val events = withTimeout(3_000) { client.live("s1").toList() }
+            assertTrue(events.filterIsInstance<DshLiveEvent.Failure>().single().message.contains("审批转交失败"))
+            assertTrue(socket.closed)
+            assertTrue(requests.none { it.target == "/api/\$events/result" })
+        }
+    }
+
+    private fun approvalSocket(sendReady: Boolean = true): ScriptedMuxSocket = ScriptedMuxSocket { current, endpoint, streamId ->
+        if (endpoint == DshMuxProtocol.EVENTS_ENDPOINT) {
+            if (sendReady) current.emit(item(streamId, JSONObject().put("type", "ready").put("clientId", "client-1")))
+            current.emit(item(streamId, JSONObject()
+                .put("type", "waterfall")
+                .put("event", "approval/request")
+                .put("eventId", "event-1")
+                .put("agentId", "s1")
+                .put("request", JSONObject().put("toolName", "Bash"))))
+        }
+    }
+
+    private fun nextResponse(request: TestRequest, status: Int = 200, accepted: Boolean = true): TestResponse {
+        val result = JSONObject().put("ok", accepted)
+        if (!accepted) result.put("error", JSONObject().put("code", "gateway/result-rejected"))
+        return TestResponse(status, emptyList(), JSONObject()
+            .put("type", "server-response")
+            .put("rpcId", JSONObject(request.body).getString("rpcId"))
+            .put("result", result)
+            .toString())
     }
 
     private fun connectResponse(): TestResponse = TestResponse(
