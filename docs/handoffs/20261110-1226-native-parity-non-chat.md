@@ -51,6 +51,7 @@
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m29s，40 tasks） | 只验证 APK 打包与清单，未安装设备、未签名发布 |
 
 - 哪些是前一轮结果，哪些是本次新验证：556 JVM、lint、新增 21 项均为本轮新跑；535 tests/393 tests 等为历史，未冒充本轮。
+- 一次 `--rerun-tasks` 全量组合中 `NpmAdaptiveWorkerPoolTest` 的 downshift 并发时序失败；该测试单独重跑与完整 JVM 重跑均通过，未改该测试，属既有 flake。
 - 未测试、超时、失败和暂未复现的情况：真实 Android/PRoot DSH、真实 `/connect` Cookie 生命周期、`commands/execute` 的 `/permission` 实际结果、`workspace/archiveSession` 运行中停止语义、设备 UI、远程 SSH、Android 仪器、assemble 结果待补。
 
 ## 未完成与暂停项
@@ -71,7 +72,7 @@
 - 数据/设备/权限边界：不读真实凭据；API Cookie 只在内存；不写 `userdata/dsh`；不删会话/项目；不合并/发布；不关闭审批/TLS/校验；不自动切 `danger-full-access`。
 - 关键决策及理由：因 42 正在重写 `DshNativeApi.kt` 并新增 WebSocket 流，本切片新增独立一元客户端与独立 Activity，避免同文件并发写；共享文件只做最小加法。完全权限需界面二次确认与控制器显式参数，避免自动提权。
 - 失败尝试与避免重复踩坑的结论：Android JVM 单测不能使用 JDK `com.sun.net.httpserver`，已改用原始 `ServerSocket`；合成服务器读取含中文请求体必须按 ISO-8859-1 逐字节读取，否则 `Content-Length` 与字符数错位导致 5 秒超时。
-- 提交前最后硬化：会话/模型/权限字段截断；`session/create` 返回标识要求可打印 ASCII；归档响应已确认 ID 在刷新后仍从列表排除；写操作期间禁用刷新；查询变化丢弃在途全文搜索；完全权限需显式 `allowFullAccess=true`。
+- 提交前最后硬化：会话/模型/权限字段截断；`session/create` 返回标识要求可打印 ASCII；归档响应已确认 ID 在刷新后仍从列表排除；写操作期间禁用刷新；查询变化丢弃在途全文搜索；完全权限需显式 `allowFullAccess=true`；模型目录失败信息展示前经 `Redact` 截断。
 - 已知风险：独立 Activity 与原生聊天页暂时是两个入口；后续需把 `DshSessionManagerPage` 嵌入聊天页或统一导航。官方 `session/search` 可能返回已归档会话，打开时会提示目标不在当前列表。远程 DSH 是否为安全模式无法从本地状态得知，写入失败由官方错误提示。
 - 参考实现名称：文档/注释/提交未写入参考实现名称。
 

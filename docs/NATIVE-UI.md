@@ -97,6 +97,7 @@
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
 - 请求不带 `Origin` 头；与官方“工具客户端”语义一致。
 - 会话管理客户端独立持有 `interactions=none` API Cookie，不复用聊天页的 `answer` Peer；两者都不把 Cookie/token 写入日志、状态或网页脚本。
+- 模型目录的 provider 失败信息展示前经 `Redact.text` 截断，避免把 provider 错误中的敏感细节直接铺到界面。
 
 ## 6. 验证
 

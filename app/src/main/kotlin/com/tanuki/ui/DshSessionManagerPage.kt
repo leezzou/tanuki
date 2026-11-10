@@ -71,6 +71,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tanuki.runtime.Redact
 import com.tanuki.web.DshAdminSession
 import com.tanuki.web.DshCommand
 import com.tanuki.web.DshModelCatalog
@@ -736,7 +737,10 @@ private fun ModelsPane(
     if (catalog.failures.isNotEmpty()) {
         Text("部分模型不可用", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
         catalog.failures.forEach { failure ->
-            Text("${failure.name.ifBlank { failure.id }}：${failure.message.ifBlank { "目录读取失败" }}",
+            val reason = failure.message.takeIf { it.isNotBlank() }
+                ?.let { Redact.text(it).take(200) }
+                ?: "模型目录读取失败"
+            Text("${failure.name.ifBlank { failure.id }}：$reason",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
