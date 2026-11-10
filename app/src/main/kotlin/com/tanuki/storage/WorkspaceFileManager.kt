@@ -25,7 +25,6 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
-import java.util.Locale
 import java.util.UUID
 
 /** 文件操作在 IO 线程串行执行；读取允许服务运行，修改已有内容仍要求服务停止。
@@ -62,27 +61,9 @@ class WorkspaceFileManager(
     }
     companion object {
         const val TEXT_LIMIT = 256 * 1024
-        private val textExtensions = setOf("txt", "text", "md", "markdown", "log", "csv", "tsv", "json", "jsonl", "xml", "yaml", "yml",
-            "toml", "ini", "cfg", "conf", "properties", "kt", "kts", "java", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx",
-            "html", "htm", "css", "scss", "less", "sh", "bash", "zsh", "c", "h", "cpp", "hpp", "rs", "go", "swift", "sql", "srt", "vtt", "env")
-        private val textNames = setOf("Dockerfile", "Makefile", "LICENSE", "README", ".gitignore", ".gitattributes", ".editorconfig")
 
-        /** 纯扩展名/MIME 分类；.doc 明确保留为旧二进制格式，不能当作 DOCX 或文本。 */
-        internal fun classifyFileKind(name: String, mime: String?): FileKind {
-            val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-            val type = mime?.lowercase(Locale.ROOT)
-            return when {
-                extension == "pdf" -> FileKind.PDF
-                extension == "docx" -> FileKind.DOCX
-                extension == "doc" -> FileKind.DOC
-                extension == "xlsx" -> FileKind.XLSX
-                type?.startsWith("image/") == true -> FileKind.IMAGE
-                type?.startsWith("audio/") == true -> FileKind.AUDIO
-                type?.startsWith("video/") == true -> FileKind.VIDEO
-                extension in textExtensions || name in textNames || type?.startsWith("text/") == true -> FileKind.TEXT
-                else -> FileKind.OTHER
-            }
-        }
+        /** 分类委托给集中的 [FileTypeCatalog]：扩展名优先于 MIME，避免 `.ts` 等冲突被当成媒体。 */
+        internal fun classifyFileKind(name: String, mime: String?): FileKind = FileTypeCatalog.kind(name, mime)
     }
     private val lock = Mutex()
     private val noFollow = LinkOption.NOFOLLOW_LINKS
@@ -272,22 +253,19 @@ class WorkspaceFileManager(
     suspend fun describe(relative: String): FileInfo = io(writing = false) {
         val file = payload(resolve(relative, true))
         val name = relative.substringAfterLast('/')
-        val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-        val explicitMime = when (extension) {
-            "mkv" -> "video/x-matroska"; "mov" -> "video/quicktime"; "webm" -> "video/webm"
-            "mp4", "m4v" -> "video/mp4"; "avi" -> "video/x-msvideo"; "m4a" -> "audio/mp4"
-            "mp3" -> "audio/mpeg"; "flac" -> "audio/flac"; "wav" -> "audio/wav"; "ogg", "opus" -> "audio/ogg"
-            "pdf" -> "application/pdf"; "md", "markdown" -> "text/markdown"
-            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            "doc" -> "application/msword"
-            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
-        }
+        val extension = FileTypeCatalog.extension(name)
+        // 先使用项目内规范 MIME，再回退系统表；系统表对源码、Office 和媒体扩展名并不稳定。
+        val explicitMime = FileTypeCatalog.mime(name)
+            ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
         var kind = classifyFileKind(name, explicitMime)
-        // 无已知扩展名时保留原有内容探测：可解码为文本的文件按文本预览。
-        if (kind == FileKind.OTHER && explicitMime == null && runCatching { TextFileReader.read(file); true }.getOrDefault(false)) {
+        // 未知扩展名/未知 MIME 时做有界内容探测：能按 UTF-8 解码且无控制字符的按文本打开。
+        // 明确二进制、归档和旧版 Office 不探测，避免把压缩包/文档误当作文本。
+        if (kind == FileKind.OTHER && !FileTypeCatalog.isBinaryExtension(name) &&
+            runCatching { TextFileReader.read(file); true }.getOrDefault(false)
+        ) {
             kind = FileKind.TEXT
         }
-        FileInfo(name, explicitMime ?: if (kind == FileKind.TEXT) "text/plain" else "application/octet-stream", Files.size(file), kind)
+        FileInfo(name, explicitMime ?: if (kind == FileKind.TEXT) "text/plain" else FileTypeCatalog.OCTET_STREAM, Files.size(file), kind)
     }
 
     /** 为 PDF 等需要可随机读取的内置预览提供只读描述符；调用方负责关闭。 */
@@ -404,16 +382,11 @@ class WorkspaceFileManager(
     }
 
     private fun fileMime(relative: String): String {
-        val extension = relative.substringAfterLast('.', "").lowercase(Locale.ROOT)
-        return when (extension) {
-            "mkv" -> "video/x-matroska"; "mov" -> "video/quicktime"; "webm" -> "video/webm"
-            "m4a" -> "audio/mp4"; "flac" -> "audio/flac"; "opus" -> "audio/ogg"
-            "pdf" -> "application/pdf"
-            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            "doc" -> "application/msword"
-            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
-        }
+        val name = relative.substringAfterLast('/')
+        val extension = FileTypeCatalog.extension(name)
+        return FileTypeCatalog.mime(name)
+            ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+            ?: if (FileTypeCatalog.isTextName(name)) "text/plain" else FileTypeCatalog.OCTET_STREAM
     }
     private fun revision(bytes: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
         .joinToString("") { "%02x".format(it) }
