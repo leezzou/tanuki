@@ -38,6 +38,7 @@ import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
 import com.tanuki.ui.DshNativeController
 import com.tanuki.ui.DshNativePage
+import com.tanuki.ui.DshSessionManagerActivity
 import com.tanuki.ui.WorkspaceFilesPage
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
@@ -499,6 +500,7 @@ class MainActivity : ComponentActivity() {
                             (application as TanukiApp).chatNotifications.refresh()
                         },
                         toggleNativeDsh = ::setNativePreference,
+                        openSessionManager = { startActivity(DshSessionManagerActivity.intent(this@MainActivity)) },
                         retryNativeDsh = {
                             nativeFallback = null
                             if (nativeUiMode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()

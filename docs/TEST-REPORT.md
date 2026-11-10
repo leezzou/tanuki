@@ -12,6 +12,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 0.1.9 已发布事实（公开 Release 只读核对）：`v0.1.9` tag `5c680b9`，Pre-release，`versionCode=11`；APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节、证书 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
 - 未执行：设备/模拟器安装、升级覆盖、真机 QA；本记录不代表 0.1.10 已通过设备验收。
 
+## 原生界面对齐：非聊天主链路验证（2026-11-10，android_agent-44，非设备）
+
+- 范围：官方 DSH `0.2.1-rc.5` 一元会话管理（列表/内容搜索/新建/重命名/归档/权限与模型 projection）、会话级模型选择、权限目录与 `/permission` 命令、Skills/斜杠命令目录、本机未读、独立原生管理页、设置入口、安全模式只读、远程 origin 复用。基线 `origin/main=0555c3c0`，分支 `ao/native-parity/session-admin`。
+- 实际执行：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL（2m04s，仅既有弃用/可读性告警）。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshSessionAdminApiTest' --tests 'com.tanuki.DshSessionManagerControllerTest'` → BUILD SUCCESSFUL，21 tests / 0 failures / 0 errors / 0 skipped。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime` → BUILD SUCCESSFUL，67 个结果文件、**556 tests / 0 failures / 0 errors / 0 skipped**（含本轮新增 21 项）。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**。
+  - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（3m29s，40 tasks；只验证打包与清单，未安装设备）。
+- 新增回归：`DshSessionAdminApiTest` 7 项（会话权限/模型 projection；搜索/模型/权限/Skills/命令解析；业务错误短码；命令 success 判定；本地合成服务器验证 `session/list|create|rename|search|modelCatalog|selectModel`、`permissionPresets/catalog`、`commands/execute|list`、`skills/list`、`workspace/archiveSession` 共 11 个 method 的参数与 Cookie 只发 `/api`；非法权限 preset 不发网络；404 不含 token）；`DshSessionManagerControllerTest` 14 项（列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 `stopActivity`、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、`custom` 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie）。
+- 明确限制：`workspace/archiveSession` 的运行中停止由官方执行，本轮只用合成响应验证参数；官方 `0.2.1-rc.5` 无会话硬删除端点，归档恢复需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
+- 未执行：真实 Android/PRoot DSH 的 `/connect` Cookie、真实 `commands/execute` `/permission` 结果、真实归档/停止、设备 UI/深色/大字体、远程 SSH 端点、Android 仪器、APK 安装。JVM、lint 与 assemble 不能替代设备验收。
+
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）
 
 - 范围：新增 `DeviceConditionPolicy`/`DeviceConditionMonitor`，状态 `NORMAL/WARM/HOT/CRITICAL/LOW_BATTERY`；热/低电/低内存降级与迟滞；后台更新检查按具体 Worker 登记/恢复；DSH 依赖下载并发上限；日志展示行数；PDF 预览尺寸/像素上限；设置开关与低电阈值；进程重启状态恢复。

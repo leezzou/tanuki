@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-2310-release-0.1.10.md",
-  "recordSha256": "7f8e7a7191445d459d776d001922f07a4effa7d4ce945412ce2868ec51ffca0e",
-  "sourceFingerprint": "fcad28f82f5a2b9a35661d8e04d0c1f8837e872b3d3215308f2e2b82d60c5387",
-  "fileCount": 591
+  "record": "docs/handoffs/20261110-1226-native-parity-non-chat.md",
+  "recordSha256": "f46bfa5626ae13f6b677168a4e4b63950ade08c28047fb4a2d4b79fad80f13bf",
+  "sourceFingerprint": "6a9178db534d25dd45ad6a0ce22459ee9c25eda477b26fa73adef6b4d32b055a",
+  "fileCount": 599
 }

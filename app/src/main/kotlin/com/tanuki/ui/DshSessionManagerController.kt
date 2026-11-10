@@ -1,0 +1,549 @@
+package com.tanuki.ui
+
+import com.tanuki.runtime.Redact
+import com.tanuki.web.DshAdminSession
+import com.tanuki.web.DshApiException
+import com.tanuki.web.DshCommand
+import com.tanuki.web.DshModelCatalog
+import com.tanuki.web.DshModelSelection
+import com.tanuki.web.DshPermissionCatalog
+import com.tanuki.web.DshSessionAdminSource
+import com.tanuki.web.DshSessionSearchHit
+import com.tanuki.web.DshSkill
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.json.JSONException
+
+/** 会话列表筛选；未读是本机记录，不是官方字段。 */
+enum class DshSessionFilter(val label: String) {
+    ALL("全部"), RUNNING("运行中"), UNREAD("未读")
+}
+
+/** 纯过滤函数，便于单测；标题或会话标识命中即可。 */
+object DshSessionFiltering {
+    fun visible(
+        sessions: List<DshAdminSession>,
+        query: String,
+        filter: DshSessionFilter,
+        unreadIds: Set<String>
+    ): List<DshAdminSession> {
+        val text = query.trim()
+        return sessions.filter { session ->
+            val matches = text.isEmpty() ||
+                session.displayTitle.contains(text, ignoreCase = true) ||
+                session.id.contains(text, ignoreCase = true)
+            matches && when (filter) {
+                DshSessionFilter.ALL -> true
+                DshSessionFilter.RUNNING -> session.running
+                DshSessionFilter.UNREAD -> session.id in unreadIds
+            }
+        }
+    }
+}
+
+/** 本机“最后查看时间”存储；只用于未读提示，不写回官方会话。 */
+interface DshReadStore {
+    fun lastRead(sessionId: String): Long
+    fun markRead(sessionId: String, updatedAt: Long)
+}
+
+data class DshSessionManagerState(
+    val available: Boolean = false,
+    val loading: Boolean = false,
+    val sessions: List<DshAdminSession> = emptyList(),
+    val query: String = "",
+    val filter: DshSessionFilter = DshSessionFilter.ALL,
+    val unreadIds: Set<String> = emptySet(),
+    val contentHits: List<DshSessionSearchHit> = emptyList(),
+    val contentHasMore: Boolean = false,
+    val contentSearching: Boolean = false,
+    val contentSearched: Boolean = false,
+    val busy: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+    val selectedId: String? = null,
+    val models: DshModelCatalog? = null,
+    val modelsLoading: Boolean = false,
+    val modelsError: String? = null,
+    val permissions: DshPermissionCatalog? = null,
+    val permissionsLoading: Boolean = false,
+    val permissionsError: String? = null,
+    val skills: List<DshSkill> = emptyList(),
+    val commands: List<DshCommand> = emptyList(),
+    val catalogLoading: Boolean = false,
+    val catalogError: String? = null,
+    /** 安全模式/试用模式下禁止写操作，仅保留只读目录。 */
+    val readOnly: Boolean = false,
+    val hasLoaded: Boolean = false
+) {
+    val visibleSessions: List<DshAdminSession>
+        get() = DshSessionFiltering.visible(sessions, query, filter, unreadIds)
+
+    val selected: DshAdminSession?
+        get() = sessions.firstOrNull { it.id == selectedId }
+
+    val canWrite: Boolean get() = !readOnly && !busy
+}
+
+/**
+ * 原生会话管理状态机。
+ *
+ * 会话标题、运行状态、模型与权限都来自官方接口；未读仅在本机记录最后查看的
+ * `updatedAt`。列表失败不回退成假数据；写操作在安全模式下直接拒绝。
+ */
+class DshSessionManagerController(
+    private val source: DshSessionAdminSource,
+    private val readStore: DshReadStore,
+    private val scope: CoroutineScope
+) {
+    private val _state = MutableStateFlow(DshSessionManagerState())
+    val state: StateFlow<DshSessionManagerState> = _state.asStateFlow()
+
+    private var listJob: Job? = null
+    private var actionJob: Job? = null
+    private var searchJob: Job? = null
+    private var modelJob: Job? = null
+    private var permissionJob: Job? = null
+    private var catalogJob: Job? = null
+
+    private var listGeneration = 0
+    private var searchGeneration = 0
+    private var modelGeneration = 0
+    private var permissionGeneration = 0
+    private var catalogGeneration = 0
+    private var pendingSelection: String? = null
+
+    fun setReadOnly(value: Boolean) {
+        _state.update { it.copy(readOnly = value) }
+    }
+
+    fun refresh() {
+        // 写操作进行中不叠加列表刷新，避免旧读取覆盖操作后的新列表。
+        if (_state.value.busy) return
+        val token = ++listGeneration
+        listJob?.cancel()
+        _state.update { it.copy(loading = true, error = null, notice = null) }
+        listJob = scope.launch {
+            val result = source.sessions()
+            if (token != listGeneration) return@launch
+            result.fold(
+                onSuccess = { sessions ->
+                    val target = pendingSelection
+                    pendingSelection = null
+                    if (target != null && sessions.none { it.id == target }) {
+                        _state.update {
+                            it.copy(
+                                loading = false,
+                                sessions = sessions,
+                                unreadIds = unreadOf(sessions),
+                                available = true,
+                                hasLoaded = true,
+                                selectedId = it.selectedId?.takeIf { id -> sessions.any { session -> session.id == id } },
+                                error = "目标会话不在当前列表，可能已归档"
+                            )
+                        }
+                    } else {
+                        publishSessions(
+                            sessions = sessions,
+                            selectedId = target ?: _state.value.selectedId,
+                            notice = null,
+                            keepError = false
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _state.update { it.copy(loading = false, error = messageOf(error)) }
+                }
+            )
+        }
+    }
+
+    fun setQuery(query: String) {
+        val next = query.take(200)
+        val changed = next != _state.value.query
+        if (changed) {
+            // 查询词变化后旧结果不再属于当前条件，直接丢弃在途全文搜索。
+            searchGeneration++
+            searchJob?.cancel()
+        }
+        _state.update { state ->
+            state.copy(
+                query = next,
+                contentHits = if (next.isBlank() || changed) emptyList() else state.contentHits,
+                contentHasMore = if (next.isBlank() || changed) false else state.contentHasMore,
+                contentSearching = if (changed) false else state.contentSearching,
+                contentSearched = if (next.isBlank() || changed) false else state.contentSearched
+            )
+        }
+    }
+
+    fun setFilter(filter: DshSessionFilter) {
+        _state.update { it.copy(filter = filter) }
+    }
+
+    /** 打开会话详情并记为本机已读；目标不在列表时等待刷新后再选中。 */
+    fun openSession(sessionId: String) {
+        if (!validId(sessionId)) return
+        val session = _state.value.sessions.firstOrNull { it.id == sessionId }
+        if (session == null) {
+            pendingSelection = sessionId
+            refresh()
+            return
+        }
+        markRead(session)
+        _state.update { it.copy(selectedId = sessionId) }
+    }
+
+    fun closeDetail() {
+        catalogJob?.cancel()
+        catalogGeneration++
+        _state.update {
+            it.copy(
+                selectedId = null,
+                skills = emptyList(),
+                commands = emptyList(),
+                catalogLoading = false,
+                catalogError = null
+            )
+        }
+    }
+
+    fun clearMessages() {
+        _state.update { it.copy(error = null, notice = null) }
+    }
+
+    fun createSession(title: String = "") {
+        if (!beginAction()) return
+        val clean = title.trim()
+        if (!validTitle(clean, allowEmpty = true)) {
+            failAction(IllegalArgumentException("标题不能超过 200 字或包含控制字符"))
+            return
+        }
+        actionJob = scope.launch {
+            source.createSession().fold(
+                onSuccess = { id ->
+                    var notice = "已创建会话"
+                    if (clean.isNotEmpty()) {
+                        source.renameSession(id, clean).fold(
+                            onSuccess = { notice = "已创建并命名会话" },
+                            onFailure = { notice = "会话已创建，但重命名失败：${messageOf(it)}" }
+                        )
+                    }
+                    readStore.markRead(id, System.currentTimeMillis())
+                    loadAfterAction(selectedId = id, notice = notice)
+                },
+                onFailure = { failAction(it) }
+            )
+        }
+    }
+
+    fun renameSession(sessionId: String, title: String) {
+        if (!validId(sessionId) || !beginAction()) return
+        val clean = title.trim()
+        if (!validTitle(clean, allowEmpty = false)) {
+            failAction(IllegalArgumentException("标题不能为空、不能超过 200 字或包含控制字符"))
+            return
+        }
+        actionJob = scope.launch {
+            source.renameSession(sessionId, clean).fold(
+                onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已重命名") },
+                onFailure = { failAction(it) }
+            )
+        }
+    }
+
+    /**
+     * 归档会话。运行中的会话需要显式 `stopActivity=true`，由官方先请求停止
+     * 当前回合/子代理/任务，再提交归档；失败时保留列表并提示原因。
+     */
+    fun archiveSession(sessionId: String, stopActivity: Boolean) {
+        if (!validId(sessionId) || !beginAction()) return
+        actionJob = scope.launch {
+            source.archiveSession(sessionId, stopActivity).fold(
+                onSuccess = { archived ->
+                    // 归档响应已确认的会话即使列表刷新稍慢也不再显示，避免“已归档但仍可点”。
+                    loadAfterAction(
+                        selectedId = null,
+                        notice = if (stopActivity) "已停止运行并归档" else "已归档",
+                        excludeIds = archived.toSet()
+                    )
+                },
+                onFailure = { failAction(it) }
+            )
+        }
+    }
+
+    fun searchContent() {
+        val query = _state.value.query.trim()
+        if (query.isEmpty()) {
+            _state.update { it.copy(contentHits = emptyList(), contentHasMore = false, contentSearching = false, contentSearched = false) }
+            return
+        }
+        val token = ++searchGeneration
+        searchJob?.cancel()
+        _state.update { it.copy(contentSearching = true, error = null) }
+        searchJob = scope.launch {
+            source.search(query).fold(
+                onSuccess = { result ->
+                    if (token != searchGeneration) return@fold
+                    _state.update {
+                        it.copy(
+                            contentSearching = false,
+                            contentSearched = true,
+                            contentHits = result.items,
+                            contentHasMore = result.hasMore
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    if (token != searchGeneration) return@fold
+                    // 搜索失败时不能显示“没有匹配”，否则会把错误说成空结果。
+                    _state.update { it.copy(contentSearching = false, contentSearched = false, error = messageOf(error)) }
+                }
+            )
+        }
+    }
+
+    fun clearContentSearch() {
+        searchGeneration++
+        searchJob?.cancel()
+        _state.update { it.copy(contentHits = emptyList(), contentHasMore = false, contentSearching = false, contentSearched = false) }
+    }
+
+    fun loadModels(force: Boolean = false) {
+        if (!force && (_state.value.models != null || _state.value.modelsLoading)) return
+        val token = ++modelGeneration
+        modelJob?.cancel()
+        _state.update { it.copy(modelsLoading = true, modelsError = null) }
+        modelJob = scope.launch {
+            source.models().fold(
+                onSuccess = { catalog ->
+                    if (token != modelGeneration) return@fold
+                    _state.update { it.copy(modelsLoading = false, models = catalog, modelsError = null) }
+                },
+                onFailure = { error ->
+                    if (token != modelGeneration) return@fold
+                    _state.update { it.copy(modelsLoading = false, modelsError = messageOf(error)) }
+                }
+            )
+        }
+    }
+
+    fun loadPermissions(force: Boolean = false) {
+        if (!force && (_state.value.permissions != null || _state.value.permissionsLoading)) return
+        val token = ++permissionGeneration
+        permissionJob?.cancel()
+        _state.update { it.copy(permissionsLoading = true, permissionsError = null) }
+        permissionJob = scope.launch {
+            source.permissions().fold(
+                onSuccess = { catalog ->
+                    if (token != permissionGeneration) return@fold
+                    _state.update { it.copy(permissionsLoading = false, permissions = catalog, permissionsError = null) }
+                },
+                onFailure = { error ->
+                    if (token != permissionGeneration) return@fold
+                    _state.update { it.copy(permissionsLoading = false, permissionsError = messageOf(error)) }
+                }
+            )
+        }
+    }
+
+    fun loadSessionCatalog(sessionId: String) {
+        if (!validId(sessionId)) return
+        val token = ++catalogGeneration
+        catalogJob?.cancel()
+        _state.update {
+            it.copy(
+                catalogLoading = true,
+                catalogError = null,
+                skills = emptyList(),
+                commands = emptyList()
+            )
+        }
+        catalogJob = scope.launch {
+            val skillsResult = source.skills(sessionId)
+            val commandsResult = source.commands(sessionId)
+            if (token != catalogGeneration) return@launch
+            val skills = skillsResult.getOrNull()
+            val commands = commandsResult.getOrNull()
+            val error = when {
+                skills == null && commands == null -> messageOf(skillsResult.exceptionOrNull() ?: commandsResult.exceptionOrNull()!!)
+                skills == null -> "技能目录读取失败：${messageOf(skillsResult.exceptionOrNull()!!)}"
+                commands == null -> "命令目录读取失败：${messageOf(commandsResult.exceptionOrNull()!!)}"
+                else -> null
+            }
+            _state.update {
+                it.copy(
+                    catalogLoading = false,
+                    skills = skills.orEmpty(),
+                    commands = commands.orEmpty(),
+                    catalogError = error
+                )
+            }
+        }
+    }
+
+    fun selectModel(sessionId: String, selection: DshModelSelection) {
+        if (!validId(sessionId) || !beginAction()) return
+        actionJob = scope.launch {
+            source.selectModel(sessionId, selection).fold(
+                onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换模型") },
+                onFailure = { failAction(it) }
+            )
+        }
+    }
+
+    /**
+     * 当前会话权限通过官方 `/permission` 命令切换，不直接写 sandbox/approval
+     * 事件。完全权限必须由界面二次确认后才会走到这里。
+     */
+    fun selectPermission(sessionId: String, preset: String, allowFullAccess: Boolean = false) {
+        if (!validId(sessionId) || !beginAction()) return
+        if (!preset.matches(Regex("[a-z0-9-]{1,64}")) || preset == "custom") {
+            failAction(IllegalArgumentException("权限模式不可选择"))
+            return
+        }
+        if (preset == "danger-full-access" && !allowFullAccess) {
+            failAction(IllegalArgumentException("完全权限需要用户明确确认"))
+            return
+        }
+        actionJob = scope.launch {
+            source.selectPermission(sessionId, preset).fold(
+                onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换权限模式") },
+                onFailure = { failAction(it) }
+            )
+        }
+    }
+
+    /** 服务停止时清空列表与选中状态，保留安全模式标记；Cookie 在 close() 中一并丢弃。 */
+    fun clearForStopped() {
+        close()
+        _state.value = DshSessionManagerState(readOnly = _state.value.readOnly)
+    }
+
+    fun close() {
+        listGeneration++
+        searchGeneration++
+        modelGeneration++
+        permissionGeneration++
+        catalogGeneration++
+        listJob?.cancel()
+        actionJob?.cancel()
+        searchJob?.cancel()
+        modelJob?.cancel()
+        permissionJob?.cancel()
+        catalogJob?.cancel()
+        source.reset()
+        _state.update { it.copy(loading = false, busy = false, contentSearching = false) }
+    }
+
+    private fun beginAction(): Boolean {
+        if (_state.value.readOnly) {
+            _state.update { it.copy(error = "安全模式下会话管理为只读，不能修改会话") }
+            return false
+        }
+        if (_state.value.busy) return false
+        // 写操作前让在途列表/搜索请求失效，避免旧结果覆盖操作后的新列表。
+        listGeneration++
+        listJob?.cancel()
+        actionJob?.cancel()
+        _state.update { it.copy(busy = true, error = null, notice = null) }
+        return true
+    }
+
+    private fun failAction(error: Throwable) {
+        _state.update { it.copy(busy = false, error = messageOf(error)) }
+    }
+
+    private suspend fun loadAfterAction(
+        selectedId: String?,
+        notice: String,
+        excludeIds: Set<String> = emptySet()
+    ) {
+        val result = source.sessions()
+        result.fold(
+            onSuccess = { sessions ->
+                publishSessions(
+                    sessions = sessions.filterNot { it.id in excludeIds },
+                    selectedId = selectedId,
+                    notice = notice,
+                    keepError = false
+                )
+            },
+            onFailure = { error ->
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        selectedId = selectedId ?: it.selectedId,
+                        notice = notice,
+                        error = "操作已完成，但列表刷新失败：${messageOf(error)}"
+                    )
+                }
+            }
+        )
+    }
+
+    private fun publishSessions(
+        sessions: List<DshAdminSession>,
+        selectedId: String?,
+        notice: String?,
+        keepError: Boolean
+    ) {
+        val keep = selectedId?.takeIf { id -> sessions.any { it.id == id } }
+            ?: _state.value.selectedId?.takeIf { id -> sessions.any { it.id == id } }
+        _state.update {
+            it.copy(
+                loading = false,
+                busy = false,
+                sessions = sessions,
+                unreadIds = unreadOf(sessions),
+                selectedId = keep,
+                available = true,
+                hasLoaded = true,
+                notice = notice ?: it.notice,
+                error = if (keepError) it.error else null
+            )
+        }
+        keep?.let { id -> sessions.firstOrNull { it.id == id }?.let(::markRead) }
+    }
+
+    private fun markRead(session: DshAdminSession) {
+        readStore.markRead(session.id, session.updatedAt)
+        _state.update { it.copy(unreadIds = it.unreadIds - session.id) }
+    }
+
+    private fun unreadOf(sessions: List<DshAdminSession>): Set<String> = sessions
+        .filter { it.updatedAt > 0 && !it.blank && it.updatedAt > readStore.lastRead(it.id) }
+        .mapTo(LinkedHashSet()) { it.id }
+
+    private fun validId(id: String): Boolean =
+        id.isNotBlank() && id.length <= 128 && id.all { it.code in 0x21..0x7e }
+
+    private fun validTitle(title: String, allowEmpty: Boolean): Boolean {
+        if (title.isEmpty()) return allowEmpty
+        return title.length <= 200 && title.none { it.code < 0x20 || it.code == 0x7f }
+    }
+
+    private fun messageOf(error: Throwable): String = when (error) {
+        is DshApiException -> when (error.code) {
+            "workspace/session-active" -> "会话仍在运行，请确认停止当前工作后再归档"
+            "session/conflict" -> "会话目录冲突，未执行操作"
+            "session/agent-busy" -> "会话正被其他 Agent 使用"
+            "session/title-invalid" -> "会话标题不合法"
+            "session/provider-credentials-unavailable" -> "模型服务凭据不可用"
+            "session/provider-models-unavailable" -> "模型目录暂时不可用"
+            "session/model-unavailable" -> "所选模型不可用"
+            "session/migration-required" -> "会话需要迁移，原生管理暂不可用"
+            else -> "官方接口返回 ${error.code}"
+        }
+        is JSONException, is IllegalArgumentException ->
+            error.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
+                ?: "官方接口响应格式不正确"
+        else -> Redact.text(error.message ?: "未知错误").take(200)
+    }
+}
