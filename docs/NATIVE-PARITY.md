@@ -550,7 +550,7 @@
 ### 4.15 文档门禁
 
 **A-DOC-01（JVM/宿主）矩阵一致性**
-1. 运行 `python3 scripts/check-native-parity.py`。
+1. 运行 `python3 scripts/check-native-parity.py`（已接入 `.github/workflows/verify.yml` 的 Host job）。
 2. 断言：14 个功能域齐全、ID 唯一、每行有状态/优先级/验收用例、验收用例引用存在、引用的仓库路径存在。
 3. 运行 `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md` 与 `python3 scripts/check-handoff.py`。
 

@@ -30,6 +30,7 @@
 |---|---|
 | `docs/NATIVE-PARITY.md` | 新增功能对齐审计：状态/优先级图例、14 类矩阵、44 个验收用例、自动化与设备前置、并行归属与阻塞、不做/不宣称、维护规则。 |
 | `scripts/check-native-parity.py` | 新增只读文档门禁：校验 14 域、行 ID 唯一/归属正确、状态/优先级/验收引用、验收用例定义、反引号仓库路径存在；`--self-test` 用内置样例验证能发现坏行。 |
+| `.github/workflows/verify.yml` | 在 Host job 增加 `Check native parity matrix` 步骤，运行同一脚本，避免矩阵随代码漂移。 |
 | `docs/handoffs/20261110-1140-native-parity-audit.md` | 本记录。 |
 | `docs/AGENT-STATE.md` | 仅增加本审计记录链接；不改写当前状态、其他记录或印章。并发汇总仍由编排器指定的维护方完成。 |
 
@@ -43,7 +44,8 @@
 | `python3 -c "compile(open('scripts/check-native-parity.py',encoding='utf-8').read(),'scripts/check-native-parity.py','exec')"` | PASS（syntax PASS） | 不写字节码缓存；只验证 Python 语法，不执行产品代码。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1140-native-parity-audit.md` | PASS（Handoff refreshed，594 public files） | 刷新印章；新文档/脚本已进入源码指纹。 |
 | `python3 scripts/check-handoff.py` | PASS（Handoff current，594 public files） | 无参数检查印章当前。 |
-| `python3 scripts/check-publication.py --git` | 未执行 | 提交前需运行；本次未提交、未暂存。 |
+| `python3 scripts/check-publication.py --git` | 0 findings（595 public files） | 提交前运行；未暂存前与提交后各核对一次。 |
+| GitHub Actions Host job `Check native parity matrix` | 未在本机执行；PR CI 为准 | 已接入 `.github/workflows/verify.yml`，本轮未等待 CI 完成。 |
 | 产品 JVM/仪器/设备 | 未执行 | 本任务为只读审计；不把历史测试当本轮结果。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只新跑矩阵检查器与自测；PR #22/#25/#29/#28/#23/#24 等是既有记录，未在本轮复跑。
@@ -62,7 +64,7 @@
 ## 下一步
 
 1. 运行 `python3 -m py_compile scripts/check-native-parity.py`、`python3 scripts/check-handoff.py --record docs/handoffs/20261110-1140-native-parity-audit.md`、`python3 scripts/check-handoff.py`，回填本记录。
-2. 运行 `python3 scripts/check-publication.py --git`，按实际路径暂存 `docs/NATIVE-PARITY.md`、`scripts/check-native-parity.py`、本记录与 `docs/AGENT-STATE.md` 链接；提交信息用 `docs: add native UI parity audit and acceptance matrix`。
+2. 运行 `python3 scripts/check-publication.py --git`，按实际路径暂存 `docs/NATIVE-PARITY.md`、`scripts/check-native-parity.py`、`.github/workflows/verify.yml`、本记录与 `docs/AGENT-STATE.md` 链接；文档提交用 `docs: add native UI parity audit and acceptance matrix`，CI 接线用 `ci: check native parity matrix`。
 3. 推送分支并创建 PR（base `main`），正文写摘要、实际验证命令、未验证范围与风险；不合并、不发布、不触发 AO Review（除非用户/编排器明确要求）。
 4. 编排器确认 android_agent-44 与 42/45/46 的范围后，按矩阵优先级排期；42 的 mux 接 UI 后优先更新 CHAT-15、SESS-12、APPROVAL-01/05 状态。
 5. 独立 Android QA 按第 4 节仪器/手工用例执行；真实模型/账号用例等用户恢复授权。
