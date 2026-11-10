@@ -34,26 +34,6 @@ data class DshApprovalRequest(
 )
 
 /** `/api/remote.mux` `$events` 流中本切片关心的事件。 */
-sealed interface DshEventFrame {
-    /** 官方事件流已就绪，返回后续回答所需的 clientId。 */
-    data class Ready(val clientId: String) : DshEventFrame
-
-    /** 一个待回答的审批请求。 */
-    data class Approval(val request: DshApprovalRequest) : DshEventFrame
-
-    /** Host 撤回了同一 eventId 的审批请求。 */
-    data class Cancelled(val eventId: String) : DshEventFrame
-
-    /** 官方逻辑流返回错误；只保留短错误码，不显示可能含细节的 message。 */
-    data class StreamError(val code: String) : DshEventFrame
-
-    /** 合法但本切片不展示的 waterfall（如用户提问）；必须回 next 让 Host 继续兜底。 */
-    data class UnsupportedWaterfall(val eventId: String) : DshEventFrame
-
-    /** 本切片不处理的通知/未知帧；不解析其正文，避免把工具参数或会话内容带进原生层。 */
-    data object Ignored : DshEventFrame
-}
-
 /** 审批通道的纯协议层：只做白名单字段校验、请求信封与回答信封，不做网络 I/O。 */
 object DshApprovalProtocol {
     const val EVENTS_ENDPOINT = "\$events"

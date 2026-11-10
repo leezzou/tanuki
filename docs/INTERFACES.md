@@ -215,21 +215,18 @@ HTTP 200..399 或 401 → 存活
 
 ### 1.9 可选原生界面的官方 DSH 接口
 
-设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话与审批，不另造协议：
+设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读写会话、发送消息并处理审批，不另造聊天协议：
 
-- 认证：同一启动 token 调 `GET /connect?token=...&interactions=...`，只取签名 API Cookie；不跟随 302。只读列表使用 `interactions=none`；审批必须使用独立的 `interactions=answer` Peer，否则官方 `$events`/`$events/result` 会返回 `gateway/interactions-forbidden`。两者各自换取 API Cookie，互不共享内存对象。
-- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
-- 实时流：`/api/remote.mux` WebSocket 上发送 `{"type":"open","streamId":...,"endpoint":"$events","payload":{"args":{}}}`；服务端返回 `ready(clientId)`、`waterfall(approval/request, eventId, agentId, request)`、`cancel(eventId)` 或 `error(code)`。原生只读取审批白名单字段（`toolName`、`callId`、`reason`、`displayReason`），不复制工具参数以外的请求正文。
-- 审批回答：`POST /api/$events/result`，信封 `{"type":"client-request","rpcId":...,"method":"$events/result","payload":{"args":{"clientId":...,"eventId":...,"outcome":{"kind":"result","value":"allowed-once"|"rejected"}}}}`。`cancelled` 由 Host 撤回，`unavailable` 由 Host 无回答者时产生；原生不发明新 outcome。401/403 表示认证 Peer 失效：不得用新 Cookie 回答旧 `clientId`，必须断开重连并由新 `/connect` 创建新 Peer。
-- 非审批 waterfall：`user-questions/request` 等合法 waterfall 回 `{"kind":"next"}`，保留 `clientId`/`eventId` 关联，让 Host 继续后续回答者/兜底；不产生审批卡片。
-- 参数查询：收到审批后按 `request.sessionId + callId` 异步读取；断线会丢弃旧代次结果，重连就绪或 Host 重放同一 `eventId` 时重新启动仍为 `lookupPending` 的查询。
-- 参数/风险：收到审批后按 `request.sessionId + callId` 读取该审批所属会话的工具调用，而不是当前选中会话的旧快照；历史后到时由原生控制器 `updateTool(sessionId, tool)` 更新参数与风险，再按“本次运行记忆”决定是否自动回答。
-- 未知类型：官方 `toolName` 缺失/非法时显示“未知审批”，风险按高处理，只能拒绝，不能按记忆自动允许。
-- 记住选择：官方审批是一次性授权，没有“记住”outcome。原生“本次运行内记住”只按 `sessionId + toolName + 风险等级` 在内存中自动复用刚才的 `allowed-once`/`rejected`，不写 DSH 配置、不跨进程/重启，关闭原生页或服务停止即清空。
-- 工具卡片：来自 `session/page` 的 `tool/call`（`callId`、`name`、`arguments`）与 `tool/result`（`message.toolCallId`、`content`、`isError`、`error`、`meta`）。`meta.diffs[]` 为官方 `FileDiff`（`path`、`oldText`、`newText`）；没有结果的事件明确显示“进行中/未读取到结果”，不伪造成功。
-- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 只连 `http://127.0.0.1:<port>/api/remote.mux`，校验 `Sec-WebSocket-Accept`，客户端帧掩码，服务端帧拒绝掩码，单帧上限 1 MiB；握手阶段有总 deadline（默认 10 秒）且先发布可关闭 socket，完成后才切长期流；WebView 同源与 Cookie 策略不变。
-- **临时实现**：`DshWebSocketClient.kt` 是本切片为完成审批功能保留的最小 RFC6455 实现，待收敛到 android_agent-42 的 `DshWebSocket.kt`/transport。它只暴露 `connect(origin, cookie, path)`、`sendText(text): Boolean`、`close()` 与 `Listener.onOpen/onText/onClosed/onFailure`；`DshApprovalController` 只依赖更高层的 `DshApprovalTransport`（`connect()`、`answer(eventId, outcome)`、`close()`），42 可用自己的 transport 实现该接口替换，不需要改审批 UI。不要再扩展这个临时 WebSocket。
-- 缺口：`session/follow`、`session/control`、聊天发送/取消/附件/模型选择仍未实现；工具卡片来自历史页，不提供实时增量流。
+- 认证：同一启动 token 调 `GET /connect?token=...&interactions=...`，只取签名 API Cookie；不跟随 302。聊天/实时/输入共用 `interactions=answer` Peer；审批切片另用独立 `interactions=answer` Peer（`$events`/`$events/result` 要求），两者不共享 Cookie 内存对象。只读列表可显式用 `none`。
+- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；使用 `session/list`、`session/projections`、`session/page`、`session/prompt`（`mode=queue`）、`session/cancel`、`$events/result`，以及输入组件的 `commands/list`、`fileUploads/*`、`fileReferences/list`、`sessionReferenceResolver/*`。
+- 实时流：`/api/remote.mux` WebSocket 逻辑流 `open/item/end/cancel`；聊天打开 `$events`（`{args:{}}`）与 `session/follow`（`request.address.kind=session`、`assistantStream=true`、`maxMessages=120`）。`session/follow` 的 `snapshot` 提供历史窗口、工具事件与 assistant 基线，`event` 提供增量消息/工具，`assistant-stream` 只聚合 `text-delta`，落盘消息替换临时流式气泡。
+- 工具时间线：`session/page`/follow 的 `tool/call` 与 `tool/result` 由 `DshToolTimeline.parse` 合成；`meta.diffs[]` 读取 `FileDiff`；没有结果明确显示“进行中”，不伪造成功。实时工具事件通过 `DshLiveEvent.Timeline` 按 callId 合并。
+- 审批：`$events` 的 `waterfall(approval/request, eventId, agentId, request)`、`cancel(eventId)`、`error(code)`；唯一展示/回答入口为 `DshApprovalController`/`DshApprovalPanel` 所属审批 Peer，使用 `allowed-once|rejected`。聊天 Peer 继续收状态通知，收到 waterfall 则用该连接固定的 Cookie/clientId 回 `next`；HTTP/业务失败或缺少 ready 时关闭聊天 mux、清 Cookie 并显示转交失败提示，让 Host 释放该回答者。转交不在 401 后换 Peer 重试，协程取消同时中止 HTTP 并传播。审批 Peer 的非审批 waterfall 同样回 `next`。参数按 `request.sessionId + callId` 查询，不使用当前选中会话旧快照；未知工具只能拒绝；`记住本次运行` 仅内存、按会话+工具+风险复用，不写配置。
+- 输入/附件：复用 `DshComposerBar`/`DshComposerController`；发送前捕获 `sessionId+generation` 的 `DshComposerSessionToken`，附件读取/粘贴/拖入结果返回时校验 token，切换会话后旧结果丢弃；发送成功只清理已提交快照，保留等待期间新编辑；批量读取按剩余数量/累计字节预算限流。
+- 共享 transport：`DshTransport` 冻结 `connection: StateFlow<DshConnectionState>`、`suspend call(method,args): Any?`、`live(sessionId): Flow<DshLiveEvent>`、`reset()`；`DshNativeComposerRemote` 只转发 call/reset。聊天、输入、会话管理共用同一连接/认证，不各自建 HTTP/WS。
+- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 校验 `Sec-WebSocket-Accept`、客户端帧掩码、拒绝服务端掩码、单帧上限 1 MiB；WebView 同源与 Cookie 策略不变。
+- **临时实现**：`DshWebSocketClient.kt` 是审批切片保留的最小 RFC6455 客户端，`DshApprovalController` 只依赖 `DshApprovalTransport`；后续可替换为 42 的 `DshWebSocket.kt`/transport，不需要改审批 UI。不要再扩展它。
+- 缺口：模型/推理强度、用户提问的完整回答、历史向前分页、自动重连、工具卡与审批的实时关联仍未实现；工具卡来自 page/follow 事件，不读取图片字节。
 
 #### 1.9.1 原生输入与附件组件
 

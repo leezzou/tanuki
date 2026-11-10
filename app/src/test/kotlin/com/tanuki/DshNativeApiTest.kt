@@ -229,7 +229,7 @@ class DshNativeApiTest {
         assertEquals(4, requests.size)
         val connect = requests.first { it.target.startsWith("/connect?") }
         assertTrue(connect.target.contains("token=top-secret"))
-        assertTrue(connect.target.contains("interactions=none"))
+        assertTrue(connect.target.contains("interactions=answer"))
         assertNull(connect.headers["cookie"])
         assertNull(connect.headers["origin"])
         val api = requests.filter { it.target.startsWith("/api/") }
@@ -395,6 +395,50 @@ class DshNativeApiTest {
             assertTrue(apiCookies.contains("dsh-session=fresh"))
             assertFalse(apiCookies.contains("dsh-session=stale"))
             resetter.join(1_000)
+        }
+    }
+
+    @Test fun transportCallReturnsOfficialValueAndKeepsBusinessCode() {
+        var fail = false
+        TestServer { request ->
+            when {
+                request.target.startsWith("/connect?") -> TestResponse(
+                    302,
+                    listOf("Set-Cookie" to "dsh-session=abc; Path=/"),
+                    ""
+                )
+                request.target == "/api/session/list" -> {
+                    if (!fail) {
+                        TestResponse(
+                            200, listOf(),
+                            okFor(request, JSONObject().put("items", JSONArray()).put("valueMarker", "ok"))
+                        )
+                    } else {
+                        val rpcId = JSONObject(request.body).getString("rpcId")
+                        TestResponse(
+                            200, listOf(),
+                            JSONObject()
+                                .put("type", "server-response")
+                                .put("rpcId", rpcId)
+                                .put(
+                                    "result",
+                                    JSONObject().put("ok", false)
+                                        .put("error", JSONObject().put("code", "session/not-found"))
+                                ).toString()
+                        )
+                    }
+                }
+                else -> TestResponse(404, listOf(), "not found")
+            }
+        }.use { server ->
+            val client = DshNativeClient { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            val value = runBlocking { client.call("session/list", JSONObject()) }
+            assertTrue(value is JSONObject)
+            assertEquals("ok", (value as JSONObject).getString("valueMarker"))
+            fail = true
+            val error = runCatching { runBlocking { client.call("session/list", JSONObject()) } }.exceptionOrNull()
+            assertTrue(error is com.tanuki.web.DshApiException)
+            assertEquals("session/not-found", (error as com.tanuki.web.DshApiException).code)
         }
     }
 

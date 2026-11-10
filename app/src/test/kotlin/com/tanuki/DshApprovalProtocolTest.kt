@@ -118,7 +118,8 @@ class DshApprovalProtocolTest {
         assertFalse(url.contains("interactions=none"))
         // 只读列表的既有契约仍是 none；审批不能复用它。
         val readOnly = DshApiProtocol.connectUrl(
-            DshEndpoint("http://127.0.0.1:1234", "http://127.0.0.1:1234/?token=t")
+            DshEndpoint("http://127.0.0.1:1234", "http://127.0.0.1:1234/?token=t"),
+            interactions = "none"
         )!!
         assertTrue(readOnly.contains("interactions=none"))
     }

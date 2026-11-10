@@ -78,6 +78,7 @@ class DshApprovalSession(
                     is DshEventFrame.Cancelled -> listener.onCancel(frame.eventId)
                     is DshEventFrame.UnsupportedWaterfall -> listener.onUnsupportedWaterfall(frame.eventId)
                     is DshEventFrame.StreamError -> disconnect("审批通道返回错误（${frame.code}）")
+                    is DshEventFrame.Emit, is DshEventFrame.Waterfall -> Unit
                     DshEventFrame.Ignored -> Unit
                 }
             }

@@ -1,10 +1,49 @@
 # 原生界面与官方网页版功能对齐审计
 
 - 审计基线：`origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`（2026-11-10 核对）。
-- PR 基线：本分支已 rebase 到 `origin/main=533eff4`（2026-11-10）；审计结论仍基于 0555c3c0，main 新增的文件查看器改动不改变本矩阵行。
+- PR 基线：本分支已合并 `origin/main=b075725`（2026-11-10）；审计结论仍基于 0555c3c0，main 新增的文件查看器/#35 改动不改变本矩阵行。
 - 审计对象：Tanuki 原生界面（Compose 原生页、原生文件页、原生设置、原生浏览器、原生通知/远程/安全模式）与官方网页版（官方客户端 0.2.1-rc.5，只读包与协议）。
-- 交付性质：只读审计 + 可执行验收清单；本轮**不修改产品代码**，不合并、不发布。
-- 结论先行：当前“原生界面”是**只读切片**（会话列表 + 最近一页文本消息）；官方网页版仍是默认且唯一完整的交互面。原生页要达到“可对话”至少需要补齐发送、流式、停止、审批/提问回答；要达到“可管理”还需会话生命周期、模型、附件、搜索；插件/终端/交付物等属于第三阶段。
+- 交付性质：只读审计 + 可执行验收清单；本文件同时保留 PR #40 的落地状态段，不合并、不发布。
+- 结论先行：PR #40 已把原生页推进到“可对话”第一批（发送/停止、follow 流式、输入/附件、Markdown/代码块、审批单次允许/拒绝）；官方网页版仍是默认完整交互面。矩阵中的“原生现状”多为审计基线，凡标注本 PR 已落地的行以第 0 节为准；会话生命周期、模型、搜索、工具卡、工作区、设置、插件/终端/交付物仍属后续阶段。
+
+## 0. 本 PR 落地状态（2026-11-10，android_agent-42）
+
+本 PR 把原生页从只读切片推进到“可对话”第一批；只更新本表列出的能力，其余矩阵行仍按审计基线。状态：✅ 本 PR 已实现；◐ 部分；☐ 未实现。
+
+| 矩阵 ID | 状态 | 本 PR 证据 / 边界 |
+|---|---|---|
+| SESS-01/02 | ◐ | 会话列表、切换、运行状态、通知目标；历史读取最近 120 条 + follow 快照；无搜索/新建/重命名/归档/向前分页 |
+| SESS-12 | ◐ | 45 审批面板显示其他会话待处理计数；无完整未读模型 |
+| SESS-17 | ✅ | 通知点击目标强制重读/重连；失败保留 pending 给官方回退 |
+| CHAT-01 | ✅ | append-origin 用户/助手文本；过滤 replace/注入 |
+| CHAT-02 | ◐ | Markdown 标题/段落/粗体/斜体/行内代码/列表/引用/分隔线；非完整 GFM |
+| CHAT-03 | ◐ | 围栏代码块、语言标签、复制、横向滚动；无语法高亮/行号/折叠 |
+| CHAT-04 | ◐ | Markdown 图片占位，不自动联网；无授权图片加载/浮层 |
+| CHAT-05 | ◐ | 输入侧附件/文件引用；历史消息附件卡片未渲染 |
+| CHAT-06/07 | ✅ | `DshToolCard` 展示工具名/状态/参数摘要/输出/diff/命令；来自 page/follow 工具事件 |
+| CHAT-08/09/10 | ☐ | reasoning、token/上下文、轮次过程折叠未接 |
+| CHAT-11 | ◐ | 错误 banner + “重发上一条”；无逐轮失败行/官方 regenerate |
+| CHAT-12 | ◐ | 代码块复制；无整条消息复制/反馈 |
+| CHAT-13 | ☐ | Markdown 链接显示 label/URL，未接应用内/外打开 |
+| CHAT-15 | ✅ | `$events` + `session/follow` + `assistant-stream` text-delta；committed 消息替换临时气泡 |
+| CHAT-17 | ✅ | 不显示系统提示/普通注入/permission 命令行 |
+| INPUT-01/02 | ✅ | composer 多行/键盘发送；`session/prompt` 文本/图片/文件 receipt |
+| INPUT-03 | ✅ | 停止按钮 + `session/cancel`，由状态流收敛 |
+| INPUT-04/05/06 | ✅ | 斜杠命令、@ 文件/会话引用、附件选择/粘贴/拖入（输入组件） |
+| INPUT-12/13 | ◐ | 按会话草稿；默认 queue，steer/队列编辑未做 |
+| INPUT-07/08/09 | ☐ | 模型/推理/权限预设选择器未接 |
+| ATT-01..04/06 | ◐ | 附件选择、上传、限制、失败重试与文件引用；历史图片读取未接 |
+| ATT-05 | ☐ | `session/attachment` 授权图片加载未接 |
+| APPROVAL-01/02 | ✅ | 45 `DshApprovalPanel`：工具名/参数/风险；`$events/result` 允许一次/拒绝 |
+| APPROVAL-05 | ◐ | 提问只读展示 + 跳官方；多选/自定义答案未接 |
+| APPROVAL-07/08 | ✅ | 按审批会话查参数；一次性/本次运行记忆，不写配置 |
+| APPROVAL-06/10 | ☐ | 计划审阅、审计展示未接；持久策略不做（官方一次性） |
+| MODEL-01..10 | ☐ | 模型/推理/用量/配额均未接 |
+| TOOL-01/02 | ✅ | 工具卡状态、输出/错误折叠、diff/文件变更、长输出截断 |
+| WORK/文件树/diff/搜索 | ☐ | 另行工作区切片 |
+| SET/技能/插件 | ☐/◐ | 通知设置已有；主题/语言/链接打开/技能列表/插件管理未接 |
+
+现有实现测试：本轮审批路由/聊天/工具定向 29 项、完整 JVM 794 tests / 0 failures / 0 errors / 0 skipped（合并 `main=b075725`、含 #41 审批/工具与 #43 composer），lint 0 errors / 101 warnings / 1 hint。**设备、真实 PRoot DSH、输入法、附件上传、审批 waterfall、通知、远程、安全模式均未验证。**
 
 ## 1. 状态、优先级与目标层级
 
@@ -102,8 +141,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | CHAT-03 | 代码块/高亮/复制 | 语法高亮、复制、行号/折叠 | `仅官方` | P2 · 原生消息渲染 · 未排期 · A-CHAT-03 |
 | CHAT-04 | 消息图片 | 用户/助手图片、内嵌预览、点击浮层、失败状态 | `仅官方`：原生跳过图片 | P1 · `session/attachment` · 未排期 · A-ATT-01、A-CHAT-03 |
 | CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `仅官方` | P1 · `fileUploads/*`、`fileReferences/list` · 46 输入（未提交） · A-ATT-01、A-CHAT-03 |
-| CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `仅官方`：原生跳过 `tool/result` | P1 · `DshMuxProtocol`/消息模型 · 45 审批/工具卡片（未提交）+ 42 聊天链路（事件） · A-TOOL-01、A-TOOL-02 |
-| CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `仅官方` | P1 · 原生消息模型 · 45 审批/工具卡片（未提交） · A-TOOL-01 |
+| CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `原生完整`：`DshToolCard`，来自 page/follow 工具事件 | — · `DshToolTimeline`/`DshNativeController.tools` · android_agent-45 + 42 接线 · A-TOOL-01、A-TOOL-02 |
+| CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `原生完整`：输出/错误折叠、长输出截断、diff/文件变更 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
 | CHAT-08 | 推理/思考过程 | 思考预览、过程分组、完全展开模式 | `仅官方`：原生只取 text-delta，不显示 reasoning | P2 · `DshFollowParser` · android_agent-42 · A-CHAT-02 |
 | CHAT-09 | Token 用量/上下文 | 每轮 token、输出速度、缓存命中、会话统计 | `仅官方` | P2 · 原生统计条 · 未排期 · A-CHAT-02 |
 | CHAT-10 | 轮次折叠/过程分组 | 已完成轮次过程可折叠，最终答案不隐藏 | `仅官方` | P2 · 原生消息分组 · 未排期 · A-CHAT-03 |
@@ -170,13 +209,13 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析 `approval/request` 最小字段，未接 UI | P0 · `DshMuxProtocol.kt` · 45 审批（42 提供 waterfall 事件） · A-APPROVAL-01、A-APPROVAL-02 |
-| APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `仅官方`：原生无回答通道 | P0 · `$events/result` waterfall · 45 审批 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `原生完整`：`DshApprovalPanel` 展示工具名/参数/风险/其他会话计数 | — · `DshApprovalController`/`DshApprovalPanel` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `原生完整`：允许一次/拒绝经 `$events/result` 回传 | — · `DshApprovalSession` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
 | APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · 45 审批（42 提供事件） · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*` · 45 审批 · A-APPROVAL-02 |
-| APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `仅官方` | P1 · 原生工具卡片 · 45 审批/工具卡片 · A-TOOL-02 |
+| APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `原生完整`：按审批会话查工具参数，长参数可展开 | — · `DshNativeController.tool` · android_agent-45 + 42 接线 · A-TOOL-02 |
 | APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `仅官方` | P1 · waterfall 语义 · 45 审批 · A-APPROVAL-01 |
 | APPROVAL-09 | 审批通知 | 等待审批/提问时提醒，点击定位会话 | `原生替代`：Android 通知已实现（PR #22），点击定位会话；无内联批准动作 | — · `ChatNotification*` · android_agent-29/PR #22 · A-NOTIFY-01、A-NOTIFY-02 |
 | APPROVAL-10 | 审计日志 | 每个请求与结果写入会话审计日志 | `仅官方` | P2 · 官方审计 · 未排期 · A-APPROVAL-03 |
@@ -185,8 +224,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| TOOL-01 | 工具调用卡片/状态 | 运行/完成/失败/取消状态，参数摘要，展开详情 | `仅官方`：原生跳过工具事件 | P1 · 原生消息模型 · 45 审批/工具卡片 · A-TOOL-01 |
-| TOOL-02 | 工具输出/错误 | 输出、退出码、错误、长输出折叠 | `仅官方` | P1 · 原生消息模型 · 45 审批/工具卡片 · A-TOOL-01 |
+| TOOL-01 | 工具调用卡片/状态 | 运行/完成/失败/取消状态，参数摘要，展开详情 | `原生完整`：运行/成功/失败状态、参数摘要、展开详情 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
+| TOOL-02 | 工具输出/错误 | 输出、退出码、错误、长输出折叠 | `原生完整`：输出/错误、命令/cwd、diff/文件变更、截断提示 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
 | TOOL-03 | 终端面板 | 右侧栏终端、多 shell、重连、快捷键 | `仅官方`：原生浏览器/文件页不是会话终端 | P2 · `terminal/*` · 未排期 · A-TOOL-03 |
 | TOOL-04 | 浏览器面板 | 右侧栏浏览器、tab、sandbox、链接偏好 | `原生替代/仅官方`：原生有独立浏览器（tab/收藏/历史/下载/AI 操作授权），但不作为会话侧栏面板 | P2 · `Browser*`/官方 sidebar browser · 未排期 · A-TOOL-03 |
 | TOOL-05 | 文件工具/预览 | 会话内文件树、预览、变更 | `原生部分`：原生文件页可浏览/预览/编辑，但不是会话内工具卡片 | P2 · `WorkspaceFilesPage.kt` · 既有 · A-FILE-02 |
