@@ -326,28 +326,42 @@ internal class RelaySshTransport(
     },
     private val connectTimeoutMs: Int = 15_000,
     private val reconnectPolicy: RelayReconnectPolicy = RelayReconnectPolicy()
-) : SshTransport {
-    override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = withContext(Dispatchers.IO) {
+) : StagedSshTransport {
+    override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = probeHostKey(config) {}
+
+    override suspend fun probeHostKey(
+        config: RemoteHostConfig,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): HostKeyProbe = withContext(Dispatchers.IO) {
+        // 中继模式下 TCP 阶段同时包含 TLS 连接与中继握手；失败会由控制器归类到中继错误。
+        onStage(RemoteConnectionStage.TCP)
         withBridge(config) { bridge ->
-            direct.dialing("127.0.0.1", bridge.localPort).probeHostKey(config)
+            direct.dialing("127.0.0.1", bridge.localPort).probeHostKey(config, onStage)
         }
     }
 
     override suspend fun open(config: RemoteHostConfig, expectedFingerprint: String): SshTunnel =
-        withContext(Dispatchers.IO) {
-            val pairing = config.relay ?: throw RemoteHostFailure("远程配置未包含中继配对信息")
-            val session = join(pairing)
-            val bridge = session.openBridge()
-            try {
-                val tunnel = direct.dialing("127.0.0.1", bridge.localPort)
-                    .open(config, expectedFingerprint)
-                RelaySshTunnel(tunnel, bridge, session)
-            } catch (error: Throwable) {
-                bridge.close()
-                session.close()
-                throw error
-            }
+        open(config, expectedFingerprint) {}
+
+    override suspend fun open(
+        config: RemoteHostConfig,
+        expectedFingerprint: String,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): SshTunnel = withContext(Dispatchers.IO) {
+        onStage(RemoteConnectionStage.TCP)
+        val pairing = config.relay ?: throw RemoteHostFailure("远程配置未包含中继配对信息")
+        val session = join(pairing)
+        val bridge = session.openBridge()
+        try {
+            val tunnel = direct.dialing("127.0.0.1", bridge.localPort)
+                .open(config, expectedFingerprint, onStage)
+            RelaySshTunnel(tunnel, bridge, session)
+        } catch (error: Throwable) {
+            bridge.close()
+            session.close()
+            throw error
         }
+    }
 
     private suspend fun <T> withBridge(config: RemoteHostConfig, block: suspend (RelayBridge) -> T): T {
         val pairing = config.relay ?: throw RemoteHostFailure("远程配置未包含中继配对信息")
@@ -507,10 +521,36 @@ internal suspend fun <T> relayRetry(
 class RoutingSshTransport(
     private val direct: SshTransport = JschSshTransport(),
     private val relay: SshTransport = RelaySshTransport()
-) : SshTransport {
+) : StagedSshTransport {
     override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe =
-        if (config.relay != null) relay.probeHostKey(config) else direct.probeHostKey(config)
+        probeHostKey(config) {}
+
+    override suspend fun probeHostKey(
+        config: RemoteHostConfig,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): HostKeyProbe = stagedProbe(if (config.relay != null) relay else direct, config, onStage)
 
     override suspend fun open(config: RemoteHostConfig, expectedFingerprint: String): SshTunnel =
-        if (config.relay != null) relay.open(config, expectedFingerprint) else direct.open(config, expectedFingerprint)
+        open(config, expectedFingerprint) {}
+
+    override suspend fun open(
+        config: RemoteHostConfig,
+        expectedFingerprint: String,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): SshTunnel = stagedOpen(if (config.relay != null) relay else direct, config, expectedFingerprint, onStage)
+
+    private suspend fun stagedProbe(
+        target: SshTransport,
+        config: RemoteHostConfig,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): HostKeyProbe = (target as? StagedSshTransport)?.probeHostKey(config, onStage)
+        ?: target.probeHostKey(config).also { onStage(RemoteConnectionStage.SSH_HANDSHAKE) }
+
+    private suspend fun stagedOpen(
+        target: SshTransport,
+        config: RemoteHostConfig,
+        expectedFingerprint: String,
+        onStage: (RemoteConnectionStage) -> Unit
+    ): SshTunnel = (target as? StagedSshTransport)?.open(config, expectedFingerprint, onStage)
+        ?: target.open(config, expectedFingerprint).also { onStage(RemoteConnectionStage.PORT_FORWARD) }
 }
