@@ -24,6 +24,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 新增回归：`DshSessionAdminApiTest` 7 项（会话权限/模型 projection；搜索/模型/权限/Skills/命令解析；业务错误短码；命令 success 判定；本地合成服务器验证 `session/list|create|rename|search|modelCatalog|selectModel`、`permissionPresets/catalog`、`commands/execute|list`、`skills/list`、`workspace/archiveSession` 共 11 个 method 的参数与 Cookie 只发 `/api`；非法权限 preset 不发网络；404 不含 token）；`DshSessionManagerControllerTest` 14 项（列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 `stopActivity`、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、`custom` 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie）。
 - 一次 `--rerun-tasks` 全量组合中 `NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 并发时序失败；该测试单独重跑与随后完整 JVM 重跑均通过（556/0/0/0），属既有并发 flake，本轮未修改该测试或下载代码。
 - 明确限制：`workspace/archiveSession` 的运行中停止由官方执行，本轮只用合成响应验证参数；官方 `0.2.1-rc.5` 无会话硬删除端点，归档恢复需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
+- PR [#38](https://github.com/leezzou/tanuki/pull/38) head `1e40b33` 的 Host handoff 检查与 Android build/JVM/lint 均 pass。
 - 未执行：真实 Android/PRoot DSH 的 `/connect` Cookie、真实 `commands/execute` `/permission` 结果、真实归档/停止、设备 UI/深色/大字体、远程 SSH 端点、Android 仪器、APK 安装。JVM、lint 与 assemble 不能替代设备验收。
 
 ## 设备温控与省电策略验证（2026-11-09，android_agent-30，非设备）

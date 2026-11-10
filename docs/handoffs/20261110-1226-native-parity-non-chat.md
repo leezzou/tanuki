@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-44
 - 时间：2026-11-10 12:26 CST
-- 状态：进行中（第一批实现完成，PR/最终验证待收尾）
+- 状态：已完成（本切片；PR #38 已创建，CI 全绿；设备 QA 待另行授权）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)
 
 ## 用户目标与范围
@@ -15,9 +15,9 @@
 ## 当前状态
 
 - 已实现：`DshSessionAdminApi` 官方一元协议与纯解析；`DshSessionManagerController` 状态机；`DshSessionManagerPage` Compose 页；`DshSessionManagerActivity` 独立入口；设置 → 网页与兼容性 → 原生会话管理；安全模式只读；远程 DSH 连接可用。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`（556 tests / 0 failures）、`lintModernDebug --rerun-tasks`（BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint）、`assembleModernDebug`（BUILD SUCCESSFUL，未安装设备）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`（556 tests / 0 failures）、`lintModernDebug --rerun-tasks`（BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint）、`assembleModernDebug`（BUILD SUCCESSFUL，未安装设备）、PR #38 的 Host 与 Android CI 全绿。
 - 待验证：真实 Android/PRoot DSH 的 `/connect`、`session/create|rename|search`、`workspace/archiveSession`、模型/权限命令；设备 UI/深色/大字体；远程 SSH 端点；Android 仪器测试。
-- 当前分支：`ao/native-parity/session-admin`，基线 `origin/main=0555c3c0`；未提交、未推送、未创建 PR。
+- 当前分支：`ao/native-parity/session-admin`，基线 `origin/main=0555c3c0`；PR [#38](https://github.com/leezzou/tanuki/pull/38)，head `1e40b33`，Host/Android CI 全绿；未合并、未发布、未触发 AO Review。
 - 关键事实：官方 `0.2.1-rc.5` 无会话硬删除端点；归档用 `workspace/archiveSession`；归档恢复需要 `workspace/follow` 流，未实现；未读是本机 `updatedAt` 比较。
 
 ## 本次改动
@@ -49,6 +49,7 @@
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint | 无新增 Error；告警为既有弃用/可读性 |
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime --rerun-tasks` | BUILD SUCCESSFUL（3m33s，28 tasks executed），0 errors / 95 warnings / 1 hint | 最终源码强制重跑，不是缓存结果 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m29s，40 tasks） | 只验证 APK 打包与清单，未安装设备、未签名发布 |
+| PR #38 Host / Android CI（head `1e40b33`） | 全部 pass | Host handoff 检查 + Android build/JVM/lint；CI 结果绑定该 head |
 
 - 哪些是前一轮结果，哪些是本次新验证：556 JVM、lint、新增 21 项均为本轮新跑；535 tests/393 tests 等为历史，未冒充本轮。
 - 一次 `--rerun-tasks` 全量组合中 `NpmAdaptiveWorkerPoolTest` 的 downshift 并发时序失败；该测试单独重跑与完整 JVM 重跑均通过，未改该测试，属既有 flake。
@@ -56,16 +57,16 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建；真实设备/PRoot 验收；工作区全局搜索/diff；插件列表；斜杠命令执行；应用内语言/主题；归档列表恢复。
+- 未完成：真实设备/PRoot 验收；工作区全局搜索/diff；插件列表；斜杠命令执行；应用内语言/主题；归档列表恢复。
 - 外部阻塞：无（网络与构建可用）。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按原状态保留。
 
 ## 下一步
 
-1. 提交前运行 `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1226-native-parity-non-chat.md`、`python3 scripts/check-handoff.py`、`python3 scripts/check-publication.py --git`、`python3 scripts/package-source.py`，核对 `artifacts/SOURCE-SHA256SUMS`。
-2. 提交并推送 `ao/native-parity/session-admin`，创建 PR（base `main`），正文写摘要、实际测试、未验证范围与已知风险；不合并、不发布、不触发 AO Review（除非用户/编排器同意）。
-3. 与 android_agent-42 协调合并顺序：本切片不改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`；共享 `TanukiUi.kt`/`MainActivity.kt` 仅有加法，冲突由编排器按最新 head 解决。
-4. 积分后续切片：工作区全局搜索/ diff、插件列表与启用、斜杠命令执行、应用内主题/语言、归档列表恢复（需 WebSocket）。
+1. 等待独立审查与合并授权；本切片不自行合并/发布。
+2. 与 android_agent-42 协调合并顺序：本切片不改 `DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`；共享 `TanukiUi.kt`/`MainActivity.kt` 仅有加法，冲突由编排器按最新 head 解决。
+3. 设备 QA 授权后验证真实 PRoot DSH 的一元接口、归档/权限与页面布局；后续把管理 composable 嵌入原生 DSH 页。
+4. 后续切片：工作区全局搜索/diff、插件列表与启用、斜杠命令执行、应用内主题/语言、归档列表恢复（需 WebSocket）。
 
 ## 约束与风险
 
