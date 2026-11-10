@@ -28,7 +28,7 @@ CI 用 `git diff --name-only --diff-filter=AMRD <base>...HEAD` 生成变更清�
 - 新增、修改或删除公开文件（`app/src`、`scripts`、`docs` 等）：本次必须同时新增/修改 `docs/handoffs/YYYYMMDD-HHMM-topic.md`；删除旧交接记录本身按路径豁免；
 - 普通 PR 不要求 `AGENT-STATE` 链接或 `CURRENT.json` 最新。
 
-`workflow_dispatch` 可把 `handoff_mode` 设为 `release`，在同一 Host job 中改跑 `python3 scripts/check-handoff.py --release`，用于发布前严格核对；日常 push/PR 固定为 PR 模式。拿不到基线 SHA 时（新分支首次 push 或手动触发），CI 不传空变更清单，而是执行不带清单的 `--pr` 校验最新记录结构。
+`workflow_dispatch` 可把 `handoff_mode` 设为 `release`，在同一 Host job 中改跑 `python3 scripts/check-handoff.py --release`，用于发布前严格核对；日常 push/PR 固定为 PR 模式。拿不到基线 SHA 时（新分支首次 push 或手动触发），CI 不传空变更清单，而是执行 `check-handoff.py --pr --require-latest-record` 校验最新记录结构。
 
 其中 `check-rpc-contract.py` 同时比对 Browser/Phone 的客户端与原生方法集、`/rpc`、Bearer、token 正则、请求/响应大小上限和错误码格式；任何一侧单独扩展协议都会失败。`test-browser-client.mjs` 与 `test-phone-client.mjs` 使用本机回环 mock server，不依赖真实浏览器、设备或用户能力配置。
 

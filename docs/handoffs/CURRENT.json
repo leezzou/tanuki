@@ -1,8 +1,8 @@
 {
   "schema": 2,
   "record": "docs/handoffs/20261110-1333-handoff-pr-mode.md",
-  "recordSha256": "76f27edaf5d00ef196e5a2bf34ae995217a4a3823e32f14bda0c3f4e8f0218a4",
-  "sourceFingerprint": "88e1b9ead1f4c6b89c6aa027149292527bf8c3503cee7a29e7480fea5a2f3b99",
-  "evidenceFingerprint": "e38d814c481350e2c754b9217393a11c1bd28920cf7ca2e3d970e56e53ff9de0",
+  "recordSha256": "15a346dc6dbcc3a3d2f52e664736f25bb2927f150815e6236398aedbff91740f",
+  "sourceFingerprint": "2611ec2a1672a04bb47e0d558e214d85e04062554da50ebc94f81103465c9f77",
+  "evidenceFingerprint": "0a170318de3f651f74ba39eb5b3a45586c672edaaa9e9c82b996838b906311a2",
   "fileCount": 621
 }

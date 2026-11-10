@@ -145,7 +145,7 @@ def public_file(path):
         # 防止 CI 回归为“排除删除”或“无基线时传空清单”。
         workflow = (ROOT / ".github/workflows/verify.yml").read_text()
         self.assertIn("--diff-filter=AMRD", workflow)
-        self.assertRegex(workflow, r"python3 scripts/check-handoff\.py --pr\s*\n")
+        self.assertIn("--pr --require-latest-record", workflow)
 
     def test_pr_mode_without_changed_list_checks_latest_record(self):
         # CI 拿不到基线时不传空清单；无清单的 --pr 必须实际校验最新记录结构。
@@ -154,6 +154,21 @@ def public_file(path):
         self.assert_fail("--pr")
         self.put(NEWER, record_text().replace("20260101-0000", "20260102-0000"))
         self.assert_ok("--pr")
+
+    def test_require_latest_record_validates_structure(self):
+        self.assert_ok("--pr", "--require-latest-record")
+        invalid = record_text().replace("## 下一步\n合成内容：下一步。\n", "")
+        self.put(NEWER, invalid.replace("20260101-0000", "20260102-0000"))
+        self.assert_fail("--pr", "--require-latest-record")
+        # 该参数只用于 PR 模式，不能与集成/发布模式组合。
+        self.assert_fail("--integrate", "--require-latest-record")
+        self.put(NEWER, record_text().replace("20260101-0000", "20260102-0000"))
+        self.assert_ok("--pr", "--require-latest-record")
+        # 一条记录都没有时必须失败，不能静默通过。
+        (self.root / RECORD).unlink()
+        (self.root / NEWER).unlink()
+        result = self.assert_fail("--pr", "--require-latest-record")
+        self.assertIn("没有可校验的最新交接记录", result.stderr)
 
     def test_integrate_requires_state_link_and_latest_record(self):
         self.assert_fail("--integrate", "--record", RECORD)

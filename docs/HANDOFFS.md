@@ -47,6 +47,9 @@ python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md
 # CI / 本地带变更清单：公开文件有改动却没有交接记录会失败
 python3 scripts/check-handoff.py --pr --changed-from /tmp/changed-files.txt
 
+# 无基线/无变更清单：只校验最新记录结构，避免空清单静默通过
+python3 scripts/check-handoff.py --pr --require-latest-record
+
 # 集成：先手动把 AGENT-STATE 指针/最近 N 条改好，再刷新印章
 python3 scripts/check-handoff.py --integrate --record docs/handoffs/<最新记录>.md
 

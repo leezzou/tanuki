@@ -19,8 +19,8 @@
 
 ## 当前状态
 
-- 已实现：`scripts/check-handoff.py` 支持 `--pr`（默认）、`--integrate`、`--release` 三种模式；PR 模式可接收变更清单，强制“公开文件有改动必须附带交接记录”；集成模式要求记录已链接且为最新并刷新 schema 2 印章；发布模式只读严格校验。新增 `scripts/test-check-handoff.py` 8 组离线回归。CI Host job 改为 PR 模式并支持 `workflow_dispatch` 选择 release 严格模式。`prepare-app-release.py` 改为 `--release`，`verify-workspace.sh` 明确 `--pr`。新增 `docs/HANDOFFS.md` 并同步 `AGENTS.md`、模板、QUICKSTART、PUBLICATION、CI、ORCHESTRATOR-RULES、LESSONS、code-standards、QA-GATES、RELEASE。
-- 已验证：`test-check-handoff.py` 8/8、`test-agent-workflow.py` 19/19、`test-publication.py` 19/19、`test-app-release.py` 18/18、PR/集成/发布三种模式、`check-publication.py --git` 0 findings、`package-source.py` 成功、脚本语法与 CI YAML 解析通过；具体命令与结果见“验证记录”。
+- 已实现：`scripts/check-handoff.py` 支持 `--pr`（默认）、`--integrate`、`--release` 三种模式；PR 模式可接收变更清单，强制“公开文件有改动必须附带交接记录”；集成模式要求记录已链接且为最新并刷新 schema 2 印章；发布模式只读严格校验。新增 `scripts/test-check-handoff.py` 12 组离线回归。CI Host job 改为 PR 模式并支持 `workflow_dispatch` 选择 release 严格模式。`prepare-app-release.py` 改为 `--release`，`verify-workspace.sh` 明确 `--pr`。新增 `docs/HANDOFFS.md` 并同步 `AGENTS.md`、模板、QUICKSTART、PUBLICATION、CI、ORCHESTRATOR-RULES、LESSONS、code-standards、QA-GATES、RELEASE。
+- 已验证：`test-check-handoff.py` 12/12、`test-agent-workflow.py` 19/19、`test-publication.py` 19/19、`test-app-release.py` 18/18、PR/集成/发布三种模式、`check-publication.py --git` 0 findings、`package-source.py` 成功、脚本语法与 CI YAML 解析通过；具体命令与结果见“验证记录”。
 - 待验证：PR 的独立 Codex High 审查、GitHub PR CI、合并后的首次集成迁移。
 - 当前分支：`ao/handoff-conflicts/pr-mode`，创建时基线 `origin/main=1cb7ad95229c539231a64c103b581a477709e344`；PR [#42](https://github.com/leezzou/tanuki/pull/42) 创建后 main 两次前进：`2a4a0503`（PR #35）与 `0068c872`（PR #36 中继配对）；均已合并并解决 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json` 冲突，按新树重建印章；未合并、未发布、未创建 tag/Release。
 - 关键事实与定位：模式说明与迁移步骤见 [交接机制](../../docs/HANDOFFS.md)；脚本入口 `scripts/check-handoff.py`；自测 `scripts/test-check-handoff.py`；CI `.github/workflows/verify.yml`；发布入口 `scripts/prepare-app-release.py`。
@@ -30,9 +30,9 @@
 | 文件 | 改动与目的 |
 |---|---|
 | `scripts/check-handoff.py` | 重写为 PR/集成/发布三模式；schema 2 印章增加证据指纹；PR 模式支持 `--changed-from`/`--changed-file` 守卫（含公开文件删除；旧交接删除按路径豁免）；拒绝模板占位符与未声明未测范围。 |
-| `scripts/test-check-handoff.py` | 新增离线自测：容忍落后共享状态、记录完整性、路径/符号链接、变更集守卫（含删除源码/豁免旧交接）、无变更清单时校验最新记录、CI 配置回归、集成最新记录、发布篡改检测、目录移动可迁移。 |
+| `scripts/test-check-handoff.py` | 新增离线自测：容忍落后共享状态、记录完整性、路径/符号链接、变更集守卫（含删除源码/豁免旧交接）、无基线时 `--require-latest-record` 结构校验、CI 配置回归、集成最新记录、发布篡改检测、目录移动可迁移。 |
 | `scripts/test-agent-workflow.py` | 原有交接用例迁移到新语义（PR 校验、`--integrate` 刷新、`--release` 严格）。 |
-| `.github/workflows/verify.yml` | Host job 先跑交接自测；交接步骤改为 PR 模式 + 变更清单（`--diff-filter=AMRD` 包含删除），无基线时不传空清单而执行 `--pr` 结构校验；步骤名统一为 `Check handoff records`；新增 `workflow_dispatch` 的 `handoff_mode=release` 严格路径。 |
+| `.github/workflows/verify.yml` | Host job 先跑交接自测；交接步骤改为 PR 模式 + 变更清单（`--diff-filter=AMRD` 包含删除），无基线时不传空清单而执行 `--pr --require-latest-record` 结构校验；步骤名统一为 `Check handoff records`；新增 `workflow_dispatch` 的 `handoff_mode=release` 严格路径。 |
 | `scripts/verify-workspace.sh` | 构建/设备门禁明确使用 `--pr`，普通 PR 不被共享状态阻塞。 |
 | `scripts/prepare-app-release.py` | 发布打包前使用 `--release` 严格核对。 |
 | `docs/HANDOFFS.md` | 新增：角色/时间点、三模式、普通 PR 与集成流程、冲突避免、指针 + 最近 N 条目标格式、迁移步骤、质量检索与失败处理。 |
@@ -57,7 +57,7 @@
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `python3 scripts/test-check-handoff.py` | 通过，11 tests / 0 failures | 临时目录合成 fixture；覆盖三模式、篡改、变更集（含删除）、无变更清单、CI 配置、目录移动 |
+| `python3 scripts/test-check-handoff.py` | 通过，12 tests / 0 failures | 临时目录合成 fixture；覆盖三模式、篡改、变更集（含删除）、`--require-latest-record`、CI 配置、目录移动 |
 | `python3 scripts/test-agent-workflow.py` | 通过，19 tests / 0 failures（54.318s） | 含设备锁/模拟 ADB 离线回归，不访问真实设备 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` | 通过（共享状态可落后） | 本记录结构、占位符、未测声明 |
 | `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` | 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建） | 要求 AGENT-STATE 已链接且本记录最新；合并 main 后按新公开文件数重建 |
@@ -69,7 +69,7 @@
 | `bash -n scripts/verify-workspace.sh`；Python 内存语法检查 | 通过 | 未执行真实 Gradle/设备 |
 | `python3 scripts/test-publication.py`、`test-app-release.py` | 19/19、18/18 通过 | Host CI 同套离线回归；发布入口断言 `--release` |
 
-- Review P2 修复（PR #42）：① `--diff-filter=AMR` 改为 `AMRD`，删除公开源码/测试同样触发交接要求，旧交接删除由 `is_handoff_path()` 豁免并补回归；② 无基线时不再传空变更清单，改为执行不带清单的 `--pr` 校验最新记录结构，并补 checker/CI 配置回归。
+- Review P2 修复（PR #42）：① `--diff-filter=AMR` 改为 `AMRD`，删除公开源码/测试同样触发交接要求，旧交接删除由 `is_handoff_path()` 豁免并补回归；② 无基线时不再传空变更清单，改为执行 `--pr --require-latest-record` 校验最新记录结构（找不到记录或结构损坏即失败），并补 checker/CI 配置回归。
 - 哪些是前一轮结果，哪些是本次新验证：以上均为本次新跑；0.1.10 的 535 JVM、设备 QA、发布包等是历史结果，本轮未复跑。
 - 未测试、超时、失败和暂未复现的情况：未跑 Android 构建/JVM/lint/仪器/设备；未在 GitHub CI 上验证新 workflow；未执行 AGENT-STATE 实际精简；PR 尚未创建、未合并、未发布。
 
@@ -85,7 +85,7 @@
 1. 推送分支 `ao/handoff-conflicts/pr-mode`，创建面向 `main` 的 PR；PR 描述包含三模式命令、验证结果、迁移步骤与风险，不合并、不发布。
 2. 独立审查关注：PR 模式是否仍能发现“源码改动未写交接”、变更清单基线是否可靠、`evidenceFingerprint` 是否允许不更新记录而刷新共享状态、发布严格模式是否覆盖旧 schema 迁移。
 3. 合并后首个集成：按 `docs/HANDOFFS.md` 第 8 节精简 `AGENT-STATE`，再运行 `--integrate --record <最新记录>`、`--release`、`check-publication.py --git`、`package-source.py`。
-4. 若 GitHub CI 因 `fetch-depth: 0` 或基线 SHA 不可用失败，回退为“仅校验最新记录结构”并在 PR 中记录原因，不放宽变更集守卫。
+4. 无基线路径已由 `--require-latest-record` 覆盖：只校验最新记录结构，不再用空变更清单静默通过。
 
 ## 约束与风险
 

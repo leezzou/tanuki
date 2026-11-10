@@ -338,8 +338,12 @@ def main() -> int:
                         help="变更文件（可重复）；用于 PR 模式强制源码变化必须有交接记录")
     parser.add_argument("--changed-from", type=Path, metavar="FILE",
                         help="从文件读取变更清单（每行一个路径，- 表示标准输入）")
+    parser.add_argument("--require-latest-record", action="store_true",
+                        help="不依赖变更清单，直接校验 docs/handoffs 中最新记录的结构（仅 --pr）")
     args = parser.parse_args()
     try:
+        if args.require_latest_record and args.mode != "pr":
+            raise ValueError("--require-latest-record 只能与 --pr 一起使用")
         if args.mode == "release" and args.record:
             raise ValueError("--release is read-only; run --integrate --record first")
         if args.mode == "release":
@@ -353,6 +357,15 @@ def main() -> int:
                 path, count = validate_current()
                 print(f"Handoff integrate check passed: {path.relative_to(ROOT).as_posix()} "
                       f"({count} public files; pass --record to refresh the stamp)")
+        elif args.require_latest_record:
+            # 无基线/无变更清单时的保守降级：按文件名取最新记录，执行与 PR 模式相同的
+            # 8 段结构、模板占位符和未测声明校验；找不到记录直接失败。
+            latest = latest_record()
+            if latest is None:
+                raise ValueError("docs/handoffs/ 下没有可校验的最新交接记录")
+            relative = latest.relative_to(ROOT).as_posix()
+            record_path(relative)
+            print(f"Handoff PR structure check passed: {relative}")
         else:
             pr_check(args.record, changed_paths(args))
     except (OSError, ValueError, TypeError, AttributeError, KeyError) as error:
