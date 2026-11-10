@@ -30,6 +30,9 @@ class DshApprovalSession(
         /** Host 撤回了审批请求；界面应移除对应卡片。 */
         fun onCancel(eventId: String)
 
+        /** 合法但本切片不展示的 waterfall（如用户提问）；由上层回 next。 */
+        fun onUnsupportedWaterfall(eventId: String)
+
         /** 连接断开或读取失败；界面保留但禁用回答，并显示中文错误。 */
         fun onDisconnected(message: String)
     }
@@ -40,6 +43,7 @@ class DshApprovalSession(
     private var clientId: String? = null
     private var socket: DshWebSocketClient? = null
     private var closed = false
+    private var disconnectedNotified = false
     private var ready = false
     private val readyLatch = CountDownLatch(1)
 
@@ -72,6 +76,7 @@ class DshApprovalSession(
                     }
                     is DshEventFrame.Approval -> listener.onApproval(frame.request)
                     is DshEventFrame.Cancelled -> listener.onCancel(frame.eventId)
+                    is DshEventFrame.UnsupportedWaterfall -> listener.onUnsupportedWaterfall(frame.eventId)
                     is DshEventFrame.StreamError -> disconnect("审批通道返回错误（${frame.code}）")
                     DshEventFrame.Ignored -> Unit
                 }
@@ -93,6 +98,7 @@ class DshApprovalSession(
             socket = client
             clientId = null
             ready = false
+            disconnectedNotified = false
         }
         try {
             client.connect(target.origin, apiCookie, DshApprovalProtocol.MUX_PATH)
@@ -123,31 +129,53 @@ class DshApprovalSession(
 
     /** 把一次用户选择回传官方；连接未就绪或回答失败时返回中文错误。 */
     override fun answer(eventId: String, outcome: DshApprovalOutcome): Result<Unit> {
-        val snapshot = synchronized(lock) {
-            if (closed) return Result.failure(IOException("审批通道已关闭"))
-            val endpoint = endpoint ?: return Result.failure(IOException("DSH 服务地址尚未就绪"))
-            val cookie = cookie ?: return Result.failure(IOException("DSH 审批通道尚未认证"))
-            val clientId = clientId ?: return Result.failure(IOException("DSH 审批通道尚未就绪"))
-            if (!ready) return Result.failure(IOException("DSH 审批通道尚未就绪"))
-            Snapshot(endpoint, cookie, clientId)
+        val snapshot = readySnapshot().getOrElse { return Result.failure(it) }
+        return postResult(snapshot, eventId) { rpcId ->
+            DshApprovalProtocol.answerBody(rpcId, snapshot.clientId, eventId, outcome)
         }
-        return runCatching {
-            try {
-                postAnswer(snapshot.endpoint, snapshot.cookie, snapshot.clientId, eventId, outcome)
-            } catch (_: AuthExpiredException) {
-                // Cookie 失效只重认证一次；不改变已建立的审批流，也不把 token 带进错误。
-                val refreshed = exchangeCookie(snapshot.endpoint)
-                synchronized(lock) { if (!closed) cookie = refreshed }
-                postAnswer(snapshot.endpoint, refreshed, snapshot.clientId, eventId, outcome)
+    }
+
+    /** 对不支持的合法 waterfall 回 next，让 Host 继续后续回答者/兜底。 */
+    override fun answerNext(eventId: String): Result<Unit> {
+        val snapshot = readySnapshot().getOrElse { return Result.failure(it) }
+        return postResult(snapshot, eventId) { rpcId ->
+            DshApprovalProtocol.answerNextBody(rpcId, snapshot.clientId, eventId)
+        }
+    }
+
+    private fun readySnapshot(): Result<Snapshot> = synchronized(lock) {
+        val endpoint = endpoint
+        val cookie = cookie
+        val clientId = clientId
+        when {
+            closed -> Result.failure(IOException("审批通道已关闭"))
+            endpoint == null -> Result.failure(IOException("DSH 服务地址尚未就绪"))
+            cookie == null -> Result.failure(IOException("DSH 审批通道尚未认证"))
+            clientId == null || !ready -> Result.failure(IOException("DSH 审批通道尚未就绪"))
+            else -> Result.success(Snapshot(endpoint, cookie, clientId))
+        }
+    }
+
+    private fun postResult(
+        snapshot: Snapshot,
+        eventId: String,
+        bodyFor: (rpcId: String) -> String
+    ): Result<Unit> = runCatching {
+        try {
+            postResultBody(snapshot, eventId, bodyFor)
+        } catch (_: AuthExpiredException) {
+            // /connect 每次创建独立 Peer；新 Cookie 不能回答旧 clientId 的事件。
+            // 认证失效只能明确转为需要重连，不能拿旧 clientId 重试。
+            disconnect("审批认证已失效，需要重新连接")
+            throw IOException("审批认证已失效，需要重新连接")
+        }
+    }.recoverCatching { error ->
+        throw IOException(
+            when (error) {
+                is DshApiException -> "官方接口返回 ${error.code}"
+                else -> error.message?.takeIf { it.isNotBlank() } ?: "审批回答失败"
             }
-        }.recoverCatching { error ->
-            throw IOException(
-                when (error) {
-                    is DshApiException -> "官方接口返回 ${error.code}"
-                    else -> error.message?.takeIf { it.isNotBlank() } ?: "审批回答失败"
-                }
-            )
-        }
+        )
     }
 
     /** 关闭连接；幂等。清空内存 Cookie 与 clientId，不触碰 DSH 进程或会话数据。 */
@@ -155,6 +183,7 @@ class DshApprovalSession(
         val client = synchronized(lock) {
             if (closed) return
             closed = true
+            disconnectedNotified = true
             ready = false
             clientId = null
             cookie = null
@@ -167,7 +196,8 @@ class DshApprovalSession(
 
     private fun disconnect(message: String) {
         val client = synchronized(lock) {
-            if (closed) return
+            if (closed || disconnectedNotified) return
+            disconnectedNotified = true
             ready = false
             clientId = null
             readyLatch.countDown()
@@ -177,15 +207,13 @@ class DshApprovalSession(
         listener.onDisconnected(message)
     }
 
-    private fun postAnswer(
-        endpoint: DshEndpoint,
-        cookie: String,
-        clientId: String,
+    private fun postResultBody(
+        snapshot: Snapshot,
         eventId: String,
-        outcome: DshApprovalOutcome
+        bodyFor: (rpcId: String) -> String
     ) {
         if (!DshApprovalProtocol.safeId(eventId, 128)) throw IOException("审批请求标识无效")
-        val url = DshApiProtocol.apiUrl(endpoint.origin, DshApprovalProtocol.RESULT_ENDPOINT)
+        val url = DshApiProtocol.apiUrl(snapshot.endpoint.origin, DshApprovalProtocol.RESULT_ENDPOINT)
             ?: throw IOException("DSH 接口地址无效")
         val connection = open(url)
         try {
@@ -193,10 +221,9 @@ class DshApprovalSession(
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("Cookie", cookie)
+            connection.setRequestProperty("Cookie", snapshot.cookie)
             val rpcId = DshApprovalProtocol.newRpcId()
-            val body = DshApprovalProtocol.answerBody(rpcId, clientId, eventId, outcome)
-                .toByteArray(Charsets.UTF_8)
+            val body = bodyFor(rpcId).toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
             val code = connection.responseCode
@@ -280,6 +307,9 @@ interface DshApprovalTransport {
     fun connect()
 
     fun answer(eventId: String, outcome: DshApprovalOutcome): Result<Unit>
+
+    /** 对不支持的合法 waterfall 回 next，避免 Host 永久等待。 */
+    fun answerNext(eventId: String): Result<Unit>
 
     fun close()
 }

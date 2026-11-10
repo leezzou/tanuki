@@ -86,6 +86,8 @@ class DshApprovalController(
     private var connectedOrigin: String? = null
     /** eventId -> 发起回答时的连接代次；断线/重连后旧回答不能清理新状态。 */
     private val answering = HashMap<String, Int>()
+    /** eventId -> 发起参数查询时的连接代次；重连后需要重新启动被旧代次丢弃的查询。 */
+    private val lookupTokens = HashMap<String, Int>()
 
     /** 打开审批通道；重复调用不会建立第二条连接。 */
     fun start() {
@@ -96,6 +98,7 @@ class DshApprovalController(
             session = null
             connectedOrigin = null
             synchronized(answering) { answering.clear() }
+            synchronized(lookupTokens) { lookupTokens.clear() }
             _state.value = DshApprovalState(remembered = memory.snapshot())
         }
         val current = _state.value
@@ -109,6 +112,8 @@ class DshApprovalController(
             override fun onReady() {
                 if (token != generation) return
                 _state.update { it.copy(connecting = false, connected = true, ready = true, error = null) }
+                // 断线时未完成的参数查询会被旧代次丢弃；新流就绪后对保留项重新发起。
+                resumePendingLookups()
             }
 
             override fun onApproval(request: DshApprovalRequest) {
@@ -120,6 +125,19 @@ class DshApprovalController(
                 if (token != generation) return
                 _state.update { state -> state.copy(pending = state.pending.filterNot { it.request.eventId == eventId }) }
                 synchronized(answering) { answering.remove(eventId) }
+                synchronized(lookupTokens) { lookupTokens.remove(eventId) }
+            }
+
+            override fun onUnsupportedWaterfall(eventId: String) {
+                if (token != generation) return
+                val current = session ?: return
+                scope.launch(ioDispatcher) {
+                    current.answerNext(eventId).onFailure { error ->
+                        if (session === current && token == generation) {
+                            _state.update { it.copy(error = "无法跳过非审批请求：${messageOf(error)}") }
+                        }
+                    }
+                }
             }
 
             override fun onDisconnected(message: String) {
@@ -129,6 +147,7 @@ class DshApprovalController(
                 connectedOrigin = null
                 // 连接代次已失效：释放所有 in-flight 标记，避免重连后同一 eventId 永久卡住。
                 synchronized(answering) { answering.clear() }
+                synchronized(lookupTokens) { lookupTokens.clear() }
                 current?.close()
                 _state.update {
                     it.copy(
@@ -247,12 +266,20 @@ class DshApprovalController(
         session = null
         connectedOrigin = null
         synchronized(answering) { answering.clear() }
+        synchronized(lookupTokens) { lookupTokens.clear() }
         if (clearMemory) memory.clear()
         _state.value = DshApprovalState(remembered = if (clearMemory) emptyList() else memory.snapshot())
     }
 
     private fun onApprovalRequest(request: DshApprovalRequest) {
-        if (_state.value.pending.any { it.request.eventId == request.eventId }) return
+        val existing = _state.value.pending.firstOrNull { it.request.eventId == request.eventId }
+        if (existing != null) {
+            // Host 在新流重放同一 eventId 时不能只去重：旧代次查询可能已退出，必须重新启动。
+            if (existing.lookupPending) {
+                existing.request.callId?.let { lookupTool(existing.request, it) }
+            }
+            return
+        }
         val baseRisk = if (request.unknownTool) {
             DshRiskAssessment(DshRiskLevel.HIGH, "未知审批类型；只能拒绝")
         } else {
@@ -275,12 +302,29 @@ class DshApprovalController(
 
     private fun lookupTool(request: DshApprovalRequest, callId: String) {
         val token = generation
+        synchronized(lookupTokens) {
+            if (lookupTokens[request.eventId] == token) return
+            lookupTokens[request.eventId] = token
+        }
         scope.launch(ioDispatcher) {
             val tool = runCatching {
                 withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { toolLookup(request.sessionId, callId) }
             }.getOrNull()
             if (token != generation) return@launch
+            synchronized(lookupTokens) {
+                if (lookupTokens[request.eventId] == token) lookupTokens.remove(request.eventId)
+            }
             if (tool != null) applyTool(request.eventId, tool) else markLookupDone(request.eventId)
+        }
+    }
+
+    /** 新连接就绪后重新启动仍标记为 lookupPending 的查询。 */
+    private fun resumePendingLookups() {
+        val pending = _state.value.pending
+        for (item in pending) {
+            if (item.lookupPending && !item.request.unknownTool) {
+                item.request.callId?.let { lookupTool(item.request, it) }
+            }
         }
     }
 

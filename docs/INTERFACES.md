@@ -220,7 +220,9 @@ HTTP 200..399 或 401 → 存活
 - 认证：同一启动 token 调 `GET /connect?token=...&interactions=...`，只取签名 API Cookie；不跟随 302。只读列表使用 `interactions=none`；审批必须使用独立的 `interactions=answer` Peer，否则官方 `$events`/`$events/result` 会返回 `gateway/interactions-forbidden`。两者各自换取 API Cookie，互不共享内存对象。
 - 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
 - 实时流：`/api/remote.mux` WebSocket 上发送 `{"type":"open","streamId":...,"endpoint":"$events","payload":{"args":{}}}`；服务端返回 `ready(clientId)`、`waterfall(approval/request, eventId, agentId, request)`、`cancel(eventId)` 或 `error(code)`。原生只读取审批白名单字段（`toolName`、`callId`、`reason`、`displayReason`），不复制工具参数以外的请求正文。
-- 审批回答：`POST /api/$events/result`，信封 `{"type":"client-request","rpcId":...,"method":"$events/result","payload":{"args":{"clientId":...,"eventId":...,"outcome":{"kind":"result","value":"allowed-once"|"rejected"}}}}`。`cancelled` 由 Host 撤回，`unavailable` 由 Host 无回答者时产生；原生不发明新 outcome。
+- 审批回答：`POST /api/$events/result`，信封 `{"type":"client-request","rpcId":...,"method":"$events/result","payload":{"args":{"clientId":...,"eventId":...,"outcome":{"kind":"result","value":"allowed-once"|"rejected"}}}}`。`cancelled` 由 Host 撤回，`unavailable` 由 Host 无回答者时产生；原生不发明新 outcome。401/403 表示认证 Peer 失效：不得用新 Cookie 回答旧 `clientId`，必须断开重连并由新 `/connect` 创建新 Peer。
+- 非审批 waterfall：`user-questions/request` 等合法 waterfall 回 `{"kind":"next"}`，保留 `clientId`/`eventId` 关联，让 Host 继续后续回答者/兜底；不产生审批卡片。
+- 参数查询：收到审批后按 `request.sessionId + callId` 异步读取；断线会丢弃旧代次结果，重连就绪或 Host 重放同一 `eventId` 时重新启动仍为 `lookupPending` 的查询。
 - 参数/风险：收到审批后按 `request.sessionId + callId` 读取该审批所属会话的工具调用，而不是当前选中会话的旧快照；历史后到时由原生控制器 `updateTool(sessionId, tool)` 更新参数与风险，再按“本次运行记忆”决定是否自动回答。
 - 未知类型：官方 `toolName` 缺失/非法时显示“未知审批”，风险按高处理，只能拒绝，不能按记忆自动允许。
 - 记住选择：官方审批是一次性授权，没有“记住”outcome。原生“本次运行内记住”只按 `sessionId + toolName + 风险等级` 在内存中自动复用刚才的 `allowed-once`/`rejected`，不写 DSH 配置、不跨进程/重启，关闭原生页或服务停止即清空。

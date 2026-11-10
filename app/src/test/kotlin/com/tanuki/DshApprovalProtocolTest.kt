@@ -61,10 +61,13 @@ class DshApprovalProtocolTest {
         assertEquals("未知审批", request.toolName)
     }
 
-    @Test fun ignoresOtherWaterfallsAndMalformedIds() {
-        assertTrue(DshApprovalProtocol.parseStreamItem(item(JSONObject()
-            .put("type", "waterfall").put("event", "user-questions/request")
-            .put("eventId", "e").put("agentId", "s"))) is DshEventFrame.Ignored)
+    @Test fun unsupportedWaterfallAndMalformedIds() {
+        assertEquals(
+            DshEventFrame.UnsupportedWaterfall("e"),
+            DshApprovalProtocol.parseStreamItem(item(JSONObject()
+                .put("type", "waterfall").put("event", "user-questions/request")
+                .put("eventId", "e").put("agentId", "s")))
+        )
         assertTrue(DshApprovalProtocol.parseStreamItem(item(JSONObject()
             .put("type", "waterfall").put("event", "approval/request")
             .put("eventId", "bad id").put("agentId", "s"))) is DshEventFrame.Ignored)
@@ -118,6 +121,16 @@ class DshApprovalProtocolTest {
             DshEndpoint("http://127.0.0.1:1234", "http://127.0.0.1:1234/?token=t")
         )!!
         assertTrue(readOnly.contains("interactions=none"))
+    }
+
+    @Test fun answerNextBodyUsesKindNext() {
+        val body = JSONObject(DshApprovalProtocol.answerNextBody("rpc-1", "client-1", "question-1"))
+        assertEquals("client-request", body.getString("type"))
+        assertEquals("\$events/result", body.getString("method"))
+        val args = body.getJSONObject("payload").getJSONObject("args")
+        assertEquals("client-1", args.getString("clientId"))
+        assertEquals("question-1", args.getString("eventId"))
+        assertEquals("next", args.getJSONObject("outcome").getString("kind"))
     }
 
     @Test fun openStreamUsesEventsEndpointAndEmptyArgs() {

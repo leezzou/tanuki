@@ -63,7 +63,7 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | **android_agent-42 独占，本切片不修改**；需要 42 增加 `timeline` 状态与按 `sessionId+callId` 查询工具的能力 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalProtocol.kt` | 审批帧/回答信封/风险/本次运行记忆的纯协议 |
 | `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | **临时实现，待收敛到 42 transport**：最小 RFC6455 客户端，loopback、Cookie、Accept 校验、掩码、握手超时与大小上限 |
-| `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 重认证 |
+| `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 断开重连/独立 Peer |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 审批状态机、连接生命周期、允许/拒绝/记住本次运行 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
@@ -128,17 +128,17 @@
 本轮（android_agent-45，基线 `origin/main=0555c3c`，已合入 `main=533eff4`）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**644 tests / 0 failures / 0 errors / 0 skipped**（77 个结果文件；基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23）。
-- `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 96 warnings / 1 hint（既有弃用/可读性告警）。
+- `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，**691 tests / 0 failures / 0 errors / 0 skipped**（80 个结果文件；基线 535 + 本切片 48 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23 + PR #38 的 43）。
+- `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 97 warnings / 1 hint（既有弃用/可读性告警）。
 - `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（仅打包验证，未安装）。
-- 新增 `DshApprovalProtocolTest` 11 项：ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆、未知类型。
+- 新增 `DshApprovalProtocolTest` 12 项：ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方 `$events/result` 信封、`$events` open 信封、风险分级、本次运行记忆、未知类型。
 - 新增 `DshToolTimelineTest` 9 项：工具调用与结果配对、失败原因、replace 去重、孤儿结果、长输出截断、diff 行/计数、新建文件、命令/路径参数、文本与工具时间线并存、append-origin/真实用户来源过滤。
 - 新增 `DshWebSocketTest` 7 项：RFC6455 Accept、客户端掩码、拒绝服务端掩码、服务端文本帧、真实 loopback 握手/Cookie/ready/approval/cancel、错误 Accept、握手无响应超时、握手中 close() 解除阻塞。
-- 新增 `DshApprovalSessionTest` 5 项：`/connect`→`$events`→`$events/result` 全链路、401 重认证一次、HTTP 500 中文错误、缺少端点、非 loopback 拒绝；假服务器断言 `interactions=answer`。
-- 新增 `DshApprovalControllerTest` 12 项：允许并记住、同工具/风险自动回答、不同工具/风险不自动、按审批会话取参数、审批先到/历史后到更新并自动回答、未知类型只能拒绝、回答失败保留卡片、断线禁用并关闭、回答中断线后重连仍可回答、连接期间断线不误报已连接、origin 变化重建、记忆存在时面板保持可见、关闭清空记忆。
+- 新增 `DshApprovalSessionTest` 6 项：`/connect`→`$events`→`$events/result` 全链路、401 断开重连/新 Peer、非审批 waterfall 回 next、HTTP 500 中文错误、缺少端点、非 loopback 拒绝；假服务器按连接分配独立 Peer 并断言 `interactions=answer`。
+- 新增 `DshApprovalControllerTest` 14 项：允许并记住、同工具/风险自动回答、不同工具/风险不自动、按审批会话取参数、审批先到/历史后到更新并自动回答、未知类型只能拒绝、回答失败保留卡片、断线禁用并关闭、回答中断线后重连仍可回答、连接期间断线不误报已连接、origin 变化重建、记忆存在时面板保持可见、关闭清空记忆。
 - 既有 `DshUiSwitchTest` 10 项、`DshNativeControllerTest` 6 项、`DshNativeApiTest` 12 项继续通过。
 
-Review 修复：审批使用独立 `interactions=answer` Peer；按 `sessionId+callId` 读取参数并支持 `updateTool` 后到更新；记忆存在时保留清除入口；断线按代次释放 answering 标记；握手期有界超时且先发布可关闭 socket；未知审批类型只能拒绝。
+Review 修复：审批使用独立 `interactions=answer` Peer；按 `sessionId+callId` 读取参数并支持 `updateTool` 后到更新；记忆存在时保留清除入口；断线按代次释放 answering 标记；握手期有界超时且先发布可关闭 socket；未知审批类型只能拒绝；认证失效重建 Peer；重连重启 lookupPending 查询；非审批 waterfall 回 next。
 
 未验证：
 

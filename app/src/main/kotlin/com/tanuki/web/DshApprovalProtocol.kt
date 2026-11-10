@@ -47,6 +47,9 @@ sealed interface DshEventFrame {
     /** 官方逻辑流返回错误；只保留短错误码，不显示可能含细节的 message。 */
     data class StreamError(val code: String) : DshEventFrame
 
+    /** 合法但本切片不展示的 waterfall（如用户提问）；必须回 next 让 Host 继续兜底。 */
+    data class UnsupportedWaterfall(val eventId: String) : DshEventFrame
+
     /** 本切片不处理的通知/未知帧；不解析其正文，避免把工具参数或会话内容带进原生层。 */
     data object Ignored : DshEventFrame
 }
@@ -106,6 +109,16 @@ object DshApprovalProtocol {
      * `POST /api/$events/result`，`payload.args.outcome.kind=result`。
      */
     fun answerBody(rpcId: String, clientId: String, eventId: String, outcome: DshApprovalOutcome): String =
+        resultBody(
+            rpcId, clientId, eventId,
+            JSONObject().put("kind", "result").put("value", outcome.wire)
+        )
+
+    /** 不支持的合法 waterfall 回 next，让 Host 继续后续回答者/兜底；不产生审批卡片。 */
+    fun answerNextBody(rpcId: String, clientId: String, eventId: String): String =
+        resultBody(rpcId, clientId, eventId, JSONObject().put("kind", "next"))
+
+    private fun resultBody(rpcId: String, clientId: String, eventId: String, outcome: JSONObject): String =
         JSONObject()
             .put("type", "client-request")
             .put("rpcId", rpcId)
@@ -113,9 +126,7 @@ object DshApprovalProtocol {
             .put("payload", JSONObject().put("args", JSONObject()
                 .put("clientId", clientId)
                 .put("eventId", eventId)
-                .put("outcome", JSONObject()
-                    .put("kind", "result")
-                    .put("value", outcome.wire))))
+                .put("outcome", outcome)))
             .toString()
 
     /**
@@ -141,12 +152,19 @@ object DshApprovalProtocol {
             val clientId = value.optString("clientId")
             if (!safeId(clientId, 128)) DshEventFrame.Ignored else DshEventFrame.Ready(clientId)
         }
-        "waterfall" -> parseApproval(value)
+        "waterfall" -> parseWaterfall(value)
         "cancel" -> {
             val eventId = value.optString("eventId")
             if (!safeId(eventId, 128)) DshEventFrame.Ignored else DshEventFrame.Cancelled(eventId)
         }
         else -> DshEventFrame.Ignored
+    }
+
+    private fun parseWaterfall(value: JSONObject): DshEventFrame {
+        if (value.optString("event") == "approval/request") return parseApproval(value)
+        val eventId = value.optString("eventId")
+        if (!safeId(eventId, 128)) return DshEventFrame.Ignored
+        return DshEventFrame.UnsupportedWaterfall(eventId)
     }
 
     private fun parseApproval(value: JSONObject): DshEventFrame {

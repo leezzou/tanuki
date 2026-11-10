@@ -19,14 +19,14 @@
 
 ## 合并说明
 
-- 已合入 `origin/main=7593805`（PR #42 交接机制；此前已合入 PR #36 中继配对、PR #35 copy-flicker、PR #32 parity audit、PR #34 文件查看器格式扩展）。代码无重叠。按新交接机制，`docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json` 直接取 main 版本，本 PR 不包含对这两个共享状态文件的任何改动。
+- 已合入 `origin/main=bc802cf`（PR #38 原生会话管理；此前已合入 PR #42 交接机制、PR #36 中继配对、PR #35 copy-flicker、PR #32 parity audit、PR #34 文件查看器格式扩展）。代码无重叠。按新交接机制，`docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json` 直接取 main 版本，本 PR 不包含对这两个共享状态文件的任何改动。
 
 ## 当前状态
 
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、5 项 Review 修复、文档与回归。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 644/0/0/0、`lintModernDebug` 0 errors / 96 warnings、`assembleModernDebug` 通过（未安装）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 691/0/0/0、`lintModernDebug` 0 errors / 97 warnings、`assembleModernDebug` 通过（未安装）。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`（answer Peer）/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、Android 仪器/真机。
-- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=7593805`；无运行中安装/设备任务。
+- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=bc802cf`；无运行中安装/设备任务。
 - 四文件归属：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 已恢复为 `origin/main` 内容，本切片不再修改；42 接线清单见 [NATIVE-UI](../NATIVE-UI.md)。
 
 ## 42 接线清单
@@ -59,7 +59,7 @@
 |---|---|
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalProtocol.kt` | 新增：审批帧/`interactions=answer` 连接/回答信封/风险分级/本次运行记忆；未知 toolName 只允许拒绝。 |
 | `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | 新增（临时）：最小 RFC6455 客户端；loopback、Cookie、Accept 校验、客户端掩码、拒绝服务端掩码、1 MiB 上限、握手有界超时、先发布可关闭 socket。待收敛到 42 transport。 |
-| `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | 新增：`/connect`（answer）→`$events`→`$events/result`、401 重认证一次、ready 10 秒超时、中文错误；定义 `DshApprovalTransport`。 |
+| `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | 新增：`/connect`（answer）→`$events`→`$events/result`、401 断开重连/独立 Peer、非审批 next、ready 10 秒超时、中文错误；定义 `DshApprovalTransport`。 |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | 新增：自包含解析 `tool/call`/`tool/result`/`meta.diffs` 与文本消息；命令/cwd/路径、输出截断、replace 去重、diff LCS。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 新增：审批状态机；按 `sessionId+callId` 异步取参数；`updateTool` 后到更新；未知类型拒绝；断线代次清理；记忆存在时面板可见。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 新增：审批卡片；工具名、参数（长参数可展开）、风险、允许/拒绝/记住、其他会话计数、错误重试、记忆撤回入口。 |
@@ -73,7 +73,7 @@
 | `docs/NATIVE-UI.md` | 更新归属边界、42 接线清单、文件表、安全边界与验证/未验证。 |
 | `docs/TEST-REPORT.md` | 新增本切片验证与 5 项 Review 修复记录。 |
 
-## 5 项 Review 修复
+## Review 修复
 
 1. **P1 answer Peer**：`DshApprovalProtocol.connectUrl()` 生成 `interactions=answer`，只读列表继续 `interactions=none`；`DshApprovalSession` 使用新函数；假服务器断言改为 `answer`。
 2. **P2 按审批会话取参数**：`toolLookup` 改为 `suspend (sessionId, callId) -> DshToolItem?`；收到审批后异步读取并更新参数/风险；新增 `updateTool(sessionId, tool)` 处理历史后到；非当前会话也按 `request.sessionId` 查询；参数未到时禁止盲目允许，2 秒超时后显示“未读取到参数”。
@@ -81,16 +81,19 @@
 4. **P2 断线释放 answering**：`answering` 改为 `eventId -> 连接代次`；断线清空；旧回答退出按代次校验，不误伤重连后的卡片；新增“回答中断线后重连仍可回答”回归。
 5. **P2 握手期限**：握手期 `soTimeout=handshakeTimeoutMs`（默认 10 秒），先发布 socket/output，握手完成后再设 0；`close()` 可解除握手中阻塞；新增“接受 TCP 但不返回 Upgrade 头”和“握手中 close()”回归。
 6. 额外安全：未知/非法 `toolName` 显示“未知审批”，只能拒绝，不能按记忆自动允许。
+7. **认证失效重建 Peer**：401/403 不再用新 Cookie 回答旧 clientId；明确断开并提示“审批认证已失效，需要重新连接”，由重连创建新 answer Peer；假服务器按每次 `/connect` 分配独立 Peer 并校验回答归属。
+8. **重连重启参数查询**：`lookupTokens` 按连接代次去重；新流就绪或 Host 重放同一 eventId 时重新启动仍为 `lookupPending` 的查询；旧代次结果被丢弃，避免卡片永久卡在“正在读取参数”。
+9. **非审批 waterfall 回 next**：`user-questions/request` 等合法 waterfall 通过 `$events/result` 回 `outcome.kind=next`，不产生审批卡片、不静默吞；补协议/传输/控制器回归。
 
 ## 验证记录
 
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh` + `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | JDK17 worktree 环境 |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；77 个结果文件，644 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23 |
-| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 96 warnings / 1 hint | 存量弃用/可读性告警 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；80 个结果文件，691 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 48 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23 + PR #38 的 43 |
+| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 97 warnings / 1 hint | 存量弃用/可读性告警 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | 仅打包验证，未安装 |
-| 目标回归 44 项：Protocol 11、Timeline 9、WebSocket 7、Session 5、Controller 12 | 44/44 通过 | 本地合成 HTTP+WebSocket 服务器；不代表真实 DSH |
+| 目标回归 48 项：Protocol 12、Timeline 9、WebSocket 7、Session 6、Controller 14 | 48/48 通过 | 本地合成 HTTP+WebSocket 服务器；不代表真实 DSH |
 | 既有 `DshNativeApiTest` 12、`DshNativeControllerTest` 6、`DshUiSwitchTest` 10 | 通过 | 四文件已恢复 main，旧契约不受影响 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1139-native-approval-tools.md`、`python3 scripts/check-publication.py --git`、`package-source.py` | 通过 | 新交接机制；不修改共享状态文件 |
 

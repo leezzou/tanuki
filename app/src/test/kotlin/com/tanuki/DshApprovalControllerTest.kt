@@ -11,6 +11,7 @@ import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,6 +106,42 @@ class DshApprovalControllerTest {
         harness.controller.answer("e1", DshApprovalOutcome.REJECTED)
         assertTrue(harness.controller.state.value.pending.isEmpty())
         assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), transport.answers)
+    }
+
+    @Test fun reconnectRestartsPendingLookupAndIgnoresOldResult() {
+        val harness = Harness()
+        val deferreds = mutableListOf<CompletableDeferred<DshToolItem?>>()
+        harness.lookup = { _, _ ->
+            CompletableDeferred<DshToolItem?>().also { deferreds += it }.await()
+        }
+        harness.controller.start()
+        val first = harness.transports.single()
+        first.listener.onApproval(request("e1"))
+        assertEquals(1, harness.lookupCalls.size)
+        assertTrue(harness.controller.state.value.pending.single().lookupPending)
+
+        first.listener.onDisconnected("审批通道已断开")
+        harness.controller.start()
+        assertEquals(2, harness.lookupCalls.size)
+        assertTrue(harness.controller.state.value.ready)
+
+        deferreds[1].complete(toolItem("c1", """{"command":"ls"}"""))
+        val item = harness.controller.state.value.pending.single()
+        assertFalse(item.lookupPending)
+        assertEquals("""{"command":"ls"}""", item.arguments)
+
+        // 旧代次查询即使完成也不能覆盖新连接的结果。
+        deferreds[0].complete(toolItem("c1", """{"command":"rm -rf /"}"""))
+        assertEquals("""{"command":"ls"}""", harness.controller.state.value.pending.single().arguments)
+    }
+
+    @Test fun unsupportedWaterfallIsAnsweredNextWithoutApprovalCard() {
+        val harness = Harness()
+        harness.controller.start()
+        val transport = harness.transports.single()
+        transport.listener.onUnsupportedWaterfall("question-1")
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(listOf("question-1"), transport.nextAnswers)
     }
 
     @Test fun answerFailureKeepsPendingWithChineseError() {
@@ -221,6 +258,7 @@ class DshApprovalControllerTest {
         var origin = "http://127.0.0.1:1"
         var connectBehavior: ((DshApprovalSession.Listener) -> Unit)? = null
         var toolLookupResult: DshToolItem? = toolItem("c1")
+        var lookup: (suspend (String, String) -> DshToolItem?)? = null
         val lookupCalls = mutableListOf<Pair<String, String>>()
         val transports = mutableListOf<FakeTransport>()
         val controller = DshApprovalController(
@@ -228,7 +266,7 @@ class DshApprovalControllerTest {
             scope = CoroutineScope(Dispatchers.Unconfined),
             toolLookup = { sessionId, callId ->
                 lookupCalls += sessionId to callId
-                toolLookupResult?.takeIf { it.callId == callId }
+                lookup?.invoke(sessionId, callId) ?: toolLookupResult?.takeIf { it.callId == callId }
             },
             sessionFactory = { listener ->
                 FakeTransport(listener).also {
@@ -242,6 +280,7 @@ class DshApprovalControllerTest {
 
     private class FakeTransport(val listener: DshApprovalSession.Listener) : DshApprovalTransport {
         val answers = mutableListOf<Pair<String, DshApprovalOutcome>>()
+        val nextAnswers = mutableListOf<String>()
         var answerError: Throwable? = null
         var answerBehavior: (() -> Result<Unit>)? = null
         var connectBehavior: ((DshApprovalSession.Listener) -> Unit)? = null
@@ -253,6 +292,10 @@ class DshApprovalControllerTest {
             answerBehavior?.let { return it() }
             answerError?.let { return Result.failure(it) }
             answers += eventId to outcome
+            return Result.success(Unit)
+        }
+        override fun answerNext(eventId: String): Result<Unit> {
+            nextAnswers += eventId
             return Result.success(Unit)
         }
         override fun close() {

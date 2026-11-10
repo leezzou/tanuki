@@ -17,6 +17,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -51,20 +52,55 @@ class DshApprovalSessionTest {
         }
     }
 
-    @Test fun expiredCookieReauthenticatesAndRetriesOnce() {
+    @Test fun authExpiredRequiresReconnectAndNewPeer() {
         val server = FakeDshServer().apply { failFirstAnswer = true }
+        try {
+            val firstListener = RecordingListener()
+            val first = DshApprovalSession({ DshEndpoint(server.origin, server.launchUrl) }, firstListener)
+            first.connect()
+            assertTrue(firstListener.ready.await(5, TimeUnit.SECONDS))
+            val failed = first.answer("event-1", DshApprovalOutcome.REJECTED)
+            assertTrue(failed.isFailure)
+            assertTrue(failed.exceptionOrNull()!!.message!!.contains("认证已失效"))
+            assertTrue(firstListener.disconnected.get()!!.contains("认证已失效"))
+            assertEquals(1, server.connectCalls.get())
+            assertEquals(1, server.answerBodies.size)
+            first.close()
+
+            // /connect 每次创建独立 Peer；新 Peer 的新 clientId 才能回答新 Cookie 的事件。
+            val secondListener = RecordingListener()
+            val second = DshApprovalSession({ DshEndpoint(server.origin, server.launchUrl) }, secondListener)
+            second.connect()
+            assertTrue(secondListener.ready.await(5, TimeUnit.SECONDS))
+            val retried = second.answer("event-1", DshApprovalOutcome.REJECTED)
+            assertTrue(retried.exceptionOrNull()?.message, retried.isSuccess)
+            assertEquals(2, server.connectCalls.get())
+            assertEquals(2, server.answerBodies.size)
+            val secondArgs = JSONObject(server.answerBodies[1])
+                .getJSONObject("payload").getJSONObject("args")
+            assertEquals("client-2", secondArgs.getString("clientId"))
+            assertEquals("rejected", secondArgs.getJSONObject("outcome").getString("value"))
+            second.close()
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test fun unsupportedWaterfallAnswersNextWithoutApprovalCard() {
+        val server = FakeDshServer().apply { sendUnsupported = true }
         try {
             val listener = RecordingListener()
             val session = DshApprovalSession({ DshEndpoint(server.origin, server.launchUrl) }, listener)
             session.connect()
             assertTrue(listener.ready.await(5, TimeUnit.SECONDS))
-            val result = session.answer("event-1", DshApprovalOutcome.REJECTED)
+            assertTrue("未收到非审批 waterfall", listener.unsupportedLatch.await(5, TimeUnit.SECONDS))
+            assertEquals("question-1", listener.unsupported.get())
+            val result = session.answerNext("question-1")
             assertTrue(result.exceptionOrNull()?.message, result.isSuccess)
-            assertEquals(2, server.answerBodies.size)
-            assertEquals(2, server.connectCalls.get())
-            assertEquals("rejected", JSONObject(server.answerBodies[1])
+            val args = JSONObject(server.answerBodies.single())
                 .getJSONObject("payload").getJSONObject("args")
-                .getJSONObject("outcome").getString("value"))
+            assertEquals("question-1", args.getString("eventId"))
+            assertEquals("next", args.getJSONObject("outcome").getString("kind"))
             session.close()
         } finally {
             server.close()
@@ -119,6 +155,8 @@ class DshApprovalSessionTest {
         val approvalLatch = CountDownLatch(1)
         val approval = AtomicReference<DshApprovalRequest>()
         val disconnected = AtomicReference<String?>()
+        val unsupportedLatch = CountDownLatch(1)
+        val unsupported = AtomicReference<String?>()
         override fun onReady() {
             ready.countDown()
         }
@@ -127,6 +165,10 @@ class DshApprovalSessionTest {
             approvalLatch.countDown()
         }
         override fun onCancel(eventId: String) = Unit
+        override fun onUnsupportedWaterfall(eventId: String) {
+            unsupported.set(eventId)
+            unsupportedLatch.countDown()
+        }
         override fun onDisconnected(message: String) {
             disconnected.set(message)
         }
@@ -140,9 +182,11 @@ class DshApprovalSessionTest {
         val answerBodies = CopyOnWriteArrayList<String>()
         val connectCalls = AtomicInteger()
         private val resultCalls = AtomicInteger()
+        private val peers = ConcurrentHashMap<String, String>()
         private val pool = Executors.newCachedThreadPool()
         @Volatile var failFirstAnswer = false
         @Volatile var answerStatus = 200
+        @Volatile var sendUnsupported = false
         private val acceptThread = thread(name = "fake-dsh-accept") {
             while (!server.isClosed) {
                 val socket = runCatching { server.accept() }.getOrNull() ?: break
@@ -163,12 +207,14 @@ class DshApprovalSessionTest {
             val path = head.requestLine.split(' ').getOrNull(1).orEmpty()
             when {
                 path.startsWith("/connect") -> {
-                    connectCalls.incrementAndGet()
+                    val call = connectCalls.incrementAndGet()
                     assertTrue(path.contains("token=secret-token"))
                     assertTrue(path.contains("interactions=answer"))
+                    val cookie = "api-cookie-$call"
+                    peers[cookie] = "client-$call"
                     output.write(
                         ("HTTP/1.1 302 Found\r\n" +
-                            "Set-Cookie: dsh=api-cookie; Path=/\r\n" +
+                            "Set-Cookie: dsh=$cookie; Path=/\r\n" +
                             "Location: /\r\nContent-Length: 0\r\n\r\n").toByteArray(Charsets.US_ASCII)
                     )
                     output.flush()
@@ -182,14 +228,22 @@ class DshApprovalSessionTest {
                             "Sec-WebSocket-Accept: ${com.tanuki.web.DshWebSocketFrames.accept(key)}\r\n\r\n")
                             .toByteArray(Charsets.US_ASCII)
                     )
+                    val clientId = peers[cookieOf(head)] ?: "unknown"
                     output.write(serverText(item(JSONObject()
-                        .put("type", "ready").put("clientId", "client-1"))))
+                        .put("type", "ready").put("clientId", clientId))))
                     output.write(serverText(item(JSONObject()
                         .put("type", "waterfall")
                         .put("event", "approval/request")
                         .put("eventId", "event-1")
                         .put("agentId", "session-1")
                         .put("request", JSONObject().put("toolName", "bash").put("callId", "call-1")))))
+                    if (sendUnsupported) {
+                        output.write(serverText(item(JSONObject()
+                            .put("type", "waterfall")
+                            .put("event", "user-questions/request")
+                            .put("eventId", "question-1")
+                            .put("agentId", "session-1"))))
+                    }
                     output.flush()
                     // 保持连接直到客户端关闭；读取客户端帧只为消费 close。
                     while (true) readClientFrame(input)
@@ -198,7 +252,16 @@ class DshApprovalSessionTest {
                     val length = head.headers["content-length"]?.toIntOrNull() ?: 0
                     val body = readBody(input, length)
                     answerBodies += body
-                    val rpcId = JSONObject(body).getString("rpcId")
+                    val parsed = JSONObject(body)
+                    val rpcId = parsed.getString("rpcId")
+                    val args = parsed.getJSONObject("payload").getJSONObject("args")
+                    val clientId = args.getString("clientId")
+                    // 官方 gateway 会校验回答属于创建该 clientId 的 Peer；固定 Cookie 夹具不能掩盖错配。
+                    if (peers[cookieOf(head)] != clientId) {
+                        output.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                        output.flush()
+                        return
+                    }
                     val call = resultCalls.incrementAndGet()
                     if (failFirstAnswer && call == 1) {
                         output.write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".toByteArray(Charsets.US_ASCII))
@@ -223,6 +286,13 @@ class DshApprovalSessionTest {
                 }
             }
         }
+
+        private fun cookieOf(head: Head): String =
+            head.headers["cookie"].orEmpty().split(';')
+                .map { it.trim() }
+                .firstOrNull { it.startsWith("dsh=") }
+                ?.substringAfter("dsh=")
+                .orEmpty()
 
         private fun item(value: JSONObject): String = JSONObject()
             .put("type", "item")
