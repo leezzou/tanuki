@@ -52,6 +52,7 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshPlanTest' --tests 'com.tanuki.DshToolTimelineTest' --tests 'com.tanuki.DshApprovalProtocolTest' --tests 'com.tanuki.DshApprovalControllerTest'` | BUILD SUCCESSFUL；51 tests / 0 failures / 0 errors / 0 skipped | JDK17/worktree；合成 JSON，不访问真实 DSH |
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；810 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 完整 JVM/lint；合成事件，不访问真实 DSH |
 | `git diff --check`、`python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1754-native-approval-ui.md`、`python3 scripts/check-publication.py --git` | 通过；676 个公开文件 / 672 个索引项 / 0 findings | 提交前收尾；共享状态允许落后 |
+| GitHub Actions PR #47（run `42797312856`，head `fd3865b`） | Host scripts and handoff checks pass；Android build, JVM tests and lint pass | PR 检查；push run `42797299897` 仅因增量变更集未包含交接记录失败，随后补记录提交 |
 
 - 哪些是前一轮结果，哪些是本次新验证：51 项定向与完整 810 tests、lint 均本轮新跑；未复用历史数字。
 - 未测试、超时、失败和暂未复现的情况：真实 Android/PRoot DSH、计划审阅真实事件、设备布局/暗色/大字体/长参数/长 diff、仪器/真机、Android assemble 均未执行。
