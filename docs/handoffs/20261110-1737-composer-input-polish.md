@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-52
 - 时间：2026-11-10 17:37 CST
-- 状态：组件实现与 JVM 回归完成；PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建，等待 CI 与独立审查；页面接线、设备验证待后续
+- 状态：组件实现与 JVM 回归完成；PR [#48](https://github.com/leezzou/tanuki/pull/48) CI 通过，等待独立审查；页面接线、设备验证待后续
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -52,7 +52,8 @@
 | `git diff --check` | 无输出 | 无空白错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-composer-input-polish.md` | Handoff PR check passed | 普通 PR 模式；`AGENT-STATE`/`CURRENT.json` 未修改 |
 | `python3 scripts/check-publication.py --git` | Publication check passed；673 public files / 672 index entries / 0 findings | 未输出匹配值 |
-| `gh pr create --base main --head ao/composer-input/input-polish` | PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建 | 未合并、未发布；CI、独立审查待后续 |
+| `gh pr create --base main --head ao/composer-input/input-polish` | PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建 | 未合并、未发布 |
+| `gh run watch 42798827155 --exit-status` | success；Android build/JVM/lint 7m7s，Host scripts/handoff 39s | head `e4daf58`；仅 CI，不等于设备验证或独立审查 |
 
 - 哪些是前一轮结果，哪些是本次新验证：52 项目标回归、805 项完整 JVM、lint 均为本分支新跑；805 中既有回归不是本切片新增。
 - 未测试、超时、失败和暂未复现的情况：真实设备 UI/输入法/选择器/粘贴/拖入/跨应用临时权限/上传取消/停止、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 焦点/键盘事件没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试。
@@ -61,16 +62,15 @@
 
 - 页面接线：`DshNativePage`/`MainActivity` 归集成方；需要把 `DshNativeState.running` 同步到 `nativeComposer.setGenerationRunning(running)`，并在需要时把页面停止按钮与 `nativeComposer.requestStop()` 统一，避免两处状态不一致。
 - 未验证：设备/模拟器、真实 DSH、上传取消的服务端残留（官方无上传取消端点，本地不保留残缺文件）、真实键盘导航。
-- 未完成：PR #48 的 CI 结果与独立 Codex High 审查；按项目规则最新 SHA 必须独立审查。
+- 未完成：PR #48 的独立 Codex High 审查；按项目规则最新 SHA 必须独立审查。CI 已在代码 head `e4daf58` 通过。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按项目既有暂停项保留；本次未触碰。
 
 ## 下一步
 
-1. 等待 PR #48 CI；失败则在本分支修复并推送。
+1. 由独立 Codex High 审查 PR #48 最新 SHA；按审查意见补修。
 2. 集成方接线 `setGenerationRunning(running)`，在设备/模拟器验证输入法避让、焦点、候选键盘、图片/文件/粘贴/拖入、上传取消与停止。
-3. 由独立 Codex High 审查 PR #48 最新 SHA；按审查意见补修。
-4. 通过后由有合并授权的人合并；本 worker 不合并、不发布。
+3. 通过后由有合并授权的人合并；本 worker 不合并、不发布。
 
 ## 约束与风险
 
