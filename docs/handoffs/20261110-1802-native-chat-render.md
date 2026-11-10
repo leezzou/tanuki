@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-51（native chat render worker）
 - 时间：2026-11-10 18:02 CST
-- 状态：实现与 JVM/lint 已完成；PR 待创建/待独立审查，设备效果未验证
+- 状态：实现与 JVM/lint 已完成；PR [#51](https://github.com/leezzou/tanuki/pull/51) 已创建，待独立审查；设备效果未验证
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -68,7 +68,7 @@
 
 ## 下一步
 
-1. 推送 `ao/chat-render/render-quality` 并创建目标 `main` 的 PR；PR 描述附改动摘要、818 tests/lint 结果、未验证设备范围与风险。
+1. PR [#51](https://github.com/leezzou/tanuki/pull/51) 已创建，目标 `main`；描述附改动摘要、818 tests/lint 结果、未验证设备范围与风险。按 CI/审查结果继续修复，不在未授权时合并。
 2. 按需运行 `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1802-native-chat-render.md`、`python3 scripts/check-publication.py --git`、`git diff --check`；确认 composer/共享状态零 diff。
 3. 由编排器安排当前 SHA 的独立审查与设备 QA；未获授权不合并、不发布。
 4. 后续可做：历史向前分页协议、远程/授权图片加载、文件链接工作区预览、语法高亮/代码折叠、逐轮失败行与反馈接口。
@@ -84,5 +84,5 @@
 ## 产物与校验
 
 - 本轮不构建/安装 APK，不创建 tag/Release，不合并默认分支；不生成源码 ZIP。
-- PR：待创建；head 以最终推送 SHA 为准。
+- PR：[#51](https://github.com/leezzou/tanuki/pull/51)，head 以最终推送 SHA 为准；未合并、未发布。
 - 普通 PR 不刷新共享状态/印章；集成维护方在批量合并后统一运行 `--integrate`。
