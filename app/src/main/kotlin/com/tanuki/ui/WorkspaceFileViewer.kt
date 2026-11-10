@@ -39,6 +39,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.tanuki.storage.OpenDocument
+import com.tanuki.storage.TextFileReader
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -169,7 +170,17 @@ internal fun WorkspaceFileViewer(
                 }
             }
             if (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT) {
-                TextFileReader(document, Modifier.weight(1f), clipboardCopy = { clipboard.setText(AnnotatedString(it)) })
+                TextViewerContent(
+                    document,
+                    Modifier.weight(1f),
+                    clipboardCopy = { clipboard.setText(AnnotatedString(it)) },
+                    onOpenWith = ::openWith,
+                    onCopyPath = {
+                        clipboard.setText(AnnotatedString(document.copyablePath))
+                        copiedPath = true
+                    },
+                    pathCopied = copiedPath,
+                )
             } else {
                 val kind = info?.kind
                 val contentModifier = Modifier.weight(1f).fillMaxWidth()
@@ -246,8 +257,18 @@ internal fun WorkspaceFileViewer(
 }
 
 @Composable
-private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboardCopy: (String) -> Unit) {
+private fun TextViewerContent(
+    document: OpenDocument,
+    modifier: Modifier,
+    clipboardCopy: (String) -> Unit,
+    onOpenWith: () -> Unit,
+    onCopyPath: () -> Unit,
+    pathCopied: Boolean,
+) {
     var requestedEncoding by rememberSaveable(document.key) { mutableStateOf("自动") }
+    // 自动识别只在第一段做一次，后续分段沿用同一编码，避免从文件中部重新猜测。
+    var resolvedAutoEncoding by remember(document.key, requestedEncoding) { mutableStateOf<String?>(null) }
+    var encodingHintDismissed by rememberSaveable(document.key, requestedEncoding) { mutableStateOf(false) }
     var offsets by remember(document.key, requestedEncoding) { mutableStateOf(listOf(0L)) }
     // 与 offsets 平行保存每段第一行的行号，上一段/下一段不会重新从 1 计数。
     var lineStarts by remember(document.key, requestedEncoding) { mutableStateOf(listOf(1)) }
@@ -266,6 +287,39 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    LaunchedEffect(document.key, requestedEncoding, pageIndex) {
+        loading = true; error = null; copied = false
+        // 切换到新分段时先清空旧文本，避免读取失败后继续展示上一段却显示新行号。
+        page = null; layout = null
+        try {
+            val effectiveEncoding = when {
+                requestedEncoding != "自动" -> requestedEncoding
+                pageIndex == 0 -> "自动"
+                else -> resolvedAutoEncoding ?: "自动"
+            }
+            val result = document.readTextPage(offsets[pageIndex], effectiveEncoding)
+            page = result
+            val binaryPage = result.binary || result.encoding == TextFileReader.BINARY_ENCODING
+            if (requestedEncoding == "自动" && pageIndex == 0 && !binaryPage) {
+                resolvedAutoEncoding = result.encoding
+            }
+            matchIndex = 0; vertical.scrollTo(0); horizontal.scrollTo(0)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
+                ?: "无法读取此文本分段，请重试或使用其他应用打开。"
+        } finally { loading = false }
+    }
+    val binary = page?.let { it.binary || it.encoding == TextFileReader.BINARY_ENCODING } == true
+    if (binary) {
+        BinaryFileNotice(
+            modifier = modifier,
+            pathCopied = pathCopied,
+            onOpenWith = onOpenWith,
+            onCopyPath = onCopyPath,
+        )
+        return
+    }
     val text = page?.text.orEmpty()
     val startLine = lineStarts.getOrElse(pageIndex) { 1 }
     val numbered = remember(text, startLine, showLineNumbers) { TextPageLayout.number(text, startLine, showLineNumbers) }
@@ -280,19 +334,6 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
     // 搜索仍以原始文本计算，再换算为带行号文本，避免把行号里的数字当作匹配。
     val displayMatches = remember(matches, text, numbered.prefixLength) {
         TextPageLayout.displayOffsets(matches, text, numbered.prefixLength)
-    }
-    LaunchedEffect(document.key, requestedEncoding, pageIndex) {
-        loading = true; error = null; copied = false
-        // 切换到新分段时先清空旧文本，避免读取失败后继续展示上一段却显示新行号。
-        page = null; layout = null
-        try {
-            page = document.readTextPage(offsets[pageIndex], requestedEncoding)
-            matchIndex = 0; vertical.scrollTo(0); horizontal.scrollTo(0)
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) {
-            error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
-                ?: "无法按此编码读取，请更换编码或使用其他应用打开。"
-        } finally { loading = false }
     }
     LaunchedEffect(query) { matchIndex = 0 }
     LaunchedEffect(matchIndex, displayMatches, layout) {
@@ -318,8 +359,23 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
         }
     }
     val hasNext = page?.let { TextPageLayout.canAdvance(it.nextOffset, it.totalBytes, it.hasMore) } == true
-    val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes, it.hasMore) } == true
+    val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes) } == true
+    val detectedEncoding = page?.encoding
+    val showEncodingHint = requestedEncoding == "自动" && detectedEncoding != null && detectedEncoding != "UTF-8"
     Column(modifier.fillMaxWidth()) {
+        if (showEncodingHint && !encodingHintDismissed) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "已按 ${shortEncodingLabel(detectedEncoding.orEmpty())} 显示，如有乱码可切换编码",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { encodingMenu = true }) { Text("切换编码") }
+                    IconButton(onClick = { encodingHintDismissed = true }) { Icon(Icons.Default.Close, "关闭编码提示") }
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { searchVisible = !searchVisible }) { Icon(Icons.Default.Search, "查找文本") }
             IconButton(onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) }, enabled = fontSize > 12) { Text("A−", Modifier.semantics { contentDescription = "减小字号" }) }
@@ -331,9 +387,15 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
             Box {
                 TextButton(onClick = { encodingMenu = true }) { Text("文本编码"); Icon(Icons.Default.ArrowDropDown, null) }
                 DropdownMenu(expanded = encodingMenu, onDismissRequest = { encodingMenu = false }) {
-                    listOf("自动", "UTF-8", "UTF-16LE", "UTF-16BE", "GB18030", "Big5", "ISO-8859-1").forEach { encoding ->
-                        DropdownMenuItem(text = { Text(encoding + if (encoding == requestedEncoding) " ✓" else "") },
-                            onClick = { requestedEncoding = encoding; encodingMenu = false })
+                    TextFileReader.ENCODINGS.forEach { encoding ->
+                        DropdownMenuItem(
+                            text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
+                            onClick = {
+                                requestedEncoding = encoding
+                                encodingMenu = false
+                                encodingHintDismissed = false
+                            },
+                        )
                     }
                 }
             }
@@ -355,7 +417,7 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
                 softWrap = wrap, onTextLayout = { layout = it })
         }
         Text(
-            "${page?.encoding ?: requestedEncoding} · 第 $startLine–${startLine + numbered.lineCount - 1} 行" +
+            "${shortEncodingLabel(page?.encoding ?: requestedEncoding)} · 第 $startLine–${startLine + numbered.lineCount - 1} 行" +
                 page?.let { " · 已显示 ${viewerBytes(it.nextOffset)} / ${viewerBytes(it.totalBytes)}" }.orEmpty(),
             Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -376,6 +438,53 @@ private fun TextFileReader(document: OpenDocument, modifier: Modifier, clipboard
             }, enabled = hasNext && !loading) { Text(if (truncated) "已截断" else "下一段") }
         }
     }
+}
+
+/**
+ * 二进制文件不进入文本视图：只提供“用其他应用打开”和“复制路径”两个安全出口。
+ * 识别发生在解码前，因此不会把大量控制字符渲染成文本，也不会修改原文件。
+ */
+@Composable
+private fun BinaryFileNotice(
+    modifier: Modifier,
+    pathCopied: Boolean,
+    onOpenWith: () -> Unit,
+    onCopyPath: () -> Unit,
+) {
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+            Text("这是二进制文件", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "文件内容不是可读文本，内置查看器不会按文本解码，也不会修改原文件。",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOpenWith) { Text("用其他应用打开") }
+                OutlinedButton(onClick = onCopyPath) { Text(if (pathCopied) "已复制路径" else "复制路径") }
+            }
+        }
+    }
+}
+
+/** 编码菜单使用可读名称；聊天里仍以实际 charset 名称展示。 */
+private fun encodingLabel(encoding: String): String = when (encoding) {
+    "自动" -> "自动检测"
+    "GB18030" -> "GB18030（GBK/GB2312）"
+    "UTF-16" -> "UTF-16（自动端序）"
+    "ISO-8859-1" -> "Latin-1（ISO-8859-1）"
+    else -> encoding
+}
+
+private fun shortEncodingLabel(encoding: String): String = when (encoding) {
+    "ISO-8859-1" -> "Latin-1"
+    "自动" -> "自动检测"
+    else -> encoding
 }
 
 /**

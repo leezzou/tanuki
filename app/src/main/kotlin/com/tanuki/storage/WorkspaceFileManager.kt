@@ -49,7 +49,8 @@ class WorkspaceFileManager(
     enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, PDF, DOCX, DOC, XLSX, OTHER }
     data class FileInfo(val name: String, val mimeType: String, val bytes: Long, val kind: FileKind)
     data class TextPage(val text: String, val offset: Long, val nextOffset: Long, val totalBytes: Long,
-                        val encoding: String, val hasMore: Boolean, val revision: String? = null)
+                        val encoding: String, val hasMore: Boolean, val revision: String? = null,
+                        val binary: Boolean = false)
     fun inLocation(value: FileLocation) = WorkspaceFileManager(paths, mutation, requireIdle, storage, value, phoneRoots)
     fun guestPath(relative: String): String {
         if (location == FileLocation.PHONE && relative.isNotEmpty()) {
@@ -245,7 +246,10 @@ class WorkspaceFileManager(
             }
             check(bytes.none { it == 0.toByte() }) { "此文件不是可预览的文本或图片" }
             val text = try { Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString() }
-            catch (_: java.nio.charset.CharacterCodingException) { throw IOException("仅支持 UTF-8 文本预览") }
+            // 查看器已支持 GBK/UTF-16 等编码；内置编辑器仍只写 UTF-8，不能用“解码失败”阻断阅读。
+            catch (_: java.nio.charset.CharacterCodingException) {
+                throw IOException("内置编辑只支持 UTF-8 文本；请使用查看器阅读，或使用其他应用打开。")
+            }
             Preview(text = text, revision = revision(bytes))
         }
     }
@@ -258,12 +262,13 @@ class WorkspaceFileManager(
         val explicitMime = FileTypeCatalog.mime(name)
             ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
         var kind = classifyFileKind(name, explicitMime)
-        // 未知扩展名/未知 MIME 时做有界内容探测：能按 UTF-8 解码且无控制字符的按文本打开。
+        // 未知扩展名/未知 MIME 时做有界内容探测：能按文本解码且未被判定为二进制的按文本打开。
         // 明确二进制、归档和旧版 Office 不探测，避免把压缩包/文档误当作文本。
-        if (kind == FileKind.OTHER && !FileTypeCatalog.isBinaryExtension(name) &&
-            runCatching { TextFileReader.read(file); true }.getOrDefault(false)
-        ) {
-            kind = FileKind.TEXT
+        if (kind == FileKind.OTHER && !FileTypeCatalog.isBinaryExtension(name)) {
+            val probe = runCatching { TextFileReader.read(file) }.getOrNull()
+            if (probe != null && !probe.binary && probe.encoding != TextFileReader.BINARY_ENCODING) {
+                kind = FileKind.TEXT
+            }
         }
         FileInfo(name, explicitMime ?: if (kind == FileKind.TEXT) "text/plain" else FileTypeCatalog.OCTET_STREAM, Files.size(file), kind)
     }
@@ -315,7 +320,7 @@ class WorkspaceFileManager(
         } else null
         val after = Files.readAttributes(file, BasicFileAttributes::class.java, noFollow)
         check(before.fileKey() == after.fileKey() && before.size() == after.size() && before.lastModifiedTime() == after.lastModifiedTime()) { "文件已变化，请重新打开" }
-        TextPage(page.text, page.offset, page.nextOffset, page.totalBytes, page.encoding, page.hasMore, revision)
+        TextPage(page.text, page.offset, page.nextOffset, page.totalBytes, page.encoding, page.hasMore, revision, page.binary)
     }
 
     /** 只把用户选择的单文件复制到独立缓存，目标应用获得只读 URI，不获得私有目录访问权。 */

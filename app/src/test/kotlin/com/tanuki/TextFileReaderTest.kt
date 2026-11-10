@@ -4,10 +4,14 @@ import com.tanuki.storage.ChannelSeekableInput
 import com.tanuki.storage.SeekableInput
 import com.tanuki.storage.StreamSeekableInput
 import com.tanuki.storage.TextFileReader
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.nio.channels.FileChannel
+import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 
@@ -29,12 +33,12 @@ class TextFileReaderTest {
         } finally { Files.delete(file) }
     }
 
-    @Test fun bomAndLegacyEncodingRoundTripAcrossPages() {
+    @Test fun bomAndExplicitLegacyEncodingRoundTripAcrossPages() {
         val file = Files.createTempFile("text-encoding", ".txt")
         try {
             val text = "简体中文和換行\n".repeat(12_000)
             for (encoding in listOf("UTF-16LE", "UTF-16BE", "GB18030", "Big5")) {
-                val charset = java.nio.charset.Charset.forName(encoding)
+                val charset = Charset.forName(encoding)
                 val bytes = text.toByteArray(charset)
                 val prefix = when (encoding) {
                     "UTF-16LE" -> byteArrayOf(0xff.toByte(), 0xfe.toByte())
@@ -93,44 +97,203 @@ class TextFileReaderTest {
             assertEquals(TextFileReader.PAGE_BYTES - 1L, first.nextOffset)
             assertFalse(first.text.contains('\ufffd'))
             assertTrue(first.hasMore)
-            val second = TextFileReader.read(file, first.nextOffset)
+            val second = TextFileReader.read(file, first.nextOffset, first.encoding)
             assertEquals("中", second.text)
             assertEquals(original, first.text + second.text)
         } finally { Files.delete(file) }
     }
 
-    @Test fun rejectsIncompleteCharacterAtEndAndSupportsLatin1Explicitly() {
-        val file = Files.createTempFile("text-encoding-edge", ".txt")
+    @Test fun detectsGbkChineseWithoutUserVisibleDecodeError() {
+        val file = Files.createTempFile("text-gbk", ".txt")
         try {
-            // UTF-16LE 末尾只剩半个字符：必须报错而不是静默替换。
-            Files.write(file, "a".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0x41))
-            try { TextFileReader.read(file, encoding = "UTF-16LE"); fail("不完整字符应报错") }
-            catch (_: java.io.IOException) { }
+            val original = "简体中文测试：编码自动识别，GBK 文件不应再提示解码失败。\n".repeat(4_000)
+            Files.write(file, original.toByteArray(Charset.forName("GBK")))
 
-            // ISO-8859-1 是显式单选，单个高位字节应正常解码。
-            Files.write(file, byteArrayOf(0x63, 0x61, 0x66, 0xe9.toByte()))
-            val latin1 = TextFileReader.read(file, encoding = "ISO-8859-1")
-            assertEquals("café", latin1.text)
-            assertEquals("ISO-8859-1", latin1.encoding)
-
-            // 未知编码名直接拒绝，不能落回默认编码。
-            try { TextFileReader.read(file, encoding = "NOT-A-CHARSET"); fail("未知编码应拒绝") }
-            catch (_: IllegalArgumentException) { }
+            val first = TextFileReader.read(file)
+            assertEquals("GB18030", first.encoding)
+            assertFalse(first.binary)
+            assertTrue("测试样本必须跨页", first.hasMore)
+            val result = StringBuilder(first.text)
+            var offset = first.nextOffset
+            var hasMore = first.hasMore
+            // 查看器在自动识别后沿用第一页的编码翻页，避免从文件中部重新猜测。
+            while (hasMore) {
+                val next = TextFileReader.read(file, offset, first.encoding)
+                result.append(next.text)
+                offset = next.nextOffset
+                hasMore = next.hasMore
+            }
+            assertEquals(original, result.toString())
         } finally { Files.delete(file) }
     }
 
-    @Test fun rejectsBinaryAndReportsMalformedEncodingWithoutSilentlyReplacing() {
+    @Test fun detectsGb18030RareCharacters() {
+        val file = Files.createTempFile("text-gb18030-rare", ".txt")
+        try {
+            val original = "生僻字：𠀀龘，扩展区字符也应正常显示。"
+            Files.write(file, original.toByteArray(Charset.forName("GB18030")))
+            val page = TextFileReader.read(file)
+            assertEquals("GB18030", page.encoding)
+            assertEquals(original, page.text)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun detectsUtf16LittleAndBigEndianWithoutBom() {
+        val file = Files.createTempFile("text-utf16-no-bom", ".txt")
+        try {
+            val original = "Hello 中文测试\n编码识别".repeat(20)
+            for (encoding in listOf("UTF-16LE", "UTF-16BE")) {
+                Files.write(file, original.toByteArray(Charset.forName(encoding)))
+                val page = TextFileReader.read(file)
+                assertEquals(encoding, page.encoding)
+                assertEquals(original, page.text)
+            }
+
+            // 纯中日韩文本没有 0x00 交错，仍需用两种端序的可读性挑出正确端序。
+            val cjk = "中文测试编码识别"
+            for (encoding in listOf("UTF-16LE", "UTF-16BE")) {
+                Files.write(file, cjk.toByteArray(Charset.forName(encoding)))
+                val page = TextFileReader.read(file)
+                assertEquals(encoding, page.encoding)
+                assertEquals(cjk, page.text)
+            }
+
+            // 手动选择笼统的 UTF-16 时也要解析出具体端序，避免后续分页退回大端默认值。
+            Files.write(file, cjk.toByteArray(Charset.forName("UTF-16LE")))
+            val manual = TextFileReader.read(file, encoding = "UTF-16")
+            assertEquals("UTF-16LE", manual.encoding)
+            assertEquals(cjk, manual.text)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun detectsUtf8AndUtf32BomAndStripsThem() {
+        val file = Files.createTempFile("text-bom", ".txt")
+        try {
+            val utf8 = "UTF-8 中文 BOM"
+            Files.write(file, byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte()) + utf8.toByteArray())
+            val utf8Page = TextFileReader.read(file)
+            assertEquals("UTF-8", utf8Page.encoding)
+            assertEquals(utf8, utf8Page.text)
+
+            val utf32 = "UTF-32 中文"
+            val le = byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x00, 0x00) +
+                utf32.toByteArray(Charset.forName("UTF-32LE"))
+            Files.write(file, le)
+            val lePage = TextFileReader.read(file)
+            assertEquals("UTF-32LE", lePage.encoding)
+            assertEquals(utf32, lePage.text)
+
+            val be = byteArrayOf(0x00, 0x00, 0xfe.toByte(), 0xff.toByte()) +
+                utf32.toByteArray(Charset.forName("UTF-32BE"))
+            Files.write(file, be)
+            val bePage = TextFileReader.read(file)
+            assertEquals("UTF-32BE", bePage.encoding)
+            assertEquals(utf32, bePage.text)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun invalidByteSequencesFallBackToLatin1WithoutThrowing() {
         val file = Files.createTempFile("text-invalid", ".txt")
         try {
-            for (bytes in listOf(byteArrayOf(0, 1, 2), byteArrayOf(0xc3.toByte(), 0x28))) {
-                Files.write(file, bytes)
-                try { TextFileReader.read(file); fail("应拒绝二进制或错误编码") }
-                catch (_: java.io.IOException) { }
+            // 0x81/0x82 后跟空格不是 GB18030、Big5 或 Shift_JIS 的合法组合，也不构成 UTF-8。
+            val bytes = byteArrayOf(0x81.toByte(), 0x20, 0x82.toByte(), 0x20)
+            Files.write(file, bytes)
+            val page = TextFileReader.read(file)
+            assertEquals("ISO-8859-1", page.encoding)
+            assertFalse(page.binary)
+            assertEquals(bytes.size, page.text.length)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun detectsBinaryFilesInsteadOfRenderingControlCharacters() {
+        val file = Files.createTempFile("text-binary", ".bin")
+        try {
+            // PNG 文件头包含非 UTF-8 高位字节和控制字符，必须判为二进制而不是文本。
+            Files.write(file, byteArrayOf(
+                0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+                0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            ))
+            val png = TextFileReader.read(file)
+            assertTrue(png.binary)
+            assertEquals(TextFileReader.BINARY_ENCODING, png.encoding)
+            assertEquals("", png.text)
+            assertFalse(png.hasMore)
+
+            Files.write(file, byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
+            val controls = TextFileReader.read(file)
+            assertTrue(controls.binary)
+            assertEquals(TextFileReader.BINARY_ENCODING, controls.encoding)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun manualEncodingSwitchDecodesTheSameBytesAndNeverThrows() {
+        val file = Files.createTempFile("text-manual", ".txt")
+        try {
+            val original = "中文 GBK 手动切换"
+            val bytes = original.toByteArray(Charset.forName("GBK"))
+            Files.write(file, bytes)
+
+            assertEquals(original, TextFileReader.read(file, encoding = "GB18030").text)
+
+            // 手动选错编码时用替代字符显示，不把解码异常抛给界面。
+            val wrongUtf8 = TextFileReader.read(file, encoding = "UTF-8")
+            assertEquals("UTF-8", wrongUtf8.encoding)
+            assertTrue(wrongUtf8.text.contains('\ufffd'))
+
+            val manualUtf16 = TextFileReader.read(file, encoding = "UTF-16LE")
+            assertEquals("UTF-16LE", manualUtf16.encoding)
+            assertTrue(manualUtf16.text.isNotEmpty())
+
+            val latin1 = TextFileReader.read(file, encoding = "ISO-8859-1")
+            assertEquals("ISO-8859-1", latin1.encoding)
+            assertEquals(bytes.size, latin1.text.length)
+
+            try {
+                TextFileReader.read(file, encoding = "NOT-A-CHARSET")
+                fail("未知编码名应拒绝")
+            } catch (_: IllegalArgumentException) { }
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun detectsBig5AndShiftJisWhenGb18030WouldProduceGarbledCjk() {
+        val file = Files.createTempFile("text-east-asian", ".txt")
+        try {
+            val big5Text = "繁體中文測試"
+            Files.write(file, big5Text.toByteArray(Charset.forName("Big5")))
+            val big5 = TextFileReader.read(file)
+            assertEquals("Big5", big5.encoding)
+            assertEquals(big5Text, big5.text)
+
+            val sjisText = "日本語のテスト"
+            Files.write(file, sjisText.toByteArray(Charset.forName("Shift_JIS")))
+            val sjis = TextFileReader.read(file)
+            assertEquals("Shift_JIS", sjis.encoding)
+            assertEquals(sjisText, sjis.text)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun stopsAtFourMebibyteDisplayCap() {
+        val file = Files.createTempFile("text-cap", ".txt")
+        try {
+            val total = TextFileReader.MAX_VIEW_BYTES + 123
+            Files.write(file, ByteArray(total.toInt()) { 'a'.code.toByte() })
+            var offset = 0L
+            var pages = 0
+            while (true) {
+                val page = TextFileReader.read(file, offset)
+                assertTrue(page.nextOffset >= offset)
+                offset = page.nextOffset
+                pages++
+                if (!page.hasMore) break
+                assertTrue("未到 4 MiB 上限前应继续分页", offset < TextFileReader.MAX_VIEW_BYTES)
             }
-            Files.write(file, byteArrayOf())
-            val empty = TextFileReader.read(file)
-            assertEquals("", empty.text)
-            assertFalse(empty.hasMore)
+            assertEquals(TextFileReader.MAX_VIEW_BYTES, offset)
+            assertEquals(TextFileReader.MAX_VIEW_BYTES / TextFileReader.PAGE_BYTES, pages.toLong())
+
+            val capped = TextFileReader.read(file, TextFileReader.MAX_VIEW_BYTES)
+            assertEquals("", capped.text)
+            assertFalse(capped.hasMore)
+            assertEquals(total, capped.totalBytes)
         } finally { Files.delete(file) }
     }
 
@@ -145,15 +308,15 @@ class TextFileReaderTest {
             val first = TextFileReader.read(counting, 0)
             assertTrue(first.hasMore)
             assertTrue("单次读取不能超过一页: ${counting.maxRead}", counting.maxRead <= TextFileReader.PAGE_BYTES)
-            assertTrue("当前页读取量不能超过一页加表头: ${counting.totalRead}",
-                counting.totalRead <= TextFileReader.PAGE_BYTES + 4)
+            assertTrue("当前页读取量不能超过一页加探测样本: ${counting.totalRead}",
+                counting.totalRead <= TextFileReader.PAGE_BYTES + TextFileReader.DETECT_BYTES)
             val firstOffset = first.nextOffset
 
             counting.reset()
             val second = TextFileReader.read(counting, firstOffset)
             assertTrue(second.nextOffset >= firstOffset)
             assertTrue(counting.maxRead <= TextFileReader.PAGE_BYTES)
-            assertTrue(counting.totalRead <= TextFileReader.PAGE_BYTES + 4)
+            assertTrue(counting.totalRead <= TextFileReader.PAGE_BYTES + TextFileReader.DETECT_BYTES)
             counting.close()
         } finally { Files.delete(file) }
     }
@@ -170,6 +333,7 @@ class TextFileReaderTest {
         val second = TextFileReader.read(
             StreamSeekableInput(ByteArrayInputStream(bytes), bytes.size.toLong()),
             first.nextOffset,
+            first.encoding,
         )
         assertTrue(second.offset >= first.nextOffset)
         assertEquals(bytes.size.toLong(), second.totalBytes)
@@ -192,6 +356,24 @@ class TextFileReaderTest {
         val page = TextFileReader.read(StreamSeekableInput(ByteArrayInputStream(bytes), null), 0)
         assertTrue(page.hasMore)
         assertEquals(-1L, page.totalBytes)
+    }
+
+    @Test fun explicitIncompleteCharacterAndLatin1DoNotFailTheViewer() {
+        val file = Files.createTempFile("text-encoding-edge", ".txt")
+        try {
+            // UTF-16LE 末尾只剩半个字符：显式选择时用替代字符显示，不抛异常。
+            Files.write(file, "a".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0x41))
+            val utf16 = TextFileReader.read(file, encoding = "UTF-16LE")
+            assertEquals("UTF-16LE", utf16.encoding)
+            assertTrue(utf16.text.startsWith("a"))
+            assertTrue(utf16.text.contains('\ufffd'))
+
+            // ISO-8859-1 是显式单选，单个高位字节应正常解码。
+            Files.write(file, byteArrayOf(0x63, 0x61, 0x66, 0xe9.toByte()))
+            val latin1 = TextFileReader.read(file, encoding = "ISO-8859-1")
+            assertEquals("café", latin1.text)
+            assertEquals("ISO-8859-1", latin1.encoding)
+        } finally { Files.delete(file) }
     }
 
     private class CountingSeekable(private val delegate: SeekableInput) : SeekableInput {

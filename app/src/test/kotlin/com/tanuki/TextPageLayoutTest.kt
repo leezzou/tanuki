@@ -91,10 +91,11 @@ class TextPageLayoutTest {
 
     @Test fun reportsTruncationOnlyWhenContentRemainsPastTheCap() {
         val cap = TextPageLayout.MAX_VIEW_BYTES
-        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = cap * 2, hasMore = true))
-        assertFalse(TextPageLayout.isTruncated(cap - 1, totalBytes = cap * 2, hasMore = true))
-        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap * 2, hasMore = false))
-        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap, hasMore = true))
+        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = cap * 2))
+        assertFalse(TextPageLayout.isTruncated(cap - 1, totalBytes = cap * 2))
+        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap))
+        // 顺序流不知道总大小时，到达上限仍按截断提示，避免用户误以为已经读完。
+        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = -1))
     }
 
     @Test fun countsLogicalLines() {
