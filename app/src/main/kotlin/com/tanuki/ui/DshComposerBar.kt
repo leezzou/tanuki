@@ -1,5 +1,8 @@
 package com.tanuki.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,10 +71,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import com.tanuki.web.DshAttachmentKind
+import com.tanuki.web.DshAttachmentReadBudget
 import com.tanuki.web.DshCommand
+import com.tanuki.web.DshComposerDragPolicy
 import com.tanuki.web.DshComposerPolicy
+import com.tanuki.web.DshComposerProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -95,7 +102,9 @@ fun DshComposerBar(
     var attachMenu by remember { mutableStateOf(false) }
     var dragActive by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<DshDraftAttachment?>(null) }
-    val imageMaxBytes by rememberUpdatedState(state.limits.effectiveMaxImageBytes())
+    var imagePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
+    var filePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
+    val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.sessionId) {
         value = TextFieldValue(state.text, TextRange(state.text.length))
@@ -111,37 +120,83 @@ fun DshComposerBar(
         }
     }
 
-    fun applyRead(result: DshAttachmentReadResult, kind: DshAttachmentKind) {
+    fun budgetFor(kind: DshAttachmentKind): DshAttachmentReadBudget {
+        val current = latestState
+        val usedTotal = current.attachments.sumOf { it.bytes.size.toLong() }
+        val remainingTotal = (DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES - usedTotal).coerceAtLeast(0)
+        return when (kind) {
+            DshAttachmentKind.IMAGE -> {
+                val imageCount = current.attachments.count { it.kind == DshAttachmentKind.IMAGE }
+                val imageBytes = current.attachments
+                    .filter { it.kind == DshAttachmentKind.IMAGE }
+                    .sumOf { it.bytes.size.toLong() }
+                val imageTotal = current.limits.effectiveMaxMessageImageBytes().toLong()
+                val remainingImage = (imageTotal - imageBytes).coerceAtLeast(0)
+                DshAttachmentReadBudget(
+                    maxItems = (DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size)
+                        .coerceAtLeast(0),
+                    remainingBytes = minOf(remainingTotal, remainingImage),
+                    maxItemBytes = current.limits.effectiveMaxImageBytes(),
+                    totalLabelBytes = minOf(DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong(), imageTotal),
+                    typeMaxItems = (current.limits.maxImagesPerMessage - imageCount).coerceAtLeast(0),
+                    typeLabel = "图片"
+                )
+            }
+            DshAttachmentKind.FILE -> {
+                val fileCount = current.attachments.count { it.kind == DshAttachmentKind.FILE }
+                DshAttachmentReadBudget(
+                    maxItems = (DshComposerProtocol.MAX_ATTACHMENTS_PER_MESSAGE - current.attachments.size)
+                        .coerceAtLeast(0),
+                    remainingBytes = remainingTotal,
+                    maxItemBytes = DshComposerProtocol.MAX_FILE_BYTES,
+                    totalLabelBytes = DshComposerProtocol.MAX_TOTAL_ATTACHMENT_BYTES.toLong(),
+                    typeMaxItems = (DshComposerProtocol.MAX_FILES_PER_MESSAGE - fileCount).coerceAtLeast(0),
+                    typeLabel = "文件"
+                )
+            }
+        }
+    }
+
+    fun applyRead(result: DshAttachmentReadResult, kind: DshAttachmentKind, token: DshComposerSessionToken?) {
+        if (token != null && !controller.isCurrentSession(token)) {
+            controller.showNotice("会话已切换，已丢弃上次附件选择")
+            return
+        }
         if (result.items.isNotEmpty()) {
-            if (kind == DshAttachmentKind.IMAGE) controller.addImages(result.items)
-            else controller.addFiles(result.items)
+            if (kind == DshAttachmentKind.IMAGE) controller.addImages(result.items, token)
+            else controller.addFiles(result.items, token)
         }
         if (result.errors.isNotEmpty()) controller.showError(result.errors.joinToString("；"))
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val token = imagePickerToken
+        imagePickerToken = null
         if (uris.isNotEmpty()) scope.launch {
             val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.IMAGE, imageMaxBytes)
+                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.IMAGE, budgetFor(DshAttachmentKind.IMAGE))
             }
-            applyRead(result, DshAttachmentKind.IMAGE)
+            applyRead(result, DshAttachmentKind.IMAGE, token)
         }
     }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val token = filePickerToken
+        filePickerToken = null
         if (uris.isNotEmpty()) scope.launch {
             val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.FILE)
+                DshAttachmentReader.readUris(context, uris, DshAttachmentKind.FILE, budgetFor(DshAttachmentKind.FILE))
             }
-            applyRead(result, DshAttachmentKind.FILE)
+            applyRead(result, DshAttachmentKind.FILE, token)
         }
     }
 
     fun pasteImage() {
+        val token = controller.captureSessionToken()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                DshAttachmentReader.readClipboard(context, imageMaxBytes)
+                DshAttachmentReader.readClipboard(context, budgetFor(DshAttachmentKind.IMAGE))
             }
-            applyRead(result, DshAttachmentKind.IMAGE)
+            applyRead(result, DshAttachmentKind.IMAGE, token)
         }
     }
 
@@ -161,19 +216,37 @@ fun DshComposerBar(
 
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 dragActive = false
-                val clip = event.toAndroidDragEvent().clipData ?: return false
+                val dragEvent = event.toAndroidDragEvent()
+                // 外部 provider 通过临时 URI 授权共享；权限必须保留到异步读取结束。
+                val permissions = context.findActivity()?.requestDragAndDropPermissions(dragEvent)
+                val clip = dragEvent.clipData
+                if (clip == null) {
+                    permissions?.release()
+                    return false
+                }
+                val token = controller.captureSessionToken()
+                val imageBudget = budgetFor(DshAttachmentKind.IMAGE)
+                val fileBudget = budgetFor(DshAttachmentKind.FILE)
                 scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        DshAttachmentReader.readDrop(context, clip, imageMaxBytes)
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            DshAttachmentReader.readDrop(context, clip, imageBudget, fileBudget)
+                        }
+                        if (!controller.isCurrentSession(token)) {
+                            controller.showNotice("会话已切换，已丢弃上次拖入的附件")
+                            return@launch
+                        }
+                        if (result.items.isNotEmpty()) {
+                            val images = result.items.filter { it.kind == DshAttachmentKind.IMAGE }
+                            val files = result.items.filter { it.kind == DshAttachmentKind.FILE }
+                            if (images.isNotEmpty()) controller.addImages(images, token)
+                            if (files.isNotEmpty()) controller.addFiles(files, token)
+                        }
+                        if (result.errors.isNotEmpty()) controller.showError(result.errors.joinToString("；"))
+                        else if (result.items.isEmpty()) controller.showError("拖入内容没有可读取的文件")
+                    } finally {
+                        permissions?.release()
                     }
-                    if (result.items.isNotEmpty()) {
-                        val images = result.items.filter { it.kind == DshAttachmentKind.IMAGE }
-                        val files = result.items.filter { it.kind == DshAttachmentKind.FILE }
-                        if (images.isNotEmpty()) controller.addImages(images)
-                        if (files.isNotEmpty()) controller.addFiles(files)
-                    }
-                    if (result.errors.isNotEmpty()) controller.showError(result.errors.joinToString("；"))
-                    else if (result.items.isEmpty()) controller.showError("拖入内容没有可读取的文件")
                 }
                 return true
             }
@@ -182,7 +255,8 @@ fun DshComposerBar(
 
     val dragModifier = Modifier.dragAndDropTarget(
         shouldStartDragAndDrop = { event ->
-            event.toAndroidDragEvent().clipData?.let { it.itemCount > 0 } == true
+            // ACTION_DRAG_STARTED 时 clipData 尚未提供，只能读 clipDescription/mimeTypes。
+            DshComposerDragPolicy.accepts(event.mimeTypes())
         },
         target = dropTarget
     )
@@ -287,6 +361,7 @@ fun DshComposerBar(
                             text = { Text("选择图片") },
                             onClick = {
                                 attachMenu = false
+                                imagePickerToken = controller.captureSessionToken()
                                 imagePicker.launch(arrayOf("image/*"))
                             }
                         )
@@ -294,6 +369,7 @@ fun DshComposerBar(
                             text = { Text("选择文件") },
                             onClick = {
                                 attachMenu = false
+                                filePickerToken = controller.captureSessionToken()
                                 filePicker.launch(arrayOf("*/*"))
                             }
                         )
@@ -331,6 +407,12 @@ fun DshComposerBar(
     preview?.let { attachment ->
         AttachmentPreviewDialog(attachment = attachment, onDismiss = { preview = null })
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 private fun insertAtCursor(

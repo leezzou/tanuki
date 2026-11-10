@@ -38,6 +38,7 @@ class DshComposerControllerTest {
             .put("maxImageDimension", 8192)
         var uploadDelayMillis = 0L
         var commandsDelayMillis = 0L
+        var promptDelayMillis = 0L
         var promptFailure: Throwable? = null
         var promptAccepted = true
 
@@ -67,6 +68,7 @@ class DshComposerControllerTest {
                     )
                 }
                 "session/prompt" -> {
+                    if (promptDelayMillis > 0) delay(promptDelayMillis)
                     promptFailure?.let { throw it }
                     JSONObject().put("accepted", promptAccepted)
                 }
@@ -242,6 +244,37 @@ class DshComposerControllerTest {
         assertTrue(state.mentionCandidates[1] is com.tanuki.ui.DshMentionCandidate.File)
         assertEquals("@[历史会话](dsh-session:history-1)", state.mentionCandidates[0].insertion)
         assertEquals("@src/Main.kt", state.mentionCandidates[1].insertion)
+    }
+
+    @Test fun sendKeepsEditsMadeWhileWaitingForResponse() {
+        val remote = FakeRemote().apply { promptDelayMillis = 80 }
+        val store = MemoryDshDraftStore()
+        val controller = controller(remote, store)
+        controller.setSession("s1")
+        controller.addImages(listOf(image(png(20, 20), "old.png")))
+        controller.updateText("A", 1)
+        controller.send()
+        controller.updateText("B", 1)
+        controller.addImages(listOf(image(png(21, 21), "new.png")))
+        val state = awaitState(controller) { it.notice?.startsWith("已发送") == true }
+        assertEquals("B", state.text)
+        assertEquals(listOf("new.png"), state.attachments.map { it.name })
+        assertEquals("B", store.read("s1"))
+        assertTrue(state.notice!!.contains("新编辑已保留"))
+    }
+
+    @Test fun staleAttachmentTokenIsRejectedAfterSessionSwitch() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        val token = controller.captureSessionToken()
+        controller.setSession("s2")
+        assertFalse(controller.isCurrentSession(token))
+        controller.addImages(listOf(image(png(20, 20), "stale.png")), token)
+        assertTrue(controller.state.value.attachments.isEmpty())
+        val current = controller.captureSessionToken()
+        assertTrue(controller.isCurrentSession(current))
+        controller.addImages(listOf(image(png(20, 20), "current.png")), current)
+        assertEquals(listOf("current.png"), controller.state.value.attachments.map { it.name })
     }
 
     @Test fun failedSendKeepsDraftAndAttachments() {

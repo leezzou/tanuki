@@ -1,6 +1,8 @@
 package com.tanuki
 
 import com.tanuki.web.DshAttachmentKind
+import com.tanuki.web.DshAttachmentReadBudget
+import com.tanuki.web.DshComposerDragPolicy
 import com.tanuki.web.DshComposerPolicy
 import com.tanuki.web.DshComposerProtocol
 import com.tanuki.web.DshImageLimits
@@ -244,6 +246,54 @@ class DshComposerProtocolTest {
                 "image/png", 100, 640, 480, limits, 0, 0, 0
             )
         )
+    }
+
+    @Test fun batchBudgetStopsBeforeOverAllocating() {
+        val budget = DshAttachmentReadBudget(
+            maxItems = 10,
+            remainingBytes = 50L * 1024 * 1024,
+            maxItemBytes = 20 * 1024 * 1024,
+            totalLabelBytes = 50L * 1024 * 1024
+        )
+        assertEquals(20 * 1024 * 1024, budget.limitFor(0, 0))
+        assertEquals(20 * 1024 * 1024, budget.limitFor(1, 20L * 1024 * 1024))
+        assertEquals(10 * 1024 * 1024, budget.limitFor(2, 40L * 1024 * 1024))
+        assertNull(budget.limitFor(3, 50L * 1024 * 1024))
+        assertTrue(budget.exhaustionMessage(3).contains("50 MB"))
+        val countBudget = budget.copy(maxItems = 2, remainingBytes = 100L * 1024 * 1024)
+        assertNull(countBudget.limitFor(2, 0))
+        assertTrue(countBudget.exhaustionMessage(2).contains("还能添加 2 个附件"))
+    }
+
+    @Test fun mixedDropKeepsFileTypeQuotaAfterImages() {
+        val fileBudget = DshAttachmentReadBudget(
+            maxItems = 10,
+            remainingBytes = 50L * 1024 * 1024,
+            maxItemBytes = 20 * 1024 * 1024,
+            totalLabelBytes = 50L * 1024 * 1024,
+            typeMaxItems = 5,
+            typeLabel = "文件"
+        )
+        val afterFiveImages = fileBudget.afterImages(5, 5L * 1024)
+        assertEquals(5, afterFiveImages.maxItems)
+        assertEquals(5, afterFiveImages.typeMaxItems)
+        assertNotNull(afterFiveImages.limitFor(0, 0))
+        assertNull(afterFiveImages.limitFor(5, 0))
+
+        val afterOneImage = fileBudget.afterImages(1, 1024)
+        assertEquals(9, afterOneImage.maxItems)
+        assertEquals(5, afterOneImage.typeMaxItems)
+        assertNotNull(afterOneImage.limitFor(4, 4L * 1024))
+        assertNull(afterOneImage.limitFor(5, 5L * 1024))
+
+        val imageBudget = fileBudget.copy(typeMaxItems = 5, typeLabel = "图片")
+        assertNull(imageBudget.limitFor(5, 0))
+    }
+
+    @Test fun dragPolicyUsesStartMetadataWithoutClipData() {
+        assertTrue(DshComposerDragPolicy.accepts(setOf("text/uri-list")))
+        assertTrue(DshComposerDragPolicy.accepts(setOf("image/png")))
+        assertFalse(DshComposerDragPolicy.accepts(emptySet()))
     }
 
     @Test fun validatesFileLimitsWithChineseErrors() {

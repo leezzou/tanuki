@@ -27,6 +27,43 @@ data class DshImageLimits(
 /** 从官方图片头解析出的固有尺寸。 */
 data class DshImageSize(val width: Int, val height: Int)
 
+/** 拖入接收判定只看开始阶段的 MIME 元数据；此时 Android 还不提供 clipData。 */
+object DshComposerDragPolicy {
+    fun accepts(mimeTypes: Set<String>): Boolean = mimeTypes.any { it.isNotBlank() }
+}
+
+/** 一次批量读取前分配的附件预算；读取阶段就拒绝超量，避免先把整批字节读进内存。 */
+data class DshAttachmentReadBudget(
+    val maxItems: Int,
+    val remainingBytes: Long,
+    val maxItemBytes: Int,
+    val totalLabelBytes: Long,
+    /** 当前类型的剩余名额；图片/文件各自独立，不能被另一类型消耗。 */
+    val typeMaxItems: Int = maxItems,
+    val typeLabel: String = "附件"
+) {
+    /** 返回当前条目可读取的最大字节；总名额、类型名额或总量已用尽时返回 null。 */
+    fun limitFor(acceptedItems: Int, usedBytes: Long): Int? {
+        if (acceptedItems >= maxItems || acceptedItems >= typeMaxItems || remainingBytes <= usedBytes) return null
+        return minOf(maxItemBytes.toLong(), remainingBytes - usedBytes).toInt()
+    }
+
+    /** 图片只消耗总附件名额与共享字节预算，保留文件类型名额。 */
+    fun afterImages(imageCount: Int, imageBytes: Long): DshAttachmentReadBudget = copy(
+        maxItems = (maxItems - imageCount).coerceAtLeast(0),
+        remainingBytes = (remainingBytes - imageBytes).coerceAtLeast(0)
+    )
+
+    fun exhaustionMessage(acceptedItems: Int): String = when {
+        acceptedItems >= typeMaxItems -> {
+            val suffix = if (typeLabel.isBlank() || typeLabel == "附件") "" else "（$typeLabel）"
+            "还能添加 $typeMaxItems 个附件$suffix"
+        }
+        acceptedItems >= maxItems -> "还能添加 $maxItems 个附件"
+        else -> "附件总大小不能超过 ${DshComposerPolicy.formatBytes(totalLabelBytes)}"
+    }
+}
+
 /** 官方 prompt 的内容块；顺序由调用方决定，原生输入栏按附件后文本发送。 */
 sealed interface DshOutgoingPart {
     data class Text(val text: String) : DshOutgoingPart
@@ -41,7 +78,6 @@ sealed interface DshOutgoingPart {
     }
 }
 
-/** 官方 commands/list 返回的斜杠命令描述；只保留原生补全需要的字段。 */
 /** 官方 fileReferences/list 返回的文件/目录候选。 */
 data class DshFileReference(val path: String, val kind: String, val mention: String)
 
