@@ -10,7 +10,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（2m32s），66 个结果文件、**544 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` **0 errors / 94 warnings / 1 hint**。
 - 新增回归 9 项（`DshUninstallTest`）：当前版本卸载被拒；运行中/活动子进程/更新检查/安装占用被拒；当前元数据缺失、非法版本、未安装版本被拒；卸载备用版本后程序目录消失、当前版本与 `userdata`/`workspaces`/`backups`/下载缓存保留、清单重扫只剩当前版本；删除失败且目录完整时回滚原程序；删除已触及 `.installed` 后不回滚半删目录、保留隔离目录；提交日志失败时在删除前回滚；版本窄锁第二次 `tryEnter` 被拒且等待者串行；两个并发卸载同一版本只能成功一个。
 - 首次完整 JVM 运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未修改该测试。
-- 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、独立 Review。首提交 `6032114` 的 PR #33 CI 4/4 通过；最终 head 以 PR 页面为准。JVM 与 lint 不能替代设备验收。
+- 未执行：assemble、Android 仪器、真实设备/PRoot 上的清单/确认/卸载/回滚/进程中断恢复、真实 Node 降级/依赖锁损坏、独立 Review。PR #33 最终 head `5f484e6` 的 Host/Android CI 4/4 通过。JVM 与 lint 不能替代设备验收。
 
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
 

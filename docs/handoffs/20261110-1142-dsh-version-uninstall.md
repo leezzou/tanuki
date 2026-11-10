@@ -22,7 +22,7 @@
   - 切换/卸载与安装、启动共用环境 mutation；切换/卸载与更新检查共用 `DshVersionGate`，锁顺序固定为 mutation → versionGate。
   - 主界面当前版本“卸载”入口改为“管理版本”；官方版本选择弹窗只对非当前已安装版本显示“卸载该备用版本”。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM `DshUninstallTest` 9 项、`DshVersionsTest` 7 项、`DshSwitchTest` 12 项全过；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**。
-- PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建；首提交 `6032114` 的 Host/Android CI 4/4 通过。最终 head 含组件事务日志备份修复，以 PR 页面 CI 为准。
+- PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建；最终 head `5f484e6`（含组件事务日志备份修复）的 Host/Android CI 4/4 通过。
 - 待验证：PR 的 Host/Android CI、独立 Codex High Review、真实设备上的版本列表/确认/卸载/回滚/清单刷新、真实 Node 降级/依赖锁损坏/进程中断恢复。
 - 当前分支：`ao/android_agent-43/root`，基线 `origin/main=0555c3c0`；未启动设备，未切换/卸载真实 DSH。
 - 关键事实：卸载事务只接收程序目录和隔离目录；当前版本不提供任何后端卸载路径；`DshVersions.canUninstallFromManager` 在当前版本未知时返回 false。
@@ -50,6 +50,7 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -x buildNativeRuntime :app:compileModernDebugKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.DshUninstallTest' --tests 'com.tanuki.DshVersionsTest' --tests 'com.tanuki.DshSwitchTest'` | 通过（BUILD SUCCESSFUL） | 本 worktree，JDK17；28 tests / 0 failures / 0 errors / 0 skipped（卸载 9、版本 7、切换 12）。 |
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL，2m32s） | 66 个结果文件、**544 tests / 0 failures / 0 errors / 0 skipped**（基线 535 + 新增 9）；`lintModernDebug` **0 errors / 94 warnings / 1 hint**；不替代设备验收。 |
 | `./gradlew --no-daemon -x buildNativeRuntime :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest' --rerun-tasks` | 通过 | 首次完整运行命中既有 `NpmAdaptiveWorkerPoolTest` 并发时序失败（退休 worker 数与目标不符），该测试单独重跑与最终完整 JVM 重跑均通过；本轮未改该测试。 |
+| GitHub Actions 42755988619 / 42755996058 | 通过 | 最终 head `5f484e6`：`Host scripts and handoff checks` 27s/35s，`Android build, JVM tests and lint` 5m5s/3m56s，4/4 全绿；未触发 AO Review。 |
 | `python3 scripts/check-handoff.py --record docs/handoffs/20261110-1142-dsh-version-uninstall.md` | 通过 | 刷新 `CURRENT.json` 指纹。 |
 | `python3 scripts/check-handoff.py` | 通过 | 当前记录与源码指纹一致。 |
 

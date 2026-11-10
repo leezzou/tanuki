@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 已创建，实现与本地 JVM/lint 完成，独立 Review/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[DSH 多版本卸载与互斥](handoffs/20261110-1142-dsh-version-uninstall.md)（android_agent-43，基线 `main=0555c3c0`；PR [#33](https://github.com/leezzou/tanuki/pull/33) 最终 head `5f484e6` CI 4/4 通过，独立 Review/设备验收待办）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；并行与历史记录保留在 `docs/handoffs/`。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -26,7 +26,7 @@
 - UI：主界面当前版本“卸载”改为“管理版本”；官方版本列表只对非当前已安装版本显示“卸载该备用版本”；确认框显示版本、占用、安装时间和保留范围。
 - 恢复：组件事务日志改用 `AtomicFile.delete()`，避免只删主文件留下 `.bak` 导致下次启动恢复已完成的卸载/替换事务。
 - 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；目标 JVM 28 tests / 0 failures / 0 errors / 0 skipped（`DshUninstallTest` 9、`DshVersionsTest` 7、`DshSwitchTest` 12）；完整 JVM **544 tests / 0 failures / 0 errors / 0 skipped**、lint **0 errors / 94 warnings / 1 hint**，详见 [测试报告](TEST-REPORT.md)。
-- 待验证：PR [#33](https://github.com/leezzou/tanuki/pull/33) 的最终 head CI 与独立 Codex High Review；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、进程在 prepared/committed 之间中断后的恢复；未跑 assemble/仪器/真机。
+- 待验证：独立 Codex High Review（PR #33 最终 head `5f484e6` 的 Host/Android CI 4/4 已通过）；真实设备上的清单/确认/卸载/回滚/刷新、更新检查期间禁用、进程在 prepared/committed 之间中断后的恢复；未跑 assemble/仪器/真机。
 
 ### 远程主机直连 SSH 切片（android_agent-34，PR #29 待审）
 
@@ -218,7 +218,7 @@
 
 ## 环境与阻塞
 
-- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，首提交 `6032114` 的 CI 4/4 通过，最终 head 以 PR 页面为准；本轮未启动设备。
+- 当前分支：DSH 多版本卸载 `ao/version-uninstall/root`（基线 `main=0555c3c0`，AO worktree `android_agent-43`，PR [#33](https://github.com/leezzou/tanuki/pull/33)）；实现与本地 JVM/lint 完成，最终 head `5f484e6` 的 CI 4/4 通过；本轮未启动设备。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。
@@ -230,7 +230,7 @@
 
 ## 下一步
 
-1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：等待最终 head CI 与独立 Codex High Review；设备验收另行授权（清单、确认、卸载备用、回滚、更新检查互斥、进程中断恢复）。不合并、不发布。
+1. DSH 多版本卸载 PR [#33](https://github.com/leezzou/tanuki/pull/33)：最终 head `5f484e6` CI 已通过，等待独立 Codex High Review；设备验收另行授权（清单、确认、卸载备用、回滚、更新检查互斥、进程中断恢复）。不合并、不发布。
 2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
