@@ -29,6 +29,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.tanuki.runtime.*
 import com.tanuki.storage.DataSnapshots
+import com.tanuki.storage.ExportCleanup
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
 import com.tanuki.storage.WorkspaceFileManager
@@ -157,9 +158,13 @@ class MainActivity : ComponentActivity() {
             catch (error: Exception) { discardIncompleteExport(uri); manager.fail(error) }
         }
     }
-    private fun discardIncompleteExport(uri: Uri) {
-        runCatching { check(android.provider.DocumentsContract.deleteDocument(contentResolver, uri)) }
-            .onFailure { manager.event("未完整导出的目标文件无法自动删除，请在目标位置检查") }
+    private fun discardIncompleteExport(uri: Uri): Boolean {
+        val cleaned = ExportCleanup.discard {
+            check(android.provider.DocumentsContract.deleteDocument(contentResolver, uri))
+            true
+        }
+        if (!cleaned) manager.event(ExportCleanup.CANNOT_DELETE)
+        return cleaned
     }
     private var filesCallback: ValueCallback<Array<Uri>>? = null
     private var pendingDownload: String? = null
@@ -194,20 +199,37 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 manager.event("官方 Blob 文件导出完成")
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (t: Exception) { manager.fail(t) } finally { blob.delete() }
+            } catch (cancelled: CancellationException) {
+                // 取消会留下本次 CreateDocument 的空/截断目标，必须清理；失败时提示用户检查。
+                val cleaned = discardIncompleteExport(uri)
+                withContext(NonCancellable + Dispatchers.Main) {
+                    android.widget.Toast.makeText(this@MainActivity, ExportCleanup.cancelledNotice(cleaned),
+                        android.widget.Toast.LENGTH_LONG).show()
+                }
+                throw cancelled
+            }
+            catch (t: Exception) { discardIncompleteExport(uri); manager.fail(t) } finally { blob.delete() }
         } else if (url != null) {
             if (!manager.cookieReady()) {
+                discardIncompleteExport(uri)
                 manager.event("管理页 Cookie 隔离未就绪，已取消下载；请重启应用")
             } else {
                 val cookie = CookieManager.getInstance().getCookie(url)
                 lifecycleScope.launch(Dispatchers.IO) {
                     try { saveDownload(url, uri, cookie) }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { manager.fail(error) }
+                    catch (cancelled: CancellationException) {
+                        val cleaned = discardIncompleteExport(uri)
+                        withContext(NonCancellable + Dispatchers.Main) {
+                            android.widget.Toast.makeText(this@MainActivity, ExportCleanup.cancelledNotice(cleaned),
+                                android.widget.Toast.LENGTH_LONG).show()
+                        }
+                        throw cancelled
+                    }
+                    catch (error: Exception) { discardIncompleteExport(uri); manager.fail(error) }
                 }
             }
         } else {
+            discardIncompleteExport(uri)
             manager.fail(IllegalStateException("下载因页面或 Activity 重建而中断，请重新保存文件"))
             android.widget.Toast.makeText(this, "下载已中断，请重新保存文件", android.widget.Toast.LENGTH_LONG).show()
         }

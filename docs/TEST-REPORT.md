@@ -12,14 +12,16 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本轮新跑）：
   - `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin` → BUILD SUCCESSFUL。
   - 目标回归 `FileTransferProgressTest`、`ImportProgressTest`、`FileListPresentationTest`、`OperationProgressTest` → BUILD SUCCESSFUL。
-  - `:app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL；68 个结果文件，**551 tests / 0 failures / 0 errors / 0 skipped**（main 既有 535 + 本次新增 16）。
+  - `:app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL；69 个结果文件，**554 tests / 0 failures / 0 errors / 0 skipped**（main 既有 535 + 本次新增 19）。
   - `:app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（新增仪器测试只编译，未在设备执行）。
-- 新增回归 16 项：
+- 新增回归 19 项：
   - `FileTransferProgressTest` 5 项：固定时钟下 50 个 64 KiB 分块只发布开始帧、最终帧始终发布；总量从 -1 变为已知时立即发布；间隔不足的中间帧合并、回退分块丢弃；取消走 `finally` 清理且进度条消失，未知 id 取消为 no-op；登记式取消动作只执行一次且 finish 后不可再登记。
   - `ImportProgressTest` 3 项：空/含未知/含负数大小不产生总量；溢出保持未知；百分比只由正总量产生并限制在 0–1。
   - `FileListPresentationTest` 8 项：同目录刷新保留旧列表、搜索/排序/显示隐藏不闪空、换目录清空旧结果、完成后显示自身条目、内容相等复用条目列表、隐藏/查询/排序规则、文件夹优先与身份稳定、排序方式与来源区分。
+  - `ExportCleanupTest` 3 项：删除成功/失败/异常、取消与失败提示不假装已删除、写入 128 KiB 部分数据后取消会删除截断目标并清空进度。
 - 新增仪器测试：`FilesBrowserPresentationTest.sameDirectoryRefreshWithNewFilesKeepsScrollPosition`（同目录新增文件后刷新，列表不回到顶部）与 `BlobDownloadTest.cancelledPendingBlobNeverOpensExport`（取消等待中的 Blob 后不触发 ready）——均仅编译通过，本会话未运行；设备由独立 QA 独占。
-- Review P2 修复：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
+- Review P2 修复一：`BlobDownloads.request()` 原先只 `begin()` 不登记取消，点击取消只置标记；现通过 `FileTransfers.onCancel` 登记动作，取消清空 pending 并忽略晚到回包，解码阶段取消协程并立即 finish；新增 JVM 登记动作回归与 Blob 仪器测试源码。
+- Review P2 修复二：新开放取消的“保存网页 Blob 文件”“下载网页文件”“导出浏览器文件”在取消/失败时会留下零字节或截断的 SAF 目标；现统一通过 `ExportCleanup` 删除本次 `CreateDocument` 目标，删除失败明确提示，并新增“写入部分数据后取消删除截断目标”的 JVM 回归。
 - 未执行：设备/模拟器真实 SAF 导入、大文件/多文件/取消 UI、旋转恢复、真实系统文档选择器、真机；编译、JVM 与 lint 不能替代设备验收。
 
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
