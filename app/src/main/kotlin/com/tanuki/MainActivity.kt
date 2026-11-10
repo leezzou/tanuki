@@ -168,7 +168,9 @@ class MainActivity : ComponentActivity() {
         finishDshFiles(result.resultCode, result.data)
     }
     private val importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) lifecycleScope.launch(Dispatchers.IO) {
+        // 取消系统选择器（空结果）不启动任务、不报错、不跳页。
+        if (uris.isEmpty()) return@registerForActivityResult
+        lifecycleScope.launch(Dispatchers.IO) {
             try { manager.fileTransfers.track("导入项目文件") { id -> importProjectFiles(uris, id) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { manager.fail(error) }
@@ -285,7 +287,7 @@ class MainActivity : ComponentActivity() {
                 val npmSpeed by manager.npmSources.speed.state.collectAsState()
                 val npmSources=remember(npmSelection.version) { manager.npmSources.sources(npmSelection.version) }
                 val tools by manager.requiredTools.collectAsState()
-                val transfers by manager.fileTransfers.state.collectAsState()
+                // 传输进度由进度条自行 collect，不能在这里 collect：否则每个分块都会重组整页。
                 val phoneWriteAllowed by manager.phoneFiles.writeAllowed.collectAsState()
                 val appUpdate by appUpdates.state.collectAsState()
                 val apkUpdateCheck by apkUpdateChecks.state.collectAsState()
@@ -389,7 +391,7 @@ class MainActivity : ComponentActivity() {
                         earlyStart=earlyStart,
                         components=components,ubuntuSources=ubuntuSources,nodeSources=nodeSources,
                         ubuntuSpeed=ubuntuSpeed,nodeSpeed=nodeSpeed,nodeRequirement=nodeRequirement,workspaceStorage=workspaceStorage,
-                        tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=transfers,
+                        tools=tools,npmSelection=npmSelection,npmSources=npmSources,npmSpeed=npmSpeed,transfers=manager.fileTransfers.state,
                         appUpdate=appUpdate,appInstallAllowed=appUpdates.installAllowed(),fileFullscreen=fileViewerFullscreen,
                         apkUpdateCheck=apkUpdateCheck,dshUpdateCheck=dshUpdateCheck,
                         remoteHost=remoteHost.saved,remote=remoteHost.status,remoteBusy=remoteHost.busy,
@@ -484,6 +486,7 @@ class MainActivity : ComponentActivity() {
                         downloadAppUpdate = appUpdates::download,
                         installAppUpdate = ::confirmApplicationUpdate,
                         cancelAppUpdate = appUpdates::cancel,
+                        cancelTransfer = { manager.fileTransfers.cancel(it) },
                         testRemoteHost = manager.remoteHost::test,
                         connectRemoteHost = manager.remoteHost::connect,
                         confirmRemoteHostKey = manager.remoteHost::confirmHostKey,
@@ -952,15 +955,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) = manager.mutation.withLock {
-        val names = uris.mapIndexed { index, uri ->
+        // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
+        val selected = uris.mapIndexed { index, uri ->
             currentCoroutineContext().ensureActive()
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
-            } ?: "file-$index"
+            var name: String? = null
+            var size: Long? = null
+            runCatching {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                    }
+                }
+            }
+            name to size
         }
-        val destination = manager.workspaceStorage.importFiles(names, onProgress = { manager.fileTransfers.update(transferId, it) }) { index ->
-            contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件")
-        }
+        val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
+        // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
+        manager.fileTransfers.update(transferId, 0, total)
+        val destination = manager.workspaceStorage.importFiles(
+            selected.mapIndexed { index, item -> item.first ?: "file-$index" },
+            onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
+        ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
         manager.event("已导入新项目 ${destination.name}")
     }
     private suspend fun exportProjects(uri: Uri, transferId: Long) = manager.mutation.withLock {
