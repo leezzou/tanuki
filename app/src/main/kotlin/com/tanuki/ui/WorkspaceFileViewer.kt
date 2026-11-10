@@ -359,7 +359,7 @@ private fun TextViewerContent(
         }
     }
     val hasNext = page?.let { TextPageLayout.canAdvance(it.nextOffset, it.totalBytes, it.hasMore) } == true
-    val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes) } == true
+    val truncated = page?.let { TextPageLayout.isTruncated(it.nextOffset, it.totalBytes, it.hasMore) } == true
     val detectedEncoding = page?.encoding
     val showEncodingHint = requestedEncoding == "自动" && detectedEncoding != null && detectedEncoding != "UTF-8"
     Column(modifier.fillMaxWidth()) {
