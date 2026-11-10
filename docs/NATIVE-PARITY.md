@@ -86,7 +86,7 @@
 | CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-03 |
 | CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-FILE-03 |
 | CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*`、`approval/request` · android_agent-42/45 · A-APPROVAL-02 |
-| CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：`DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · android_agent-42 · A-CHAT-01、A-CHAT-03 |
+| CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：android_agent-42 未提交的 `DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · android_agent-42 · A-CHAT-01、A-CHAT-03 |
 | CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-03 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
 | CHAT-18 | 交付物（deliverables） | 轮次页脚交付物卡片、右侧预览 | `仅官方` | P2 · 官方交付物协议 · 未排期 · A-FILE-03 |
@@ -145,11 +145,11 @@
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `进行中`：`DshMuxProtocol` 已解析 `approval/request` 最小字段，未接 UI | P0 · `DshMuxProtocol.kt` · android_agent-42/45 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析 `approval/request` 最小字段，未接 UI | P0 · `DshMuxProtocol.kt` · android_agent-42/45 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `仅官方`：原生无回答通道 | P0 · `$events/result` waterfall · android_agent-45 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-02 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
-| APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：`DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · android_agent-42/45 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · android_agent-42/45 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*` · android_agent-45 · A-APPROVAL-02 |
 | APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `仅官方` | P1 · 原生工具卡片 · android_agent-45 · A-TOOL-02 |
 | APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `仅官方` | P1 · waterfall 语义 · android_agent-45 · A-APPROVAL-01 |
@@ -190,7 +190,7 @@
 | FILE-13 | Git worktree | 实验性 worktree 管理 | `仅官方` | P2 · 官方 worktree 插件 · 未排期 · A-FILE-03 |
 | FILE-14 | 在文件管理器中打开 | `session/openWorkspacePath`、系统关联打开 | `原生部分`：原生文件页可用系统 Intent 打开音视频/文档；无“在文件管理器中显示” | P2 · `session/openWorkspacePath` · 未排期 · A-FILE-02 |
 | FILE-15 | 手机文件访问/写入授权 | 官方网页无此能力 | `原生完整`：原生文件页手机卷只读浏览、单独授权写入、停止 DSH 恢复只读 | — · `PhoneFileService.kt`/`WorkspaceFilesPage.kt` · 既有 · A-FILE-02、A-FILE-04 |
-| FILE-16 | 工作区容量/存储统计 | 官方设置中的存储/用量 | `原生完整`：原生设置“存储与空间”容量预算、目录占用、清理缓存 | — · `WorkspaceStorageControls.kt` · 既有 · A-FILE-02 |
+| FILE-16 | 工作区容量/存储统计 | 官方网页无 Tanuki 容量预算/目录占用 | `原生完整`：原生设置“存储与空间”容量预算、目录占用、清理缓存 | — · `WorkspaceStorageControls.kt` · 既有 · A-FILE-02 |
 
 ### 3.9 搜索（SEARCH）
 
@@ -218,7 +218,7 @@
 | SET-08 | 通知设置 | 应用内通知/系统通知入口 | `原生完整`：原生“运行与后台”聊天通知总开关、权限/系统入口、更新通知 | — · `TanukiUi.kt`/`ChatNotification*` · android_agent-29/PR #22、24/PR #19 · A-NOTIFY-02 |
 | SET-09 | 应用更新 | 检查/下载/覆盖安装、后台检查 | `原生完整`：原生“应用更新”卡片、后台每 30 分钟检查、权限申请 | — · `ApplicationUpdateCard.kt`/`BackgroundUpdateChecks.kt` · android_agent-24/PR #19 · A-NOTIFY-02 |
 | SET-10 | 组件版本/维护 | Ubuntu/Node/DSH 版本、重装、卸载、备用 | `原生完整`：原生“组件维护与诊断”、版本选择、重装/卸载/备用/切换 | — · `TanukiUi.kt`/`DshVersionManagerDialog.kt` · android_agent-25/PR #18、43 · A-SET-02 |
-| SET-11 | 存储/备份/快照 | 工作区容量、导出、私有快照 | `原生完整`：原生“存储与空间”“项目与备份” | — · `TanukiUi.kt`/`DataSnapshots.kt` · 既有 · A-FILE-02 |
+| SET-11 | 存储/备份/快照 | 官方网页无 Tanuki 容量预算/私有快照；项目导出由 Tanuki 提供 | `原生完整`：原生“存储与空间”“项目与备份” | — · `TanukiUi.kt`/`DataSnapshots.kt` · 既有 · A-FILE-02 |
 | SET-12 | 远程主机 | 官方网页无 SSH 隧道设置 | `原生完整`：原生“远程主机”配置、测试连接、指纹确认、断开/清除 | — · `RemoteHostSettings.kt` · android_agent-34/PR #29 · A-REMOTE-02 |
 | SET-13 | 网页/兼容性 | WebView 能力、兼容层、Blob 导出 | `原生完整`：原生“网页与兼容性”检测、更新入口、兼容开关 | — · `TanukiUi.kt`/`WebViewSupport.kt` · 既有 · A-SET-02 |
 | SET-14 | 高级/关于/许可 | 关于、许可、缓存清理 | `原生完整`：原生“高级与关于”、许可、清除下载缓存 | — · `TanukiUi.kt` · 既有 · A-SET-02 |
@@ -268,11 +268,11 @@
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| SAFE-01 | 失败分类 | 官方进程失败/错误提示 | `原生完整`：`RuntimeFailurePolicy` 分类 LAUNCH/STARTUP/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE | — · `RuntimeFailurePolicy.kt` · android_agent-28/PR #25 · A-SAFE-01 |
-| SAFE-02 | 安全模式/rescue | 官方无 Tanuki rescue | `原生完整`：独立 safe-home/safe-dsh，不加载用户插件/配置，不删数据 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-02 |
-| SAFE-03 | 试用/probation | 官方无 | `原生完整`：显式试用 normal，2 分钟窗口，失败回安全模式 | — · `RuntimeFailurePolicy.kt` · android_agent-28/PR #25 · A-SAFE-01、A-SAFE-02 |
-| SAFE-04 | 自动重启/退避 | 官方进程重启策略 | `原生完整`：最多 3 次，2s/4s/8s 退避；KILLED/NO_SPACE 不自动重启 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-01 |
-| SAFE-05 | 数据/插件隔离 | 官方 profile 隔离 | `原生完整`：安全模式不加载用户插件/配置，项目工作区保留 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-02 |
+| SAFE-01 | 失败分类 | 官方网页无 Tanuki 运行时失败分类；仅进程/页面错误提示 | `原生完整`：`RuntimeFailurePolicy` 分类 LAUNCH/STARTUP/CRASHED_EARLY/CRASHED_LATE/KILLED/NO_SPACE | — · `RuntimeFailurePolicy.kt` · android_agent-28/PR #25 · A-SAFE-01 |
+| SAFE-02 | 安全模式/rescue | 官方网页无 Tanuki rescue | `原生完整`：独立 safe-home/safe-dsh，不加载用户插件/配置，不删数据 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-02 |
+| SAFE-03 | 试用/probation | 官方网页无 Tanuki probation | `原生完整`：显式试用 normal，2 分钟窗口，失败回安全模式 | — · `RuntimeFailurePolicy.kt` · android_agent-28/PR #25 · A-SAFE-01、A-SAFE-02 |
+| SAFE-04 | 自动重启/退避 | 官方网页无 Tanuki 自动重启/退避 | `原生完整`：最多 3 次，2s/4s/8s 退避；KILLED/NO_SPACE 不自动重启 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-01 |
+| SAFE-05 | 数据/插件隔离 | 官方 profile 隔离；无 Tanuki safe-home/safe-dsh | `原生完整`：安全模式不加载用户插件/配置，项目工作区保留 | — · `RuntimeManager.kt` · android_agent-28/PR #25 · A-SAFE-02 |
 | SAFE-06 | 命令沙箱/权限 | 官方 workspace-write/danger-full-access | `原生部分`：原生探测 bwrap/Landlock 并说明；策略修改仍在官方设置 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
 | SAFE-07 | WebView 同源/Cookie/TLS | 官方 Host/Origin/Cookie/TLS | `原生完整`：精确 origin、同源策略、第三方 Cookie 关闭、TLS 错误取消、无 JS Bridge | — · `OriginPolicy.kt`/`DshWebView.kt` · 既有 · A-SAFE-03 |
 | SAFE-08 | 凭据存储 | 官方 `.credentials`/环境变量 | `原生部分`：远程凭据 Keystore；DSH 模型密钥仍由官方设置管理；API Key 保存问题用户暂停 | — · `RemoteHostStorage.kt` · android_agent-34/PR #29 · A-SAFE-03 |
