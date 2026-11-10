@@ -58,7 +58,9 @@
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` | BUILD SUCCESSFUL；16 tests / 0 failures / 0 errors / 0 skipped | 覆盖配对链接、帧、HMAC 向量、钉扎、重连、假中继 DATA 回声、错误 token、存储、身份/Cookie、控制器 |
 | `cd scripts/remote-relay && python3 test_remote_relay.py` | OK；6 tests / 0 failures | 自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA、错误 token、未知房间、明文拒绝、日志不含 token；仅回环；已加入 CI Host job |
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m28s）；66 个结果文件，551 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint | 完整 JVM 含既有 535 + 新增 16；lint 告警数与基线相同，无新增 Error |
-| `python3 scripts/check-handoff.py --record ...` / 无参检查 | 待执行 | 结束后刷新印章 |
+| `python3 scripts/check-handoff.py --record ...` / 无参检查 | 通过；602 public files | 本轮结束刷新印章 |
+| `python3 scripts/check-publication.py --git` | 0 findings | 实际暂存内容检查 |
+| PR #36 当前 head `67a00e3` 的 push/PR CI | Host scripts、Android build/JVM/lint 均 pass | 公开 Actions；不替代独立 Review/设备验收 |
 | `python3 scripts/package-source.py` | 待执行 | 仅检查源码包，不提交 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只记录上表本轮实际执行；0.1.10 的 535 tests 与旧 PR 结果未复跑，不作为本轮结论。
@@ -66,7 +68,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR #36 的当前 head CI 与独立 Codex High Review、真实设备/公网中继 QA。
+- 未完成：独立 Codex High Review、真实设备/公网中继 QA。
 - 外部阻塞：真实公网中继与 Android 设备需用户/独立 QA 提供资源与授权。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收继续按既有要求等待授权/恢复；不合并、不发布、不触发 AO Review。
 
