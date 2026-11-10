@@ -99,8 +99,6 @@ class MainActivity : ComponentActivity() {
             android.widget.Toast.makeText(this, "尚未允许悬浮窗；完整浏览器仍可正常使用", android.widget.Toast.LENGTH_LONG).show()
         }
     }
-    private val EXTERNAL_OPEN_PREFS = "external-open"
-
     private val workspaceFiles by lazy {
         WorkspaceFileManager(manager.paths, manager.mutation, {
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
@@ -302,9 +300,9 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         consumeBrowserIntent(intent)
         consumeChatIntent(intent)
-        restoreExternalConsumedRequest(savedInstanceState)
+        externalConsumedRequest = savedInstanceState?.getString("externalConsumedRequest")
         restoreExternalDocument(savedInstanceState)
-        consumeExternalDocumentIntent(intent, restored = savedInstanceState != null || externalConsumedRequest != null)
+        consumeExternalDocumentIntent(intent, restored = savedInstanceState != null)
         browser = DshWebView(this, manager,
             chooser = ::chooseDshFiles,
             download = { url, name ->
@@ -575,7 +573,7 @@ class MainActivity : ComponentActivity() {
                     filesPage = { modifier, bottomInset ->
                         val descriptor = externalDescriptor
                         val externalDocument = descriptor?.let { current ->
-                            remember(current.uri, current.displayName, current.mimeType, current.bytes, current.persistedRead) {
+                            remember(current.uri, current.displayName, current.mimeType, current.bytes, current.persistedRead, current.openToken) {
                                 ContentDocument.create(this@MainActivity, current)
                             }
                         }
@@ -917,6 +915,10 @@ class MainActivity : ComponentActivity() {
             openToken = state.getLong("externalOpenToken", 0),
         ) ?: return
         externalDescriptor = descriptor
+        // 恢复后下一次 increment 必须大于已恢复 token，避免首次重选复用同一个 key。
+        externalOpenSequence.set(
+            ExternalDocumentPolicy.restoredTokenSequence(externalOpenSequence.get(), descriptor.openToken)
+        )
         filesOpenRequest++
     }
 
@@ -935,18 +937,8 @@ class MainActivity : ComponentActivity() {
         } ?: return
         val request = ExternalDocumentPolicy.requestId(action, uri.toString(), uri.toString())
         if (!ExternalDocumentPolicy.shouldConsume(restored, externalConsumedRequest, request)) return
-        persistExternalConsumedRequest(request)
-        openExternal(uri)
-    }
-
-    private fun restoreExternalConsumedRequest(state: Bundle?) {
-        externalConsumedRequest = state?.getString("externalConsumedRequest")
-            ?: getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).getString("consumedRequest", null)
-    }
-
-    private fun persistExternalConsumedRequest(request: String?) {
         externalConsumedRequest = request
-        getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).edit().putString("consumedRequest", request).apply()
+        openExternal(uri)
     }
 
     /**
@@ -1100,10 +1092,6 @@ class MainActivity : ComponentActivity() {
         browserBackgroundHost = null
         // The application and foreground browser service own tabs/RPC, not this Activity.
         browser.destroy()
-        // 任务真正结束时清除去重标记；进程被杀时保留，避免系统用原 Intent 重建后重放旧文件。
-        if (isFinishing) {
-            getSharedPreferences(EXTERNAL_OPEN_PREFS, MODE_PRIVATE).edit().remove("consumedRequest").apply()
-        }
         super.onDestroy()
     }
 

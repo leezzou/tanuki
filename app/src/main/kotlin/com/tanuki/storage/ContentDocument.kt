@@ -36,7 +36,7 @@ internal class ContentDocument(
     val uri: Uri,
     private val descriptor: ExternalDocumentDescriptor,
 ) : OpenDocument {
-    override val key: String = ExternalDocumentPolicy.contentKey(uri.toString(), descriptor.openToken)
+    override val key: String = ExternalDocumentPolicy.viewerKey(descriptor)
     override val displayName: String get() = descriptor.displayName
     override val accessWarning: String? =
         if (descriptor.persistedRead) null else ExternalDocumentPolicy.NON_PERSISTED_WARNING

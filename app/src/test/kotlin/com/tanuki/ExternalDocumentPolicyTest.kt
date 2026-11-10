@@ -122,6 +122,10 @@ class ExternalDocumentPolicyTest {
         val first = ExternalDocumentDescriptor(good, "a.pdf", "application/pdf", 1, true, openToken = 1)
         val reauthorized = ExternalDocumentDescriptor(good, "a.pdf", "application/pdf", 1, true, openToken = 2)
         assertNotEquals(first.openToken, reauthorized.openToken)
+        assertNotEquals(ExternalDocumentPolicy.viewerKey(first), ExternalDocumentPolicy.viewerKey(reauthorized))
+        // Activity 恢复 token=1 后，第一次重选必须得到 2，而不是复用 1。
+        val restoredSequence = ExternalDocumentPolicy.restoredTokenSequence(0, restoredToken = 1)
+        assertEquals(2L, restoredSequence + 1)
     }
 
     @Test fun consumedLaunchIntentIsNotReplayedOnActivityRestore() {

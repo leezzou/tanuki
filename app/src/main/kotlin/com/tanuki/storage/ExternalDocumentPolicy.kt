@@ -90,6 +90,14 @@ internal object ExternalDocumentPolicy {
     /** 查看器/子预览的稳定键；同一 URI 重新选择时 token 变化会触发新的读取。 */
     fun contentKey(uri: String, openToken: Long): String = "content:$uri#$openToken"
 
+    /** 从完整描述派生查看器键，确保 openToken 真正进入 ContentDocument.key。 */
+    fun viewerKey(descriptor: ExternalDocumentDescriptor): String =
+        contentKey(descriptor.uri, descriptor.openToken)
+
+    /** Activity 恢复时把计数器推进到至少已恢复的 token，下一次重选必然得到更大的 token。 */
+    fun restoredTokenSequence(currentSequence: Long, restoredToken: Long): Long =
+        maxOf(currentSequence, restoredToken)
+
     /**
      * 计算 ACTION_VIEW/ACTION_SEND 的外部打开请求身份，用于避免 Activity 重建时重放已消费的启动 Intent。
      * 仅接受可直开的 content://；其他 action/来源返回 null。
