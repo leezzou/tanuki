@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-53（AO worker）
 - 时间：2026-11-10 17:54 CST
-- 状态：组件与独立 review 5 项修复已完成，本地 821 tests/lint 通过；PR [#47](https://github.com/leezzou/tanuki/pull/47) 待推送新 head/复审；未合并、未发布
+- 状态：组件与独立 review 5 项修复已完成并推送（`d41b408`，Host/Android CI pass）；PR [#47](https://github.com/leezzou/tanuki/pull/47) 待最终 head 复审；未合并、未发布
 - 前一记录：[原生界面可交互切片](20261110-1233-native-ui-chat.md)（PR #40 已合并 `main=1f7222d`）；当前基线 `origin/main=4f2a3717`
 
 ## 用户目标与范围
@@ -63,22 +63,22 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshApprovalEntryTest' --tests 'com.tanuki.DshPlanTest' --tests 'com.tanuki.DshToolTimelineTest' --tests 'com.tanuki.DshApprovalProtocolTest' --tests 'com.tanuki.DshApprovalControllerTest'` | BUILD SUCCESSFUL；62 tests / 0 failures / 0 errors / 0 skipped | JDK17/worktree；合成 JSON，不访问真实 DSH |
 | `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；821 tests / 92 个结果文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 102 warnings / 1 hint | 完整 JVM/lint；合成事件，不访问真实 DSH |
 | `git diff --check`、`python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1754-native-approval-ui.md`、`python3 scripts/check-publication.py --git` | 通过；678 个公开文件 / 676 个索引项 / 0 findings | 提交前收尾；共享状态允许落后 |
-| GitHub Actions PR #47（run `42797312856`，head `fd3865b`） | Host scripts and handoff checks pass；Android build, JVM tests and lint pass | 旧 head 检查；新 head 待推送后重跑 |
+| GitHub Actions PR #47（runs `42801842844`/`42801851968`，head `d41b408`） | Host scripts and handoff checks pass；Android build, JVM tests and lint pass | review 修复后的 CI；最终文档 head 以 PR 为准 |
 
 - 哪些是前一轮结果，哪些是本次新验证：62 项定向与完整 821 tests、lint 均本轮新跑；未复用历史数字。
 - 未测试、超时、失败和暂未复现的情况：真实 Android/PRoot DSH、计划审阅真实事件、设备布局/暗色/大字体/长参数/长 diff、仪器/真机、Android assemble 均未执行。
 
 ## 未完成与暂停项
 
-- 未完成：推送新 head、等待新 head CI 与独立复审；`DshNativePage`/`MainActivity` 接线（51 按 NATIVE-UI 的 hook 清单完成）；51 用 `DshToolMerge.merge` 替换私有 `mergeTools`。
+- 未完成：等待最终 head 独立复审；`DshNativePage`/`MainActivity` 接线（51 按 NATIVE-UI 的 hook 清单完成）；51 用 `DshToolMerge.merge` 替换私有 `mergeTools`。
 - 外部阻塞：无。
 - 未纳入：用户提问卡、本会话所有工具自动放行；前者需确认归属与官方回答协议，后者安全影响大，等编排方明确。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收。
 
 ## 下一步
 
-1. 运行完整 JVM/lint、`git diff --check`、`check-handoff.py --pr`、`check-publication.py --git` 后，以 leezzou 身份提交并推送新 head。
-2. 新 head 推送后触发/等待独立复审；不合并、不发布。
+1. 已完成完整 JVM/lint、`git diff --check`、`check-handoff.py --pr`、`check-publication.py --git`，并以 leezzou 身份推送 review 修复（`d41b408`）；CI 已通过。
+2. 请求/等待最终 head 独立复审；不合并、不发布。
 3. 51 按 `docs/NATIVE-UI.md` 第 4 节接入：审批窄条+抽屉、`DshToolMerge.merge`、计划卡 `latest`/`planCallIds`；设备验收另行授权。
 
 ## 约束与风险
