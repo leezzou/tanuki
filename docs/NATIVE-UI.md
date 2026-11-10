@@ -169,7 +169,7 @@
 
 4. 用户提问卡 `DshQuestionCard` + `DshQuestionParser`
    - `DshQuestionParser.parse(eventId, sessionId, request)` 从 `user-questions/request` 的 `questions[]` 解析单选/多选/文本、选项、`allowCustom`、`required`；只保留短文本，不复制原始请求。
-   - `DshQuestionDraft` 负责本地选择：单选覆盖、多选切换、文本保存、必填校验；可独立 JVM 回归。
+   - `DshQuestionDraft` 负责本地选择：单选覆盖、多选切换、文本保存、必填校验；编辑态保留原始空格/换行（只限长度），必填用 `isBlank`，提交边界才 trim；可独立 JVM 回归。
    - 组件调用：
      ```kotlin
      DshQuestionCard(

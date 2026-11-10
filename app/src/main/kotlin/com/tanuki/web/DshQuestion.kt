@@ -67,10 +67,10 @@ data class DshQuestionDraft(
 
     fun setCustom(questionId: String, text: String): DshQuestionDraft {
         if (questions.none { it.id == questionId }) return this
-        val clean = text.trim().take(MAX_CUSTOM_CHARS)
-        return copy(
-            custom = if (clean.isBlank()) custom - questionId else custom + (questionId to clean)
-        )
+        // 编辑态必须保留原始文本：逐字输入的空格、换行不能被 trim 吃掉。
+        // 长度限制仍在此应用；空白校验用 isBlank，最终清理只在 answers() 提交边界做。
+        val edited = text.take(MAX_CUSTOM_CHARS)
+        return copy(custom = custom + (questionId to edited))
     }
 
     fun customFor(questionId: String): String = custom[questionId].orEmpty()
@@ -82,9 +82,11 @@ data class DshQuestionDraft(
             custom[question.id].orEmpty().isNotBlank()
     }
 
+    /** 提交边界才做首尾清理；空白文本不进入官方回答。 */
     fun answers(): DshQuestionAnswers = DshQuestionAnswers(
         selections = selections.filterValues { it.isNotEmpty() },
         custom = custom.filterValues { it.isNotBlank() }
+            .mapValues { (_, value) -> value.trim() }
     )
 
     companion object {

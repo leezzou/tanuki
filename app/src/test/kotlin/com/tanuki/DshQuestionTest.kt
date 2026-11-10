@@ -117,10 +117,26 @@ class DshQuestionTest {
         assertFalse(draft.canSubmit())
         draft = draft.setCustom("q1", "  需要保留工作区  ")
         assertTrue(draft.canSubmit())
-        assertEquals("需要保留工作区", draft.customFor("q1"))
+        assertEquals("  需要保留工作区  ", draft.customFor("q1"))
+        assertEquals("需要保留工作区", draft.answers().custom["q1"])
         draft = draft.setCustom("q1", "   ")
         assertFalse(draft.canSubmit())
         assertTrue(draft.answers().custom.isEmpty())
+    }
+
+    @Test fun characterByCharacterEditingKeepsSpacesAndNewlines() {
+        val questions = DshQuestionParser.parse("e", "s", JSONObject().put("question", "输入"))!!
+            .questions
+        var draft = DshQuestionDraft(questions)
+        for (value in listOf("h", "he", "hel", "hell", "hello", "hello ", "hello w", "hello wo")) {
+            draft = draft.setCustom("q1", value)
+        }
+        assertEquals("hello wo", draft.customFor("q1"))
+        draft = draft.setCustom("q1", "hello wo\n")
+        assertEquals("hello wo\n", draft.customFor("q1"))
+        draft = draft.setCustom("q1", "hello wo\nworld")
+        assertEquals("hello wo\nworld", draft.customFor("q1"))
+        assertEquals("hello wo\nworld", draft.answers().custom["q1"])
     }
 
     @Test fun optionalQuestionDoesNotBlockSubmit() {
