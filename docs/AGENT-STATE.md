@@ -1,6 +1,21 @@
 # Tanuki 当前状态
 
-当前交接：[原生审批/权限/工具调用切片](handoffs/20261110-1139-native-approval-tools.md)（android_agent-45，基线 `main=0555c3c0`，分支 `ao/tool-approval/root`，PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；已合入 `main=2a4a050`，完整非设备回归通过，不合并、不发布）。上一记录：[文件复制界面稳定](handoffs/20261110-0330-copy-flicker.md)（android_agent-40，PR [#35](https://github.com/leezzou/tanuki/pull/35) 已合并 `main=2a4a050`）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[交接机制改造：普通 PR 不再改共享状态](handoffs/20261110-1333-handoff-pr-mode.md)（android_agent-49，基线 `main=0068c872`，分支 `ao/handoff-conflicts/pr-mode`，PR [#42](https://github.com/leezzou/tanuki/pull/42) 待审；脚本/文档非设备验证通过，不合并、不发布）。共享状态现由单一集成维护方在批量合并后统一刷新，规则、指针 + 最近 N 条目标格式与迁移步骤见 [交接机制](HANDOFFS.md)；本 PR 之后的普通 PR 只新增自己的 `docs/handoffs/<日期>-<主题>.md`，不再修改本文件或 `CURRENT.json`。上一记录：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，PR [#36](https://github.com/leezzou/tanuki/pull/36) 已合并为 `0068c872`）；文件复制、文件查看器、0.1.10 与并行历史保留在 `docs/handoffs/`。
+
+## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
+
+- 起始基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；已合并 `origin/main=533eff4`（PR #34 文件查看器）、`1cb7ad9`（原生能力对等审计）与 `2a4a050`（PR #35 文件复制界面稳定）解决 PR 冲突。分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），PR [#36](https://github.com/leezzou/tanuki/pull/36) base `main`，未合并、未发布、未触发 AO Review。
+- 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
+- 已实现：
+  - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
+  - `RelayTransport`：生产 TLS 1.2/1.3 客户端（系统 CA + 主机名或证书 DER 钉扎）、客户端 JOIN/CHALLENGE/AUTH/QUEUED/OPEN_OK、只绑定 `127.0.0.1` 的 loopback 桥、DATA/CLOSE/PING/PONG；`RoutingSshTransport` 按配置在直连 SSH 与中继之间路由。
+  - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`（room 不参与，同一服务换房间复用，不同用户/端口隔离）；token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
+  - `scripts/remote-relay/`：Python 标准库参考中继、只出站的主机端 agent、0600 配对文件、自签名证书生成脚本、回环端到端自测；共享 HMAC 向量 `app/src/test/resources/relay-protocol-vectors.json`。
+- Review P1 修复：中继 Cookie 作用域补 SSH 用户与远程 DSH 端口（`relay:<hostId>:<user>:<remoteDshPort>`，room 不参与），新增不同用户/端口不恢复彼此 Cookie、同服务换 room 复用的回归；接口/安全/远程主机文档同步。
+- Review P2 修复：桥接/会话关闭不再等待 `writerLock` 或同步写 CLOSE（先关底层 socket，`RelaySshTunnel` 先拆桥），补「对端不读、写阻塞时 close 及时返回」回归；`relayRetry` 接入 `RelaySshTransport.join`（最多 4 次尝试、可取消、只重试瞬时错误），补先失败后成功/耗尽/认证钉扎不重试/取消回归；Python 参考中继去掉 32 帧有损队列，改为阻塞写背压并在释放 room.lock 后发送，补 2 MiB 慢消费者完整传输回归。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 22 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 7 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；P1 修复前完整 JVM + lint 552/0/0/0；合并 `origin/main=533eff4` 后、P2 修复前 575/0/0/0；P2 修复后完整 JVM 581/0/0/0；合并 `origin/main=2a4a050` 后完整 JVM **600 tests / 0 failures / 0 errors / 0 skipped**、lint 0 errors / 96 warnings / 1 hint；PR #36 P2 修复提交 `049edcc` 的 Host/Android CI 均 pass；最终 merge head CI 以 PR 页面为准。
+- 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
+- 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 
 ### 文件复制界面稳定（android_agent-40，PR [#35](https://github.com/leezzou/tanuki/pull/35) 待审）
 
@@ -21,11 +36,6 @@
 - 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。未合并/未发布，PR #34 的独立 Codex High Review 待办。
 - 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
 
-### 原生审批/权限/工具调用切片（android_agent-45，进行中）
-
-- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=2a4a050`；新增官方 `$events` 审批流（独立 `interactions=answer` Peer）与 `$events/result` 回答、工具调用时间线/卡片（运行中/成功/失败、命令、diff、文件变更、折叠输出）、本次运行内的“记住选择”（仅内存，不写 DSH 配置）。
-- 归属：`DshNativeApi.kt`/`DshNativeController.kt`/`DshNativePage.kt`/`MainActivity.kt` 由 android_agent-42 独占，本切片已撤回这四个文件的改动，42 接线清单见 [原生界面文档](NATIVE-UI.md)；`DshWebSocketClient.kt` 为临时实现，待收敛到 42 transport。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 621 tests / 0 failures / 0 errors / 0 skipped、`lintModernDebug` 0 errors / 95 warnings、`assembleModernDebug`（未安装）；5 项 Codex Review（answer Peer、按审批会话取参数、记忆撤回入口、断线代次清理、握手超时）已修复并补回归。设备、真实 PRoot DSH、远程 SSH 隧道、安全模式 rescue 与 Android 仪器/真机未验证。PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；不合并、不发布。详见 [交接](handoffs/20261110-1139-native-approval-tools.md)。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -241,14 +251,15 @@
 
 ## 下一步
 
-1. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
-2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
-3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
-4. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
-5. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
-6. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
-7. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
-8. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
+1. 无公网 IP 中继切片 PR [#36](https://github.com/leezzou/tanuki/pull/36)：以最终 head/CI 为准，等待独立 Review；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
+2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
+3. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
+4. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
+5. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。
+6. 安全模式 `5fd1ab4`、XLSX `f5debf5`、PDF `0ba11da` 已合并：真机崩溃/低内存/磁盘满、大表/手势/缩放、PDF 连续滚动 QA 另行授权。
+7. 若 DSH 升级调整 `$events` 或侧栏 `data-*`，先更新 `docs/INTERFACES.md` 与回归，再改实现。
+8. PR #20 已合并 `2f3fac9`、PR #19 已合并 `6136451`：真实设备/弱网/WorkManager 验收另行授权。
+9. 视频全屏 PR #17 与 F1 设备 QA、0.1.8 真实环境/模型验证另开授权；API Key 保存与真实模型/账号验收等待用户恢复。
 1. DOCX 预览 PR [#28](https://github.com/leezzou/tanuki/pull/28)：已 merge `main=f5f3bf3`，等待当前完整 SHA 的独立 Codex High Review 与设备 QA（双指缩放、横向滚动、复杂 DOCX、超大文档）；不合并、不触发 AO Review。
 2. 温控 PR [#21](https://github.com/leezzou/tanuki/pull/21) 已合并为 `f5f3bf3`：真机温控/低电/低内存、WorkManager 调度与重启恢复由独立 QA 另行授权。
 3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并为 `d9b4aa2`：真机/PRoot 原生界面切换、通知点击与失败回退验收另行授权。
@@ -259,7 +270,7 @@
 8. PDF 原生阅读 PR [#24](https://github.com/leezzou/tanuki/pull/24) 已合并为 `0ba11da`：大文档滚动/内存、加密/损坏样本与缩放手感 QA 另行授权。
 9. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
 10. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-11. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+11. 合并后由集成维护方先运行 `check-handoff.py --integrate --record <最新记录>`，再跑 `--release`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。

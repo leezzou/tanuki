@@ -153,7 +153,7 @@ bash scripts/test-ao-worktree-env.sh
 - 原生构建缓存按 `PRoot commit`（`runtime/build-native-runtime.sh` 中 `b27d81a...`）与 talloc 版本做键；或把 `.build/sources`、`.build/downloads` 作为只读缓存挂载，避免每次 `git fetch`/`curl`。
 - `ANDROID_USER_HOME` 指向 job 临时目录，让 debug keystore 每个 job 独立生成；不要复用开发者 `~/.android`。
 - 命令顺序：`./gradlew --version` → `:app:compileModernDebugKotlin` → `:app:testModernDebugUnitTest`；需要 APK 时追加 `:app:assembleModernDebug`。失败即失败，不跳过。
-- `scripts/verify-workspace.sh` 会先跑 `check-handoff.py`，当前该门禁失败（W1 修复后再纳入 CI 必过项）。
+- `scripts/verify-workspace.sh` 会先跑 `check-handoff.py --pr`；普通 PR 只校验本次记录，共享状态由集成方刷新，不再要求每个 worktree 自带最新印章。
 - 同一 job/目录不要并行跑不同 flavor 或不同 init script 的构建。
 - 不要上传 `.build`、`local.properties`、`app/src/main/jniLibs/*.so` 作为源码产物。
 

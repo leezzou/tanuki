@@ -168,7 +168,7 @@ def prepare(options, tested_apk, pinned):
     directory = ROOT / "artifacts/releases" / options.version
     manifest = directory / "app-update.json"
     prior = prior_entries(directory, options.version, options.version_code, json.loads(manifest.read_text())) if manifest.exists() else []
-    run([sys.executable, "scripts/check-handoff.py"], "确认最新交接")
+    run([sys.executable, "scripts/check-handoff.py", "--release"], "确认最新交接")
     if tested_apk is None:
         command = ["env", f"TANUKI_VERSION_NAME={options.version}", f"TANUKI_VERSION_CODE={options.version_code}",
                    *build_command(options.channel, options.version, options.version_code)]

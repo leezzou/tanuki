@@ -149,10 +149,20 @@ class RemoteHostController(
         val problem = config.validationError()
         // 配置本身无效时不要拆掉已经连着的远程隧道。
         if (problem != null) return fail(problem, keepTunnel = false)
-        val host = config.normalizedHost() ?: return fail("远程主机格式无效", keepTunnel = false)
+        val identity = config.hostIdentity() ?: return fail("远程主机身份无效", keepTunnel = false)
+        val host = config.displayName()
 
         mutableUi.update {
-            it.copy(busy = true, error = "", message = "正在连接 ${config.user}@$host:${config.sshPort}…", pendingFingerprint = null)
+            it.copy(
+                busy = true,
+                error = "",
+                message = if (config.relay != null) {
+                    "正在通过中继 ${config.relay.endpointLabel()} 配对 $host…"
+                } else {
+                    "正在连接 ${config.user}@$host:${config.sshPort}…"
+                },
+                pendingFingerprint = null
+            )
         }
         if (keepTunnel) {
             // 先切到本地 Cookie 作用域，再撤销旧远程端点；失败时保留原连接。
@@ -161,11 +171,11 @@ class RemoteHostController(
                 return fail(cookieError, keepTunnel = false)
             }
             closeTunnel()
-            machine.remoteConnecting(config.host.trim())
+            machine.remoteConnecting(host)
             onStatus(machine.status)
         }
         try {
-            val trusted = forcedFingerprint ?: storage.knownFingerprint(host, config.sshPort)
+            val trusted = forcedFingerprint ?: storage.knownFingerprint(identity)
             if (trusted == null) {
                 val probe = transport.probeHostKey(config)
                 pending = PendingConnection(config, keepTunnel, probe.fingerprint)
@@ -179,7 +189,7 @@ class RemoteHostController(
                 }
                 return RemoteAttemptResult.HostKeyConfirmation(probe.fingerprint)
             }
-            openAndVerify(config, host, trusted, keepTunnel)
+            openAndVerify(config, identity, trusted, keepTunnel)
         } catch (error: Throwable) {
             fail(friendly(error), keepTunnel, error)
         } finally {
@@ -189,18 +199,26 @@ class RemoteHostController(
 
     private suspend fun openAndVerify(
         config: RemoteHostConfig,
-        host: String,
+        identity: String,
         fingerprint: String,
         keepTunnel: Boolean
     ): RemoteAttemptResult {
-        mutableUi.update { it.copy(message = "正在建立 SSH 隧道并检测远程 DSH…") }
+        mutableUi.update {
+            it.copy(
+                message = if (config.relay != null) {
+                    "正在通过中继建立 SSH 通道并检测远程 DSH…"
+                } else {
+                    "正在建立 SSH 隧道并检测远程 DSH…"
+                }
+            )
+        }
         var candidate: SshTunnel? = null
         try {
             candidate = transport.open(config, fingerprint)
             if (!httpProbe(candidate.localPort)) {
                 throw RemoteHostFailure("远程 DSH 端口未响应；请确认远程 DSH 已启动并监听 127.0.0.1:${config.remoteDshPort}")
             }
-            runCatching { storage.trustFingerprint(host, config.sshPort, fingerprint) }.getOrElse {
+            runCatching { storage.trustFingerprint(identity, fingerprint) }.getOrElse {
                 throw RemoteHostFailure("主机密钥信任记录无法保存，已取消远程连接")
             }
             if (!keepTunnel) {
@@ -224,7 +242,7 @@ class RemoteHostController(
             candidate = null
             machine.remoteConnected(
                 endpoint,
-                config.host.trim(),
+                config.displayName(),
                 established.localPort,
                 fingerprint,
                 config.cookieScope()
@@ -327,6 +345,7 @@ class RemoteHostController(
     )
 
     private fun friendly(error: Throwable): String {
+        if (error is RemoteRelayException) return error.message ?: "中继连接失败"
         if (error is RemoteHostFailure) return error.message ?: "远程主机连接失败"
         if (error is RemoteHostKeyChangedException) {
             return "远程主机密钥已变化（新指纹 ${error.actualFingerprint}），已拒绝连接；如确认主机重装，请清除远程主机配置后重试"

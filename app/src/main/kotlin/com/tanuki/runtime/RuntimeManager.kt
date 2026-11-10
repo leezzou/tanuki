@@ -51,7 +51,7 @@ class RuntimeManager(val context: Context) {
     )
     val remoteHost = RemoteHostController(
         storage = androidRemoteHostStorage(context),
-        transport = JschSshTransport(),
+        transport = RoutingSshTransport(),
         scope = scope,
         machine = remoteMachine,
         onStatus = { status ->

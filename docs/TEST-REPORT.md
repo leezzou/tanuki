@@ -2,6 +2,37 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 交接机制改造验证（2026-11-10，android_agent-49，非设备）
+
+- 范围：只改宿主脚本、CI 与交接文档，不改产品代码。`scripts/check-handoff.py` 新增普通 PR / 集成 / 发布三模式；普通 PR 只校验自己的记录，CI 用变更清单强制“公开文件有改动必须附带交接记录”；集成模式刷新 schema 2 印章，发布模式只读严格校验；新增 `docs/HANDOFFS.md` 与 `scripts/test-check-handoff.py`。基线创建于 `main=1cb7ad95`；PR 创建后连续合并 `main=2a4a0503`（PR #35）与 `main=0068c872`（PR #36 中继配对），解决交接文档冲突并按新树复跑宿主回归；分支 `ao/handoff-conflicts/pr-mode`，不合并、不发布。
+- 实际执行：
+  - `python3 scripts/test-check-handoff.py` → 8 tests / 0 failures，覆盖 PR 容忍落后共享状态、记录缺失/空章节/占位符、路径与符号链接、变更集守卫、集成最新记录、发布篡改检测、目录移动可迁移。
+  - `python3 scripts/test-agent-workflow.py` → 19 tests / 0 failures（54.318s），含设备锁/模拟 ADB 离线回归，不访问真实设备。
+  - `python3 scripts/test-publication.py` → 19 tests / 0 failures；`python3 scripts/test-app-release.py` → 18 tests / 0 failures（并断言发布入口调用 `--release`）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过（共享状态允许落后）。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建）。
+  - `python3 scripts/check-handoff.py --release` → 通过（记录哈希、公开源码指纹、证据指纹与最新记录一致）。
+  - `python3 scripts/check-publication.py --git` → 0 findings；`python3 scripts/package-source.py` → 源码包生成成功。
+  - `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` → YAML_OK；`bash -n scripts/verify-workspace.sh` 与 Python 内存语法检查通过。
+- 未执行：设备/仪器、PR 独立审查、合并、`AGENT-STATE` 指针 + 最近 N 条实际精简、APK/发布附件；Android 构建/JVM/lint 与 Host 已由 GitHub Actions 在 `c417daa` 验证通过，后续 head 以 PR 页面为准。源码包 SHA 会随最终文档改动变化，以最后一次输出为准，不回填到记录形成循环。
+
+## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
+
+- 范围：反向注册中继 + 既有 SSH 端到端最小切片；Kotlin 配对链接/帧/HMAC/TLS 钉扎/重连/loopback 桥；中继配置存储/控制器/设置页；Python 参考中继/主机端 agent；共享协议向量。基线 `origin/main=0555c3c0`，分支 `ao/tanuki-remote/relay-pairing`。
+- 实际执行（本轮新跑）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` → BUILD SUCCESSFUL，22 tests / 0 failures / 0 errors / 0 skipped。
+  - `cd scripts/remote-relay && python3 test_remote_relay.py` → OK，7 tests / 0 failures（回环自签名 TLS + pin、主机注册、JOIN/OPEN_OK/DATA 双向、2 MiB 慢消费者、错误 token、未知房间、明文拒绝、日志不含 token）。
+  - P1 修复前 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（2m32s）；66 个结果文件，552 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 合并 `origin/main=533eff4`（PR #34 文件查看器）后、P2 修复前完整 JVM/lint：2m20s，68 个结果文件，575 tests / 0 failures / 0 errors / 0 skipped。
+  - P2 修复后、合并 `2a4a050` 前完整 JVM/lint：2m17s，68 个结果文件，581 tests / 0 failures / 0 errors / 0 skipped；lint 0 errors / 95 warnings / 1 hint。
+  - 合并 `origin/main=2a4a050`（PR #35 文件复制界面稳定）后 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（4m06s）；72 个结果文件，**600 tests / 0 failures / 0 errors / 0 skipped**（main 558 + 中继 23 + 复制界面 19）；lint **0 errors / 96 warnings / 1 hint**。
+  - PR [#36](https://github.com/leezzou/tanuki/pull/36) P1 修复提交 `ff8b706` 的 Host scripts 与 Android build/JVM/lint 两项 CI 均 pass；合并 main 后的新 head CI 以 PR 页面为准；CI 不替代独立 Review 或设备验收。
+- 新增覆盖：配对链接 IPv4/IPv6/域名往返与未知/重复/非规范字段拒绝；帧编解码/64 KiB/1 KiB/截断/未知类型；共享 HMAC host/client 向量；证书 DER SHA-256 钉扎；指数退避与仅瞬时错误重试；假中继配对 + 早期字节不丢失 + DATA 回声；错误 token；中继稳定 `relay:<hostId>` 身份/Cookie 作用域；token 加密存储/篡改拒绝/切回直连；控制器使用稳定身份跳过首次指纹探测。
+- 复审修复（PR #36 P1）：中继 Cookie 作用域从 `relay:<hostId>` 改为 `relay:<hostId>:<user>:<remoteDshPort>`；room 不参与，同一服务换房间复用 Cookie，同一主机不同用户/DSH 端口分别保存，避免切回时把 A 的认证 Cookie 恢复给 B。`DshRemoteIsolationTest` 新增对应用户/端口分区与同服务换 room 回归；`RemoteRelayTest` 更新作用域断言。定向 `DshRemoteIsolationTest` + `RemoteRelayTest` 共 27 tests / 0 failures；P1 修复提交 `ff8b706` 的 Host/Android CI 均 pass。
+- 复审修复（PR #36 P2）：桥接/会话关闭不再等待 `writerLock`，先关闭底层 TLS socket 解除阻塞写，关闭路径不再同步写 CLOSE；`RelaySshTunnel.close` 先拆桥再关 JSch。`RemoteRelayTest` 新增对端不读、写阻塞时 `RelayBridge.close`/`RelayClientSession.close` 及时返回的回归。`relayRetry` 接入 `RelaySshTransport.join`，最多 4 次尝试、只重试瞬时错误、可取消；新增先失败后成功、耗尽、认证/钉扎/协议不重试、退避取消回归。Python 参考中继去掉 32 帧有损队列，改为每 peer 写锁内阻塞写并在释放 `room.lock` 后发送；新增 2 MiB 慢消费者完整传输回归。
+- 未执行：真实 Android 设备到真实中继/sshd/DSH、Android Keystore 真机、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN。JVM/Python 回环不能替代设备或公网验收。
+
 ## 文件复制界面稳定验证（2026-11-10，android_agent-40，非设备）
 
 - 范围：从手机/SAF 多选「导入文件到工作区」（写入新独立项目）的进度与列表稳定性。基线 `origin/main=0555c3c0`，分支 `ao/copy-flicker/root`；PR [#35](https://github.com/leezzou/tanuki/pull/35)，不合并、不发布。
@@ -147,7 +178,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 原生审批与工具调用验证（2026-11-10，android_agent-45，非设备）
 
-- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
+- 范围：在原生 DSH 界面补齐审批/权限请求与工具调用卡片；官方 DSH `0.2.1-rc.5` 的 `approval/request` waterfall 经 `/api/remote.mux` `$events` 流读取，经 `POST /api/$events/result` 回传 `allowed-once`/`rejected`；工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=7593805`，PR [#41](https://github.com/leezzou/tanuki/pull/41)；不改官方 npm 包、不写 DSH 数据、不合并/发布。
 - 归属边界：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 由 android_agent-42 独占，本切片已从这四个文件撤回改动；新增文件为 `DshApprovalProtocol`、`DshWebSocketClient`（临时，待收敛到 42 transport）、`DshApprovalSession`、`DshToolTimeline`、`DshApprovalController`、`DshApprovalPanel`、`DshToolCard`。42 接线清单见 [原生界面文档](NATIVE-UI.md)。
 - Review 修复（5 项）：
   - P1 审批认证改用独立 `interactions=answer` Peer；只读列表继续 `none`；假服务器改为断言 `answer`。
@@ -159,8 +190,8 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 新增 JVM 回归 44 项：`DshApprovalProtocolTest` 11、`DshToolTimelineTest` 9、`DshWebSocketTest` 7、`DshApprovalSessionTest` 5、`DshApprovalControllerTest` 12。覆盖 ready/waterfall/cancel/error 帧、字段白名单、`interactions=answer`、官方回答信封、风险分级、本次运行记忆、未知类型拒绝、工具运行/成功/失败/替换/孤儿/截断、命令/diff/文件路径、RFC6455 Accept/掩码/握手超时/大小上限、本地合成 HTTP+WebSocket 服务器的 `/connect`→`$events`→`$events/result` 顺序与 401 重认证。
 - 实际命令（worktree 内 `source scripts/ao-worktree-env.sh` 后）：
   - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL。
-  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**621 tests / 0 failures / 0 errors / 0 skipped**（76 个结果文件；0.1.10 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19）。
-  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**（存量弃用/可读性告警）。
+  - `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**644 tests / 0 failures / 0 errors / 0 skipped**（77 个结果文件；0.1.10 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23）。
+  - `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL，**0 errors / 96 warnings / 1 hint**（存量弃用/可读性告警）。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` → BUILD SUCCESSFUL（仅打包验证，未安装）。
 - 未验证：真实 Android 设备/模拟器上的原生审批卡片布局、深色主题、大字体、长参数/长 diff、输出折叠与滚动；真实 PRoot 内 DSH `/connect`、`/api/remote.mux` WebSocket、审批 waterfall、`$events/result` 回答、401 Cookie 失效、服务重启与安全模式 rescue；远程 SSH 隧道后的审批流；通知点击后待审批列表过滤；Android 仪器/真机未执行。以上不能计为设备通过。
 

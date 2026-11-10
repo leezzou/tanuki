@@ -2,7 +2,7 @@
 
 目标：只拿到源码 ZIP、不访问此前聊天或 `.build`，也能定位代码、构建、选择正确的测试入口，并继续维护交接。
 
-先读根目录 [AGENTS.md](../AGENTS.md) 和 [当前状态](AGENT-STATE.md)。每任 Agent 都要按 [交接模板](handoffs/TEMPLATE.md) 留下新记录；完整流程在 AGENTS.md，不是可选事项。
+先读根目录 [AGENTS.md](../AGENTS.md)、[当前状态](AGENT-STATE.md) 和 [交接机制](HANDOFFS.md)。每任 Agent 都要按 [交接模板](handoffs/TEMPLATE.md) 留下新记录；普通 PR 只写自己的记录，不改共享状态。完整流程在 AGENTS.md 与 HANDOFFS.md，不是可选事项。
 
 ## 1. 项目是什么
 
@@ -40,10 +40,11 @@ printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
 
 ## 3. 第一次构建（不操作设备）
 
-无需JDK/SDK的宿主流程自测：`python3 scripts/test-agent-workflow.py`、发布清单/版本回归 `python3 scripts/test-app-release.py`；上传过滤/脱敏回归为 `python3 scripts/test-publication.py`，合并前门禁离线回归为 `python3 scripts/test-development-gates.py`，发布前按 [上传检查](PUBLICATION.md) 检查候选文件。它只在临时目录使用模拟ADB/Gradle/gh/ao，验证交接过期检测、默认不操作设备、包名/target保护、失败/跳过/中断判定和门禁拒绝边界，不代表Android产品测试。
+无需JDK/SDK的宿主流程自测：`python3 scripts/test-check-handoff.py`（交接三模式）、`python3 scripts/test-agent-workflow.py`、发布清单/版本回归 `python3 scripts/test-app-release.py`；上传过滤/脱敏回归为 `python3 scripts/test-publication.py`，合并前门禁离线回归为 `python3 scripts/test-development-gates.py`，发布前按 [上传检查](PUBLICATION.md) 检查候选文件。它只在临时目录使用模拟ADB/Gradle/gh/ao，验证交接过期检测、默认不操作设备、包名/target保护、失败/跳过/中断判定和门禁拒绝边界，不代表Android产品测试。
 
 ```bash
-python3 scripts/check-handoff.py
+python3 scripts/check-handoff.py --pr          # 普通 PR 交接检查
+python3 scripts/check-handoff.py --release     # 仅集成/发布前：严格核对共享状态
 bash scripts/verify-workspace.sh
 ```
 
@@ -133,8 +134,8 @@ bash scripts/verify-workspace.sh \
 
 当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`）；**0.1.10/code12** 正在最终发布（最终 `main=9e7edbb9`，包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机）。本轮完整 JVM 535 tests / 0 failures、lint 通过；设备 QA 仍未执行。0.1.7/0.1.8/0.1.9 历史证据见 [测试现状](TEST-REPORT.md)，不能混算成 0.1.10 已通过设备验收。
 
-1. 完成本次交接记录并更新 `AGENT-STATE.md`，诚实写明实际验证及未测范围。每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、删除已过期交接并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
-2. `python3 scripts/check-handoff.py --record docs/handoffs/<本次记录>.md`，再不带参数检查。
+1. 完成本次交接记录，诚实写明实际验证及未测范围。普通 PR **不修改 `AGENT-STATE.md` / `CURRENT.json`**；每次 Git 提交/推送前按 [上传检查](PUBLICATION.md) 先归档必要结论、清理本次确认过期的记录并修复引用；当前记录、模板和仍需使用的验证/未完成记录保留。
+2. `python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md`。集成维护方在批量合并后更新状态，再运行 `--integrate` 与 `--release`；普通 PR 不运行写印章的命令。
 3. `python3 scripts/check-publication.py --git` 检查实际Git候选；`python3 scripts/package-source.py` 生成 `artifacts/sources/` 下的源码包，再检查ZIP内容、嵌套附件与 `artifacts/SOURCE-SHA256SUMS`。
 4. APK有变化才更新其交付副本/校验并核对包名、签名和安装目标。仅文档/宿主脚本变化，不声称业务APK已重编译或设备测试全套重跑。
 5. 产物分类见 [取包说明](ARTIFACTS.md)：有效发布只在 `artifacts/releases/<版本>/`，源码准备区为 `artifacts/sources/`，旧包归入 `artifacts/archive/`，不要在根目录散放旧 APK/ZIP。

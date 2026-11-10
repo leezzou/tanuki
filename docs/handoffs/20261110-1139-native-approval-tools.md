@@ -19,14 +19,14 @@
 
 ## 合并说明
 
-- 已合入 `origin/main=2a4a050`（PR #35 文件复制界面稳定；此前已合入 PR #32 parity audit、PR #34 文件查看器格式扩展）。代码无重叠；仅 `docs/AGENT-STATE.md`/`docs/handoffs/CURRENT.json` 冲突，已保留本切片为当前交接、copy-flicker 为上一记录，并刷新交接印章。
+- 已合入 `origin/main=7593805`（PR #42 交接机制；此前已合入 PR #36 中继配对、PR #35 copy-flicker、PR #32 parity audit、PR #34 文件查看器格式扩展）。代码无重叠。按新交接机制，`docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json` 直接取 main 版本，本 PR 不包含对这两个共享状态文件的任何改动。
 
 ## 当前状态
 
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、5 项 Review 修复、文档与回归。
-- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 621/0/0/0、`lintModernDebug` 0 errors / 95 warnings、`assembleModernDebug` 通过（未安装）。
+- 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest` 644/0/0/0、`lintModernDebug` 0 errors / 96 warnings、`assembleModernDebug` 通过（未安装）。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`（answer Peer）/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、Android 仪器/真机。
-- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=2a4a050`；无运行中安装/设备任务。
+- 分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=7593805`；无运行中安装/设备任务。
 - 四文件归属：`DshNativeApi.kt`、`DshNativeController.kt`、`DshNativePage.kt`、`MainActivity.kt` 已恢复为 `origin/main` 内容，本切片不再修改；42 接线清单见 [NATIVE-UI](../NATIVE-UI.md)。
 
 ## 42 接线清单
@@ -72,8 +72,6 @@
 | `docs/INTERFACES.md` | 更新 1.7：answer Peer、`$events`/`$events/result`、参数后到、未知类型、临时 WebSocket 收敛说明。 |
 | `docs/NATIVE-UI.md` | 更新归属边界、42 接线清单、文件表、安全边界与验证/未验证。 |
 | `docs/TEST-REPORT.md` | 新增本切片验证与 5 项 Review 修复记录。 |
-| `docs/AGENT-STATE.md` | 更新当前切片状态、621 项验证与 42 归属。 |
-| `docs/handoffs/CURRENT.json` | 刷新交接印章。 |
 
 ## 5 项 Review 修复
 
@@ -89,26 +87,26 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh` + `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | JDK17 worktree 环境 |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；76 个结果文件，621 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 |
-| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 95 warnings / 1 hint | 存量弃用/可读性告警 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；77 个结果文件，644 tests / 0 failures / 0 errors / 0 skipped | 基线 535 + 本切片 44 + PR #34 的 23 + PR #35 的 19 + PR #36 的 23 |
+| `./gradlew :app:lintModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL；0 errors / 96 warnings / 1 hint | 存量弃用/可读性告警 |
 | `./gradlew :app:assembleModernDebug -x buildNativeRuntime --console=plain` | BUILD SUCCESSFUL | 仅打包验证，未安装 |
 | 目标回归 44 项：Protocol 11、Timeline 9、WebSocket 7、Session 5、Controller 12 | 44/44 通过 | 本地合成 HTTP+WebSocket 服务器；不代表真实 DSH |
 | 既有 `DshNativeApiTest` 12、`DshNativeControllerTest` 6、`DshUiSwitchTest` 10 | 通过 | 四文件已恢复 main，旧契约不受影响 |
-| `python3 scripts/check-handoff.py`、`check-publication.py --git`、`package-source.py` | 通过 | 收尾时重跑并刷新印章 |
+| `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1139-native-approval-tools.md`、`python3 scripts/check-publication.py --git`、`package-source.py` | 通过 | 新交接机制；不修改共享状态文件 |
 
 - 哪些是前一轮结果，哪些是本次新验证：以上产品编译/JVM/lint/assemble 均为本次新跑；未复用历史数字。
 - 未测试、超时、失败和暂未复现的情况：真实设备/模拟器、真实 PRoot DSH、远程 SSH 隧道、安全模式 rescue、通知点击过滤、Android 仪器、真机均未执行。
 
 ## 未完成与暂停项
 
-- 未完成：提交/推送新 head、回复并 resolve 5 条 GitHub review thread、等待新 head CI；PR 不合并、不发布。
+- 未完成：提交/推送新 head、等待新 head CI；10 条 review thread 已全部 resolve；PR 不合并、不发布。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收。
 
 ## 下一步
 
-1. 以 `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/tool-approval/root`（一次 push）。
-2. 在新 head 上回复并 resolve 5 条 thread（`PRRT_kwDOVgRm4s61kLrI`、`...LrP`、`...LrT`、`...LrY`、`...Lrc`），确认 Host/Android CI。
+1. 以 `leezzou <115924933+leezzou@users.noreply.github.com>` 提交并推送 `ao/tool-approval/root`（一次 push），确认 `AGENT-STATE.md`/`CURRENT.json` 与 main 完全一致。
+2. 确认新 head Host/Android CI；10 条 review thread 已全部 resolve。
 3. 真实设备/PRoot 审批与工具卡片验收由独立 QA 另行授权；远程 SSH 隧道与安全模式 rescue 同样待验。
 
 ## 约束与风险
