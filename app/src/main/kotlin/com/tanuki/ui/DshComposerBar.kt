@@ -158,7 +158,11 @@ fun DshComposerBar(
     }
 
     fun applyRead(result: DshAttachmentReadResult, kind: DshAttachmentKind, token: DshComposerSessionToken?) {
-        if (token != null && !controller.isCurrentSession(token)) {
+        if (token == null) {
+            controller.showNotice("无法确认附件所属会话，已丢弃选择结果")
+            return
+        }
+        if (!controller.isCurrentSession(token)) {
             controller.showNotice("会话已切换，已丢弃上次附件选择")
             return
         }
@@ -173,6 +177,10 @@ fun DshComposerBar(
         val token = imagePickerToken
         imagePickerToken = null
         if (uris.isNotEmpty()) scope.launch {
+            if (token == null) {
+                controller.showNotice("无法确认附件所属会话，已丢弃选择结果")
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 DshAttachmentReader.readUris(context, uris, DshAttachmentKind.IMAGE, budgetFor(DshAttachmentKind.IMAGE))
             }
@@ -183,6 +191,10 @@ fun DshComposerBar(
         val token = filePickerToken
         filePickerToken = null
         if (uris.isNotEmpty()) scope.launch {
+            if (token == null) {
+                controller.showNotice("无法确认附件所属会话，已丢弃选择结果")
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 DshAttachmentReader.readUris(context, uris, DshAttachmentKind.FILE, budgetFor(DshAttachmentKind.FILE))
             }

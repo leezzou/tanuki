@@ -181,13 +181,17 @@ class DshComposerController(
         _state.update { it.copy(commandCandidates = emptyList()) }
     }
 
-    fun addImages(items: List<DshPickedAttachment>, token: DshComposerSessionToken? = null) {
-        if (token != null && !isCurrentSession(token)) return
+    /** 只有携带当前会话 token 的异步结果才能进入附件列表；null 一律视为无效发起凭证。 */
+    fun canApplyAttachmentResult(token: DshComposerSessionToken?): Boolean =
+        token != null && isCurrentSession(token)
+
+    fun addImages(items: List<DshPickedAttachment>, token: DshComposerSessionToken) {
+        if (!isCurrentSession(token)) return
         addAttachments(items, DshAttachmentKind.IMAGE)
     }
 
-    fun addFiles(items: List<DshPickedAttachment>, token: DshComposerSessionToken? = null) {
-        if (token != null && !isCurrentSession(token)) return
+    fun addFiles(items: List<DshPickedAttachment>, token: DshComposerSessionToken) {
+        if (!isCurrentSession(token)) return
         addAttachments(items, DshAttachmentKind.FILE)
     }
 
