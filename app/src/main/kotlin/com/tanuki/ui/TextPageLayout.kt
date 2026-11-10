@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import com.tanuki.storage.TextFileReader
+
 /**
  * 文本查看器的行号排版、搜索位置换算与分段上限。
  *
@@ -10,7 +12,7 @@ package com.tanuki.ui
  */
 internal object TextPageLayout {
     /** 单次查看最多显示 4 MiB；更早的 64 KiB 分页上限保持不变。 */
-    const val MAX_VIEW_BYTES = 4L * 1024 * 1024
+    const val MAX_VIEW_BYTES = TextFileReader.MAX_VIEW_BYTES
 
     /** 带行号文本；[numberStarts] 是每行行号在 [text] 中的起始下标。 */
     data class Numbered(val text: String, val lineCount: Int, val prefixLength: Int, val numberStarts: List<Int>)
@@ -96,9 +98,9 @@ internal object TextPageLayout {
         displayedBytes > 0 && hasMore && displayedBytes < MAX_VIEW_BYTES &&
             (totalBytes < 0 || displayedBytes < totalBytes)
 
-    /** 是否因为达到显示上限而截断（文件实际还有内容）。 */
-    fun isTruncated(displayedBytes: Long, totalBytes: Long, hasMore: Boolean): Boolean =
-        hasMore && displayedBytes >= MAX_VIEW_BYTES && totalBytes > MAX_VIEW_BYTES
+    /** 是否因为达到显示上限而截断（文件实际还有内容或大小未知）。 */
+    fun isTruncated(displayedBytes: Long, totalBytes: Long): Boolean =
+        displayedBytes >= MAX_VIEW_BYTES && (totalBytes > MAX_VIEW_BYTES || totalBytes < 0)
 
     /** 下一段第一行的行号：段内换行数即下一段的起始行（跨段拆开的同一行保持相同行号）。 */
     fun nextStartLine(currentStartLine: Int, pageText: String): Int =

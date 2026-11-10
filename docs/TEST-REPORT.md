@@ -2,16 +2,16 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
-## 原生聊天渲染质量验证（2026-11-10，android_agent-51，非设备）
+## 文本编码识别与兜底验证（2026-11-10，android_agent-57，非设备）
 
-- 范围：原生聊天渲染层，不改协议/传输、`DshComposer*` 组件内部、`MainActivity` 与共享状态。基线 `origin/main=4f2a3717`，分支 `ao/chat-render/render-quality`。
-- 实际执行（本 worktree，`-x buildNativeRuntime`）：
-  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
-  - 定向 `DshMarkdownTest`、`DshChatRenderTest`、`DshNativeControllerTest` → BUILD SUCCESSFUL，**46 tests / 0 failures / 0 errors / 0 skipped**（15 + 11 + 20）。
-  - 完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（5m43s），**818 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。
-  - `python3 scripts/check-native-parity.py` → PASS（166 行、14 功能域、路径/验收引用通过）。
-- 新增覆盖：消息窗口与“显示更早”、底部判定/拖动脱离跟随、流式累计/增量/去重/重置、按帧合并、committed 取消待发布增量、链接协议白名单与危险协议拒绝、图片/附件分类、错误分类、代码行号/行数上限、表格行/列上限、嵌套/任务列表、表格对齐/转义竖线、附件块、块数截断、发送失败保留/重试/切会话清理。
-- 未执行：真实 Android 设备/模拟器、PRoot DSH 实时流、图片 `content://` 解码、链接调起系统应用、深色/大字体/输入法、assemble、Android 仪器测试、合并/发布。JVM/lint 不能替代设备验收；设备上的帧率、手势与内存表现仍待独立 QA。
+- 范围：修复 `.txt`/`.cpp` 等文本文件因 UTF-8 解码失败而打不开的问题；只改文本读取/解码与查看器显示层，不改 content:// 直开和共享状态文件。基线 `origin/main=4f2a3717`；先 fetch 发现远端已前进到 `326726c`（仅文档），按用户指定 SHA 建 `ao/text-decoding/text-encoding`。
+- 实现：识别顺序 BOM（UTF-8/UTF-16LE/BE/UTF-32）→ UTF-8 严格校验 → 无 BOM UTF-16 启发式 → 二进制判定 → GB18030（覆盖 GBK/GB2312）→ Big5 → Shift_JIS → Latin-1 兜底；显示解码使用替代字符，不抛解码异常；4 MiB 显示上限与截断提示；顶部可关闭的编码提示条和手动切换；二进制内容显示专用提示与“用其他应用打开/复制路径”。
+- 实际执行：
+  - `./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL（JDK17、Android SDK、macOS ARM64）。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.TextFileReaderTest' --tests 'com.tanuki.TextPageLayoutTest' -x buildNativeRuntime` → BUILD SUCCESSFUL，28 tests / 0 failures。
+  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（5m09s），**802 tests / 90 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。
+- 新增/更新 JVM 用例：GBK 中文跨页、GB18030 生僻字、UTF-16LE/BE 无 BOM（含纯中日韩与手动 UTF-16 端序解析）、UTF-8/UTF-32 BOM、非法字节 Latin-1 兜底、二进制识别（PNG 头与控制字节）、编码手动切换与错选编码不抛异常、Big5/Shift_JIS 自动识别、4 MiB 截断、64 KiB 页边界与流式读取窗口。
+- 未执行：Android 设备/模拟器打开真实 GBK `.txt`/`.cpp`、Android 仪器测试、assemble/安装。`preview()` 编辑入口仍只允许 UTF-8（提示已改为编辑限制而非解码失败）；Big5/Shift_JIS 与 GB18030 字节范围重叠时仍可能误判，需手动切换；Android 上 UTF-32 charset 与文件提供方未知大小流的实际行为未做设备验证。
 
 ## 0.1.11 发布准备验证（2026-11-10，android_agent-49，非设备）
 

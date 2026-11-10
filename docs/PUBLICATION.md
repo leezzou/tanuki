@@ -1,6 +1,6 @@
 # Git 上传与脱敏
 
-当前已发布 **0.1.9/code11** 为 Pre-release（`v0.1.9` tag=`5c680b9`，APK SHA `210b6e...`、10,506,550 字节、证书 `371dc3...`）；0.1.9 没有随版本记录完整设备验收。**0.1.11/code13** 为当前候选，基线 `main=1f7222d0e4ac`（#40 合并后 rebase）；0.1.10/code12 为历史本地候选，未发布。状态以[交接](AGENT-STATE.md)为准。
+**0.1.11/code13 已发布为 Pre-release（tag `v0.1.11`）**：main=`4f2a3717d6d7`（PR #44 squash；#40 合并点 `1f7222d0`），APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节、证书 `371dc301...`。上一 Pre-release 0.1.9/code11（tag `5c680b9`）未随版本记录完整设备验收；0.1.10/code12 为历史本地候选，未发布。
 
 ## 只上传源码
 
@@ -53,7 +53,7 @@ git config --local user.email "<GitHub提供的隐私邮箱>"
 
 ## 源码归档与二进制
 
-当前已发布 0.1.9（code11），0.1.11 为当前候选（code13），0.1.10 为历史本地候选（code12，未发布）；后续发版前须重新核对公开/设备/归档版本上限，确保严格递增。沿用同 workspacecheck 开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。0.1.11 候选包含 0.1.9 之后合并的原生聊天/输入栏/审批接线、交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等；#40 `DshTransport` 待合并。行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)；候选 release 须独立验证，debug 或 0.1.8/0.1.9 历史测试不能替代，实际范围见[测试现状](TEST-REPORT.md)。
+当前已发布 0.1.11（code13，tag `v0.1.11`，Pre-release），上一 Pre-release 为 0.1.9（code11），0.1.10 为历史本地候选（code12，未发布）；后续发版前须重新核对公开/设备/归档版本上限，确保严格递增。沿用同 workspacecheck 开发证书、non-debuggable、ARM64、minSdk26/targetSdk34。0.1.11 已发布，包含 0.1.9 之后合并的原生聊天/输入栏/审批接线、交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等；#40 `DshTransport` 已随 0.1.11 包含（合并点 `1f7222d0`）；临时 `DshHttpAdminTransport` 适配器切换留作后续清理。行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)；该版本已按发布流程验证，debug 或 0.1.8/0.1.9 历史测试不能替代，实际范围见[测试现状](TEST-REPORT.md)。
 
 ```bash
 python3 scripts/check-publication.py
@@ -68,4 +68,4 @@ Git检出不依赖本机构建附件。源码ZIP按明确目录清单生成；�
 
 固定顺序为：完成候选测试、版本/测试/专题文档与交接、过期记录清理和公开检查，再统一一次commit/push；推送成功后按[发布说明](RELEASE.md)的verified模式封装已测APK，不因提交元数据变化重新构建另一份未测字节。0.1.9 已按该顺序交付到 `artifacts/releases/0.1.9/`，0.1.8及更早历史附件保持原样；后续发版仍由用户在网页创建Pre-release并上传全部6附件，Agent不自动创建tag或上传Release。
 
-本轮为 0.1.11 本地发布准备（分支 `ao/handoff-conflicts/release-0.1.11`，独立 worktree）；当前 main=`1f7222d0e4ac`，#40 合并后 rebase 再统一 commit/push、创建 tag `v0.1.11` 与 Pre-release 上传；0.1.9 及更早交付附件保持原样。最终由用户确认合并与 Pre-release 上传，Agent 不直推 main 或修改保护规则，合并前按 [编排规则](ORCHESTRATOR-RULES.md) 完成当前 SHA 的独立审查与适用验证。
+0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。本次为发布后文档一致性修正，只改文档；0.1.9 及更早交付附件保持原样。
