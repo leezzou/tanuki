@@ -7,6 +7,7 @@ import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshToolArguments
 import com.tanuki.web.DshToolDuration
+import com.tanuki.web.DshToolMerge
 import com.tanuki.web.DshToolStatus
 import com.tanuki.web.DshToolTimeline
 import org.json.JSONArray
@@ -131,6 +132,28 @@ class DshToolTimelineTest {
         val tool = (DshToolTimeline.parse(records).single() as DshTimelineItem.Tool).tool
         assertTrue(tool.outputTruncated)
         assertTrue(tool.output!!.length <= DshToolTimeline.MAX_OUTPUT_CHARS + 1)
+    }
+
+    @Test fun mergePreservesStartAndAddsFinishFromSeparateFollowEvents() {
+        val running = (DshToolTimeline.parse(JSONArray().put(call(1, "c1", "bash", """{"command":"ls"}""")))
+            .single() as DshTimelineItem.Tool).tool
+        val resultOnly = (DshToolTimeline.parse(JSONArray().put(result(3, "c1", "ok", isError = false)))
+            .single() as DshTimelineItem.Tool).tool
+        val merged = DshToolMerge.merge(listOf(running), listOf(resultOnly)).single()
+        assertEquals("bash", merged.name)
+        assertEquals(DshToolStatus.SUCCESS, merged.status)
+        assertEquals(2L, merged.durationMs)
+    }
+
+    @Test fun mergeDoesNotLetLateRunningEventRollBackFinishedTool() {
+        val running = (DshToolTimeline.parse(JSONArray().put(call(1, "c1", "bash", """{"command":"ls"}""")))
+            .single() as DshTimelineItem.Tool).tool
+        val resultOnly = (DshToolTimeline.parse(JSONArray().put(result(3, "c1", "ok", isError = false)))
+            .single() as DshTimelineItem.Tool).tool
+        val success = DshToolMerge.merge(listOf(running), listOf(resultOnly)).single()
+        val merged = DshToolMerge.merge(listOf(success), listOf(running)).single()
+        assertEquals(DshToolStatus.SUCCESS, merged.status)
+        assertEquals(2L, merged.durationMs)
     }
 
     @Test fun diffPresentationShowsContextRemovedAndAddedLines() {

@@ -220,6 +220,29 @@ class DshApprovalControllerTest {
         assertTrue(state.error!!.contains("断开"))
     }
 
+    @Test fun retryDuringAnswerResetsPendingAndOldCompletionCannotStick() {
+        val harness = Harness()
+        harness.controller.start()
+        val first = harness.transports.single()
+        first.listener.onApproval(request("e1"))
+        first.answerBehavior = {
+            // 模拟回答 HTTP 尚未返回时用户点击“重试连接”。
+            harness.controller.retry()
+            Result.failure(IOException("旧回答中断"))
+        }
+        harness.controller.answer("e1", DshApprovalOutcome.ALLOWED_ONCE)
+        assertEquals(2, harness.transports.size)
+        val interrupted = harness.controller.state.value.pending.single()
+        assertFalse(interrupted.answering)
+        assertTrue(interrupted.error!!.contains("中断"))
+
+        // 旧代次完成不能卡住新连接；同一 eventId 仍可用新 Peer 回答。
+        val second = harness.transports[1]
+        harness.controller.answer("e1", DshApprovalOutcome.REJECTED)
+        assertTrue(harness.controller.state.value.pending.isEmpty())
+        assertEquals(listOf("e1" to DshApprovalOutcome.REJECTED), second.answers)
+    }
+
     @Test fun rememberedChoicesKeepPanelVisibleUntilCleared() {
         val harness = Harness()
         harness.controller.start()

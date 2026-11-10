@@ -399,6 +399,51 @@ object DshToolArguments {
     }
 }
 
+/**
+ * 工具卡合并策略。
+ *
+ * 实时 follow 按单条事件解析，`tool/call` 与 `tool/result` 会分两批到达；接线方必须使用本
+ * 合并器（替换页面控制器里的私有实现），否则新增的 `startedAt`/`finishedAt` 会在 `copy`
+ * 合并时丢失，完成后仍显示“耗时未知”。
+ */
+object DshToolMerge {
+    const val MAX_TOOLS = 200
+
+    fun merge(current: List<DshToolItem>, incoming: List<DshToolItem>): List<DshToolItem> {
+        if (incoming.isEmpty()) return current
+        val merged = LinkedHashMap<String, DshToolItem>()
+        current.forEach { merged[it.callId] = it }
+        incoming.forEach { item ->
+            val previous = merged[item.callId]
+            // 迟到的历史页可能仍是 RUNNING；已经收到终态的卡片不能被回退。
+            if (previous != null && previous.status != DshToolStatus.RUNNING &&
+                item.status == DshToolStatus.RUNNING
+            ) return@forEach
+            merged[item.callId] = if (previous == null) item else previous.copy(
+                name = item.name.takeIf { it.isNotBlank() && it != "未知工具" } ?: previous.name,
+                arguments = item.arguments ?: previous.arguments,
+                status = item.status,
+                output = item.output ?: previous.output,
+                error = item.error ?: previous.error,
+                command = item.command ?: previous.command,
+                cwd = item.cwd ?: previous.cwd,
+                diffs = item.diffs.ifEmpty { previous.diffs },
+                files = item.files.ifEmpty { previous.files },
+                outputTruncated = item.outputTruncated || previous.outputTruncated,
+                risk = item.risk,
+                // 终态结果保留调用起点；孤儿结果没有起点时沿用已有起点，不伪造耗时。
+                startedAt = when {
+                    previous.startedAt > 0L -> previous.startedAt
+                    item.startedAt > 0L -> item.startedAt
+                    else -> 0L
+                },
+                finishedAt = item.finishedAt ?: previous.finishedAt
+            )
+        }
+        return merged.values.sortedBy { it.seq }.takeLast(MAX_TOOLS)
+    }
+}
+
 /** 工具卡片耗时文案；只格式化真实起止时间，未知返回 null。 */
 object DshToolDuration {
     fun label(durationMs: Long?): String? {

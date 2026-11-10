@@ -51,7 +51,7 @@ fun DshApprovalPanel(
     onRetry: () -> Unit,
     onClearRemembered: () -> Unit,
     sessionTitle: String? = null,
-    onForgetRemembered: (DshRememberedChoice) -> Unit = {},
+    onForgetRemembered: ((DshRememberedChoice) -> Unit)? = null,
     onDismissNotice: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -184,7 +184,7 @@ fun DshApprovalPanel(
 @Composable
 private fun RememberedChoices(
     choices: List<DshRememberedChoice>,
-    onForget: (DshRememberedChoice) -> Unit,
+    onForget: ((DshRememberedChoice) -> Unit)?,
     onClear: () -> Unit
 ) {
     Surface(
@@ -231,7 +231,9 @@ private fun RememberedChoices(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        TextButton(onClick = { onForget(choice) }) { Text("撤销") }
+                        if (DshApprovalActions.canForget(onForget)) {
+                            TextButton(onClick = { onForget?.invoke(choice) }) { Text("撤销") }
+                        }
                     }
                 }
             }
@@ -455,6 +457,11 @@ private fun ApprovalCard(
             }
         }
     }
+}
+
+/** 审批组件的接线安全策略：未提供单条撤销回调时，界面不得显示可点击但无效的“撤销”。 */
+object DshApprovalActions {
+    fun canForget(onForget: ((DshRememberedChoice) -> Unit)?): Boolean = onForget != null
 }
 
 private const val MAX_COLLAPSED_ARGUMENTS = 1_200

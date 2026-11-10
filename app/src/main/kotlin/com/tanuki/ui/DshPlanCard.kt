@@ -69,31 +69,43 @@ fun DshPlanCard(
                 }
                 StatusPill(
                     plan.statusLabel,
-                    awaiting || plan.currentStep != null || plan.completed == plan.total
+                    awaiting || plan.currentStepTitle != null || plan.completed == plan.total
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "进度 ${plan.completed}/${plan.total}",
+                        if (plan.progressUnknown) {
+                            "进度未知 · 共 ${plan.total} 步"
+                        } else {
+                            "进度 ${plan.completed}/${plan.total}"
+                        },
                         style = MaterialTheme.typography.labelSmall
                     )
                     Spacer(Modifier.weight(1f))
-                    plan.currentStep?.let { step ->
+                    (plan.currentStepTitle ?: plan.currentStep?.title)?.let { title ->
                         Text(
-                            "当前：${step.title}",
+                            "当前：$title",
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                LinearProgressIndicator(
-                    progress = { plan.progress },
-                    modifier = Modifier.fillMaxWidth().semantics {
-                        contentDescription = "计划进度 ${plan.completed}/${plan.total}"
-                    }
-                )
+                if (plan.progressUnknown) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = "计划进度未知，共 ${plan.total} 步"
+                        }
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { plan.progress },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = "计划进度 ${plan.completed}/${plan.total}"
+                        }
+                    )
+                }
             }
             plan.steps.forEach { step -> PlanStepRow(step) }
             if (plan.truncated) {

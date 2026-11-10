@@ -40,23 +40,33 @@ data class DshPlan(
     val steps: List<DshPlanStep>,
     val review: DshPlanReviewState = DshPlanReviewState.NONE,
     val sourceTool: String? = null,
-    val truncated: Boolean = false
+    val truncated: Boolean = false,
+    /** 原始步骤总数；展示层只保留前 MAX_STEPS 个步骤。 */
+    val totalSteps: Int = steps.size,
+    /** 原始步骤中已完成的数量；不能只用展示列表推导。 */
+    val completedSteps: Int = steps.count { it.status == DshPlanStepStatus.COMPLETED },
+    /** 进行中步骤标题；可能来自被截断的步骤。 */
+    val currentStepTitle: String? = null,
+    /** 无法取得完整进度统计（超长/损坏步骤）时为 true，界面显示未知而不是完成。 */
+    val progressUnknown: Boolean = false
 ) {
-    val total: Int get() = steps.size
-    val completed: Int get() = steps.count { it.status == DshPlanStepStatus.COMPLETED }
-    val progress: Float get() = if (total == 0) 0f else completed.toFloat() / total
+    val total: Int get() = totalSteps
+    val completed: Int get() = completedSteps
+    val progress: Float get() =
+        if (progressUnknown || total <= 0) 0f else completed.toFloat() / total
     val currentStep: DshPlanStep?
         get() = steps.firstOrNull { it.status == DshPlanStepStatus.IN_PROGRESS }
     val awaitingReview: Boolean get() = review == DshPlanReviewState.AWAITING
 
-    /** 卡片状态：审阅状态优先，其次按步骤推导执行进度，不虚构“已完成”。 */
+    /** 卡片状态：审阅状态优先，其次按完整统计推导执行进度，不虚构“已完成”。 */
     val statusLabel: String
         get() = when {
             review != DshPlanReviewState.NONE -> review.label
+            progressUnknown -> "进度未知"
             total == 0 -> "无步骤"
             completed == total -> "已完成"
-            currentStep != null -> "执行中"
-            else -> "未开始"
+            completed == 0 -> "未开始"
+            else -> "执行中"
         }
 }
 
@@ -81,6 +91,7 @@ data class DshPlanExtraction(
  */
 object DshPlanParser {
     const val MAX_STEPS = 20
+    const val MAX_SCAN_STEPS = 500
     const val MAX_STEP_CHARS = 240
     const val MAX_DETAIL_CHARS = 600
 
@@ -195,32 +206,47 @@ object DshPlanParser {
             planJson.optJSONArray("plan") != null -> planJson.optJSONArray("plan")
             else -> return null
         }
-        val steps = stepsOf(rawSteps)
-        if (steps.isEmpty()) return null
+        val stats = stepsOf(rawSteps)
+        if (stats.display.isEmpty()) return null
         val title = firstText(
             planJson, "title", "name", "summary", "goal", "explanation"
         ) ?: "执行计划"
-        // 审阅字段可能在外层 data，也可能在嵌套 plan 对象；外层优先，避免丢失审阅状态。
-        val outerReview = reviewOf(json, reviewByDefault)
-        val review = if (outerReview != DshPlanReviewState.NONE) {
-            outerReview
-        } else {
-            reviewOf(planJson, reviewByDefault)
+        // 先在外层、再在内层查找显式审阅状态；两层都没有时才应用“待审阅”默认值。
+        val outerReview = reviewOf(json, reviewByDefault = false)
+        val innerReview = reviewOf(planJson, reviewByDefault = false)
+        val review = when {
+            outerReview != DshPlanReviewState.NONE -> outerReview
+            innerReview != DshPlanReviewState.NONE -> innerReview
+            reviewByDefault -> DshPlanReviewState.AWAITING
+            else -> DshPlanReviewState.NONE
         }
         return DshPlan(
             id = id,
             seq = seq,
             title = title,
-            steps = steps,
+            steps = stats.display,
             review = review,
             sourceTool = sourceTool,
-            truncated = rawSteps.length() > MAX_STEPS
+            truncated = rawSteps.length() > MAX_STEPS,
+            totalSteps = stats.total,
+            completedSteps = stats.completed,
+            currentStepTitle = stats.currentTitle,
+            progressUnknown = stats.unknown
         )
     }
 
-    private fun stepsOf(array: JSONArray): List<DshPlanStep> {
-        val steps = ArrayList<DshPlanStep>(minOf(array.length(), MAX_STEPS))
-        for (index in 0 until minOf(array.length(), MAX_STEPS)) {
+    /**
+     * 展示只保留前 [MAX_STEPS] 项，但统计遍历整份计划；超过扫描上限或遇到损坏项时
+     * 标记进度未知，避免把“只看到前 20 步”误报成整份计划完成。
+     */
+    private fun stepsOf(array: JSONArray): PlanSteps {
+        val display = ArrayList<DshPlanStep>(minOf(array.length(), MAX_STEPS))
+        val total = array.length()
+        val scan = minOf(total, MAX_SCAN_STEPS)
+        var completed = 0
+        var currentTitle: String? = null
+        var unknown = total > MAX_SCAN_STEPS
+        for (index in 0 until scan) {
             val raw = array.opt(index)
             val step = when (raw) {
                 is JSONObject -> stepOf(index, raw)
@@ -228,11 +254,27 @@ object DshPlanParser {
                     DshPlanStep(index, bounded(it, MAX_STEP_CHARS), null, DshPlanStepStatus.PENDING)
                 }
                 else -> null
-            } ?: continue
-            steps += step
+            }
+            if (step == null) {
+                unknown = true
+                continue
+            }
+            if (step.status == DshPlanStepStatus.COMPLETED) completed++
+            if (step.status == DshPlanStepStatus.IN_PROGRESS && currentTitle == null) {
+                currentTitle = step.title
+            }
+            if (display.size < MAX_STEPS) display += step
         }
-        return steps
+        return PlanSteps(display, total, completed, currentTitle, unknown)
     }
+
+    private data class PlanSteps(
+        val display: List<DshPlanStep>,
+        val total: Int,
+        val completed: Int,
+        val currentTitle: String?,
+        val unknown: Boolean
+    )
 
     private fun stepOf(index: Int, json: JSONObject): DshPlanStep? {
         val title = firstText(json, "step", "title", "text", "content", "task")

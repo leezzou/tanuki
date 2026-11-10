@@ -143,9 +143,67 @@ class DshPlanTest {
             JSONArray().put(call(1, "c1", "todo_write", JSONObject().put("todos", steps).toString()))
         ).latest!!
         assertEquals(DshPlanParser.MAX_STEPS, plan.steps.size)
+        assertEquals(DshPlanParser.MAX_STEPS + 5, plan.total)
         assertTrue(plan.truncated)
         assertEquals(DshPlanStepStatus.BLOCKED, plan.steps[1].status)
         assertEquals(DshPlanStepStatus.SKIPPED, plan.steps[2].status)
+    }
+
+    @Test fun truncatedPlanDoesNotClaimCompletionForHiddenSteps() {
+        val steps = JSONArray()
+        for (index in 0 until 20) {
+            steps.put(JSONObject().put("title", "步骤 $index").put("status", "completed"))
+        }
+        steps.put(JSONObject().put("title", "隐藏的最后一步").put("status", "pending"))
+        val plan = DshPlanParser.extract(
+            JSONArray().put(call(1, "c1", "update_plan", JSONObject().put("steps", steps).toString()))
+        ).latest!!
+        assertEquals(21, plan.total)
+        assertEquals(20, plan.completed)
+        assertEquals(20f / 21f, plan.progress, 0.0001f)
+        assertEquals("执行中", plan.statusLabel)
+        assertTrue(plan.truncated)
+    }
+
+    @Test fun hiddenInProgressStepRemainsVisibleAsCurrent() {
+        val steps = JSONArray()
+        for (index in 0 until 20) {
+            steps.put(JSONObject().put("title", "步骤 $index").put("status", "completed"))
+        }
+        steps.put(JSONObject().put("title", "隐藏的进行中步骤").put("status", "in_progress"))
+        val plan = DshPlanParser.extract(
+            JSONArray().put(call(1, "c1", "update_plan", JSONObject().put("steps", steps).toString()))
+        ).latest!!
+        assertEquals("隐藏的进行中步骤", plan.currentStepTitle)
+        assertEquals("执行中", plan.statusLabel)
+    }
+
+    @Test fun nestedExplicitReviewStateBeatsDefaultAwaiting() {
+        val eventPlan = DshPlanParser.extract(
+            JSONArray().put(
+                event(
+                    "plan/review", 4,
+                    JSONObject().put(
+                        "plan",
+                        JSONObject()
+                            .put("reviewStatus", "approved")
+                            .put("steps", JSONArray().put("执行"))
+                    )
+                )
+            )
+        ).latest!!
+        assertEquals(DshPlanReviewState.APPROVED, eventPlan.review)
+
+        val payloadPlan = DshPlanParser.fromReviewPayload(
+            5, "review-2",
+            JSONObject().put(
+                "plan",
+                JSONObject()
+                    .put("reviewStatus", "changes-requested")
+                    .put("steps", JSONArray().put("执行"))
+            )
+        )!!
+        assertEquals(DshPlanReviewState.CHANGES_REQUESTED, payloadPlan.review)
     }
 
     @Test fun ignoresNonPlanToolsAndMalformedPayloads() {

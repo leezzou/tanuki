@@ -34,7 +34,7 @@
 | INPUT-07/08/09 | ☐ | 模型/推理/权限预设选择器未接 |
 | ATT-01..04/06 | ◐ | 附件选择、上传、限制、失败重试与文件引用；历史图片读取未接 |
 | ATT-05 | ☐ | `session/attachment` 授权图片加载未接 |
-| APPROVAL-01/02 | ✅ | 53 `DshApprovalPanel`：来源/工具名/风险/参数摘要/长参数折叠；批量逐条编号、高风险二次确认；`$events/result` 允许一次/拒绝 |
+| APPROVAL-01/02 | ✅ | 53 审批入口窄条+底部抽屉：来源/工具名/风险/参数摘要/长参数折叠；批量逐条编号、高风险二次确认；`$events/result` 允许一次/拒绝 |
 | APPROVAL-05 | ◐ | 提问只读展示 + 跳官方；多选/自定义答案未接 |
 | APPROVAL-07/08 | ✅ | 按审批会话查参数；本次运行记忆可逐条撤销/全部清除，不写配置 |
 | APPROVAL-06/10 | ◐ | 计划卡片/解析组件就绪，`DshNativePage` 接线待集成方；审计展示未接；持久策略不做（官方一次性） |
@@ -209,7 +209,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
-| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `原生完整`：`DshApprovalPanel` 展示来源/工具名/风险等级/参数摘要/完整参数折叠/其他会话计数；批量逐条编号，高风险允许二次确认 | — · `DshApprovalController`/`DshApprovalPanel` · android_agent-53 · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-01 | 审批请求展示 | Agent-scoped waterfall，接管输入框，展示工具/原因/详情 | `原生完整`：输入框上方“⚑ 待审批 N 项”窄条 + 底部抽屉；抽屉内 `DshApprovalPanel` 展示来源/工具名/风险等级/参数摘要/完整参数折叠/其他会话计数；批量逐条编号，高风险允许二次确认 | — · `DshApprovalEntryBar`/`DshApprovalSheet`/`DshApprovalPanel` · android_agent-53 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `原生完整`：允许一次/拒绝经 `$events/result` 回传 | — · `DshApprovalSession` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |

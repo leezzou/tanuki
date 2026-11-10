@@ -227,6 +227,7 @@ class DshApprovalController(
         session = null
         generation++
         // 旧代次在途回答/参数查询的标记必须清掉，否则同一 eventId 重连后会被当成仍在提交。
+        val interrupted = synchronized(answering) { answering.keys.toSet() }
         synchronized(answering) { answering.clear() }
         synchronized(lookupTokens) { lookupTokens.clear() }
         _state.update {
@@ -236,7 +237,14 @@ class DshApprovalController(
                 ready = false,
                 error = null,
                 errorRetryable = false,
-                notice = null
+                notice = null,
+                pending = it.pending.map { item ->
+                    if (item.request.eventId in interrupted) {
+                        item.copy(answering = false, error = "回答已中断，可重试")
+                    } else {
+                        item
+                    }
+                }
             )
         }
         start()
