@@ -36,8 +36,10 @@ import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.BrowserControlUiState
+import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.DshNativeController
 import com.tanuki.ui.DshNativePage
+import com.tanuki.ui.SharedPreferencesDshDraftStore
 import com.tanuki.ui.WorkspaceFilesPage
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
@@ -51,7 +53,9 @@ import com.tanuki.web.ChatNotificationRoute
 import com.tanuki.web.ChatNotificationRoutePolicy
 import com.tanuki.web.ChatNotificationTargetPolicy
 import com.tanuki.web.DshEndpoint
+import com.tanuki.web.DshComposerClient
 import com.tanuki.web.DshNativeClient
+import com.tanuki.web.DshNativeComposerRemote
 import com.tanuki.web.DshUiMode
 import com.tanuki.web.DshWebView
 import com.tanuki.web.DshFileChooser
@@ -310,18 +314,32 @@ class MainActivity : ComponentActivity() {
                 }
                 var nativeFallback by remember { mutableStateOf<String?>(null) }
                 var nativeChatRequest by remember { mutableStateOf<String?>(null) }
-                val nativeController = remember {
-                    DshNativeController(
-                        DshNativeClient {
-                            val origin = manager.origin
-                            val launchUrl = manager.authenticatedUrl
-                            if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
-                        },
-                        lifecycleScope
+                val nativeClient = remember {
+                    DshNativeClient {
+                        val origin = manager.origin
+                        val launchUrl = manager.authenticatedUrl
+                        if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
+                    }
+                }
+                val nativeController = remember { DshNativeController(nativeClient, lifecycleScope) }
+                val nativeComposer = remember {
+                    DshComposerController(
+                        client = DshComposerClient(DshNativeComposerRemote(nativeClient)),
+                        drafts = SharedPreferencesDshDraftStore(this@MainActivity),
+                        scope = lifecycleScope,
+                        onSent = { id -> nativeController.select(id, force = true) }
                     )
                 }
                 val nativeState by nativeController.state.collectAsState()
-                DisposableEffect(Unit) { onDispose { nativeController.close() } }
+                DisposableEffect(Unit) {
+                    onDispose {
+                        nativeComposer.close()
+                        nativeController.close()
+                    }
+                }
+                LaunchedEffect(nativeState.selectedId) {
+                    nativeComposer.setSession(nativeState.selectedId)
+                }
                 LaunchedEffect(s.service, nativeUiMode) {
                     nativeFallback = null
                     when {
@@ -508,6 +526,7 @@ class MainActivity : ComponentActivity() {
                     nativeDshPage = { modifier ->
                         DshNativePage(
                             controller = nativeController,
+                            composer = nativeComposer,
                             modifier = modifier,
                             onFallback = { reason -> nativeFallback = Redact.text(reason) },
                             onSwitchOfficial = { setNativePreference(false) }

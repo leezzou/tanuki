@@ -162,6 +162,8 @@ class DshNativeController(
         val sessionId = current.selectedId ?: return false
         val prompt = text.trim()
         if (prompt.isEmpty() || current.sending) return false
+        // 发送是跨网络的长操作；响应回来时用户可能已切到别的会话，必须绑定发起时的代次。
+        val token = generation
         val wasRunning = current.running
         if (prompt.length > MAX_PROMPT_CHARS) {
             _state.update { it.copy(sendError = "消息过长（最多 $MAX_PROMPT_CHARS 字）") }
@@ -186,12 +188,19 @@ class DshNativeController(
         }
         return client.send(sessionId, prompt).fold(
             onSuccess = {
+                // 只允许仍属于发起会话的结果修改状态或触发历史刷新。
+                if (token != generation || _state.value.selectedId != sessionId) {
+                    return@fold false
+                }
                 _state.update { it.copy(sending = false, notice = "已交给官方 DSH") }
                 // follow 正常时由实时消息替换占位；follow 已结束/滞后时也补一次历史读取，避免停在“发送中”。
-                refreshMessages(sessionId)
+                refreshMessages(sessionId, token)
                 true
             },
             onFailure = { error ->
+                if (token != generation || _state.value.selectedId != sessionId) {
+                    return@fold false
+                }
                 _state.update { state ->
                     state.copy(
                         sending = false,
@@ -203,6 +212,14 @@ class DshNativeController(
                 false
             }
         )
+    }
+
+    /** 官方没有独立“重新生成”一元方法；这里明确重发上一条用户消息，不伪造隐藏重试。 */
+    suspend fun retryLastPrompt(): Boolean {
+        val state = _state.value
+        if (state.running) return false
+        val last = state.messages.lastOrNull { it.role == DshMessageRole.USER && !it.pending } ?: return false
+        return send(last.text)
     }
 
     /** 停止只取消当前活动回合，不停止 DSH 服务；官方状态流会决定 running 何时结束。 */
@@ -334,8 +351,8 @@ class DshNativeController(
         }
     }
 
-    private fun refreshMessages(sessionId: String) {
-        val token = generation
+    private fun refreshMessages(sessionId: String, token: Int) {
+        if (token != generation || _state.value.selectedId != sessionId) return
         pageJob?.cancel()
         pageJob = scope.launch { loadMessages(sessionId, token) }
     }

@@ -19,16 +19,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,15 +32,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.web.DshApproval
@@ -64,13 +56,13 @@ import java.util.Locale
 @Composable
 fun DshNativePage(
     controller: DshNativeController,
+    composer: DshComposerController,
     modifier: Modifier = Modifier,
     onFallback: (String) -> Unit,
     onSwitchOfficial: () -> Unit
 ) {
     val state by controller.state.collectAsState()
     val scope = rememberCoroutineScope()
-    var draft by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(state.unavailableReason) {
         state.unavailableReason?.let(onFallback)
     }
@@ -118,21 +110,30 @@ fun DshNativePage(
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         }
-        Composer(
-            state = state,
-            draft = draft,
-            onDraft = { draft = it.take(MAX_PROMPT_CHARS) },
-            onSend = {
-                val text = draft.trim()
-                if (text.isNotEmpty() && !state.sending) {
-                    scope.launch {
-                        if (controller.send(text)) draft = ""
-                    }
+        if (state.liveError != null && state.messages.any { it.role == DshMessageRole.USER && !it.pending }) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = { scope.launch { controller.retryLastPrompt() } },
+                    enabled = !state.running && !state.sending
+                ) { Text("重发上一条") }
+            }
+        }
+        if (state.running) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
+                OutlinedButton(onClick = { scope.launch { controller.stop() } }, enabled = !state.stopping) {
+                    Text(if (state.stopping) "停止中…" else "停止生成")
                 }
-            },
-            onStop = { scope.launch { controller.stop() } },
-            onOfficial = onSwitchOfficial
-        )
+            }
+        }
+        state.sendError?.let { message ->
+            Text(
+                message,
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+        DshComposerBar(composer, Modifier.fillMaxWidth())
     }
 }
 
@@ -235,52 +236,6 @@ private fun MessageList(state: DshNativeState) {
 }
 
 @Composable
-private fun Composer(
-    state: DshNativeState,
-    draft: String,
-    onDraft: (String) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onOfficial: () -> Unit
-) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = onDraft,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("发送消息给官方 DSH") },
-                    maxLines = 5,
-                    enabled = state.selectedId != null && !state.sending,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() })
-                )
-                if (state.running) {
-                    OutlinedButton(onClick = onStop, enabled = !state.stopping) {
-                        Text(if (state.stopping) "停止中…" else "停止")
-                    }
-                }
-                Button(onClick = onSend, enabled = draft.isNotBlank() && !state.sending && state.selectedId != null) {
-                    Text(if (state.sending) "发送中…" else "发送")
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                NativeCaption(if (state.live) "实时连接已建立" else "实时未连接；发送与停止仍可用")
-                Spacer(Modifier.weight(1f))
-                if (state.liveError != null || !state.live) {
-                    TextButton(onClick = onOfficial) { Text("官方处理审批") }
-                }
-                NativeCaption("${draft.length}/$MAX_PROMPT_CHARS")
-            }
-            state.sendError?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
 private fun SessionStrip(sessions: List<DshSession>, selectedId: String?, onSelect: (String) -> Unit) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
@@ -343,9 +298,7 @@ private fun MessageCard(message: DshMessage) {
                 Spacer(Modifier.weight(1f))
                 Text(timeLabel(message.time), style = MaterialTheme.typography.labelSmall)
             }
-            SelectionContainer {
-                Text(message.text, style = MaterialTheme.typography.bodyMedium)
-            }
+            DshMarkdown(message.text)
         }
     }
 }
@@ -360,7 +313,7 @@ private fun StreamingCard(text: String) {
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("DSH 正在回复", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-            SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium) }
+            DshMarkdown(text)
         }
     }
 }
@@ -417,5 +370,3 @@ private fun timeLabel(millis: Long): String {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
     }.getOrDefault("时间未知")
 }
-
-private const val MAX_PROMPT_CHARS = 12_000

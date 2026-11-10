@@ -1,9 +1,11 @@
 package com.tanuki.web
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
@@ -103,10 +105,25 @@ class DshWebSocketMuxSocket(
         writeFrame(DshWsCodec.OP_TEXT, text.toByteArray(Charsets.UTF_8))
     }
 
-    override fun incoming(): Flow<String> = flow {
-        while (true) {
-            val text = readTextMessage() ?: break
-            emit(text)
+    override fun incoming(): Flow<String> = channelFlow {
+        val reader = launch(Dispatchers.IO) {
+            try {
+                while (!closed) {
+                    val text = readTextMessage() ?: break
+                    send(text)
+                }
+            } catch (error: Throwable) {
+                if (!closed) throw error
+            } finally {
+                // 读取结束（对端关闭/取消）时结束通道，触发 awaitClose 统一关闭 socket。
+                close()
+            }
+        }
+        awaitClose {
+            // 协程取消时 InputStream.read 不会响应取消；必须主动关闭 socket 才能退出阻塞读。
+            closed = true
+            reader.cancel()
+            runCatching { socket?.close() }
         }
     }.flowOn(Dispatchers.IO)
 

@@ -203,7 +203,24 @@ HTTP 200..399 或 401 → 存活
 - 审批：`approval/request` 只展示 `toolName` 与 `displayReason`/`reason`，不读工具参数；用户选择后以 `{"kind":"result","value":"allowed-once"|"rejected"}` 回答。`user-questions/request` 在原生页只读展示问题与选项，明确跳官方界面处理；不伪造多选答案。
 - 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 不发送 `Origin`，只连当前精确 loopback origin；列表失败才回退官方界面，实时流/单次操作失败只提示并保留历史/发送能力。关闭物理 mux 会销毁该 API Peer，Native 客户端同时丢弃 Cookie，下次重新 `/connect`。
 
-细节、端点、未实现项与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
+#### 组件 transport 契约
+
+输入、审批、会话管理等原生组件只消费一个 transport，不各自拼 HTTP/WS：
+
+```kotlin
+interface DshTransport {
+    val connection: StateFlow<DshConnectionState> // DISCONNECTED/CONNECTING/CONNECTED/FAILED
+    suspend fun call(method: String, args: JSONObject): Any? // 官方 result.value
+    fun live(sessionId: String): Flow<DshLiveEvent>
+    fun reset()
+}
+```
+
+- `call` 业务失败抛 `DshApiException`（只含短错误码），认证/网络失败抛 `IOException`；不把 token/Cookie/URL 放进异常。
+- `DshNativeComposerRemote` 只把 `call/reset` 转发给 transport，输入组件不读认证信息。
+- `live` 取消时立即关闭底层 socket；发送结果与历史刷新绑定发起时的会话代次，A→B 切换后旧响应不得写新会话。
+- 原生消息渲染支持 Markdown 标题/段落/行内样式/列表/引用/代码块/基础表格；远程图片只显示占位，不自动联网或打开链接。
+- 完整功能清单与缺口见 [原生界面功能对齐清单](NATIVE-PARITY.md)；端点、安全与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
 ## 2. 工具面：Browser RPC
 

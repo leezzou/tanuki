@@ -4,6 +4,9 @@ import com.tanuki.runtime.Redact
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
@@ -244,6 +247,12 @@ object DshApiProtocol {
         return result
     }
 
+    /** 输入/审批/会话管理组件需要官方 `result.value`；undefined 统一转成 null。 */
+    fun parseValue(body: String): Any? {
+        val value = successValue(body)?.opt("value")
+        return if (value == null || value === JSONObject.NULL) null else value
+    }
+
     /** 发送/取消的官方结果都要求 `accepted=true`，不能只凭 HTTP 200 判断成功。 */
     fun parseAccepted(body: String): Boolean =
         successValue(body)?.optJSONObject("value")?.optBoolean("accepted", false) == true
@@ -268,7 +277,7 @@ interface DshSessionSource {
 class DshNativeClient(
     private val socketFactory: () -> DshMuxSocket = { DshWebSocketMuxSocket() },
     private val endpointProvider: () -> DshEndpoint?
-) : DshChatSource {
+) : DshChatSource, DshTransport {
     private val stateLock = Any()
     /** 同一时刻只允许一条 remote.mux 物理连接；切换会话时先关闭旧连接。 */
     private val muxLock = Mutex()
@@ -281,6 +290,8 @@ class DshNativeClient(
     private var activeSocket: DshMuxSocket? = null
     private var eventsClientId: String? = null
     private val pendingApprovals = LinkedHashMap<String, DshApproval>()
+    private val _connection = MutableStateFlow(DshConnectionState.DISCONNECTED)
+    override val connection: StateFlow<DshConnectionState> = _connection.asStateFlow()
 
     /** 只短暂同步状态，绝不等待网络；主线程可安全调用。 */
     override fun reset() {
@@ -295,6 +306,7 @@ class DshNativeClient(
             pendingApprovals.clear()
             socket = activeSocket
             activeSocket = null
+            _connection.value = DshConnectionState.DISCONNECTED
         }
         runCatching { socket?.close() }
     }
@@ -306,13 +318,13 @@ class DshNativeClient(
     override suspend fun messages(sessionId: String): Result<DshSessionPage> = withContext(Dispatchers.IO) {
         runCatching {
             require(sessionId.isNotBlank()) { "会话标识为空" }
-            val projection = call(
+            val projection = callEnvelope(
                 "session/projections",
                 JSONObject().put("request", JSONObject().put("sessionId", sessionId))
             )
             val throughSeq = DshApiProtocol.parseProjectionSeq(projection)
                 ?: return@runCatching DshSessionPage(emptyList(), false)
-            val page = call(
+            val page = callEnvelope(
                 "session/page",
                 JSONObject().put(
                     "request",
@@ -333,7 +345,7 @@ class DshNativeClient(
             val prompt = text.trim()
             require(prompt.isNotEmpty()) { "消息不能为空" }
             require(prompt.length <= MAX_PROMPT_CHARS) { "消息过长（最多 $MAX_PROMPT_CHARS 字）" }
-            val body = call(
+            val body = callEnvelope(
                 "session/prompt",
                 JSONObject().put(
                     "request",
@@ -355,7 +367,7 @@ class DshNativeClient(
     override suspend fun cancel(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             require(sessionId.isNotBlank()) { "会话标识为空" }
-            val body = call(
+            val body = callEnvelope(
                 "session/cancel",
                 JSONObject().put("request", JSONObject().put("sessionId", sessionId))
             )
@@ -372,7 +384,7 @@ class DshNativeClient(
             if (!DshMuxProtocol.validEventId(eventId)) throw IOException("审批事件标识无效")
             val clientId = synchronized(stateLock) { eventsClientId }
                 ?: throw IOException("实时审批通道尚未连接")
-            val body = call(
+            val body = callEnvelope(
                 DshMuxProtocol.EVENTS_RESULT_ENDPOINT,
                 JSONObject()
                     .put("clientId", clientId)
@@ -400,6 +412,7 @@ class DshNativeClient(
         require(sessionId.isNotBlank()) { "会话标识为空" }
         muxLock.withLock {
             // 认证、握手与 socket 读取都是阻塞 I/O；整个上游必须在 IO 线程，不能占主线程。
+            _connection.value = DshConnectionState.CONNECTING
             var generation = 0L
             var socket: DshMuxSocket? = null
             try {
@@ -415,6 +428,7 @@ class DshNativeClient(
                     activeSocket = opened
                     eventsClientId = null
                     pendingApprovals.clear()
+                    _connection.value = DshConnectionState.CONNECTED
                 }
                 val eventsId = "events-${UUID.randomUUID()}"
                 val followId = "follow-${UUID.randomUUID()}"
@@ -451,6 +465,9 @@ class DshNativeClient(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                if (generation == 0L || generation == muxGeneration) {
+                    _connection.value = DshConnectionState.FAILED
+                }
                 emit(DshLiveEvent.Failure(liveFailure(error)))
             } finally {
                 runCatching { socket?.close() }
@@ -463,6 +480,9 @@ class DshNativeClient(
                         cookie = null
                         boundOrigin = null
                         boundLaunchUrl = null
+                        if (_connection.value != DshConnectionState.FAILED) {
+                            _connection.value = DshConnectionState.DISCONNECTED
+                        }
                     }
                 }
             }
@@ -512,10 +532,28 @@ class DshNativeClient(
         else -> Redact.text(error.message ?: "实时连接失败").take(200)
     }
 
-    private fun <T> parse(reader: (String) -> T, method: String, args: JSONObject): T =
-        reader(call(method, args))
+    /** 供输入/审批/会话管理组件使用；返回官方 result.value，不暴露 Cookie/token。 */
+    override suspend fun call(method: String, args: JSONObject): Any? = withContext(Dispatchers.IO) {
+        try {
+            val value = DshApiProtocol.parseValue(callEnvelope(method, args))
+            if (_connection.value == DshConnectionState.DISCONNECTED ||
+                _connection.value == DshConnectionState.FAILED
+            ) {
+                _connection.value = DshConnectionState.CONNECTED
+            }
+            value
+        } catch (error: Throwable) {
+            if (_connection.value != DshConnectionState.CONNECTED) {
+                _connection.value = DshConnectionState.FAILED
+            }
+            throw error
+        }
+    }
 
-    private fun call(method: String, args: JSONObject): String {
+    private fun <T> parse(reader: (String) -> T, method: String, args: JSONObject): T =
+        reader(callEnvelope(method, args))
+
+    private fun callEnvelope(method: String, args: JSONObject): String {
         val endpoint = endpointProvider() ?: throw IOException("DSH 服务地址尚未就绪")
         var requestGeneration = synchronized(stateLock) { authGeneration }
         var currentCookie = ensureCookie(endpoint, requestGeneration)

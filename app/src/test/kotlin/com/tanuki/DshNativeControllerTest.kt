@@ -15,9 +15,11 @@ import com.tanuki.web.DshLiveEvent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -203,6 +205,69 @@ class DshNativeControllerTest {
         assertTrue(state.sessions.any { it.id == "A" })
     }
 
+    @Test fun delayedSendSuccessCannotRefreshAnotherSelectedSession() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeSource(
+            listOf(session("A"), session("B")),
+            messages = mapOf("A" to "A-message", "B" to "B-message"),
+            sendGate = gate
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        val job = launch { controller.send("A prompt") }
+        awaitState(controller) { it.sending }
+        controller.select("B", force = true)
+        awaitSelection(controller, "B")
+        gate.complete(Unit)
+        job.join()
+
+        val state = controller.state.value
+        assertEquals("B", state.selectedId)
+        assertEquals(listOf("B-message"), state.messages.map { it.text })
+        assertFalse(state.messages.any { it.text == "A prompt" })
+        assertNull(state.sendError)
+    }
+
+    @Test fun delayedSendFailureCannotOverwriteAnotherSelectedSession() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeSource(
+            listOf(session("A"), session("B")),
+            messages = mapOf("A" to "A-message", "B" to "B-message"),
+            sendGate = gate,
+            sendFailure = com.tanuki.web.DshApiException("session/agent-busy")
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        val job = launch { controller.send("A prompt") }
+        awaitState(controller) { it.sending }
+        controller.select("B", force = true)
+        awaitSelection(controller, "B")
+        gate.complete(Unit)
+        job.join()
+
+        val state = controller.state.value
+        assertEquals("B", state.selectedId)
+        assertEquals(listOf("B-message"), state.messages.map { it.text })
+        assertNull(state.sendError)
+        assertFalse(state.running)
+    }
+
+    @Test fun retryResendsLastUserPromptOnlyWhenIdle() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            messages = mapOf("A" to "上一条用户消息"),
+            sendGate = CompletableDeferred<Unit>().also { it.complete(Unit) }
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertTrue(controller.retryLastPrompt())
+        assertTrue(controller.state.value.messages.any { it.text == "上一条用户消息" })
+        assertTrue(controller.state.value.notice!!.contains("官方"))
+    }
+
     private fun controller(source: DshChatSource): DshNativeController =
         DshNativeController(source, CoroutineScope(Dispatchers.Unconfined))
 
@@ -234,7 +299,8 @@ class DshNativeControllerTest {
         private val failSessions: Boolean = false,
         messages: Map<String, String> = emptyMap(),
         private val liveEvents: List<DshLiveEvent> = emptyList(),
-        private val sendFailure: Throwable? = null
+        private val sendFailure: Throwable? = null,
+        private val sendGate: CompletableDeferred<Unit>? = null
     ) : DshChatSource {
         private val current = messages.toMutableMap()
 
@@ -259,8 +325,10 @@ class DshNativeControllerTest {
             )
         )
 
-        override suspend fun send(sessionId: String, text: String): Result<Unit> =
-            sendFailure?.let { Result.failure(it) } ?: Result.success(Unit)
+        override suspend fun send(sessionId: String, text: String): Result<Unit> {
+            sendGate?.await()
+            return sendFailure?.let { Result.failure(it) } ?: Result.success(Unit)
+        }
 
         override suspend fun cancel(sessionId: String): Result<Unit> = Result.success(Unit)
 

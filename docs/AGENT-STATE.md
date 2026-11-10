@@ -6,9 +6,10 @@
 
 - 基线 `origin/main=0555c3c`；交付分支 `ao/tanuki-native-ui/native-chat`（从 `ao/tanuki-native-ui/root` 建兄弟分支），功能提交 `9fdffd3`，合并 `main=533eff4` 后 head `600d6b5`，PR [#40](https://github.com/leezzou/tanuki/pull/40) base `main`；不合并、不发布、不触发 AO Review。
 - 官方协议：同一 `/connect?interactions=answer` API Peer；一元 `session/list|projections|page|prompt|cancel` 与 `$events/result`；实时 `/api/remote.mux` 的 `$events`（ready/waterfall/cancel/emit）与 `session/follow`（snapshot/event/assistant-stream）。不另造聊天协议。
-- 原生能力：发送（`session/prompt`，`mode=queue`）、停止（`session/cancel`）、切换会话、实时增量 `text-delta`、运行状态、错误提示、审批显示与“允许一次/拒绝/去官方处理”、提问只读+跳官方；附件/图片/模型选择/提问多选/自动重连未实现。
-- 安全与兼容：只连精确 loopback origin；WebSocket 握手校验/掩码/ping-pong；token/Cookie 不落日志/状态；关闭 mux 即丢弃失效 Cookie；列表失败回退官方，实时/单次失败只提示；通知目标会重连；远程 origin 复用同一 loopback 转发地址；安全模式与 WebView 路径未改。
-- 已验证（本轮）：目标协议/客户端/控制器/WebSocket 回归 51 项通过；合并最新 `main=533eff4` 后完整 `testModernDebugUnitTest` **581 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
+- 原生能力：发送/停止、切换会话、实时增量、运行状态、错误提示、审批单次允许/拒绝、提问只读+跳官方；输入栏（多行/草稿/附件/粘贴/拖入/@/斜杠命令）与 Markdown/代码块/基础表格/图片占位已接线；完整功能清单见 [原生界面功能对齐清单](NATIVE-PARITY.md)。模型/推理、工具卡、历史向前分页、会话管理、工作区、设置、技能/插件、自动重连仍未实现。
+- 安全与兼容：只连精确 loopback origin；WebSocket 握手校验/掩码/ping-pong；token/Cookie 不落日志/状态；取消实时收集立即关闭 socket；发送绑定发起会话代次；列表失败回退官方，实时/单次失败只提示；通知目标会重连；远程 origin 复用同一 loopback 转发地址；安全模式与 WebView 路径未改。
+- 组件契约：`DshTransport` 已冻结（connection/call/live/reset），输入/审批/会话管理共用；`DshNativeComposerRemote` 只转发 call/reset。P1 两条 Review 已修。
+- 已验证（本轮）：目标协议/客户端/控制器/WebSocket/Markdown/composer 回归 96 项通过；合并 `main=533eff4` 后完整 `testModernDebugUnitTest` **626 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
 - 详细端点、未实现项与设备验收清单见 [原生界面](NATIVE-UI.md)。
 
 ## 文件查看器格式支持扩展（android_agent-41，PR #34 已合并）

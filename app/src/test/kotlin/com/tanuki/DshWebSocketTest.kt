@@ -2,7 +2,11 @@ package com.tanuki
 
 import com.tanuki.web.DshWebSocketMuxSocket
 import com.tanuki.web.DshWsCodec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
@@ -16,6 +20,7 @@ import java.net.ServerSocket
 import java.net.SocketException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class DshWebSocketTest {
@@ -46,6 +51,78 @@ class DshWebSocketTest {
             socket.close()
         } finally {
             server.close()
+        }
+    }
+
+    @Test fun idleConnectionCancellationClosesSocketAndAllowsSecondConnection() = runBlocking {
+        val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
+        val origin = "http://127.0.0.1:${server.localPort}"
+        val firstHandshake = CountDownLatch(1)
+        val secondHandshake = CountDownLatch(1)
+        val connectionIndex = AtomicInteger()
+        val failure = AtomicReference<Throwable?>(null)
+        val serverThread = Thread {
+            try {
+                while (!server.isClosed) {
+                    val accepted = server.accept()
+                    Thread {
+                        try {
+                            accepted.use { socket ->
+                                socket.soTimeout = 3_000
+                                val input = socket.getInputStream()
+                                val output = socket.getOutputStream()
+                                var key: String? = null
+                                while (true) {
+                                    val line = readLine(input) ?: break
+                                    if (line.isEmpty()) break
+                                    val separator = line.indexOf(':')
+                                    if (separator > 0 && line.substring(0, separator).trim().equals("Sec-WebSocket-Key", true)) {
+                                        key = line.substring(separator + 1).trim()
+                                    }
+                                }
+                                val accept = DshWsCodec.expectedAccept(key ?: "")
+                                output.write(
+                                    ("HTTP/1.1 101 Switching Protocols\r\n" +
+                                        "Upgrade: websocket\r\n" +
+                                        "Connection: Upgrade\r\n" +
+                                        "Sec-WebSocket-Accept: $accept\r\n\r\n").toByteArray(Charsets.US_ASCII)
+                                )
+                                output.flush()
+                                if (connectionIndex.getAndIncrement() == 0) firstHandshake.countDown()
+                                else secondHandshake.countDown()
+                                // 保持空闲 5 秒；客户端取消若不能立即 close，测试会在 2 秒超时。
+                                Thread.sleep(5_000)
+                            }
+                        } catch (_: SocketException) {
+                            // 客户端关闭/测试收尾属正常。
+                        } catch (error: Throwable) {
+                            failure.compareAndSet(null, error)
+                        }
+                    }.apply { isDaemon = true; start() }
+                }
+            } catch (_: SocketException) {
+                // 关闭监听属正常收尾。
+            } catch (error: Throwable) {
+                failure.compareAndSet(null, error)
+            }
+        }.apply { isDaemon = true; start() }
+        try {
+            val first = DshWebSocketMuxSocket()
+            first.connect(origin, "dsh-session=abc")
+            val collector = launch(Dispatchers.Default) { first.incoming().collect { } }
+            assertTrue(firstHandshake.await(2, TimeUnit.SECONDS))
+            delay(50)
+            withTimeout(2_000) { collector.cancelAndJoin() }
+            first.close()
+
+            val second = DshWebSocketMuxSocket()
+            second.connect(origin, "dsh-session=def")
+            assertTrue("第二连接未建立", secondHandshake.await(2, TimeUnit.SECONDS))
+            second.close()
+        } finally {
+            server.close()
+            serverThread.join(2_000)
+            failure.get()?.let { throw AssertionError("空闲 WebSocket 合成服务器异常", it) }
         }
     }
 

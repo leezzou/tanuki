@@ -10,7 +10,7 @@
 - 实时流：`/api/remote.mux` WebSocket，逻辑流用 `open/item/end/cancel` 文本帧。
 - 审批/提问：Agent-scoped waterfall，经 `$events` 转发，用 `$events/result` 回答。
 
-本切片已实现：会话列表、历史文本、发送、停止、实时增量文本、运行状态、错误提示、审批显示与“允许一次/拒绝”，以及提问的只读展示 + 跳官方处理。附件、模型选择、提问多选回答、自动重连仍未实现。
+第一批已实现：会话列表/切换/运行状态、历史读取、发送与停止、实时增量文本、运行状态、错误提示、审批展示与“允许一次/拒绝”、提问只读+跳官方，以及输入栏（多行/草稿/附件/粘贴/拖入/@ 引用/斜杠命令）和 Markdown/代码块/基础表格/图片占位渲染。完整功能清单与缺口见 [原生界面功能对齐清单](NATIVE-PARITY.md)。
 
 ## 2. 认证与传输
 
@@ -34,11 +34,11 @@
 | `session/list` | 读取可见会话摘要；标题在 `projections.values.title`，事件切点在 `projections.asOfSeq` | 使用 |
 | `session/projections` | 读取单会话 `kind=sequenced` 的 `asOfSeq` | 使用；作为 `session/page` 的 `throughSeq` |
 | `session/page` | 读取一段历史事件 | 使用；文本、`maxMessages=120` |
-| `session/prompt` | 发送提示词；要求 `requestId/sessionId/mode/content` | 使用；`mode=queue`，只发文本 |
+| `session/prompt` | 发送提示词；要求 `requestId/sessionId/mode/content` | 使用；输入组件发送文本/图片/文件 receipt，`mode=queue` |
 | `session/cancel` | 取消当前活动回合，不清空待处理队列 | 使用 |
 | `$events` | 转发 Agent 事件与审批 waterfall | 使用；ready/waterfall/cancel/emit |
 | `$events/result` | 回答指定 `eventId` 的 waterfall | 使用；审批回 `allowed-once`/`rejected` |
-| `session/follow` | 从开局或恢复游标跟随会话日志 | 使用；`assistantStream=true` |
+| `session/follow` | 从开局或恢复游标跟随会话日志 | 使用；`assistantStream=true`；取消收集立即关闭底层 socket |
 | `session/control` | Host 全局实时状态 | 未使用；会话状态已由 `session/list` 与 `$events` 覆盖 |
 | `session/create` / `rename` / `selectModel` / `updateQueue` | 会话管理 | 未使用 |
 | `session/attachment` | 附件读取 | 未使用 |
@@ -60,6 +60,24 @@
 - 只有用户点击才发送裁决；连接断开、事件被 `cancel` 或页面切回官方时，原生不会自动允许/拒绝。
 - 同一审批若官方 WebView 也在线，两边都会收到；原生回答后官方应收到 `cancel`，官方回答后原生卡片也会移除。页面切回官方会关闭原生 mux，未决事项交给官方页面。
 
+### 3.3 组件 transport 契约
+
+输入、审批与后续会话管理组件共用一个最小 transport，不各自拼 HTTP/WS：
+
+```kotlin
+interface DshTransport {
+    val connection: StateFlow<DshConnectionState> // DISCONNECTED/CONNECTING/CONNECTED/FAILED
+    suspend fun call(method: String, args: JSONObject): Any? // 官方 result.value；业务错误 DshApiException
+    fun live(sessionId: String): Flow<DshLiveEvent>
+    fun reset()
+}
+```
+
+- 认证/Cookie/URL/超时/脱敏都在 `DshNativeClient` 内；消费方只传 method 与 args。
+- 输入栏通过 `DshNativeComposerRemote` 适配 `DshComposerRemote`（call/reset 两项转发），复用同一 transport。
+- `live` 取消时主动关闭 socket，避免阻塞 `InputStream.read()` 继续持有 mux 锁；切换会话可立即建立下一连接。
+- 该签名冻结后只做加法；需要变更先回报编排器。
+
 ## 4. 应用内实现
 
 | 文件 | 作用 |
@@ -69,6 +87,9 @@
 | `app/src/main/kotlin/com/tanuki/web/DshMuxProtocol.kt` | mux 帧、`$events`、`session/follow`、文本/审批解析与流式聚合 |
 | `app/src/main/kotlin/com/tanuki/web/DshWebSocket.kt` | 最小 RFC6455 客户端（握手、掩码、分片、ping/pong、close） |
 | `app/src/main/kotlin/com/tanuki/web/DshLive.kt` | 实时事件模型与 `DshChatSource` 接口 |
+| `app/src/main/kotlin/com/tanuki/web/DshTransport.kt` | 冻结的组件 transport 契约与 composer 适配器 |
+| `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | Markdown/代码块/基础表格/图片占位解析与 Compose 渲染 |
+| `app/src/main/kotlin/com/tanuki/ui/DshComposer*.kt` | 输入栏、附件、草稿、@/斜杠命令组件（由输入切片提供，本 PR 接线） |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 原生页状态机：选择、发送占位、停止、实时快照、审批、错误与回退 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 原生 Compose 页：会话条、消息/流式气泡、审批卡、输入栏、停止按钮 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置开关、原生/官方切换、回退提示与“重试” |
@@ -96,6 +117,8 @@
 - WebSocket 只连当前精确 loopback origin，不发送 `Origin`；客户端帧强制掩码，服务端帧必须未掩码；拒绝二进制帧、扩展位与超 2 MiB 消息。
 - 业务错误只显示短错误码；其他异常经 `Redact.text` 截断；`DshEndpoint.toString()` 显式脱敏 launch URL，避免误日志带出 token。
 - 审批只展示工具名与原因，不读取/记录工具参数；只有用户显式点击才回答。提问不回传答案，跳官方处理。
+- 实时收集取消时立即关闭底层 socket；发送结果绑定发起时的 generation/session，切换会话后旧响应不得刷新或修改新会话。
+- Markdown 不执行 HTML、不自动加载远程图片/打开链接；图片显示占位并提示去官方查看，避免绕过 DSH 会话授权。
 - 不新增 JavaScript Bridge、不扩大 WebView origin、不把 API Cookie 交给网页脚本；原生页不持有 WebView。
 - 不自动切换 DSH `danger-full-access`，不关闭审批/TLS/哈希校验。
 
@@ -104,12 +127,12 @@
 本轮新跑：
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL。
-- 目标回归：`DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest` 全部通过（见 [测试报告](TEST-REPORT.md)）。
-- 完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug`：BUILD SUCCESSFUL；合并最新 `main=533eff4` 后 581 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 94 warnings / 1 hint。
-- 新增覆盖：mux 帧合法性/请求体、`$events` ready/waterfall/cancel/status、审批字段与不泄露参数、`session/follow` 快照过滤与流式 text-delta、WebSocket 握手/掩码、发送/取消/审批 HTTP 路径、控制器发送占位/失败/停止/实时/审批/回退。
-- 未在真实 Android 设备/PRoot DSH 上验证：`/connect` Cookie、WebSocket Upgrade、真实 `$events`/`session/follow` 帧、审批 waterfall 的实际到达与回答、发送/停止的设备交互、通知点击、远程主机隧道、安全模式 rescue、暗色/长文本/大字体/输入法。
+- 目标回归：`DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest`、`DshWebSocketTest`、`DshMarkdownTest`、`DshComposer*` 全部通过。
+- 完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug`：以最终轮实际输出为准，结果写入 [测试报告](TEST-REPORT.md)。
+- 新增覆盖：mux/事件/审批/流式解析、发送/取消/审批 HTTP 路径、真实 loopback 握手/掩码/ping-pong、空闲连接取消后第二连接、发送期间 A→B 切换、Markdown 块/行内/表格/代码围栏、composer 客户端/控制器协议。
+- 未在真实 Android 设备/PRoot DSH 上验证：`/connect` Cookie、WebSocket Upgrade、真实 `$events`/`session/follow`/审批 waterfall、输入法/附件选择/上传、Markdown 长文档/表格宽度、通知点击、远程隧道、安全模式 rescue、暗色/大字体。
 - 未运行 assemble、Android 仪器测试、真机与发布流程；编译、JVM 与 lint 不能替代设备验收。
-- 未实现：附件、图片、模型选择、会话创建/重命名、提问多选回答、自动重连/心跳超时策略、后台保活、`session/control` 全局状态。
+- 未实现项见 [原生界面功能对齐清单](NATIVE-PARITY.md)，包括会话管理、模型/推理、工具卡、thinking、用量、工作区、设置、技能/插件、自动重连等。
 
 ## 7. 后续
 
