@@ -58,6 +58,7 @@ import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshTimelineItem
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -79,7 +80,9 @@ fun DshNativePage(
     onApprovalRetry: () -> Unit = {},
     onClearRemembered: () -> Unit = {},
     onForgetRemembered: (DshRememberedChoice) -> Unit = {},
-    onDismissNotice: () -> Unit = {}
+    onDismissNotice: () -> Unit = {},
+    /** 输入栏 transport 边界的发送记录；有它时不依赖重组是否看到 sending 中间帧。 */
+    composerSendEvents: Flow<DshComposerSendEvent>? = null
 ) {
     val state by controller.state.collectAsState()
     val composerState by composer.state.collectAsState()
@@ -88,16 +91,46 @@ fun DshNativePage(
     var composerFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
     var composerPendingText by remember { mutableStateOf("") }
     var showApprovalSheet by rememberSaveable { mutableStateOf(false) }
-    // 输入栏的真实发送链路在 composer；这里只观察其公开状态，失败时保留本次提交原文。
-    LaunchedEffect(composerState.sending, composerState.error) {
-        if (composerState.sending) {
-            composerPendingText = composerState.text
-            composerFailure = null
+    // 直接收集 composer 状态（不经过重组），并在没有 recorder 时用它作为兜底。
+    LaunchedEffect(composer, composerSendEvents) {
+        var wasSending = false
+        composer.state.collect { current ->
+            if (current.sending) {
+                if (composerPendingText.isBlank()) composerPendingText = current.text
+            } else {
+                composerPendingText = ""
+                if (wasSending && current.error == null) composerFailure = null
+            }
+            if (composerSendEvents == null) {
+                sendTracker.observe(
+                    current.sending,
+                    current.text,
+                    current.error,
+                    current.attachments.size
+                )?.let { composerFailure = it }
+            }
+            wasSending = current.sending
         }
-        sendTracker.observe(composerState.sending, composerState.text, composerState.error)?.let {
-            composerFailure = it
+    }
+    LaunchedEffect(composerSendEvents) {
+        composerSendEvents?.collect { event ->
+            when (event) {
+                is DshComposerSendEvent.Started -> composerPendingText = event.text
+                is DshComposerSendEvent.Succeeded -> {
+                    composerPendingText = ""
+                    composerFailure = null
+                }
+                is DshComposerSendEvent.Failed -> {
+                    composerPendingText = ""
+                    composerFailure = DshFailedPrompt(
+                        text = event.text,
+                        reason = event.error,
+                        time = event.time,
+                        attachmentCount = event.attachmentCount
+                    )
+                }
+            }
         }
-        if (!composerState.sending) composerPendingText = ""
     }
     LaunchedEffect(state.selectedId) {
         composerFailure = null
@@ -148,7 +181,20 @@ fun DshNativePage(
                 composerFailure = composerFailure,
                 composerPendingText = composerPendingText,
                 composerSending = composerState.sending,
-                onRetryComposer = { composer.send() },
+                composerRetryEnabled = composerFailure?.let {
+                    DshComposerDraftPolicy.matches(it, composerState.text, composerState.attachments.size)
+                } == true,
+                composerRetryHint = composerFailure?.let {
+                    DshComposerDraftPolicy.retryHint(it, composerState.text, composerState.attachments.size)
+                },
+                onRetryComposer = {
+                    val failed = composerFailure
+                    if (failed != null &&
+                        DshComposerDraftPolicy.matches(failed, composerState.text, composerState.attachments.size)
+                    ) {
+                        composer.send()
+                    }
+                },
                 onFillComposer = { text -> composer.updateText(text) }
             )
             if (state.loading && state.messages.isEmpty()) {
@@ -223,6 +269,8 @@ private fun MessageList(
     composerFailure: DshFailedPrompt?,
     composerPendingText: String,
     composerSending: Boolean,
+    composerRetryEnabled: Boolean,
+    composerRetryHint: String?,
     onRetryComposer: () -> Unit,
     onFillComposer: (String) -> Unit
 ) {
@@ -313,6 +361,8 @@ private fun MessageList(
                     FailedPromptCard(
                         failed = failed,
                         sending = if (failureFromComposer) composerSending else state.sending,
+                        retryEnabled = !failureFromComposer || composerRetryEnabled,
+                        retryHint = if (failureFromComposer) composerRetryHint else null,
                         onRetry = if (failureFromComposer) onRetryComposer else onRetryFailed,
                         onFill = {
                             if (failureFromComposer) onFillComposer(failed.text) else onFillFailed(failed.text)
@@ -489,6 +539,8 @@ private fun StreamingCard(text: String) {
 private fun FailedPromptCard(
     failed: DshFailedPrompt,
     sending: Boolean,
+    retryEnabled: Boolean = true,
+    retryHint: String? = null,
     onRetry: () -> Unit,
     onFill: () -> Unit
 ) {
@@ -513,11 +565,14 @@ private fun FailedPromptCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(error.hint, style = MaterialTheme.typography.labelSmall)
+            retryHint?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
             SelectionContainer {
                 Text(error.detail, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onRetry, enabled = !sending) { Text("重试") }
+                TextButton(onClick = onRetry, enabled = !sending && retryEnabled) { Text("重试") }
                 TextButton(onClick = onFill, enabled = !sending && failed.text.isNotBlank()) { Text("填入输入框") }
                 TextButton(
                     onClick = { clipboard.setText(AnnotatedString(failed.text)) },

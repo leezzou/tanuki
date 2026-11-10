@@ -118,7 +118,7 @@
 - 发送状态：发送中显示占位气泡与进度圈；失败保留原文、可读原因、“重试/填入输入框/复制内容”；错误 banner 提供中文提示与“复制错误”，不隐藏原始短错误码。
 - 审批入口：使用 53 的 `DshApprovalEntryBar` 固定在消息区上方，点击打开 `DshApprovalSheet` 底部抽屉逐条处理；自动滚到底部不影响入口条可见。
 - 发送状态：观察输入栏真实 `DshComposerController` 的 sending/error 变化，发送中显示占位，失败保留本次提交原文并提供重试/回填/复制；不再只依赖控制器内部的发送路径。
-- 评审修复：图片采样只按原始宽高除以 2 的幂采样（8192→4、32768→16）；新流空串重置在帧合并中保留；补图片采样、审批停靠条、composer 失败跟踪与跨 start 流式回归。
+- 评审修复：图片采样只按原始宽高除以 2 的幂采样（8192→4、32768→16）；新流空串重置在帧合并中保留；发送记录改到 transport 边界；重试绑定失败提交，草稿变化/含附件时禁用。补图片采样、快慢失败、重试边界与跨 start 流式回归。
 - 未验证：真实设备上的链接点击、文本选择与链接手势冲突、图片解码内存、长代码/表格滚动、深色/大字体、低端机帧率；审批停靠条与 composer 失败卡片的设备界面未验。
 
 ### 53 本轮组件与接线 hook（DshNativePage/MainActivity 由集成方接线）
@@ -215,8 +215,8 @@
 46 渲染质量切片（2026-11-10，基线 `origin/main=4f2a3717`，非设备）新跑：
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
-- 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 15 项、`DshNativeControllerTest` 22 项：52 tests / 0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**861 tests / 93 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。
+- 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 17 项、`DshNativeControllerTest` 22 项：54 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**863 tests / 93 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。
 - 覆盖：窗口/底部判定、流式累计/增量/去重/重置、链接协议拒绝、图片/附件分类、错误分类、代码/表格上限、Markdown 块与行内语法、控制器按帧合并/committed 取消/失败重试。
 - 未执行：真实 Android 设备、PRoot DSH、仪器测试、assemble；JVM 与 lint 不能替代设备验收。
 

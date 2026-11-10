@@ -1,5 +1,11 @@
 package com.tanuki.ui
 
+import com.tanuki.runtime.Redact
+import com.tanuki.web.DshComposerRemote
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import org.json.JSONObject
 import java.util.Locale
 
 /**
@@ -144,22 +150,33 @@ object DshImageSampling {
 class DshComposerSendTracker {
     private var sending = false
     private var submittedText = ""
+    private var submittedAttachments = 0
     private var submittedAt = 0L
 
-    fun observe(sendingNow: Boolean, text: String, error: String?): DshFailedPrompt? {
+    fun observe(
+        sendingNow: Boolean,
+        text: String,
+        error: String?,
+        attachmentCount: Int = 0
+    ): DshFailedPrompt? {
         if (!sending && sendingNow) {
             sending = true
             submittedText = text
+            submittedAttachments = attachmentCount
             submittedAt = System.currentTimeMillis()
             return null
         }
         if (sending && !sendingNow) {
             sending = false
             val payload = submittedText
+            val attachments = submittedAttachments
             val time = submittedAt
             submittedText = ""
+            submittedAttachments = 0
             submittedAt = 0L
-            if (!error.isNullOrBlank()) return DshFailedPrompt(payload, error, time)
+            if (!error.isNullOrBlank()) {
+                return DshFailedPrompt(payload, error, time, attachments)
+            }
         }
         return null
     }
@@ -167,6 +184,7 @@ class DshComposerSendTracker {
     fun reset() {
         sending = false
         submittedText = ""
+        submittedAttachments = 0
         submittedAt = 0L
     }
 }
@@ -382,5 +400,113 @@ object DshTablePolicy {
             truncatedRows = table.rows.size > safeRows,
             truncatedColumns = columns > shownColumns
         )
+    }
+}
+
+/** 输入栏发送记录：在 transport 边界产生，不依赖 Compose 是否看到 sending 的中间帧。 */
+sealed interface DshComposerSendEvent {
+    val text: String
+    val attachmentCount: Int
+
+    data class Started(
+        override val text: String,
+        override val attachmentCount: Int
+    ) : DshComposerSendEvent
+
+    data class Succeeded(override val text: String) : DshComposerSendEvent {
+        override val attachmentCount: Int get() = 0
+    }
+
+    data class Failed(
+        override val text: String,
+        val error: String,
+        override val attachmentCount: Int,
+        val time: Long = System.currentTimeMillis()
+    ) : DshComposerSendEvent
+}
+
+/**
+ * 包装官方 composer remote，在真正提交/返回的边界记录原文和附件数量。
+ *
+ * 这样即使服务地址未就绪、连接立即拒绝，页面也能拿到失败提交；不要求 UI 先观察
+ * `sending=true`。记录器只旁路记录，不改变请求/响应、错误传播或附件语义。
+ */
+class DshComposerSendRecorder(
+    private val delegate: DshComposerRemote
+) : DshComposerRemote {
+    private val mutableEvents = MutableSharedFlow<DshComposerSendEvent>(extraBufferCapacity = 16)
+    val events: SharedFlow<DshComposerSendEvent> = mutableEvents.asSharedFlow()
+
+    override suspend fun call(method: String, args: JSONObject): Any? {
+        if (method != PROMPT_METHOD && method != COMMAND_METHOD) return delegate.call(method, args)
+        val text = submittedText(method, args)
+        val attachments = submittedAttachmentCount(method, args)
+        mutableEvents.tryEmit(DshComposerSendEvent.Started(text, attachments))
+        return try {
+            val value = delegate.call(method, args)
+            mutableEvents.tryEmit(DshComposerSendEvent.Succeeded(text))
+            value
+        } catch (error: Throwable) {
+            mutableEvents.tryEmit(
+                DshComposerSendEvent.Failed(
+                    text = text,
+                    error = Redact.text(error.message ?: "发送失败").take(240),
+                    attachmentCount = attachments
+                )
+            )
+            throw error
+        }
+    }
+
+    override fun reset() {
+        delegate.reset()
+    }
+
+    private fun submittedText(method: String, args: JSONObject): String {
+        if (method == COMMAND_METHOD) return args.optString("line")
+        val content = args.optJSONObject("request")?.optJSONArray("content") ?: return ""
+        val parts = ArrayList<String>()
+        for (index in 0 until content.length()) {
+            val part = content.optJSONObject(index) ?: continue
+            if (part.optString("type") != "text") continue
+            val value = part.optString("text")
+            if (value.isNotBlank()) parts += value
+        }
+        return parts.joinToString("\n")
+    }
+
+    private fun submittedAttachmentCount(method: String, args: JSONObject): Int {
+        if (method == COMMAND_METHOD) return args.optJSONArray("submittedAttachments")?.length() ?: 0
+        val content = args.optJSONObject("request")?.optJSONArray("content") ?: return 0
+        var count = 0
+        for (index in 0 until content.length()) {
+            val part = content.optJSONObject(index) ?: continue
+            if (part.optString("type") != "text") count++
+        }
+        return count
+    }
+
+    private companion object {
+        const val PROMPT_METHOD = "session/prompt"
+        const val COMMAND_METHOD = "commands/execute"
+    }
+}
+
+/**
+ * 失败卡片的重试边界：只有当前草稿与失败提交完全一致且没有附件快照时才允许直接重试。
+ * 原生输入栏没有“按快照重发附件”的公开接口，因此含附件或已编辑的草稿必须显式回填/重新添加。
+ */
+object DshComposerDraftPolicy {
+    fun matches(failure: DshFailedPrompt, text: String, attachmentCount: Int): Boolean =
+        failure.attachmentCount == 0 && attachmentCount == 0 &&
+            failure.text.isNotBlank() && failure.text == text
+
+    fun retryHint(failure: DshFailedPrompt, text: String, attachmentCount: Int): String? = when {
+        failure.attachmentCount > 0 || attachmentCount > 0 ->
+            "失败消息包含附件；原生输入栏暂不支持按快照重发附件，请复制内容并重新添加附件。"
+        text != failure.text ->
+            "当前草稿已修改；请先回填失败内容，或复制后重新发送。"
+        failure.text.isBlank() -> "失败消息没有可重发的文本，请重新编辑后发送。"
+        else -> null
     }
 }

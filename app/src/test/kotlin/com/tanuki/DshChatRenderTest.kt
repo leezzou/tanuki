@@ -4,7 +4,11 @@ import com.tanuki.ui.DshAttachmentPolicy
 import com.tanuki.ui.DshComposerController
 import com.tanuki.ui.MemoryDshDraftStore
 import com.tanuki.ui.DshChatRenderPolicy
+import com.tanuki.ui.DshComposerDraftPolicy
+import com.tanuki.ui.DshComposerSendEvent
+import com.tanuki.ui.DshComposerSendRecorder
 import com.tanuki.ui.DshComposerSendTracker
+import com.tanuki.ui.DshFailedPrompt
 import com.tanuki.ui.DshErrorKind
 import com.tanuki.ui.DshErrorPresenter
 import com.tanuki.ui.DshImageKind
@@ -20,6 +24,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -128,16 +134,18 @@ class DshChatRenderTest {
                 else -> null
             }
         }
+        val recorder = DshComposerSendRecorder(remote)
         val controller = DshComposerController(
-            client = DshComposerClient(remote),
+            client = DshComposerClient(recorder),
             drafts = MemoryDshDraftStore(),
             scope = CoroutineScope(Dispatchers.Unconfined)
         )
-        val tracker = DshComposerSendTracker()
-        var failure: com.tanuki.ui.DshFailedPrompt? = null
+        var failure: DshFailedPrompt? = null
         val collector = launch(Dispatchers.Unconfined) {
-            controller.state.collect { state ->
-                tracker.observe(state.sending, state.text, state.error)?.let { failure = it }
+            recorder.events.collect { event ->
+                if (event is DshComposerSendEvent.Failed) {
+                    failure = DshFailedPrompt(event.text, event.error, event.time, event.attachmentCount)
+                }
             }
         }
         controller.setSession("session-A")
@@ -151,6 +159,47 @@ class DshChatRenderTest {
         assertTrue(failure!!.reason.contains("网络"))
         collector.cancel()
         controller.close()
+    }
+
+    @Test fun sendRecorderCapturesFastFailureWithoutUiFrames() = runBlocking {
+        val remote = object : DshComposerRemote {
+            override suspend fun call(method: String, args: JSONObject): Any? =
+                throw java.io.IOException("连接立即失败")
+        }
+        val recorder = DshComposerSendRecorder(remote)
+        val events = ArrayList<DshComposerSendEvent>()
+        val collector = launch(Dispatchers.Unconfined) {
+            recorder.events.take(2).toList(events)
+        }
+        val args = JSONObject().put(
+            "request",
+            JSONObject().put(
+                "content",
+                JSONArray()
+                    .put(JSONObject().put("type", "text").put("text", "失败原文"))
+                    .put(JSONObject().put("type", "file").put("receiptId", "r-1"))
+            )
+        )
+        runCatching { recorder.call("session/prompt", args) }
+        withTimeout(2_000) { collector.join() }
+        assertEquals(2, events.size)
+        assertTrue(events[0] is DshComposerSendEvent.Started)
+        val failed = events[1] as DshComposerSendEvent.Failed
+        assertEquals("失败原文", failed.text)
+        assertEquals(1, failed.attachmentCount)
+        assertTrue(failed.error.contains("连接"))
+    }
+
+    @Test fun retryPolicyRequiresUnchangedTextOnlyDraft() {
+        val failure = DshFailedPrompt("失败原文", "网络连接中断", 1L)
+        assertTrue(DshComposerDraftPolicy.matches(failure, "失败原文", 0))
+        assertFalse(DshComposerDraftPolicy.matches(failure, "改成别的", 0))
+        assertFalse(DshComposerDraftPolicy.matches(failure, "失败原文", 1))
+        assertTrue(DshComposerDraftPolicy.retryHint(failure, "改成别的", 0)!!.contains("已修改"))
+        assertTrue(DshComposerDraftPolicy.retryHint(failure, "失败原文", 1)!!.contains("附件"))
+        val attachmentFailure = DshFailedPrompt("失败原文", "网络连接中断", 1L, attachmentCount = 1)
+        assertFalse(DshComposerDraftPolicy.matches(attachmentFailure, "失败原文", 0))
+        assertTrue(DshComposerDraftPolicy.retryHint(attachmentFailure, "失败原文", 0)!!.contains("附件"))
     }
 
     @Test fun composerSendTrackerConnectsRealInputBarFailures() {

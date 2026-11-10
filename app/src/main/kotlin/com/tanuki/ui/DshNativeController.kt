@@ -55,7 +55,9 @@ data class DshNativeState(
 data class DshFailedPrompt(
     val text: String,
     val reason: String,
-    val time: Long
+    val time: Long,
+    /** 本次失败提交携带的附件数量；非 0 时不能直接按当前草稿重试。 */
+    val attachmentCount: Int = 0
 )
 
 /**

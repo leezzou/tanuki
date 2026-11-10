@@ -22,6 +22,10 @@
   - `DshNativeController` 改用 `DshToolMerge.merge`，删除私有 `mergeTools`；新增 startedAt/finishedAt 保留回归。
   - `DshNativePage` 改用 `DshApprovalEntryBar` + `DshApprovalSheet`，入口条固定在消息区上方，点击打开底部抽屉；消息流不再直接挂 `DshApprovalPanel`。`MainActivity` 传入 `onForgetRemembered`/`onDismissNotice`。
   - 未接线 `DshPlanCard`/`DshPlanParser`；计划审阅仍待后续集成。
+- 复审修复（PR #51 新 thread，2026-11-10）：
+  - 重试不再调用无参 `composer.send()` 直接发当前草稿：`DshComposerDraftPolicy` 仅在失败原文未改且失败/当前附件数都为 0 时允许直接重试；已编辑或含附件时禁用并提示回填/重新添加。
+  - 失败记录改到 `DshComposerSendRecorder`（包裹 composer remote），在 `session/prompt`/`commands/execute` 提交/返回边界产生 Started/Succeeded/Failed 事件；`MainActivity` 注入，页面直接收集，不依赖重组是否看到 sending 中间帧。
+  - 新增“快速失败无 UI 帧”“失败 A→编辑 B 不可重试”“含附件不可直接重试”回归。
 - 评审修复（PR #51，2026-11-10）：
   - [P1] 图片采样改为只对原始宽高除以 2 的幂采样，8192×8192→sample 4、32768×32768→sample 16，并补 `DshImageSampling` 边界回归，避免突破 2048 上限。
   - [P2] 待审批时在消息区上方固定审批停靠条（条数/最近工具/查看审批）；点击回到顶部审批面板并暂停自动跟随，长历史初始或新到审批不再被滚出屏幕。
@@ -35,7 +39,7 @@
   - 链接：`http/https/mailto/tel` 点击先确认再调起系统应用；`javascript/data/intent/file/content` 拒绝并显示中文原因；附件/相对路径提示需要工作区授权。
   - 图片/附件：图片占位卡片、中文原因、点击查看；本地/内嵌图片按尺寸采样解码，失败显示“图片加载失败：文件不可读、已损坏或格式不支持”；远程与会话授权图片仍不自动联网。独立附件链接显示占位卡片，可查看/复制地址。
   - 发送状态：发送中占位气泡 + 进度圈；失败保留原文与可读原因，提供“重试/填入输入框/复制内容”；错误 banner 显示中文分类、原始短错误并支持“复制错误”；整条消息可复制。
-- 已验证：评审修复 + #47 接线后定向 52 tests（Markdown 15 + 渲染 15 + 控制器 22）；完整 JVM **861 tests / 93 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**；`check-native-parity.py` 通过。详见下方验证记录。
+- 已验证：评审修复 + #47 接线后定向 54 tests（Markdown 15 + 渲染 17 + 控制器 22）；完整 JVM **863 tests / 93 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**；`check-native-parity.py` 通过。详见下方验证记录。
 - 待验证：真实 Android 设备/模拟器上的流式帧率、链接与文本选择手势冲突、图片解码内存、长代码/表格横向滚动、深色/大字体、输入法、审批停靠条与 composer 失败卡片；PRoot DSH 实时流；仪器、assemble。
 - 关键事实与定位：`DshChatRender.kt` 纯策略；`DshMarkdown.kt` 解析与渲染；`DshNativeController.kt` 流式/失败状态；`DshNativePage.kt` 窗口/跟随/卡片；见 [NATIVE-UI](../NATIVE-UI.md) 第 46 节。
 
@@ -45,7 +49,7 @@
 |---|---|
 | `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 新增纯策略：消息窗口、底部判定/跟随、流式合并/重置帧、图片采样、审批停靠条、composer 失败跟踪、链接/图片/附件分类、错误可读化、代码行号、表格上限。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 解析器支持嵌套/任务列表、表格对齐与转义、附件块、块上限；渲染器支持代码行号/不换行、链接确认、图片/附件占位与查看器、本地图片有界解码。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 窗口化消息与“显示更早”、底部跟随/“↓ 最新”、`DshApprovalEntryBar`/`DshApprovalSheet` 接线、composer 发送中/失败卡片、错误复制、消息复制、附件/图片入口。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 窗口化消息与“显示更早”、底部跟随/“↓ 最新”、`DshApprovalEntryBar`/`DshApprovalSheet` 接线、composer 发送中/失败卡片、失败提交绑定重试、错误复制、消息复制、附件/图片入口。 |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 传入审批抽屉 `onForgetRemembered`/`onDismissNotice`；不改变服务与聊天协议。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalSheet.kt` 等 #47 组件 | 随 PR #47 合并引入，未在本次提交重写；51 只做页面接线。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 新增 `DshFailedPrompt` 与 `failedPrompt` 状态、流式按帧合并/取消、失败重试与切会话清理；改用 `DshToolMerge.merge`。 |
@@ -64,8 +68,8 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL | 本 worktree、JDK17、Android SDK；仅既有/剪贴板弃用告警。 |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshMarkdownTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest'` | BUILD SUCCESSFUL；15 + 15 + 22 = 52 tests / 0 failures / 0 errors / 0 skipped | 纯 JVM；`DshNativeControllerTest` 使用 `Dispatchers.Unconfined` 与合成 source，不连真实 DSH。 |
-| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（4m16s）；**861 tests / 93 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint** | 同步 #47 合并后的 main 后新跑；lint 仅存量告警，不改产品安全策略。 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshMarkdownTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest'` | BUILD SUCCESSFUL；15 + 17 + 22 = 54 tests / 0 failures / 0 errors / 0 skipped | 纯 JVM；`DshNativeControllerTest` 使用 `Dispatchers.Unconfined` 与合成 source，不连真实 DSH。 |
+| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（3m41s）；**863 tests / 93 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint** | 同步 #47 合并后的 main 后新跑；lint 仅存量告警，不改产品安全策略。 |
 | `python3 scripts/check-native-parity.py` | PASS：166 行、14 功能域、ID/状态/验收/路径检查通过 | 文档结构检查，不证明设备行为。 |
 | 设备/仪器/assemble | 未执行 | JVM/lint 不能替代 Android 设备验收；本轮未安装/启动 App。 |
 
