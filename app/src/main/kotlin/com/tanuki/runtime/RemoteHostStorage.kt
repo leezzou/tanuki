@@ -141,6 +141,31 @@ class RemoteHostStorage(
         val user = config.getString(KEY_USER) ?: return null
         val auth = runCatching { RemoteAuthType.valueOf(config.getString(KEY_AUTH).orEmpty()) }
             .getOrDefault(RemoteAuthType.PRIVATE_KEY)
+        val mode = config.getString(KEY_MODE) ?: MODE_DIRECT
+        val relay = if (mode == MODE_RELAY) {
+            val relayHost = config.getString(KEY_RELAY_HOST)
+                ?: throw IllegalStateException("中继配对信息不完整；请清除远程主机配置后重新配对")
+            val relayPort = config.getString(KEY_RELAY_PORT)?.toIntOrNull()
+                ?: throw IllegalStateException("中继配对信息不完整；请清除远程主机配置后重新配对")
+            val room = config.getString(KEY_RELAY_ROOM)
+                ?: throw IllegalStateException("中继配对信息不完整；请清除远程主机配置后重新配对")
+            val hostId = config.getString(KEY_RELAY_HOST_ID)
+                ?: throw IllegalStateException("中继配对信息不完整；请清除远程主机配置后重新配对")
+            val relayToken = runCatching { vault.get(SECRET_RELAY_TOKEN) }.getOrNull()
+                ?: throw IllegalStateException("中继配对密钥无法解密；请重新配对")
+            RemoteRelayPairing(
+                relayHost = relayHost,
+                relayPort = relayPort,
+                roomId = room,
+                token = relayToken,
+                hostId = hostId,
+                certPin = config.getString(KEY_RELAY_PIN).orEmpty()
+            ).also { pairing ->
+                pairing.validationError()?.let { throw IllegalStateException("中继配对信息无效：$it") }
+            }
+        } else {
+            null
+        }
         return RemoteHostConfig(
             host = host,
             sshPort = config.getString(KEY_SSH_PORT)?.toIntOrNull() ?: 22,
@@ -150,12 +175,13 @@ class RemoteHostStorage(
             privateKey = runCatching { vault.get(SECRET_PRIVATE_KEY) }.getOrNull().orEmpty(),
             passphrase = runCatching { vault.get(SECRET_PASSPHRASE) }.getOrNull().orEmpty(),
             remoteDshPort = config.getString(KEY_REMOTE_DSH_PORT)?.toIntOrNull() ?: 3080,
-            token = runCatching { vault.get(SECRET_TOKEN) }.getOrNull().orEmpty()
+            token = runCatching { vault.get(SECRET_TOKEN) }.getOrNull().orEmpty(),
+            relay = relay
         )
     }
 
     fun save(value: RemoteHostConfig) {
-        // 先写凭据再写非敏感配置；任一步失败都不会让 load() 看到“有配置但无凭据”的半成品。
+        // 先写凭据再写非敏感配置，最后写 mode 作为提交标记；load() 不会把半成品当成可连接配置。
         vault.put(SECRET_TOKEN, value.token)
         when (value.auth) {
             RemoteAuthType.PASSWORD -> {
@@ -174,26 +200,49 @@ class RemoteHostStorage(
         config.putString(KEY_USER, value.user)
         config.putString(KEY_AUTH, value.auth.name)
         config.putString(KEY_REMOTE_DSH_PORT, value.remoteDshPort.toString())
+        val relay = value.relay
+        if (relay == null) {
+            config.putString(KEY_MODE, MODE_DIRECT)
+            runCatching { vault.remove(SECRET_RELAY_TOKEN) }
+            listOf(KEY_RELAY_HOST, KEY_RELAY_PORT, KEY_RELAY_ROOM, KEY_RELAY_HOST_ID, KEY_RELAY_PIN).forEach {
+                config.remove(it)
+            }
+        } else {
+            vault.put(SECRET_RELAY_TOKEN, relay.token)
+            config.putString(KEY_RELAY_HOST, relay.relayHost)
+            config.putString(KEY_RELAY_PORT, relay.relayPort.toString())
+            config.putString(KEY_RELAY_ROOM, relay.roomId)
+            config.putString(KEY_RELAY_HOST_ID, relay.hostId)
+            config.putString(KEY_RELAY_PIN, relay.certPin)
+            config.putString(KEY_MODE, MODE_RELAY)
+        }
     }
 
     fun clear() {
         config.clear()
         knownHosts.clear()
-        listOf(SECRET_PASSWORD, SECRET_PRIVATE_KEY, SECRET_PASSPHRASE, SECRET_TOKEN).forEach {
+        listOf(SECRET_PASSWORD, SECRET_PRIVATE_KEY, SECRET_PASSPHRASE, SECRET_TOKEN, SECRET_RELAY_TOKEN).forEach {
             runCatching { vault.remove(it) }
         }
     }
 
-    fun knownFingerprint(host: String, sshPort: Int): String? =
-        knownHosts.getString("$host:$sshPort")
+    /** 连接身份由 [RemoteHostConfig.hostIdentity] 提供；直连为 host:port，中继为 relay:hostId。 */
+    fun knownFingerprint(identity: String): String? = knownHosts.getString(identity)
 
-    fun trustFingerprint(host: String, sshPort: Int, fingerprint: String) {
-        knownHosts.putString("$host:$sshPort", fingerprint)
+    fun trustFingerprint(identity: String, fingerprint: String) {
+        knownHosts.putString(identity, fingerprint)
     }
 
-    fun forgetFingerprint(host: String, sshPort: Int) {
-        knownHosts.remove("$host:$sshPort")
+    fun forgetFingerprint(identity: String) {
+        knownHosts.remove(identity)
     }
+
+    fun knownFingerprint(host: String, sshPort: Int): String? = knownFingerprint("$host:$sshPort")
+
+    fun trustFingerprint(host: String, sshPort: Int, fingerprint: String) =
+        trustFingerprint("$host:$sshPort", fingerprint)
+
+    fun forgetFingerprint(host: String, sshPort: Int) = forgetFingerprint("$host:$sshPort")
 
     companion object {
         private const val KEY_HOST = "host"
@@ -201,10 +250,19 @@ class RemoteHostStorage(
         private const val KEY_USER = "user"
         private const val KEY_AUTH = "auth"
         private const val KEY_REMOTE_DSH_PORT = "remoteDshPort"
+        private const val KEY_MODE = "mode"
+        private const val KEY_RELAY_HOST = "relayHost"
+        private const val KEY_RELAY_PORT = "relayPort"
+        private const val KEY_RELAY_ROOM = "relayRoom"
+        private const val KEY_RELAY_HOST_ID = "relayHostId"
+        private const val KEY_RELAY_PIN = "relayPin"
+        private const val MODE_DIRECT = "direct"
+        private const val MODE_RELAY = "relay"
         private const val SECRET_PASSWORD = "password"
         private const val SECRET_PRIVATE_KEY = "privateKey"
         private const val SECRET_PASSPHRASE = "passphrase"
         private const val SECRET_TOKEN = "token"
+        private const val SECRET_RELAY_TOKEN = "relayToken"
     }
 }
 
