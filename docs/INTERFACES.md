@@ -174,7 +174,8 @@ HTTP 200..399 或 401 → 存活
 | 错误码 | `room_not_found`、`bad_token`、`room_busy`、`host_offline`、`host_timeout`、`expired`、`too_large`、`protocol`、`internal`；客户端映射中文，不回显原始载荷 |
 | 身份与 Cookie | SSH 主机密钥仍按 `SHA256:` 首次确认/后续比对；中继模式 known_hosts 键为 `relay:<hostId>`；Cookie 作用域为 `relay:<hostId>:<user>:<remoteDshPort>`，room 不参与，同一服务换房间复用 Cookie，不同用户/DSH 端口必须隔离 |
 | origin | 中继模式仍只暴露 `http://127.0.0.1:<本地转发端口>`；`OriginPolicy`、TLS/明文策略、Cookie 校验和 Blob 导出边界不变 |
-| 重连 | 控制握手仅对网络/房间忙/主机离线按指数退避（最多 4 次）；认证/钉扎/协议错误立即失败；已建立 SSH 会话不透明迁移，隧道断开回退本地 |
+| 重连 | `relayRetry` 在握手层只对网络/房间忙/主机离线按指数退避，最多 4 次尝试（首次 + 至多 3 次退避，可取消）；认证/钉扎/协议错误立即失败；已建立 SSH 会话不透明迁移，隧道断开回退本地 |
+| 关闭与背压 | 关闭桥接/会话直接关闭底层 socket 解除可能阻塞的 TLS 写，不等待 `writerLock`，也不在关闭路径同步写 CLOSE；参考中继的 `Peer.send` 使用有界阻塞写把背压传回上游，不使用满队列即断开的丢弃策略 |
 | 资源 | 中继需一个双方可达的 TLS 端口；无公网服务器时降级为局域网直连、全局 IPv6、用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连 |
 | 实现边界 | 参考中继/主机端见 `scripts/remote-relay/`；中继是字节转发，不是 SSH 代理，也不是恶意远程主机沙箱；参考实现未做高可用/限流/审计 |
 

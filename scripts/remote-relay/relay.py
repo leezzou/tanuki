@@ -8,12 +8,12 @@
 - 这是参考实现，不是高可用生产服务；没有持久化、水平扩展、限流计费和审计存储。
 - 房间 token 只保存在内存，中继进程重启后房间消失，主机端会重新注册。
 - 不记录 token、配对链接、SSH 数据或请求载荷；只记录房间短前缀和错误码。
+- 转发使用阻塞写而不是有损队列：下游变慢时由 TCP/TLS 反向施加上游背压，不因队列满断开合法 SSH。
 """
 from __future__ import annotations
 
 import argparse
 import logging
-import queue
 import socket
 import socketserver
 import ssl
@@ -26,43 +26,38 @@ import protocol as p
 
 
 class Peer:
-    """一个已认证连接；写操作串行化，读仍由各自 handler 线程负责。"""
+    """一个已认证连接。
+
+    不使用有损队列：send 在写锁内直接写 TLS socket，下游变慢时写会阻塞，读取线程随之
+    减慢或停止，由 TCP/TLS 把背压传回上游；这样慢手机不会因为 32 帧队列满而被断开。
+    close 不获取写锁，直接关闭底层 socket 来解除正在阻塞的 send。
+    """
 
     def __init__(self, sock: socket.socket, label: str) -> None:
         self.sock = sock
         self.label = label
-        self._queue: "queue.Queue[Optional[tuple]]" = queue.Queue(maxsize=32)
         self._closed = threading.Event()
-        self._writer = threading.Thread(target=self._write_loop, name="relay-writer", daemon=True)
-        self._writer.start()
+        self._write_lock = threading.Lock()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed.is_set()
 
     def send(self, frame_type: int, stream_id: int, payload: bytes = b"") -> None:
         if self._closed.is_set():
             return
         try:
-            self._queue.put_nowait((frame_type, stream_id, payload))
-        except queue.Full:
+            with self._write_lock:
+                if self._closed.is_set():
+                    return
+                p.write_frame(self.sock, frame_type, stream_id, payload)
+        except (OSError, p.ProtocolError):
             self.close()
-
-    def _write_loop(self) -> None:
-        while not self._closed.is_set():
-            item = self._queue.get()
-            if item is None:
-                break
-            try:
-                p.write_frame(self.sock, item[0], item[1], item[2])
-            except (OSError, p.ProtocolError):
-                break
-        self.close()
 
     def close(self) -> None:
         if self._closed.is_set():
             return
         self._closed.set()
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            pass
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -104,7 +99,6 @@ class RoomManager:
                 if existing.host is not None and existing.host is not peer:
                     raise p.RelayError("room_busy")
                 if existing.client is not None:
-                    existing.client.send(p.ERROR, 0, b"host_reconnected")
                     existing.client.close()
                     existing.client = None
                     existing.stream_id = 0
@@ -146,29 +140,35 @@ class RoomManager:
             room.client = peer
             room.stream_id = room.next_stream
             room.next_stream += 1
-            room.host.send(p.OPEN, room.stream_id)
-            return room.stream_id
+            host = room.host
+            stream_id = room.stream_id
+        # 发送可能因下游慢而阻塞，必须在释放 room.lock 后调用，避免阻塞 detach/close。
+        host.send(p.OPEN, stream_id)
+        return stream_id
 
     def detach_client(self, room: Room, peer: Peer) -> None:
         with room.lock:
             if room.client is not peer:
                 return
             room.client = None
-            if room.host is not None and room.stream_id:
-                room.host.send(p.CLOSE, room.stream_id)
+            host = room.host
+            stream_id = room.stream_id
             room.stream_id = 0
+        if host is not None and stream_id:
+            host.send(p.CLOSE, stream_id)
 
     def detach_host(self, room: Room, peer: Peer) -> None:
         with room.lock:
             if room.host is not peer:
                 return
             room.host = None
-            if room.client is not None:
-                room.client.send(p.ERROR, 0, b"host_offline")
-                room.client.close()
-                room.client = None
+            victim = room.client
+            room.client = None
             room.stream_id = 0
             room.expires_at = time.monotonic() + self.ttl_seconds
+        # 关闭 socket 即可让客户端看到 EOF；不在持锁时发送可能阻塞的 ERROR 帧。
+        if victim is not None:
+            victim.close()
 
     def purge(self) -> None:
         with self._lock:
@@ -183,8 +183,8 @@ class RoomManager:
         for room_id in expired:
             room = self._rooms.pop(room_id)
             if room.client is not None:
-                room.client.send(p.ERROR, 0, b"expired")
                 room.client.close()
+                room.client = None
             logging.info("room expired: %s…", room_id[:8])
 
 
@@ -302,26 +302,31 @@ class RelayHandler(socketserver.BaseRequestHandler):
             frame_type, stream_id, payload = frame
             if frame_type == p.OPEN_OK:
                 with room.lock:
-                    if room.client is not None and room.stream_id == stream_id:
-                        room.client.send(p.OPEN_OK, stream_id)
+                    target = room.client if room.client is not None and room.stream_id == stream_id else None
+                if target is not None:
+                    target.send(p.OPEN_OK, stream_id)
             elif frame_type == p.DATA:
                 with room.lock:
-                    if room.client is not None and room.stream_id == stream_id:
-                        room.client.send(p.DATA, stream_id, payload)
+                    target = room.client if room.client is not None and room.stream_id == stream_id else None
+                if target is not None:
+                    target.send(p.DATA, stream_id, payload)
             elif frame_type == p.CLOSE:
                 with room.lock:
-                    if room.client is not None and room.stream_id == stream_id:
-                        room.client.send(p.CLOSE, stream_id)
-                        room.client.close()
+                    target = room.client if room.client is not None and room.stream_id == stream_id else None
+                    if target is not None:
                         room.client = None
                         room.stream_id = 0
+                if target is not None:
+                    target.send(p.CLOSE, stream_id)
+                    target.close()
             elif frame_type == p.ERROR:
                 with room.lock:
-                    if room.client is not None:
-                        room.client.send(p.ERROR, 0, payload[:64])
-                        room.client.close()
-                        room.client = None
-                        room.stream_id = 0
+                    target = room.client
+                    room.client = None
+                    room.stream_id = 0
+                if target is not None:
+                    target.send(p.ERROR, 0, payload[:64])
+                    target.close()
             elif frame_type == p.PING:
                 peer.send(p.PONG, 0)
             elif frame_type in (p.PONG, p.OPEN, p.CONTROL):
@@ -337,8 +342,9 @@ class RelayHandler(socketserver.BaseRequestHandler):
             frame_type, stream_id, payload = frame
             if frame_type == p.DATA:
                 with room.lock:
-                    if room.host is not None and room.stream_id == stream_id:
-                        room.host.send(p.DATA, stream_id, payload)
+                    target = room.host if room.host is not None and room.stream_id == stream_id else None
+                if target is not None:
+                    target.send(p.DATA, stream_id, payload)
             elif frame_type == p.CLOSE:
                 self.manager.detach_client(room, peer)
             elif frame_type == p.PING:

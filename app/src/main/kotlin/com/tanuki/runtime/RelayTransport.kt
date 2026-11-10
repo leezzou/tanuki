@@ -1,6 +1,9 @@
 package com.tanuki.runtime
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -159,7 +162,7 @@ class RelayClientSession internal constructor(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        runCatching { RelayFrameCodec.write(output, RelayFrame(RelayFrameType.CLOSE, streamId, ByteArray(0))) }
+        // 关闭底层 socket 让对端收到 EOF 并清理；不再同步写 CLOSE 帧，避免对端停读时阻塞断开。
         runCatching { socket.close() }
         bridge?.close()
     }
@@ -295,11 +298,8 @@ class RelayBridge internal constructor(
         if (!closed.compareAndSet(false, true)) return
         runCatching { server.close() }
         runCatching { local?.close() }
-        runCatching {
-            synchronized(writerLock) {
-                RelayFrameCodec.write(output, RelayFrame(RelayFrameType.CLOSE, streamId, ByteArray(0)))
-            }
-        }
+        // 先关闭底层 TLS socket 解除可能阻塞的 sendall，不能等待 writerLock；
+        // 对端通过 EOF 清理流，不需要在关闭路径同步写 CLOSE 帧。
         runCatching { relaySocket.close() }
         thread?.interrupt()
     }
@@ -324,7 +324,8 @@ internal class RelaySshTransport(
     private val connector: RelaySocketConnector = RelaySocketConnector { pairing, timeout ->
         RelayTlsSocket.connect(pairing, timeout)
     },
-    private val connectTimeoutMs: Int = 15_000
+    private val connectTimeoutMs: Int = 15_000,
+    private val reconnectPolicy: RelayReconnectPolicy = RelayReconnectPolicy()
 ) : SshTransport {
     override suspend fun probeHostKey(config: RemoteHostConfig): HostKeyProbe = withContext(Dispatchers.IO) {
         withBridge(config) { bridge ->
@@ -360,8 +361,10 @@ internal class RelaySshTransport(
         }
     }
 
-    private fun join(pairing: RemoteRelayPairing): RelayClientSession =
-        RelayClientSession.join(pairing, connector, connectTimeoutMs)
+    private suspend fun join(pairing: RemoteRelayPairing): RelayClientSession =
+        relayRetry(reconnectPolicy) {
+            RelayClientSession.join(pairing, connector, connectTimeoutMs)
+        }
 }
 
 private class RelaySshTunnel(
@@ -374,8 +377,9 @@ private class RelaySshTunnel(
     override fun isAlive(): Boolean = tunnel.isAlive() && bridge.isAlive()
 
     override fun close() {
-        runCatching { tunnel.close() }
+        // 先拆桥关闭底层 socket，避免 JSch 在断开时向已停止读取的中继无限写 SSH disconnect。
         runCatching { bridge.close() }
+        runCatching { tunnel.close() }
         runCatching { session.close() }
     }
 }
@@ -472,6 +476,27 @@ internal object RelayClientHandshake {
             return RemoteRelayException(RelayFailureKind.NETWORK, "中继连接中断；请检查网络")
         }
         return RemoteRelayException(RelayFailureKind.IO, "中继配对失败")
+    }
+}
+
+/**
+ * 只对可恢复的中继握手错误做有界、可取消的指数退避。
+ * maxAttempts 表示总尝试次数（首次 + 最多 maxAttempts-1 次重试），认证/钉扎/协议错误不重试。
+ */
+internal suspend fun <T> relayRetry(
+    policy: RelayReconnectPolicy,
+    block: suspend () -> T
+): T {
+    var attempt = 1
+    while (true) {
+        currentCoroutineContext().ensureActive()
+        try {
+            return block()
+        } catch (error: RemoteRelayException) {
+            if (!error.retryable || attempt >= policy.maxAttempts) throw error
+            delay(policy.delayMillis(attempt))
+            attempt++
+        }
     }
 }
 

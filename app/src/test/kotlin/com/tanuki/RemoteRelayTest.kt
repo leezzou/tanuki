@@ -23,13 +23,16 @@ import com.tanuki.runtime.RemotePhase
 import com.tanuki.runtime.RemoteRelayException
 import com.tanuki.runtime.RemoteRelayPairing
 import com.tanuki.runtime.SshTunnel
+import com.tanuki.runtime.relayRetry
 import com.tanuki.runtime.SshTransport
 import com.tanuki.runtime.parseRelayControl
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -45,10 +48,17 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.io.PipedInputStream
+import java.io.PipedOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.KeyGenerator
 
 class RemoteRelayTest {
@@ -323,6 +333,114 @@ class RemoteRelayTest {
         }
     }
 
+    @Test
+    fun relayRetrySucceedsAfterTransientFailures() = runBlocking {
+        var attempts = 0
+        val policy = RelayReconnectPolicy(maxAttempts = 4, baseDelayMillis = 100, maxDelayMillis = 100, jitterFraction = 0.0)
+        val result = relayRetry(policy) {
+            attempts++
+            if (attempts < 3) throw RemoteRelayException(RelayFailureKind.NETWORK, "temporary")
+            "ok"
+        }
+        assertEquals("ok", result)
+        assertEquals(3, attempts)
+    }
+
+    @Test
+    fun relayRetryStopsAfterMaxAttempts() {
+        var attempts = 0
+        val policy = RelayReconnectPolicy(maxAttempts = 4, baseDelayMillis = 100, maxDelayMillis = 100, jitterFraction = 0.0)
+        val error = assertThrows(RemoteRelayException::class.java) {
+            runBlocking {
+                relayRetry(policy) {
+                    attempts++
+                    throw RemoteRelayException(RelayFailureKind.NETWORK, "still down")
+                }
+            }
+        }
+        assertEquals(4, attempts)
+        assertEquals(RelayFailureKind.NETWORK, error.kind)
+    }
+
+    @Test
+    fun relayRetryDoesNotRetryAuthPinOrProtocolErrors() {
+        val policy = RelayReconnectPolicy(maxAttempts = 4, baseDelayMillis = 100, maxDelayMillis = 100, jitterFraction = 0.0)
+        listOf(RelayFailureKind.AUTH, RelayFailureKind.PIN_MISMATCH, RelayFailureKind.PROTOCOL).forEach { kind ->
+            var attempts = 0
+            val error = assertThrows(RemoteRelayException::class.java) {
+                runBlocking {
+                    relayRetry(policy) {
+                        attempts++
+                        throw RemoteRelayException(kind, "terminal")
+                    }
+                }
+            }
+            assertEquals(1, attempts)
+            assertEquals(kind, error.kind)
+        }
+    }
+
+    @Test
+    fun relayRetryIsCancellableDuringBackoff() {
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                withTimeout(80) {
+                    relayRetry(
+                        RelayReconnectPolicy(maxAttempts = 4, baseDelayMillis = 500, maxDelayMillis = 500, jitterFraction = 0.0)
+                    ) {
+                        throw RemoteRelayException(RelayFailureKind.NETWORK, "temporary")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun bridgeCloseDoesNotWaitForBlockedTlsWrite() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val fake = BlockingWriteSocket()
+        val pipeIn = PipedInputStream()
+        val pipeOut = PipedOutputStream(pipeIn)
+        val bridge = RelayBridge(
+            server,
+            fake,
+            1,
+            DataInputStream(pipeIn),
+            DataOutputStream(fake.getOutputStream()),
+            Any(),
+            AtomicBoolean(false)
+        )
+        bridge.start()
+        try {
+            Socket().use { local ->
+                local.connect(InetSocketAddress("127.0.0.1", bridge.localPort), 3_000)
+                local.getOutputStream().write(byteArrayOf(1, 2, 3))
+                local.getOutputStream().flush()
+                assertTrue("uplink should enter blocked TLS write", fake.awaitEntered())
+                val started = System.nanoTime()
+                bridge.close()
+                val elapsedMs = (System.nanoTime() - started) / 1_000_000
+                assertTrue("bridge.close must not wait for writerLock; took ${elapsedMs}ms", elapsedMs < 1_500)
+                assertTrue(fake.closedByPeer)
+            }
+        } finally {
+            bridge.close()
+            pipeOut.close()
+            runCatching { server.close() }
+        }
+    }
+
+    @Test
+    fun sessionCloseDoesNotAttemptBlockingCloseFrameWrite() {
+        val fake = BlockingWriteSocket()
+        val session = RelayClientSession(fake, 1, pairing())
+        val started = System.nanoTime()
+        session.close()
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("session.close must not write CLOSE synchronously; took ${elapsedMs}ms", elapsedMs < 1_000)
+        assertTrue(fake.closedByPeer)
+    }
+
     private fun relayConfig() = RemoteHostConfig(
         host = "relay-display",
         sshPort = 22,
@@ -374,6 +492,39 @@ class RemoteRelayTest {
             assertEquals(fingerprint, expectedFingerprint)
             return FakeTunnel()
         }
+    }
+
+    private class BlockingWriteSocket : Socket() {
+        private val entered = CountDownLatch(1)
+        private val released = CountDownLatch(1)
+        private val emptyInput = java.io.ByteArrayInputStream(ByteArray(0))
+        @Volatile var closedByPeer = false
+        private val blockingOutput = object : OutputStream() {
+            override fun write(value: Int) = write(byteArrayOf(value.toByte()))
+            override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                entered.countDown()
+                if (!released.await(2, TimeUnit.SECONDS)) throw IOException("blocked write")
+                if (closedByPeer) throw IOException("closed")
+            }
+        }
+
+        override fun getInputStream(): InputStream = emptyInput
+
+        override fun getOutputStream(): OutputStream = blockingOutput
+
+        override fun close() {
+            closedByPeer = true
+            released.countDown()
+            super.close()
+        }
+
+        override fun isConnected(): Boolean = true
+
+        override fun isClosed(): Boolean = closedByPeer
+
+        override fun setTcpNoDelay(on: Boolean) = Unit
+
+        fun awaitEntered(): Boolean = entered.await(2, TimeUnit.SECONDS)
     }
 
     private class EchoRelayServer(

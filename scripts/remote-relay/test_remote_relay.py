@@ -5,6 +5,7 @@
 - 共享 HMAC 向量与 Kotlin/Rust 无关的线协议一致性；
 - 自签名 TLS + 证书钉扎；
 - 主机端注册、客户端配对、OPEN/OPEN_OK、DATA 回声；
+- 慢消费者下 2 MiB 完整传输（验证中继使用背压而非有损队列）；
 - 错误 token、未知房间、明文连接拒绝；
 - 中继输出不包含配对 token。
 
@@ -31,6 +32,7 @@ import protocol as p
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "app/src/test/resources/relay-protocol-vectors.json"
 OPENSSL = shutil.which("openssl")
+SLOW_CONSUMER_BYTES = 2 * 1024 * 1024
 
 
 class EchoServer:
@@ -64,7 +66,11 @@ class EchoServer:
                 data = conn.recv(8192)
                 if not data:
                     return
-                conn.sendall(data)
+                if data == b"BIG\n":
+                    # 模拟主机快速返回大块 DSH 资源；客户端稍后才读取，验证中继背压。
+                    conn.sendall(b"x" * SLOW_CONSUMER_BYTES)
+                else:
+                    conn.sendall(data)
         except OSError:
             return
         finally:
@@ -356,6 +362,38 @@ class RelayReferenceTest(unittest.TestCase):
             self.assertEqual(p.DATA, frame_type)
             self.assertEqual(stream_id, read_stream)
             self.assertEqual(payload, echoed)
+        finally:
+            try:
+                p.write_frame(tls, p.CLOSE, stream_id)
+            except OSError:
+                pass
+            tls.close()
+
+    def test_slow_consumer_receives_large_transfer_without_disconnect(self) -> None:
+        tls, stream_id = join_client(self.pairing, str(self.pairing["token"]))
+        expected = b"x" * SLOW_CONSUMER_BYTES
+        try:
+            p.write_frame(tls, p.DATA, stream_id, b"BIG\n")
+            # 先不读，让中继的下行缓冲被填满；旧实现会在 32 帧队列满时直接断开。
+            time.sleep(1.0)
+            received = bytearray()
+            deadline = time.monotonic() + 30
+            while len(received) < len(expected) and time.monotonic() < deadline:
+                frame = p.read_frame(tls)
+                if frame is None:
+                    self.fail("relay closed the slow consumer before transfer completed")
+                frame_type, read_stream, payload = frame
+                if frame_type == p.DATA:
+                    self.assertEqual(stream_id, read_stream)
+                    received.extend(payload)
+                elif frame_type == p.PING:
+                    p.write_frame(tls, p.PONG, 0)
+                elif frame_type == p.CLOSE:
+                    self.fail("relay sent CLOSE to slow consumer")
+                elif frame_type == p.ERROR:
+                    self.fail("relay error: {}".format(payload[:64].decode("utf-8", "replace")))
+            self.assertEqual(len(expected), len(received))
+            self.assertEqual(expected, bytes(received))
         finally:
             try:
                 p.write_frame(tls, p.CLOSE, stream_id)

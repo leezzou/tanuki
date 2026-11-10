@@ -63,9 +63,10 @@
 
 ### 2.4 断线、重连与回退
 
-- **控制握手重试**：`RelayReconnectPolicy` 只对网络、房间忙、主机离线等可恢复错误做指数退避（1s/2s/4s/8s，带抖动，最多 4 次）；认证失败、证书钉扎不匹配、协议错误立即失败，不重试。
+- **控制握手重试**：`relayRetry` 只对网络、房间忙、主机离线等可恢复错误做指数退避（1s/2s/4s/8s，带抖动，最多 4 次尝试，即首次 + 至多 3 次退避；协程取消可中断）；认证失败、证书钉扎不匹配、协议错误立即失败，不重试。该策略已接入 `RelaySshTransport.join` 的实际 probe/open 路径。
 - **主机端重连**：agent 断开后按 1s→30s 退避重新连接并注册；同一 `room`/`token` 在 TTL 内可重新注册。中继重启后 agent 会重建房间。
 - **已建立 SSH 会话**：本切片不把断线后的 SSH 会话透明迁移到新连接；隧道断开时 `RemoteHostController` 关闭隧道、切回本地端点并显示中文错误，用户可用已保存配置重连（token 仍有效时）。透明会话恢复留后续。
+- **关闭与背压**：桥接/会话关闭直接关闭底层 TLS socket，不等待可能被阻塞的 `writerLock`，也不在关闭路径同步写 CLOSE 帧；`RelaySshTunnel.close` 先拆桥再关闭 JSch，避免向停止读取的中继无限写 SSH disconnect。参考中继用每 peer 写锁内的阻塞写向下游传播背压，不使用有损队列；慢消费者不会因 32 帧队列满被断开。
 - **失败回退**：中继不可达、TLS/钉扎失败、token 错误、房间过期、主机端离线、sshd 不可达或 SSH 失败都会回退本地运行时；不自动降级明文，不静默信任新主机密钥。
 - **无中继时的降级**：
   1. 同一局域网/热点：直接使用既有 SSH 直连切片，零额外基础设施；
@@ -136,6 +137,7 @@
 | 配对链接、帧、HMAC、TLS 钉扎、重连策略 | `app/src/main/kotlin/com/tanuki/runtime/RemoteRelay.kt` |
 | TLS 中继客户端、loopback 桥、直连/中继路由 | `app/src/main/kotlin/com/tanuki/runtime/RelayTransport.kt` |
 | 远程配置/known_hosts/Cookie 作用域 | `app/src/main/kotlin/com/tanuki/runtime/RemoteHost.kt`、`RemoteHostStorage.kt`、`RemoteHostController.kt` |
+| 关闭/背压与握手退避 | `app/src/main/kotlin/com/tanuki/runtime/RelayTransport.kt`、`scripts/remote-relay/relay.py` |
 | 设置页配对链接入口 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` |
 | JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt` |
 | Python 参考中继/主机端/自测 | `scripts/remote-relay/{protocol,relay,host_agent,test_remote_relay,gen-cert}.py/sh` |
@@ -145,9 +147,10 @@
 
 已执行（JVM/宿主）：
 
-- `RemoteRelayTest` 16 项：配对链接往返/拒绝未知字段/非规范 base64url；帧编解码/上限/截断/未知类型；共享 HMAC 向量；证书钉扎；重连策略；loopback 假中继的配对 + DATA 回声 + 早期字节不丢失；错误 token；中继配置身份/Cookie 作用域；加密存储往返/篡改拒绝/切回直连；控制器使用稳定 `relay:<hostId>` 信任键。
+- `RemoteRelayTest` 22 项：配对链接往返/拒绝未知字段/非规范 base64url；帧编解码/上限/截断/未知类型；共享 HMAC 向量；证书钉扎；重连策略；loopback 假中继的配对 + DATA 回声 + 早期字节不丢失；错误 token；中继配置身份/Cookie 作用域；加密存储往返/篡改拒绝/切回直连；控制器使用稳定 `relay:<hostId>` 信任键。
 - `DshRemoteIsolationTest` 新增中继 Cookie 分区：同一 hostId/user/DSH 端口换 room 复用同一分区；不同用户、不同 DSH 端口分别保存，互不恢复认证 Cookie。
-- Python 参考实现 6 项回环端到端：自签名 TLS + pin、主机注册、客户端 JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文连接不获得协议响应、共享向量一致、日志不泄露 token。
+- `RemoteRelayTest` 新增 P2 回归：对端不读/写阻塞时 `RelayBridge.close` 与 `RelayClientSession.close` 及时返回；`relayRetry` 先失败后成功、重试耗尽、认证/钉扎/协议不重试、退避取消。
+- Python 参考实现 7 项回环端到端：自签名 TLS + pin、主机注册、客户端 JOIN/OPEN_OK/DATA 双向、2 MiB 慢消费者完整传输、错误 token、未知房间、明文连接不获得协议响应、共享向量一致、日志不泄露 token。
 
 未验证：
 

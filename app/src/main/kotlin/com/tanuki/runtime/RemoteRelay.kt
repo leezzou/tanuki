@@ -345,7 +345,10 @@ class RemoteRelayException(
             kind == RelayFailureKind.IO
 }
 
-/** 控制通道重连退避；已建立的 SSH 会话重连属于后续切片，不在这里伪装成透明恢复。 */
+/**
+ * 控制通道重连退避。maxAttempts 是总尝试次数（首次 + 至多 maxAttempts-1 次退避）；
+ * 已建立的 SSH 会话重连属于后续切片，不在这里伪装成透明恢复。
+ */
 data class RelayReconnectPolicy(
     val maxAttempts: Int = 4,
     val baseDelayMillis: Long = 1_000,
