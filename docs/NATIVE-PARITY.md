@@ -86,7 +86,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | SESS-13 | 子代理会话 | 侧栏隐藏 subagent 来源会话，可按直接父子地址打开 | `仅官方` | P2 · `subagents/*` · 42 聊天链路（子会话路由，待确认） · A-TOOL-02 |
 | SESS-14 | 会话目标（goal） | 输入框上方目标条，支持编辑/暂停/恢复/清除与 `/goal` 气泡 | `仅官方` | P2 · `goals/*` · 44 会话管理（目标，待确认） · A-SESS-05 |
 | SESS-15 | 定时任务/自动化 | Schedule 列表、历史、更新/删除，活动任务在会话行显示时钟 | `仅官方` | P2 · `schedule/*` · 未排期 · A-SESS-06 |
-| SESS-16 | 复制会话 ID/日志导出 | 行菜单复制完整 ID；会话日志下载 | `仅官方` | P2 · `session/*`、日志路由 · 44 会话管理（复制 ID/日志导出，待确认） · A-SESS-02 |
+| SESS-16 | 复制会话 ID/日志导出 | 行菜单复制完整 ID；会话日志下载 | `仅官方` | P2 · `session/*`、日志路由 · 44 会话管理（复制 ID/日志导出，待确认） · A-SESS-07 |
 | SESS-17 | 通知点击定位会话 | 通知携带会话 id，点击后展开侧栏、清搜索、展开分组并选中 | `原生完整`：`DshNativeController.openSession()` 冷启动/已加载均选中，失败保留 pending 给官方回退 | — · `DshNativeController.kt` · android_agent-29/PR #22、android_agent-33/PR #26 · A-SESS-03、A-NOTIFY-02 |
 | SESS-18 | 会话级模型选择 | 每个会话可选模型，Host 返回模型目录 | `仅官方` | P1 · `session/selectModel`、`session/modelCatalog` · 44 会话管理（模型选择，待确认） · A-MODEL-01 |
 | SESS-19 | 队列/中途引导 | 排队消息、编辑/移除、steering 在下一步边界送达 | `仅官方` | P1 · `session/updateQueue`、`session/prompt` · 46 输入（队列/steering） · A-INPUT-01 |
@@ -125,7 +125,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | INPUT-02 | 发送提示词 | `session/prompt`，支持文本+附件+requestId 幂等 | `仅官方` | P0 · `session/prompt` · 46 输入（发送）+ 42 聊天链路（follow/回显） · A-INPUT-01、A-INPUT-02 |
 | INPUT-03 | 停止/取消运行 | 停止按钮读取运行状态，调用 `session/cancel` | `仅官方`：原生只有停止 DSH 服务，不是停止当前回合 | P0 · `session/cancel` · 42 聊天链路（cancel）+ 46 输入（停止按钮） · A-INPUT-01、A-INPUT-02 |
 | INPUT-04 | 斜杠命令 | 命令目录、执行、变更通知 | `仅官方` | P1 · `commands/*` · 未排期 · A-SKILL-01 |
-| INPUT-05 | @ 文件引用/文件提及 | 输入框提及工作区文件，生成引用卡片 | `仅官方` | P1 · `fileReferences/list`、`sessionReferenceResolver/*` · 46 输入 · A-INPUT-01 |
+| INPUT-05 | @ 文件引用/文件提及 | 输入框提及工作区文件，生成引用卡片 | `仅官方` | P1 · `fileReferences/list`、`sessionReferenceResolver/*` · 46 输入 · A-INPUT-01、A-INPUT-06 |
 | INPUT-06 | 附件/图片选择 | 选择、粘贴、拖放，按顺序进入草稿 | `仅官方` | P1 · `fileUploads/upload` · 46 输入 · A-ATT-01、A-ATT-02 |
 | INPUT-07 | 模型选择器 | 输入框旁模型选择，Host 校正实际值 | `仅官方` | P1 · `session/selectModel` · 未排期 · A-MODEL-02 |
 | INPUT-08 | 推理强度选择 | 模型支持的 reasoning effort 选择 | `仅官方` | P1 · `llm/*` · 未排期 · A-MODEL-02 |
@@ -146,7 +146,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | ATT-03 | 附件预览/移除 | 草稿附件卡片、缩略图、移除、失败保留 | `仅官方` | P1 · 原生 composer · 46 输入 · A-ATT-02 |
 | ATT-04 | 大小/类型/数量限制 | 单请求/图片总量/请求体上限，超限明确报错 | `仅官方` | P1 · `fileUploads/*` · 46 输入 · A-ATT-01 |
 | ATT-05 | 会话媒体授权读取 | `session/attachment` 按会话授权，图片 URL 随 binding 释放撤销 | `仅官方` | P1 · `session/attachment` · 未排期 · A-ATT-01 |
-| ATT-06 | 远程/工作区文件引用 | 工作区文件引用与 `@` 提及，不复制文件 | `仅官方` | P1 · `fileReferences/list` · 46 输入 · A-INPUT-01 |
+| ATT-06 | 远程/工作区文件引用 | 工作区文件引用与 `@` 提及，不复制文件 | `仅官方` | P1 · `fileReferences/list` · 46 输入 · A-INPUT-01、A-INPUT-06 |
 | ATT-07 | Office/PDF 转换预览 | `officeToPdf/*` 生成/渲染 | `仅官方`：原生文件页已有 PDF/DOCX/XLSX 只读预览，但不在对话内 | P2 · `officeToPdf/*` · 未排期 · A-ATT-03 |
 | ATT-08 | 上传进度/失败重试 | 阶段/字节进度、失败可重试 | `仅官方` | P2 · `fileUploads/*` · 46 输入 · A-ATT-02 |
 
@@ -163,7 +163,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | MODEL-07 | Token/上下文用量 | 每轮/会话 token、缓存命中、速度 | `仅官方` | P2 · 原生统计 · 未排期 · A-CHAT-02 |
 | MODEL-08 | 自动审查 | auto-review 权限/流程 | `仅官方` | P2 · 官方插件 · 未排期 · A-MODEL-04 |
 | MODEL-09 | CoT 翻译 | 思考过程翻译 | `仅官方` | P2 · 官方插件 · 未排期 · A-MODEL-04 |
-| MODEL-10 | 账户余额/配额 | 账户状态、余额、配额失败提示 | `仅官方` | P2 · `account/*` · 未排期 · A-MODEL-01 |
+| MODEL-10 | 账户余额/配额 | 账户状态、余额、配额失败提示 | `仅官方` | P2 · `account/*` · 未排期 · A-MODEL-05 |
 
 ### 3.6 审批/权限（APPROVAL）
 
@@ -323,7 +323,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 4. 现有覆盖：`DshNativeApiTest`、`DshNativeControllerTest`；新增分页用例应放在同目录。
 
 **A-SESS-02（JVM）会话生命周期方法**
-- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09、SESS-16
+- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09
 1. 合成服务实现 `session/create`、`session/rename`、`session/fork`、`workspace/archiveSession`、`workspace/unarchiveSession`、`workspace/delete`、`workspace/pinSession`、`workspace/insertSessionBefore`。
 2. 断言请求信封 `type=client-request`、`rpcId` 关联、参数与官方方法一致；业务错误只显示短码。
 3. 断言失败不改变本地选择；归档/删除确认流程不被静默跳过。
@@ -338,15 +338,14 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 5. 现有覆盖：`DshUiSwitchTest`、`DshNativeControllerTest`；仪器新增 `DshNativePresentationTest`。
 
 **A-SESS-04（手工）真实会话生命周期**
-- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09、SESS-16
+- 覆盖：SESS-04、SESS-05、SESS-06、SESS-07、SESS-08、SESS-09
 1. 前置：真实/模拟设备 + 真实 DSH + 可用模型账号（用户暂停项恢复后）。
 2. 新建、重命名、分叉、归档、取消归档各一次；确认官方页面与原生页看到同一会话。
 3. 在运行中会话执行“停止并归档”，确认工作列表、停止、归档、撤销。
 4. 记录设备、DSH 版本、模型、时间；不得使用真实用户数据。
 
 **A-SESS-05（JVM/仪器）会话目标（goal）**
-- 覆盖：SESS-14、CHAT-19
-- 跨域：goal 条同时属于会话上下文与对话输入区。
+- 覆盖：SESS-14
 1. JVM：合成 `goals/get`、`goals/create`、`goals/edit`、`goals/pause`、`goals/resume`、`goals/clear`，断言目标文本、状态、错误码与 `/goal` 气泡事件。
 2. 仪器：目标条显示、编辑、暂停、恢复、清除；`/goal` 命令气泡；被拒绝的变更内联提示。
 3. 预期：状态与官方投影一致；清除后条带消失；不伪造目标，不把目标写进会话正文。
@@ -400,15 +399,22 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 2. 操作：查看输入框上方三张卡片，编辑/暂停 goal，展开/收起 todo，编辑/移除 queue。
 3. 预期：卡片顺序 Todo→Goal→Queue；状态与官方投影一致；空态不占位。
 
+**A-SESS-07（JVM/仪器）复制会话 ID/日志导出**
+- 覆盖：SESS-16
+1. JVM：合成 `session/list` 与日志下载路由，断言复制的 ID 为完整 ID（不截断）、日志导出只含当前会话事件且不含 token/Cookie、失败返回短码。
+2. 仪器：行菜单“复制 Session ID”写入剪贴板并与官方 ID 一致；日志导出走系统文件选择器，取消不产生文件，失败有提示。
+3. 预期：复制不加载历史、不 retain 会话；导出只含当前会话；不泄露凭据。
+
 ### 4.3 输入
 
-**A-INPUT-01（JVM）提示词/队列/取消协议**
+**A-INPUT-01（JVM）提示词/队列/取消/文件引用协议**
 - 覆盖：INPUT-02、INPUT-05、INPUT-12、INPUT-13、SESS-19、ATT-06
 - 跨域：提示词协议同时覆盖输入、附件引用与会话队列。
-1. 合成服务实现 `session/prompt`、`session/cancel`、`session/updateQueue`。
+1. 合成服务实现 `session/prompt`、`session/cancel`、`session/updateQueue`、`fileReferences/list`。
 2. 断言：空文本且无附件被拒绝；`requestId` 幂等；附件顺序保持；queue edit 只接受非空文本；取消只作用于当前回合。
-3. 断言业务错误映射为短码，不泄露请求体。
-4. 新增 `DshPromptProtocolTest`。
+3. 断言 `fileReferences/list` 的查询/路径解析、候选去重、只返回可读工作区文件；`@` 提及解析为引用而非复制；引用随 prompt 提交且顺序稳定。
+4. 断言业务错误映射为短码，不泄露请求体。
+5. 新增 `DshPromptProtocolTest`、`DshFileReferenceTest`。
 
 **A-INPUT-02（仪器）原生 composer**
 - 覆盖：INPUT-01、INPUT-02、INPUT-03、SESS-04、SESS-20
@@ -437,6 +443,13 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 2. 操作：进入计划模式，提交计划请求，查看计划审阅卡片，选择同意执行/要求修改。
 3. 预期：计划模式状态可见；审阅卡片与官方一致；要求修改回到编辑器且不提交批准。
 
+**A-INPUT-06（仪器）@ 文件提及/引用卡片**
+- 覆盖：INPUT-05、ATT-06
+- 跨域：文件提及同时属于输入选择与对话附件引用展示。
+1. 前置：合成工作区含多个文件；原生 composer 可用。
+2. 操作：输入 `@` 触发候选，键盘/触摸选择文件，检查引用卡片；删除引用；发送后检查对话内引用卡片。
+3. 预期：候选来自 `fileReferences/list`；只引用不复制文件；引用路径按当前工作区解析；无匹配/失败有提示。
+
 ### 4.4 附件
 
 **A-ATT-01（JVM）上传/附件协议**
@@ -464,7 +477,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 ### 4.5 模型/推理
 
 **A-MODEL-01（JVM）模型目录/提供方/凭据协议**
-- 覆盖：MODEL-01、MODEL-04、MODEL-06、MODEL-10、SESS-18、SET-02
+- 覆盖：MODEL-01、MODEL-04、MODEL-06、SESS-18、SET-02
 - 跨域：模型目录/凭据同时服务设置、会话模型选择与账户信息。
 1. 合成服务实现 `session/modelCatalog`、`llm/listProviders`、`llm/listConfigurableProviders`、`llm/discoverModels`、`credentials/describe`。
 2. 断言模型列表、默认值、错误码、密钥不回显。
@@ -564,7 +577,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 3. 命令：`./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.*File*' --tests 'com.tanuki.*Pdf*' --tests 'com.tanuki.*Docx*' --tests 'com.tanuki.*Xlsx*'`。
 
 **A-FILE-02（仪器）原生文件页**
-- 覆盖：FILE-04、FILE-05、FILE-06、FILE-07、FILE-08、FILE-09、FILE-10、FILE-14、FILE-15、FILE-16、TOOL-05
+- 覆盖：FILE-04、FILE-05、FILE-06、FILE-07、FILE-08、FILE-09、FILE-10、FILE-15、TOOL-05
 - 跨域：原生文件页同时承载工作区文件与会话内文件工具预览。
 1. 前置：同 A-SESS-03；预置合成工作区文件（文本/图片/PDF/DOCX/XLSX/视频）与手机卷。
 2. 浏览、搜索、排序、网格/列表、隐藏文件、面包屑；预览各格式；编辑 ≤256 KiB 文本并检查 revision 冲突；新建/重命名/复制/移动/删除；导入/导出。
@@ -591,11 +604,12 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 2. 仪器：添加工作区、重命名、删除确认、拖拽排序、树形层级；删除父工作区后子工作区归入最近祖先。
 3. 预期：会话归属不变；删除确认保留边界；层级与官方一致；失败保留当前选择。
 
-**A-FILE-06（仪器）在文件管理器中打开**
+**A-FILE-06（仪器）在文件管理器中显示/系统关联打开**
 - 覆盖：FILE-14
 1. 前置：设备有文件管理器；合成工作区文件。
-2. 操作：对文件执行“在文件管理器中显示”或系统关联打开；检查不支持的类型提示。
-3. 预期：只打开当前工作区路径；不泄露 guest 路径；失败有提示；不复制文件。
+2. “在文件管理器中显示”：若原生实现，断言只传当前工作区路径/URI，不复制文件；当前原生未实现时记录缺口，不用系统打开冒充。
+3. “系统关联打开”：选择单个文件，断言 `prepareOpen` 只把该文件复制到 `cacheDir/workspace-open/<uuid>/`，URI 只读、只授予该文件、原文件未被修改；工作区其他文件/根目录不可访问；取消或失败清理临时目录；超过 24h 的缓存可清理。
+4. 预期：两条路径预期不同；系统打开允许受控只读缓存副本，禁止写模式或共享整个工作区。
 
 ### 4.9 搜索
 
@@ -635,7 +649,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 4. 现有覆盖：`SetupPresentationTest`、`WorkspaceStorageUiTest`；新增 `SettingsParityTest`。
 
 **A-SET-03（手工）设置持久化/重启**
-- 覆盖：SET-01、SET-06、SET-08、SET-10、SET-12、SET-13、SET-14
+- 覆盖：SET-01、SET-06、SET-08、SET-12
 1. 修改界面偏好、通知开关、早启动、低电阈值、远程主机，重启 App/进程后确认保留。
 2. 确认失败写入不覆盖旧值；恢复默认只影响当前项。
 3. 用户暂停项恢复后执行。
