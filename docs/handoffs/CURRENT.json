@@ -1,7 +1,8 @@
 {
-  "schema": 1,
-  "record": "docs/handoffs/20261110-1233-native-ui-chat.md",
-  "recordSha256": "581efd68cdb568556602513c78745eca158a21456d8827020793ae95873be3e2",
-  "sourceFingerprint": "86b47d2c9bd5bfe4aedee6da5b5ada156bee712329b178cdf3324c1e60aed106",
-  "fileCount": 637
+  "schema": 2,
+  "record": "docs/handoffs/20261110-1333-handoff-pr-mode.md",
+  "recordSha256": "76f27edaf5d00ef196e5a2bf34ae995217a4a3823e32f14bda0c3f4e8f0218a4",
+  "sourceFingerprint": "88e1b9ead1f4c6b89c6aa027149292527bf8c3503cee7a29e7480fea5a2f3b99",
+  "evidenceFingerprint": "e38d814c481350e2c754b9217393a11c1bd28920cf7ca2e3d970e56e53ff9de0",
+  "fileCount": 621
 }

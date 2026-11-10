@@ -15,8 +15,8 @@
 
 - 类型：规则（已升级）
 - 证据：Wave0 的 PR #12（<https://github.com/leezzou/tanuki/pull/12>）在 W2 合并后需要同步 `docs/AGENT-STATE.md`、`docs/handoffs/CURRENT.json` 并 rebase 解决冲突；当时交接记录明确写到“解决 AGENT-STATE/CURRENT 冲突并重建印章”。同类冲突也出现在 W1/W2/W3 并行交付后的状态汇总。
-- 结论：`AGENT-STATE.md`、`CURRENT.json`、交接记录和发布清单只能由一个维护方串行写入。并行 Worker 把要写入的事实、验证命令和未完成项交回编排者，由维护方统一汇总后再刷新印章。
-- 门禁/动作：每轮指定唯一状态维护方；提交前重新运行 `check-handoff.py --record` 和无参检查；不把多个 Worker 的本地印章直接合并。
+- 结论（已升级）：`AGENT-STATE.md`、`CURRENT.json`、交接记录和发布清单只能由一个维护方串行写入；普通 PR 不再写共享状态，只新增自己的记录。并行 Worker 把要写入的事实、验证命令和未完成项交回编排者，由集成维护方统一汇总后再刷新印章。
+- 门禁/动作：普通 PR 只跑 `check-handoff.py --pr`；集成方在批量合并后跑 `--integrate` 和 `--release`；CI 用 PR 模式，发布/集成用严格模式。不把多个 Worker 的本地印章直接合并。
 
 ## L-002 AO 项目配置的角色字段不能只看顶层 agent
 

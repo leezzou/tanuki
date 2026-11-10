@@ -8,7 +8,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本 worktree，`-x buildNativeRuntime`）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
   - 目标回归 `DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest`、`DshWebSocketTest`、`DshMarkdownTest`、`DshComposer*` → BUILD SUCCESSFUL，96 tests / 0 failures / 0 errors / 0 skipped。
-  - 合并 `main=0068c87`（#34/#35/parity audit/#36 远程中继）后完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（4m18s）；79 个结果文件、**668 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 96 warnings / 1 hint**。
+  - 合并 `main=0068c87`（#34/#35/parity audit/#36 远程中继）后完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（4m18s）；79 个结果文件、**668 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 96 warnings / 1 hint**。再合并 `main=7593805`（仅 #42 handoff 机制/脚本，无 app 代码）后同任务 up-to-date；`check-handoff.py --pr` 通过。
 - 新增 45 项回归：
   - `DshMuxProtocolTest` 10 项：mux open/item/end/cancel 形状、非法端点/流 id、下行 item/error/end、`$events` ready/waterfall/cancel/status、审批字段（不泄露工具参数）、提问只读字段、snapshot 过滤 replace/注入并按 seq 排序、`text-delta`/baseline 流式聚合与 committed 替换、append-origin 文本、RFC 握手 accept 与客户端掩码/长帧。
   - `DshNativeLiveTest` 5 项：`session/prompt`/`session/cancel` 请求体与 `interactions=answer`、`accepted=false` 不当成功、合成 mux 的 snapshot/assistant text/status/approval、`$events/result` 的 `clientId/eventId/allowed-once`、未连接审批失败关闭。
@@ -19,6 +19,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 未执行：真实 Android 设备/模拟器、PRoot 内 DSH `/connect`/WebSocket Upgrade、真实 `$events`/`session/follow`/审批 waterfall、发送/停止的设备输入法/长文本/深色/大字体、通知点击、远程主机隧道、安全模式 rescue、assemble、Android 仪器测试、真机、合并/发布。
 - 结论：JVM 协议层与控制器路径已覆盖，编译/lint 通过；**不能据此宣称设备可用或已验收**。
 
+## 交接机制改造验证（2026-11-10，android_agent-49，非设备）
+
+- 范围：只改宿主脚本、CI 与交接文档，不改产品代码。`scripts/check-handoff.py` 新增普通 PR / 集成 / 发布三模式；普通 PR 只校验自己的记录，CI 用变更清单强制“公开文件有改动必须附带交接记录”；集成模式刷新 schema 2 印章，发布模式只读严格校验；新增 `docs/HANDOFFS.md` 与 `scripts/test-check-handoff.py`。基线创建于 `main=1cb7ad95`；PR 创建后连续合并 `main=2a4a0503`（PR #35）与 `main=0068c872`（PR #36 中继配对），解决交接文档冲突并按新树复跑宿主回归；分支 `ao/handoff-conflicts/pr-mode`，不合并、不发布。
+- 实际执行：
+  - `python3 scripts/test-check-handoff.py` → 8 tests / 0 failures，覆盖 PR 容忍落后共享状态、记录缺失/空章节/占位符、路径与符号链接、变更集守卫、集成最新记录、发布篡改检测、目录移动可迁移。
+  - `python3 scripts/test-agent-workflow.py` → 19 tests / 0 failures（54.318s），含设备锁/模拟 ADB 离线回归，不访问真实设备。
+  - `python3 scripts/test-publication.py` → 19 tests / 0 failures；`python3 scripts/test-app-release.py` → 18 tests / 0 failures（并断言发布入口调用 `--release`）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过（共享状态允许落后）。
+  - `python3 scripts/check-handoff.py --integrate --record docs/handoffs/20261110-1333-handoff-pr-mode.md` → 通过，刷新 schema 2 印章（合并 main 后按新公开文件数重建）。
+  - `python3 scripts/check-handoff.py --release` → 通过（记录哈希、公开源码指纹、证据指纹与最新记录一致）。
+  - `python3 scripts/check-publication.py --git` → 0 findings；`python3 scripts/package-source.py` → 源码包生成成功。
+  - `ruby -ryaml -e 'YAML.load_file(".github/workflows/verify.yml")'` → YAML_OK；`bash -n scripts/verify-workspace.sh` 与 Python 内存语法检查通过。
+- 未执行：设备/仪器、PR 独立审查、合并、`AGENT-STATE` 指针 + 最近 N 条实际精简、APK/发布附件；Android 构建/JVM/lint 与 Host 已由 GitHub Actions 在 `c417daa` 验证通过，后续 head 以 PR 页面为准。源码包 SHA 会随最终文档改动变化，以最后一次输出为准，不回填到记录形成循环。
 ## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
 
 - 范围：反向注册中继 + 既有 SSH 端到端最小切片；Kotlin 配对链接/帧/HMAC/TLS 钉扎/重连/loopback 桥；中继配置存储/控制器/设置页；Python 参考中继/主机端 agent；共享协议向量。基线 `origin/main=0555c3c0`，分支 `ao/tanuki-remote/relay-pairing`。

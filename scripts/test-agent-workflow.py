@@ -17,7 +17,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = "com.tanuki.modern.workspacecheck"
-RECORD = "docs/handoffs/test-session.md"
+RECORD = "docs/handoffs/20260101-0000-test-session.md"
 
 
 class WorkflowTests(unittest.TestCase):
@@ -46,16 +46,19 @@ class WorkflowTests(unittest.TestCase):
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ("AGENTS.md", "README.md")
 TREES = ("scripts", "docs", "app/src")
+def public_name(relative):
+    return bool(relative.parts) and "__pycache__" not in relative.parts
 def public_file(path):
-    return path.is_file() and "__pycache__" not in path.parts
+    return path.is_file() and public_name(path.relative_to(ROOT))
 ''')
         self.put("AGENTS.md", "Agent rules\n")
         self.put("README.md", "Public project\n")
         self.put("app/src/main/example.kt", "// original\n")
-        self.put("docs/AGENT-STATE.md", "[Latest](handoffs/test-session.md)\n")
+        self.put("docs/AGENT-STATE.md", "[Latest](handoffs/20260101-0000-test-session.md)\n")
         headings = ("用户目标与范围", "当前状态", "本次改动", "验证记录", "未完成与暂停项", "下一步", "约束与风险", "产物与校验")
-        self.put(RECORD, "# Synthetic handoff\n" + "\n".join("## " + h + "\nSynthetic evidence.\n" for h in headings))
-        result = self.checker("--record", RECORD)
+        self.put(RECORD, "# Synthetic handoff\n" + "\n".join("## " + h + "\nSynthetic evidence.\n" for h in headings)
+                 + "\n未测试：synthetic device not run.\n")
+        result = self.checker("--integrate", "--record", RECORD)
         self.assertEqual(0, result.returncode, result.stderr)
 
     def checker(self, *args):
@@ -99,44 +102,44 @@ if args[0] == 'sign':
 
     def test_clean_handoff_and_move_are_portable(self):
         self.handoff_fixture()
-        self.assertEqual(0, self.checker().returncode)
+        self.assertEqual(0, self.checker("--release").returncode)
         moved = self.root.with_name("moved project")
         shutil.copytree(self.root, moved)
-        result = subprocess.run([sys.executable, "scripts/check-handoff.py"], cwd=moved, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "scripts/check-handoff.py", "--release"],
+                                cwd=moved, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_code_change_requires_written_handoff_not_just_restamping(self):
         self.handoff_fixture()
         self.put("app/src/main/example.kt", "// changed\n")
-        self.assertNotEqual(0, self.checker().returncode)
-        self.assertNotEqual(0, self.checker("--record", RECORD).returncode)
+        self.assertNotEqual(0, self.checker("--release").returncode)
+        self.assertNotEqual(0, self.checker("--integrate", "--record", RECORD).returncode)
         with (self.root / RECORD).open("a") as output:
             output.write("\nUpdated: actual code change and verification.\n")
-        self.assertEqual(0, self.checker("--record", RECORD).returncode)
-        self.assertEqual(0, self.checker().returncode)
+        self.assertEqual(0, self.checker("--integrate", "--record", RECORD).returncode)
+        self.assertEqual(0, self.checker("--release").returncode)
 
     def test_missing_section_and_wrong_current_link_are_rejected(self):
         self.handoff_fixture()
         self.put("docs/AGENT-STATE.md", "No current record link\n")
-        self.assertNotEqual(0, self.checker().returncode)
-        self.put("docs/AGENT-STATE.md", "[Latest](handoffs/test-session.md)\n")
+        self.assertNotEqual(0, self.checker("--integrate", "--record", RECORD).returncode)
+        self.put("docs/AGENT-STATE.md", "[Latest](handoffs/20260101-0000-test-session.md)\n")
         record = self.root / RECORD
         record.write_text(record.read_text().replace("## 验证记录", "## Removed"))
-        self.assertNotEqual(0, self.checker("--record", RECORD).returncode)
+        self.assertNotEqual(0, self.checker("--pr", "--record", RECORD).returncode)
 
     def test_generated_jni_does_not_invalidate_source_handoff(self):
         self.handoff_fixture()
         self.put("app/src/main/jniLibs/arm64-v8a/libsynthetic.so", "generated ELF placeholder")
-        self.assertEqual(0, self.checker().returncode)
+        self.assertEqual(0, self.checker("--release").returncode)
 
     def test_record_traversal_template_and_symlink_are_rejected(self):
         self.handoff_fixture()
-        for bad in ("../record.md", "/tmp/record.md", "docs/handoffs/TEMPLATE.md"):
+        for bad in ("../record.md", "/tmp/record.md", "docs/handoffs/TEMPLATE.md", "docs/handoffs/foo.md"):
             with self.subTest(path=bad):
-                self.assertNotEqual(0, self.checker("--record", bad).returncode)
-        (self.root / "docs/handoffs/link.md").symlink_to("test-session.md")
-        self.put("docs/AGENT-STATE.md", "[Latest](handoffs/link.md)\n")
-        self.assertNotEqual(0, self.checker("--record", "docs/handoffs/link.md").returncode)
+                self.assertNotEqual(0, self.checker("--pr", "--record", bad).returncode)
+        (self.root / "docs/handoffs/20260102-0000-link.md").symlink_to("20260101-0000-test-session.md")
+        self.assertNotEqual(0, self.checker("--pr", "--record", "docs/handoffs/20260102-0000-link.md").returncode)
 
     def apk_paths(self):
         return (self.root / "app/build/outputs/apk/modern/debug/app-modern-debug.apk",

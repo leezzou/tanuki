@@ -59,11 +59,12 @@
 
 ## 6. 状态、交接与印章
 
-- 本轮只有一名 `AGENT-STATE.md` / `CURRENT.json` 维护方。其他 Worker 把要写入的事实、验证命令和未完成项作为报告交回，由维护方串行汇总，避免并发覆盖或印章冲突。
+- 普通 Worker 只新增/补完自己的 `docs/handoffs/YYYYMMDD-HHMM-topic.md`，不改 `AGENT-STATE.md` / `CURRENT.json`；这样功能 PR 之间不再因共享文件互相冲突。
+- 集成阶段只有一名维护方：在批量合并后、发布前或状态明显落后时，按 [HANDOFFS](HANDOFFS.md) 更新 `AGENT-STATE.md` 的指针与最近 N 条，运行 `check-handoff.py --integrate --record <最新记录>` 重建印章，再用 `--release` 复核。
 - 每个任务创建唯一 `docs/handoffs/YYYYMMDD-HHMM-topic.md`；完成后把仍有效的事实迁入状态、专题文档或 [TEST-REPORT](TEST-REPORT.md)，再删除过期记录并修复引用。
 - 状态文字必须区分“已实现 / 已验证 / 待验证 / 用户暂停 / 外部阻塞”。历史测试只能标为历史，不能写成当前轮已复跑。
 - 本地 `main`、旧交接、PR 描述都可能过期；当前 baseline 以远端实际 SHA 和 provider 查询为准。
-- 每次提交或推送前按 [PUBLICATION](PUBLICATION.md) 的顺序刷新印章、重打源码包并核对外部 SHA；印章只证明公开源文件指纹一致，不证明自然语言内容真实。
+- 每次提交或推送前按 [PUBLICATION](PUBLICATION.md) 的顺序清理过期记录、重打源码包并核对外部 SHA；普通 PR 用 `--pr`，集成方用 `--integrate` / `--release`。印章只证明公开源文件指纹一致，不证明自然语言内容真实。
 
 ## 7. 合并与发布授权
 
