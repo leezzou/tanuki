@@ -149,7 +149,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | CHAT-11 | 失败行/重试/欠费 | 终止轮次红点、失败摘要、重试、欠费中立文案 | `仅官方`：原生只有整页错误 banner | P0/P1 · 原生消息状态 · 42 聊天链路（错误/失败行） · A-CHAT-01、A-CHAT-03 |
 | CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-05 |
 | CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-CHAT-05 |
-| CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `组件就绪`：`DshPlanCard`/`DshPlanParser`，待 42 接线页面状态 | P1 · `userQuestions/*`、`approval/request` · android_agent-53 + 42 · A-APPROVAL-02 |
+| CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `进行中`：`DshPlanCard`/`DshPlanParser` 组件就绪，待 42 接线页面状态 | P1 · `userQuestions/*`、`approval/request` · android_agent-53 + 42 · A-APPROVAL-02 |
 | CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：android_agent-42 未提交的 `DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · 42 聊天链路 · A-CHAT-01、A-CHAT-03 |
 | CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-05 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
@@ -214,7 +214,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
 | APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · 45 审批（42 提供事件） · A-APPROVAL-01、A-APPROVAL-02 |
-| APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `组件就绪`：`DshPlanCard` 多步骤进度与审阅按钮、`DshPlanParser` 解析计划事件/计划工具调用；`DshNativePage` 状态接线待集成方 | P1 · `userQuestions/*`/计划事件 · android_agent-53 + 42 接线 · A-APPROVAL-02 |
+| APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `进行中`：`DshPlanCard` 多步骤进度与审阅按钮、`DshPlanParser` 解析计划事件/计划工具调用；`DshNativePage` 状态接线待集成方 | P1 · `userQuestions/*`/计划事件 · android_agent-53 + 42 接线 · A-APPROVAL-02 |
 | APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `原生完整`：按审批会话查工具参数，摘要+完整参数折叠 | — · `DshNativeController.tool`/`DshApprovalPanel` · android_agent-53 · A-TOOL-02 |
 | APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `原生完整（本次运行内存）`：按会话+工具+风险复用，可逐条撤销/全部清除；不写官方持久配置 | — · `DshApprovalMemory`/`DshApprovalController` · android_agent-53 · A-APPROVAL-01 |
 | APPROVAL-09 | 审批通知 | 等待审批/提问时提醒，点击定位会话 | `原生替代`：Android 通知已实现（PR #22），点击定位会话；无内联批准动作 | — · `ChatNotification*` · android_agent-29/PR #22 · A-NOTIFY-01、A-NOTIFY-02 |
