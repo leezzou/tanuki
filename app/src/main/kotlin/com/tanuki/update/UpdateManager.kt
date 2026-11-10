@@ -28,36 +28,40 @@ class UpdateManager(
     fun check() {
         if (job?.isActive == true) return
         job = manager.scope.launch {
-            val startedAt = System.currentTimeMillis()
-            manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", download = null, bytes = 0, total = -1, phasePercent = null) }
-            try {
-                val connection = URL("https://registry.npmjs.org/@deepseek-ai%2Fdsh").openConnection() as HttpURLConnection
-                connection.connectTimeout = 20000; connection.readTimeout = 20000; connection.instanceFollowRedirects = false
-                val metadata = try {
-                    check(connection.responseCode == 200) { "官方版本检查 HTTP ${connection.responseCode}" }
-                    val bytes = connection.inputStream.use { it.readBytesLimited(8 * 1024 * 1024) }
-                    JSONObject(bytes.toString(Charsets.UTF_8))
-                } finally { connection.disconnect() }
-                val versions = metadata.getJSONObject("versions")
-                val list = versions.keys().asSequence().filter { it.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")) }.toList().sortedWith { a,b -> VersionOrder.compare(b,a) }.take(40).map { version ->
-                    val item = versions.getJSONObject(version); val dist = item.getJSONObject("dist")
-                    val source = dist.getString("tarball")
-                    require(URL(source).protocol == "https" && URL(source).host == "registry.npmjs.org")
-                    Release(version, dist.getString("integrity"), source, item.optJSONObject("engines")?.optString("node", "未声明") ?: "未声明",
-                        "官方 npm 发行版；详细变更请查阅官方仓库。${if ('-' in version) "预发布版本。" else ""}", File(manager.paths.engines, "$version/.web-verified").exists())
-                }
-                releases.value = list
-                val candidate = metadata.getJSONObject("dist-tags").getString("latest")
-                try { onCheckCompleted(candidate, startedAt) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Throwable) { }
-                manager.paths.atomic("releases.json", metadata.toString())
-                manager.state.update { it.copy(candidate = candidate, stage = "官方版本列表已更新", update = if (candidate == it.dsh) UpdateState.CURRENT else UpdateState.AVAILABLE) }
-                manager.event("官方 npm 版本检查完成：$candidate")
-            } catch (cancelled: CancellationException) {
-                manager.state.update { it.copy(update = UpdateState.UNCHECKED, stage = "版本检查已取消，可重新获取") }
-                throw cancelled
-            } catch (t: Throwable) { manager.fail(t); manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") } }
+            // 与切换/卸载共用版本窄锁：检查期间不会改写 installed.json，也不会读到正在删除的 engines。
+            // 锁顺序固定为先环境 mutation、后 versionGate；本检查只取 versionGate，不与启动/安装抢占。
+            manager.versionGate.withLock {
+                val startedAt = System.currentTimeMillis()
+                manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", download = null, bytes = 0, total = -1, phasePercent = null) }
+                try {
+                    val connection = URL("https://registry.npmjs.org/@deepseek-ai%2Fdsh").openConnection() as HttpURLConnection
+                    connection.connectTimeout = 20000; connection.readTimeout = 20000; connection.instanceFollowRedirects = false
+                    val metadata = try {
+                        check(connection.responseCode == 200) { "官方版本检查 HTTP ${connection.responseCode}" }
+                        val bytes = connection.inputStream.use { it.readBytesLimited(8 * 1024 * 1024) }
+                        JSONObject(bytes.toString(Charsets.UTF_8))
+                    } finally { connection.disconnect() }
+                    val versions = metadata.getJSONObject("versions")
+                    val list = versions.keys().asSequence().filter { it.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")) }.toList().sortedWith { a,b -> VersionOrder.compare(b,a) }.take(40).map { version ->
+                        val item = versions.getJSONObject(version); val dist = item.getJSONObject("dist")
+                        val source = dist.getString("tarball")
+                        require(URL(source).protocol == "https" && URL(source).host == "registry.npmjs.org")
+                        Release(version, dist.getString("integrity"), source, item.optJSONObject("engines")?.optString("node", "未声明") ?: "未声明",
+                            "官方 npm 发行版；详细变更请查阅官方仓库。${if ('-' in version) "预发布版本。" else ""}", File(manager.paths.engines, "$version/.web-verified").exists())
+                    }
+                    releases.value = list
+                    val candidate = metadata.getJSONObject("dist-tags").getString("latest")
+                    try { onCheckCompleted(candidate, startedAt) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Throwable) { }
+                    manager.paths.atomic("releases.json", metadata.toString())
+                    manager.state.update { it.copy(candidate = candidate, stage = "官方版本列表已更新", update = if (candidate == it.dsh) UpdateState.CURRENT else UpdateState.AVAILABLE) }
+                    manager.event("官方 npm 版本检查完成：$candidate")
+                } catch (cancelled: CancellationException) {
+                    manager.state.update { it.copy(update = UpdateState.UNCHECKED, stage = "版本检查已取消，可重新获取") }
+                    throw cancelled
+                } catch (t: Throwable) { manager.fail(t); manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") } }
+            }
         }
     }
     private fun cachedRelease(version: String): Release {

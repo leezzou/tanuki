@@ -53,7 +53,7 @@ internal fun DshVersionManagerDialog(
     var loadError by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var pendingSwitch by remember { mutableStateOf<String?>(null) }
-    var pendingUninstall by remember { mutableStateOf<String?>(null) }
+    var pendingUninstall by remember { mutableStateOf<InstalledDshVersion?>(null) }
 
     LaunchedEffect(activeVersion, inventoryKey, reload) {
         loadError = null
@@ -79,9 +79,9 @@ internal fun DshVersionManagerDialog(
                         ManagerCaption("先通过“选择版本安装”安装程序；安装后这里会显示体积、安装时间与校验状态。")
                     }
                     else -> {
-                        Text("共 ${current.versions.size} 个版本，合计 ${formatDshBytes(current.totalBytes)}",
+                        Text("共 ${current.versions.size} 个版本，合计占用 ${formatDshBytes(current.totalBytes)}",
                             style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        ManagerCaption("“当前”是应用正在使用的版本；其他版本保留为备用程序，不删除用户数据。")
+                        ManagerCaption("“当前使用”是应用正在使用的版本，禁止卸载；“备用”可切换或卸载。卸载只删除程序目录，不删除配置、会话、项目、快照与其他版本。")
                         LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(current.versions, key = { it.version }) { item ->
                                 InstalledDshRow(
@@ -94,7 +94,10 @@ internal fun DshVersionManagerDialog(
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
                         }
-                        if (activeVersion.isNotBlank() && current.versions.none { it.active }) {
+                        if (!activeVersion.matches(DshVersions.VERSION)) {
+                            Text("当前安装元数据缺少有效 DSH 版本，无法确认哪个版本正在使用；列表仅供查看，已禁止切换与卸载。",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        } else if (current.versions.none { it.active }) {
                             Text("当前安装元数据指向的 DSH $activeVersion 不在清单中；请重装该版本或恢复匹配的数据快照。",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
@@ -121,16 +124,20 @@ internal fun DshVersionManagerDialog(
         )
     }
 
-    pendingUninstall?.let { version ->
+    pendingUninstall?.let { item ->
         AlertDialog(
             onDismissRequest = { pendingUninstall = null },
-            title = { Text("卸载 DSH $version") },
-            text = { Text("只删除该版本的 DSH 程序目录，保留配置、会话、扩展、项目、数据快照与其他已安装版本。此版本不是当前版本。") },
+            title = { Text("确认卸载 DSH ${item.version}？") },
+            text = {
+                Text("将删除备用版本的程序目录：占用 ${formatDshBytes(item.bytes)}，安装于 ${formatDshTime(item.installedAtMillis)}。\n\n" +
+                    "不会删除配置、会话、扩展、项目、用户数据、数据快照、共享下载缓存与其他已安装版本；" +
+                    "如需再回滚到该版本，需要重新安装匹配程序。当前使用版本不能在此卸载。")
+            },
             confirmButton = {
                 TextButton(
-                    onClick = { pendingUninstall = null; onUninstall(version) },
+                    onClick = { pendingUninstall = null; item.version.let(onUninstall) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("卸载") }
+                ) { Text("确认卸载") }
             },
             dismissButton = { TextButton(onClick = { pendingUninstall = null }) { Text("取消") } }
         )
@@ -143,23 +150,26 @@ private fun InstalledDshRow(
     activeVersion: String,
     idle: Boolean,
     onSwitch: (String) -> Unit,
-    onUninstall: (String) -> Unit
+    onUninstall: (InstalledDshVersion) -> Unit
 ) {
-    val older = !item.active && DshVersions.isOlder(item.version, activeVersion)
+    val currentKnown = activeVersion.matches(DshVersions.VERSION)
+    val older = !item.active && currentKnown && DshVersions.isOlder(item.version, activeVersion)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(item.version, style = MaterialTheme.typography.titleMedium)
-            StatusPill(if (item.active) "当前" else "备用", item.active)
+            StatusPill(if (item.active) "当前使用" else "备用", item.active)
             StatusPill(if (item.verified) "已校验" else "未校验", item.verified)
         }
         ManagerCaption("占用 ${formatDshBytes(item.bytes)} · 安装于 ${formatDshTime(item.installedAtMillis)}")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!DshVersions.canUninstallFromManager(item.version, activeVersion)) {
-                ManagerCaption("当前版本不可在此卸载；主界面仍保留原卸载入口。")
+            if (item.active) {
+                ManagerCaption("当前使用中，禁止卸载；如需清理请先切换到其他版本。")
+            } else if (!currentKnown || !DshVersions.canUninstallFromManager(item.version, activeVersion)) {
+                ManagerCaption("当前使用的版本未知，已禁止切换与卸载。")
             } else {
                 OutlinedButton(onClick = { onSwitch(item.version) }, enabled = idle && !older && item.lockVerified,
                     modifier = Modifier.heightIn(min = 44.dp)) { Text("切换") }
-                TextButton(onClick = { onUninstall(item.version) }, enabled = idle,
+                TextButton(onClick = { onUninstall(item) }, enabled = idle,
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("卸载") }
             }
         }
@@ -168,7 +178,7 @@ private fun InstalledDshRow(
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (!item.lockVerified) {
-            Text("依赖锁缺失或与 .installed 不一致，无法切换；可卸载后重装该版本。",
+            Text("依赖锁缺失或与 .installed 不一致，无法切换；仍可卸载后重装该版本。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }

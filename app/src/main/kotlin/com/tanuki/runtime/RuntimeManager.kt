@@ -73,6 +73,8 @@ class RuntimeManager(val context: Context) {
     val fileTransfers = FileTransfers { android.os.SystemClock.elapsedRealtime() }
     val phoneFiles = com.tanuki.storage.PhoneFileService(context, paths, fileTransfers)
     val mutation = Mutex()
+    /** 版本元数据窄锁：切换、卸载与更新检查串行，避免并发读写 installed.json 与 engines。 */
+    val versionGate = DshVersionGate()
     private val stopMutex = Mutex()
     private var job: Job? = null
     private var serverJob: Job? = null
@@ -181,7 +183,12 @@ class RuntimeManager(val context: Context) {
         synchronized(this) {
             if (job?.isActive == true) { event("已有环境操作正在进行"); return }
             job = scope.launch {
-                if (!mutation.tryLock()) { event("另一个操作占用环境，请稍后重试"); return@launch }
+                if (!mutation.tryLock()) {
+                    event("另一个操作占用环境，请稍后重试")
+                    // 不能只写事件日志：版本按钮失败时用户需要看到中文原因。
+                    state.update { it.copy(error = "另一个安装、切换、卸载或更新操作正在进行，请稍后重试", stage = "操作未开始：环境正被其他操作占用") }
+                    return@launch
+                }
                 val before=state.value
                 state.update { it.copy(operation=label,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="") }
                 try {

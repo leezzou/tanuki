@@ -82,6 +82,8 @@ python3 scripts/test-dsh-lock.py
 
 Ubuntu、Node、DSH 程序和项目、用户数据分别保存。卸载组件需要确认，保留用户主目录、DSH 配置、会话和项目；卸载整个 Android 应用或清除应用数据则会删除这些私有文件。
 
+DSH 的「已安装版本」列出当前使用/备用、占用空间、安装时间与校验状态；只允许卸载非当前版本。当前版本、运行中的服务或活动任务、正在进行的更新检查/安装都会拒绝卸载并给出中文原因。卸载采用“改名到隔离目录 → 提交事务日志 → 删除”的两阶段流程：删除失败且目录完整时回滚并保留原程序；已部分删除时保留隔离目录，由下次启动的 `recover()` 继续清理，不把半删程序当成已安装版本。事务只处理 `engines/<版本>` 与隔离目录，不删除 `userdata`、`workspaces`、`backups`、共享下载缓存、数据快照或其他版本；切换、卸载与安装、启动、更新检查共用版本互斥，避免并发改写 `installed.json`。见 [`DshVersions.kt`](../app/src/main/kotlin/com/tanuki/runtime/DshVersions.kt)、[`RuntimeComponents.kt`](../app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt)、[`DshVersionManagerDialog.kt`](../app/src/main/kotlin/com/tanuki/ui/DshVersionManagerDialog.kt)。
+
 Ubuntu、Node 更换版本先准备候选，提交前失败时保留旧组件，中断由事务记录恢复。更换 Ubuntu 会移除原系统内自行 apt 安装的额外软件；必需工具会重新检测和补齐。
 
 DSH 同版本重装先在独立目录安装和检查候选程序，通过后才替换；失败、取消或切换中断会保留或恢复旧程序，项目与会话不随程序回退。备用安装只准备另一个程序版本，不切换当前数据。跨版本切换先执行候选检查、保存匹配快照，再启动新版本；回退数据需要匹配的 Ubuntu、Node 和 DSH 程序。

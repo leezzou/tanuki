@@ -308,7 +308,7 @@ class DshComposerController(
             return
         }
         val command = DshComposerPolicy.commandFor(text, current.commands)
-        if (command != null && current.attachments.isNotEmpty() && !command.allowsAttachments) {
+        if (command != null && current.attachments.isNotEmpty() && !command.acceptsAttachments) {
             _state.update { it.copy(error = "该斜杠命令不接受附件，请移除附件或改用普通消息") }
             return
         }
