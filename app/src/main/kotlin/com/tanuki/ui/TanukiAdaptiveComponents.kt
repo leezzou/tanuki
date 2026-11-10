@@ -14,15 +14,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.mapSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 
 /**
@@ -131,7 +136,45 @@ class TanukiListStateStore {
     }
 
     fun keys(): Set<String> = positions.keys.toSet()
+
+    /** 供 Saver 与测试使用的不可变快照。 */
+    fun snapshot(): Map<String, TanukiListPosition> = positions.toMap()
 }
+
+/**
+ * 把整个 store 写入 Bundle。
+ *
+ * 位置按 `key/index/offset` 三段展开为字符串列表，避免依赖平台对嵌套 Map
+ * 的保存能力；`rememberSaveable` 恢复后所有会话位置仍在。
+ */
+val TanukiListStateStoreSaver: Saver<TanukiListStateStore, Any> = mapSaver(
+    save = { store ->
+        val flat = ArrayList<String>()
+        store.snapshot().forEach { (key, position) ->
+            flat.add(key)
+            flat.add(position.index.toString())
+            flat.add(position.offset.toString())
+        }
+        mapOf("positions" to flat)
+    },
+    restore = { saved ->
+        val store = TanukiListStateStore()
+        val flat = (saved["positions"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+        var index = 0
+        while (index + 2 < flat.size) {
+            val key = flat[index]
+            if (key.isNotBlank()) {
+                store.save(
+                    key = key,
+                    firstVisibleItemIndex = flat[index + 1].toIntOrNull() ?: 0,
+                    firstVisibleItemScrollOffset = flat[index + 2].toIntOrNull() ?: 0,
+                )
+            }
+            index += 3
+        }
+        store
+    },
+)
 
 private val LocalTanukiListStateStore = staticCompositionLocalOf<TanukiListStateStore?> { null }
 
@@ -148,8 +191,9 @@ fun TanukiPageStateHost(
     content: @Composable () -> Unit,
 ) {
     val holder: SaveableStateHolder = rememberSaveableStateHolder()
-    // store 必须位于 pageKey 之外，才能跨页面切换保留各会话滚动位置。
-    val listStore = remember { TanukiListStateStore() }
+    // store 必须位于 pageKey 之外，才能跨页面切换保留各会话滚动位置；
+    // rememberSaveable 让 Activity 重建/进程恢复后仍能读回各会话位置。
+    val listStore = rememberSaveable(saver = TanukiListStateStoreSaver) { TanukiListStateStore() }
     holder.SaveableStateProvider(pageKey) {
         CompositionLocalProvider(LocalTanukiListStateStore provides listStore) {
             content()
@@ -161,8 +205,8 @@ fun TanukiPageStateHost(
  * 按页面/会话保存并恢复滚动位置。
  *
  * 优先使用 `TanukiPageStateHost` 提供的 store；没有宿主时退化为列表自身的
- * 局部 store（只能保证同一页面内 A→B→A）。key 必须包含页面与会话身份，
- * 例如 `dsh-native:<sessionId>`。
+ * saveable 局部 store（可跨 Activity 重建与同一页面 A→B→A，但页面移出后
+ * 需要宿主才能保留）。key 必须包含页面与会话身份，例如 `dsh-native:<sessionId>`。
  */
 @Composable
 fun rememberTanukiListState(
@@ -170,15 +214,19 @@ fun rememberTanukiListState(
     store: TanukiListStateStore? = null,
 ): LazyListState {
     val localStore = LocalTanukiListStateStore.current
-    val fallbackStore = remember { TanukiListStateStore() }
+    val fallbackStore = rememberSaveable(saver = TanukiListStateStoreSaver) { TanukiListStateStore() }
     val resolved = store ?: localStore ?: fallbackStore
     val state = remember(key, resolved) {
         val position = resolved.position(key)
         LazyListState(position.index, position.offset)
     }
-    DisposableEffect(state, key, resolved) {
-        onDispose {
-            // key 变化或页面移出时保存；回到同一 key 由上面的 remember 恢复。
+    // 持续保存，而不是只等 onDispose：Activity 重建/后台回收时也能拿到最新位置。
+    LaunchedEffect(state, key, resolved) {
+        try {
+            snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+                .collect { (index, offset) -> resolved.save(key, index, offset) }
+        } finally {
+            // 取消/离开组合时再补一次，覆盖尚未通过 snapshotFlow 发布的最新位置。
             resolved.save(key, state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
         }
     }

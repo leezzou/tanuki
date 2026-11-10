@@ -19,11 +19,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+
+/** 窄屏抽屉是否打开；供页面内的二级返回处理器让位。 */
+private val LocalTanukiDrawerOpen = staticCompositionLocalOf { false }
 
 /**
  * 自适应外壳：同一套导航与内容在宽屏和窄屏复用。
@@ -65,23 +70,26 @@ fun TanukiAdaptiveShell(
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         // 窄屏抽屉最多占 90% 宽度，360dp/320dp 下不会横向溢出。
         val drawerWidth = TanukiLayoutPolicy.drawerWidthDp(metrics.widthDp).dp
-        // 抽屉是页面内的最上层容器；先关它，再交给页面返回策略。
-        BackHandler(enabled = drawerState.isOpen) {
-            scope.launch { drawerState.close() }
-        }
         ModalNavigationDrawer(
             drawerState = drawerState,
             modifier = modifier.fillMaxSize(),
             drawerContent = {
-                ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
+                ModalDrawerSheet(modifier = Modifier.fillMaxHeight().width(drawerWidth)) {
                     navigation { scope.launch { drawerState.close() } }
                 }
             },
         ) {
-            content(
-                Modifier.fillMaxSize(),
-                { scope.launch { drawerState.open() } },
-            )
+            CompositionLocalProvider(LocalTanukiDrawerOpen provides drawerState.isOpen) {
+                content(
+                    Modifier.fillMaxSize(),
+                    { scope.launch { drawerState.open() } },
+                )
+            }
+        }
+        // 必须在 content 之后组合：Compose 让最后注册的 BackHandler 优先，
+        // 这样详情页打开抽屉后，返回只关抽屉，不会先关详情。
+        BackHandler(enabled = drawerState.isOpen) {
+            scope.launch { drawerState.close() }
         }
     }
 }
@@ -116,9 +124,14 @@ fun TanukiTwoPane(
             }
         }
     } else {
-        BackHandler(enabled = detailVisible && onDetailBack != null) {
+        val drawerOpen = LocalTanukiDrawerOpen.current
+        // 抽屉打开时详情处理器必须让位，不能抢先关闭下层详情。
+        BackHandler(enabled = detailVisible && onDetailBack != null && !drawerOpen) {
             onDetailBack?.invoke()
         }
-        if (detailVisible) detail(Modifier.fillMaxSize()) else list(Modifier.fillMaxSize())
+        // 窄屏也要保留调用方的 padding/尺寸约束，不能换成裸 fillMaxSize。
+        Box(modifier.fillMaxSize()) {
+            if (detailVisible) detail(Modifier.fillMaxSize()) else list(Modifier.fillMaxSize())
+        }
     }
 }

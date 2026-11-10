@@ -31,6 +31,7 @@
 - 宽屏 `>=840dp`：`TanukiAdaptiveShell` 用左侧导航栏 + 右侧内容；同一 `navigation`/`content` slot 不写第二套。
 - 窄屏：同一外壳改为 `ModalNavigationDrawer`，内容全宽，`content` 的 `openNavigation` 打开抽屉；返回键先关抽屉。
 - 列表+详情：`TanukiTwoPane` 在宽屏并排、窄屏只显示其中一页；窄屏详情用整页打开，返回键先 `onDetailBack` 回列表。
+- 返回仲裁：抽屉打开时 `TanukiTwoPane` 的详情返回处理器自动禁用，shell 的抽屉处理器最后注册并优先；不会出现“先关详情、抽屉还在”的情况。
 - 不再在业务页里写 `if (wide) ... else ...` 两套页面；只把布局差异收敛到这两个容器。
 
 ### 3.1 主壳导航（`TanukiUi.kt`）
@@ -107,7 +108,7 @@
 
 - `TanukiStartupPolicy` 把工作分成首帧前、首帧后、可交互后三档；冷启动到可交互只做状态恢复、主题和轻量偏好。
 - 列表 key 必须稳定：`message-<seq>`、`pending-<负序号>`、`tool-<callId>`、会话 id；禁止下标 key。`TanukiListKeys.requireUnique` 可在开发期做唯一性断言。
-- 滚动位置用 `TanukiPageStateHost` + `rememberTanukiListState(key)` 显式保存；key 必须包含页面与会话身份。不要只用 `rememberSaveable(key)`，key 变化会重置状态。
+- 滚动位置用 `TanukiPageStateHost` + `rememberTanukiListState(key)` 显式保存；store 通过 `TanukiListStateStoreSaver` 写入 Bundle，列表滚动时持续保存，Activity 重建/进程恢复可读回。key 必须包含页面与会话身份。不要只用 `rememberSaveable(key)`，key 变化会重置状态。
 - 高频进度流只让进度组件订阅，不在主壳根部 `collectAsState`；避免整页重组。
 - 切换原生/官方或进入二级页时复用已有控制器与列表快照，不重新认证、不重建服务、不重新 `refresh()`。
 - `TanukiStateView` 与按钮均为纯展示组件，不持有业务状态；数据变化只更新传入参数。
@@ -123,9 +124,9 @@
 - `TanukiStartupPolicyTest`：首帧前/首帧后/可交互三档工作预算与单调性。
 - `TanukiListKeysTest`：同一业务 id 稳定、不同 id 不冲突、已落库/待发送消息区分、非法 id 与重复 key 拒绝。
 - `TanukiSaveableStateTest`：原生/官方切换状态与会话二级页状态经 Saver 保存/恢复后完全一致。
-- `TanukiListStateStoreTest`：按会话保存/恢复、页面重进、未设置 key、负值钳制、单 key/全部清理与空 key 拒绝。
+- `TanukiListStateStoreTest`：按会话保存/恢复、页面重进、Saver 跨 Activity 重建、重建后 `LazyListState` 位置、未设置 key、负值钳制、单 key/全部清理与空 key 拒绝。
 
-本轮实际：`compileModernDebugKotlin` 通过；新增 8 个测试类共 54 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 98 个结果文件、**848 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](handoffs/20261110-1745-native-ui-polish.md)；设备结果不在此列。
+本轮实际：`compileModernDebugKotlin` 通过；新增 8 个测试类共 56 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 98 个结果文件、**850 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](handoffs/20261110-1745-native-ui-polish.md)；设备结果不在此列。
 
 ## 9. 未完成与后续
 
