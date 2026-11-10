@@ -552,15 +552,51 @@ class DshComposerControllerTest {
         controller.send()
         awaitState(controller) { it.generationRunning }
 
-        // 接入了 running 但长时间没有新事件：兜底恢复发送，而不是永久停在停止态。
-        val recovered = awaitState(controller) {
-            !it.generationRunning && it.notice.orEmpty().contains("恢复发送")
-        }
+        // 接入了 running 但长时间没有新事件：只进入 UI 降级，不推测回合结束。
+        val stale = awaitState(controller) { it.runStateStale && it.generationRunning }
+        assertTrue(stale.generationRunning)
+        assertTrue(stale.notice.orEmpty().contains("继续发送"))
+
         controller.clearNotice()
         controller.updateText("B", 1)
         controller.send()
         awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
         assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+        assertFalse(controller.state.value.runStateStale)
+    }
+
+    @Test fun silentTimeoutKeepsStopAvailable() {
+        val remote = FakeRemote()
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning && it.runStateStale }
+
+        controller.requestStop()
+        val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        // 静默超时不能被当成已停止：官方运行态和停止能力都要保留。
+        assertTrue(requested.generationRunning)
+        assertFalse(requested.stopOutcome == DshStopOutcome.STOPPED)
+    }
+
+    @Test fun watchdogBeforeCancelAcceptedDoesNotMarkStopped() {
+        val remote = FakeRemote().apply { cancelDelayMillis = 120 }
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning }
+        controller.requestStop()
+
+        // watchdog 先于 cancel accepted 触发：仍应保留运行态与 stopping。
+        val stale = awaitState(controller) { it.runStateStale && it.stopping }
+        assertTrue(stale.generationRunning)
+        val accepted = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
+        assertTrue(accepted.generationRunning)
+        assertFalse(accepted.stopOutcome == DshStopOutcome.STOPPED)
     }
 
     @Test fun runningStateTogglesWithOfficialEvents() {

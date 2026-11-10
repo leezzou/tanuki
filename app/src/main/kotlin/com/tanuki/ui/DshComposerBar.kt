@@ -654,6 +654,10 @@ fun DshComposerBar(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 TextButton(onClick = { insertToken("@") }) { Text("@") }
                 TextButton(onClick = { insertToken("/") }) { Text("/") }
+                // 运行态静默降级：只额外开放发送，不夺走主键上的停止能力。
+                if (state.runStateStale && state.generationRunning && !state.stopping) {
+                    TextButton(onClick = ::submit, enabled = state.canSend) { Text("继续发送") }
+                }
                 if (readingAttachments > 0 || state.uploadBusy || state.stopping || state.sending) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(6.dp))
@@ -667,6 +671,7 @@ fun DshComposerBar(
                     state.stopOutcome == DshStopOutcome.FAILED -> "停止失败，可重试"
                     state.sendFailed -> "发送失败，内容已保留，可重发"
                     state.sending -> "发送中…"
+                    state.runStateStale -> "长时间无运行事件；可继续发送，停止仍可用"
                     else -> "Ctrl/⌘+Enter 发送"
                 }
                 val statusFailed = state.sendFailed || state.stopOutcome == DshStopOutcome.FAILED

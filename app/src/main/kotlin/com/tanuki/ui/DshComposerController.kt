@@ -107,6 +107,11 @@ data class DshComposerState(
     val uploadBusy: Boolean = false,
     /** 当前回合是否在运行；由发送成功置位，页面接入官方 running 状态后同步复位。 */
     val generationRunning: Boolean = false,
+    /**
+     * 长时间没有运行事件时的 UI 降级：额外开放“继续发送”，但不改变官方运行态，
+     * 停止入口与停止能力继续保留，避免把静默误判成已结束。
+     */
+    val runStateStale: Boolean = false,
     val stopping: Boolean = false,
     val stopOutcome: DshStopOutcome? = null,
     val error: String? = null,
@@ -456,6 +461,7 @@ class DshComposerController(
                         attachments = keepAttachments,
                         sending = false,
                         sendFailed = false,
+                        runStateStale = false,
                         // 提交回执只负责提交状态/草稿清理：官方 running 状态在等待期间
                         // 已变化时，回执不能覆盖已确认的 idle；未接线时也不能把发送键
                         // 永久换成停止键。
@@ -503,6 +509,7 @@ class DshComposerController(
                 // 官方确认新回合运行：旧的“已停止”不再适用；仍在收尾的停止请求保留。
                 state.copy(
                     generationRunning = true,
+                    runStateStale = false,
                     stopOutcome = if (state.stopOutcome == DshStopOutcome.STOPPED) null else state.stopOutcome
                 )
             }
@@ -516,6 +523,7 @@ class DshComposerController(
                 if (!awaitingStop && !state.generationRunning) return@update state
                 state.copy(
                     generationRunning = false,
+                    runStateStale = false,
                     stopping = false,
                     stopOutcome = if (awaitingStop) DshStopOutcome.STOPPED else state.stopOutcome,
                     notice = if (awaitingStop) "已停止当前回合" else state.notice
@@ -623,10 +631,10 @@ class DshComposerController(
             if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
             _state.update { state ->
                 if (state.generationRunning && officialStateVersion == versionAtSchedule) {
+                    // 只进入 UI 降级，不推测回合结束；停止入口和 requestStop 仍然可用。
                     state.copy(
-                        generationRunning = false,
-                        stopping = false,
-                        notice = "未收到运行事件，已恢复发送"
+                        runStateStale = true,
+                        notice = "长时间未收到运行事件，可继续发送；停止仍可用"
                     )
                 } else state
             }
