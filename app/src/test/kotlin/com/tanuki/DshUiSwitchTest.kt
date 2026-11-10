@@ -42,11 +42,16 @@ class DshUiSwitchTest {
         assertNotNull(connect)
         assertTrue(connect!!.startsWith("$origin/connect?"))
         assertTrue(connect.contains("token=secret-token"))
-        assertTrue(connect.endsWith("&interactions=none"))
-        val replaced = DshApiProtocol.connectUrl(DshEndpoint(origin, "$origin/?token=secret-token&interactions=answer"))
+        assertTrue(connect.endsWith("&interactions=answer"))
+        val replaced = DshApiProtocol.connectUrl(DshEndpoint(origin, "$origin/?token=secret-token&interactions=none"))
         assertNotNull(replaced)
         assertEquals(1, Regex("interactions=").findAll(replaced!!).count())
-        assertTrue(replaced.endsWith("interactions=none"))
+        assertTrue(replaced.endsWith("interactions=answer"))
+        // 只读调用仍可显式回到 none，避免把交互能力写死在协议层。
+        val readOnly = DshApiProtocol.connectUrl(DshEndpoint(origin, "$origin/?token=secret-token"), interactions = "none")
+        assertNotNull(readOnly)
+        assertTrue(readOnly!!.endsWith("interactions=none"))
+        assertNull(DshApiProtocol.connectUrl(endpoint, interactions = "bad"))
     }
 
     @Test fun connectUrlRejectsForeignOriginMissingTokenAndNonHttp() {

@@ -1,6 +1,13 @@
 package com.tanuki.web
 
+import com.tanuki.runtime.Redact
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,8 +40,15 @@ data class DshSession(
 
 enum class DshMessageRole(val label: String) { USER("你"), ASSISTANT("DSH") }
 
-/** 从官方 session/page 事件中提取的只读文本消息。 */
-data class DshMessage(val seq: Int, val role: DshMessageRole, val text: String, val time: Long)
+/** 从官方 session/page 或 session/follow 事件中提取的文本消息。 */
+data class DshMessage(
+    val seq: Int,
+    val role: DshMessageRole,
+    val text: String,
+    val time: Long,
+    /** 仅本地发送占位使用；官方落盘后同一文本的用户消息会替换它。 */
+    val pending: Boolean = false
+)
 
 data class DshSessionPage(val messages: List<DshMessage>, val hasMore: Boolean)
 
@@ -61,8 +75,14 @@ object DshApiProtocol {
             uri.userInfo == null && uri.rawPath.isNullOrEmpty() && uri.rawQuery == null && uri.rawFragment == null
     }.getOrDefault(false)
 
-    /** 使用同一次启动的 token 换取 API Cookie；不跟随重定向，避免把 token 带到别处。 */
-    fun connectUrl(endpoint: DshEndpoint): String? = runCatching {
+    /**
+     * 使用同一次启动的 token 换取 API Cookie；不跟随重定向，避免把 token 带到别处。
+     *
+     * 原生页需要 `$events` 审批 waterfall 与 `session/follow` 实时流，因此默认声明
+     * `interactions=answer`；只读调用也复用同一 Peer，不再另开 `none` 连接。
+     */
+    fun connectUrl(endpoint: DshEndpoint, interactions: String = "answer"): String? = runCatching {
+        if (interactions != "answer" && interactions != "none") return null
         if (!validOrigin(endpoint.origin) || !OriginPolicy.sameOrigin(endpoint.launchUrl, endpoint.origin)) return null
         val uri = URI(endpoint.launchUrl)
         val query = uri.rawQuery ?: return null
@@ -73,7 +93,7 @@ object DshApiProtocol {
         }
         if (!hasToken) return null
         val withoutInteractions = parts.filterNot { it.substringBefore('=').equals("interactions", ignoreCase = true) }
-        "${endpoint.origin}/connect?${withoutInteractions.joinToString("&")}&interactions=none"
+        "${endpoint.origin}/connect?${withoutInteractions.joinToString("&")}&interactions=$interactions"
     }.getOrNull()
 
     /** 只接受官方 endpoint 形式的 method，并固定拼到当前 loopback origin。 */
@@ -149,41 +169,52 @@ object DshApiProtocol {
 
     fun parsePage(body: String): DshSessionPage {
         val value = successValue(body)?.optJSONObject("value") ?: throw IllegalArgumentException("消息响应格式不正确")
-        val records = value.optJSONArray("records") ?: JSONArray()
+        return DshSessionPage(
+            messages = parseRecords(value.optJSONArray("records") ?: JSONArray()),
+            hasMore = value.optBoolean("hasMore", false)
+        )
+    }
+
+    /** 历史页与实时跟随共用同一套事件过滤，避免两个入口显示不一致。 */
+    fun parseRecords(records: JSONArray): List<DshMessage> {
         val messages = ArrayList<DshMessage>(records.length())
         for (index in 0 until records.length()) {
             val event = records.optJSONObject(index)?.optJSONObject("event") ?: continue
-            val type = event.optString("type")
-            val role = when (type) {
-                "user/message" -> DshMessageRole.USER
-                "assistant/message" -> DshMessageRole.ASSISTANT
-                else -> continue
-            }
-            // 官方聊天只取 append-origin surface；replace 副本仅供模型上下文，不能当对话显示。
-            if (event.opt("surfaceOp") != "append") continue
-            val data = event.optJSONObject("data") ?: continue
-            // user/message 也可能是注入上下文；原生只把真实用户来源标成“你”。
-            if (role == DshMessageRole.USER) {
-                val sourceKind = data.optJSONObject("source")?.optString("kind")
-                if (sourceKind != null && sourceKind != "user") continue
-            }
-            val content = when (role) {
-                DshMessageRole.USER -> data.optJSONArray("content")
-                    ?: data.optJSONObject("message")?.optJSONArray("content")
-                DshMessageRole.ASSISTANT -> data.optJSONObject("message")?.optJSONArray("content")
-                    ?: data.optJSONArray("content")
-            } ?: continue
-            val text = textOf(content)
-            if (text.isBlank()) continue
-            messages += DshMessage(
-                seq = event.optInt("seq", 0),
-                role = role,
-                text = text,
-                time = event.optLong("time", 0L)
-            )
+            parseMessage(event)?.let(messages::add)
         }
         messages.sortBy { it.seq }
-        return DshSessionPage(messages, value.optBoolean("hasMore", false))
+        return messages
+    }
+
+    fun parseMessage(event: JSONObject): DshMessage? {
+        val type = event.optString("type")
+        val role = when (type) {
+            "user/message" -> DshMessageRole.USER
+            "assistant/message" -> DshMessageRole.ASSISTANT
+            else -> return null
+        }
+        // 官方聊天只取 append-origin surface；replace 副本仅供模型上下文，不能当对话显示。
+        if (event.opt("surfaceOp") != "append") return null
+        val data = event.optJSONObject("data") ?: return null
+        // user/message 也可能是注入上下文；原生只把真实用户来源标成“你”。
+        if (role == DshMessageRole.USER) {
+            val sourceKind = data.optJSONObject("source")?.optString("kind")
+            if (sourceKind != null && sourceKind != "user") return null
+        }
+        val content = when (role) {
+            DshMessageRole.USER -> data.optJSONArray("content")
+                ?: data.optJSONObject("message")?.optJSONArray("content")
+            DshMessageRole.ASSISTANT -> data.optJSONObject("message")?.optJSONArray("content")
+                ?: data.optJSONArray("content")
+        } ?: return null
+        val text = textOf(content)
+        if (text.isBlank()) return null
+        return DshMessage(
+            seq = event.optInt("seq", 0),
+            role = role,
+            text = text,
+            time = event.optLong("time", 0L)
+        )
     }
 
     private fun textOf(content: JSONArray): String {
@@ -212,6 +243,15 @@ object DshApiProtocol {
         }
         return result
     }
+
+    /** 发送/取消的官方结果都要求 `accepted=true`，不能只凭 HTTP 200 判断成功。 */
+    fun parseAccepted(body: String): Boolean =
+        successValue(body)?.optJSONObject("value")?.optBoolean("accepted", false) == true
+
+    /** 审批应答只关心业务成功；失败仍抛出短错误码，不回显响应细节。 */
+    fun checkSuccess(body: String) {
+        successValue(body)
+    }
 }
 
 /** 原生页依赖的最小会话数据源；生产实现是官方 API，测试可替换。 */
@@ -222,25 +262,41 @@ interface DshSessionSource {
 }
 
 /**
- * 用当前 DSH 启动 token 换取一个独立 API Peer，再读取官方会话与只读历史。
+ * 用当前 DSH 启动 token 换取一个独立 API Peer，再读取官方会话、历史、实时流并发送消息。
  * Cookie 只保存在本对象内存中；本类不写日志、不把 token/Cookie 放进异常文本。
  */
-class DshNativeClient(private val endpointProvider: () -> DshEndpoint?) : DshSessionSource {
+class DshNativeClient(
+    private val socketFactory: () -> DshMuxSocket = { DshWebSocketMuxSocket() },
+    private val endpointProvider: () -> DshEndpoint?
+) : DshChatSource {
     private val stateLock = Any()
+    /** 同一时刻只允许一条 remote.mux 物理连接；切换会话时先关闭旧连接。 */
+    private val muxLock = Mutex()
     private var cookie: String? = null
     private var boundOrigin: String? = null
     private var boundLaunchUrl: String? = null
     /** 每次 reset 递增；旧认证请求即使晚到也不能重新发布 Cookie。 */
     private var authGeneration = 0L
+    private var muxGeneration = 0L
+    private var activeSocket: DshMuxSocket? = null
+    private var eventsClientId: String? = null
+    private val pendingApprovals = LinkedHashMap<String, DshApproval>()
 
     /** 只短暂同步状态，绝不等待网络；主线程可安全调用。 */
     override fun reset() {
+        val socket: DshMuxSocket?
         synchronized(stateLock) {
             authGeneration++
+            muxGeneration++
             cookie = null
             boundOrigin = null
             boundLaunchUrl = null
+            eventsClientId = null
+            pendingApprovals.clear()
+            socket = activeSocket
+            activeSocket = null
         }
+        runCatching { socket?.close() }
     }
 
     override suspend fun sessions(): Result<List<DshSession>> = withContext(Dispatchers.IO) {
@@ -268,6 +324,192 @@ class DshNativeClient(private val endpointProvider: () -> DshEndpoint?) : DshSes
             )
             DshApiProtocol.parsePage(page)
         }
+    }
+
+    /** 官方 `session/prompt`；`mode=queue` 与官方网页默认一致，不伪造本地队列。 */
+    override suspend fun send(sessionId: String, text: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(sessionId.isNotBlank()) { "会话标识为空" }
+            val prompt = text.trim()
+            require(prompt.isNotEmpty()) { "消息不能为空" }
+            require(prompt.length <= MAX_PROMPT_CHARS) { "消息过长（最多 $MAX_PROMPT_CHARS 字）" }
+            val body = call(
+                "session/prompt",
+                JSONObject().put(
+                    "request",
+                    JSONObject()
+                        .put("requestId", UUID.randomUUID().toString())
+                        .put("sessionId", sessionId)
+                        .put("mode", "queue")
+                        .put(
+                            "content",
+                            JSONArray().put(JSONObject().put("type", "text").put("text", prompt))
+                        )
+                )
+            )
+            if (!DshApiProtocol.parseAccepted(body)) throw IOException("官方接口未接受消息")
+        }
+    }
+
+    /** 官方 `session/cancel`；只取消当前活动回合，不清空官方待处理队列。 */
+    override suspend fun cancel(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(sessionId.isNotBlank()) { "会话标识为空" }
+            val body = call(
+                "session/cancel",
+                JSONObject().put("request", JSONObject().put("sessionId", sessionId))
+            )
+            if (!DshApiProtocol.parseAccepted(body)) throw IOException("官方接口未接受停止请求")
+        }
+    }
+
+    /**
+     * 通过官方 `$events/result` 回答审批。value 只使用官方闭集 `allowed-once`/`rejected`，
+     * 不读取或回传审批请求里的工具参数。
+     */
+    override suspend fun answer(eventId: String, allow: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!DshMuxProtocol.validEventId(eventId)) throw IOException("审批事件标识无效")
+            val clientId = synchronized(stateLock) { eventsClientId }
+                ?: throw IOException("实时审批通道尚未连接")
+            val body = call(
+                DshMuxProtocol.EVENTS_RESULT_ENDPOINT,
+                JSONObject()
+                    .put("clientId", clientId)
+                    .put("eventId", eventId)
+                    .put(
+                        "outcome",
+                        JSONObject()
+                            .put("kind", "result")
+                            .put("value", if (allow) "allowed-once" else "rejected")
+                    )
+            )
+            DshApiProtocol.checkSuccess(body)
+            removeApproval(eventId)
+            Unit
+        }
+    }
+
+    /**
+     * 打开官方 `$events` 与 `session/follow` 两个逻辑流，持续输出实时事件。
+     *
+     * 物理连接只有一条；关闭它会销毁该 API Peer，因此 finally 同时清空 Cookie，
+     * 下次发送或重连会重新 `/connect`。同一时刻只保留一个 live 收集器。
+     */
+    override fun live(sessionId: String): Flow<DshLiveEvent> = flow {
+        require(sessionId.isNotBlank()) { "会话标识为空" }
+        muxLock.withLock {
+            // 认证、握手与 socket 读取都是阻塞 I/O；整个上游必须在 IO 线程，不能占主线程。
+            var generation = 0L
+            var socket: DshMuxSocket? = null
+            try {
+                val endpoint = endpointProvider() ?: throw IOException("DSH 服务地址尚未就绪")
+                generation = synchronized(stateLock) { ++muxGeneration }
+                val requestGeneration = synchronized(stateLock) { authGeneration }
+                val currentCookie = ensureCookie(endpoint, requestGeneration)
+                val opened = socketFactory()
+                socket = opened
+                opened.connect(endpoint.origin, currentCookie)
+                synchronized(stateLock) {
+                    if (generation != muxGeneration) throw IOException("实时连接已取消")
+                    activeSocket = opened
+                    eventsClientId = null
+                    pendingApprovals.clear()
+                }
+                val eventsId = "events-${UUID.randomUUID()}"
+                val followId = "follow-${UUID.randomUUID()}"
+                opened.send(DshMuxProtocol.openFrame(eventsId, DshMuxProtocol.EVENTS_ENDPOINT, DshMuxProtocol.eventsOpenArgs()))
+                opened.send(DshMuxProtocol.openFrame(followId, DshMuxProtocol.FOLLOW_ENDPOINT, DshMuxProtocol.followArgs(sessionId)))
+                emit(DshLiveEvent.Connected)
+                val followParser = DshFollowParser()
+                opened.incoming().collect { text ->
+                    when (val downlink = DshMuxProtocol.parseDownlink(text)) {
+                        is DshMuxDownlink.Item -> when (downlink.streamId) {
+                            eventsId -> handleEvent(downlink.value, sessionId)?.let { emit(it) }
+                            followId -> followParser.accept(downlink.value).forEach { frame ->
+                                when (frame) {
+                                    is DshFollowFrame.Snapshot ->
+                                        emit(DshLiveEvent.Snapshot(frame.messages, frame.hasMore, frame.liveText))
+                                    is DshFollowFrame.Message -> emit(DshLiveEvent.Message(frame.message))
+                                    is DshFollowFrame.Streaming -> emit(DshLiveEvent.Streaming(frame.text))
+                                    is DshFollowFrame.Finished -> emit(DshLiveEvent.Finished(frame.committed))
+                                }
+                            }
+                        }
+                        is DshMuxDownlink.Failure -> emit(DshLiveEvent.Failure(liveFailure(DshApiException(downlink.code))))
+                        is DshMuxDownlink.Ended -> {
+                            if (downlink.streamId == followId) {
+                                emit(DshLiveEvent.Failure("实时消息流已结束，可点刷新重连"))
+                                emit(DshLiveEvent.Finished(false))
+                            } else {
+                                emit(DshLiveEvent.Failure("实时事件流已结束，审批请到官方界面处理"))
+                            }
+                        }
+                        null -> Unit
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                emit(DshLiveEvent.Failure(liveFailure(error)))
+            } finally {
+                runCatching { socket?.close() }
+                synchronized(stateLock) {
+                    if (generation != 0L && generation == muxGeneration) {
+                        activeSocket = null
+                        eventsClientId = null
+                        pendingApprovals.clear()
+                        // 关闭物理 socket 会销毁该 API Peer，旧 Cookie 不可再用于 HTTP。
+                        cookie = null
+                        boundOrigin = null
+                        boundLaunchUrl = null
+                    }
+                }
+            }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    private fun handleEvent(value: JSONObject, sessionId: String): DshLiveEvent? {
+        val frame = DshMuxProtocol.parseEventFrame(value) ?: return null
+        return when (frame) {
+            is DshEventFrame.Ready -> {
+                synchronized(stateLock) { eventsClientId = frame.clientId }
+                null
+            }
+            is DshEventFrame.Waterfall -> {
+                val approval = DshMuxProtocol.approvalOf(frame) ?: return null
+                DshLiveEvent.Approvals(publishApproval(approval))
+            }
+            is DshEventFrame.Cancelled -> DshLiveEvent.Approvals(removeApproval(frame.eventId))
+            is DshEventFrame.Emit -> when (frame.event) {
+                "api-session/status" -> {
+                    if (frame.args.length() < 2 || frame.args.optString(0) != sessionId) return null
+                    if (frame.args.opt(1) !is Boolean) return null
+                    DshLiveEvent.Running(frame.args.optBoolean(1))
+                }
+                "api-session/error" -> {
+                    if (frame.args.length() < 1 || frame.args.optString(0) != sessionId) return null
+                    DshLiveEvent.Failure("官方 Agent 报告错误，可切换官方界面查看详情")
+                }
+                else -> null
+            }
+        }
+    }
+
+    private fun publishApproval(approval: DshApproval): List<DshApproval> = synchronized(stateLock) {
+        pendingApprovals[approval.eventId] = approval
+        pendingApprovals.values.toList()
+    }
+
+    private fun removeApproval(eventId: String): List<DshApproval> = synchronized(stateLock) {
+        pendingApprovals.remove(eventId)
+        pendingApprovals.values.toList()
+    }
+
+    private fun liveFailure(error: Throwable): String = when (error) {
+        is DshApiException -> "官方接口返回 ${error.code}"
+        is org.json.JSONException -> "官方实时流格式不正确"
+        else -> Redact.text(error.message ?: "实时连接失败").take(200)
     }
 
     private fun <T> parse(reader: (String) -> T, method: String, args: JSONObject): T =
@@ -377,5 +619,9 @@ class DshNativeClient(private val endpointProvider: () -> DshEndpoint?) : DshSes
             }
             return output.toString("UTF-8")
         }
+    }
+
+    private companion object {
+        const val MAX_PROMPT_CHARS = 12_000
     }
 }

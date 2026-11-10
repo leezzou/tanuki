@@ -1,6 +1,15 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[原生界面可交互切片](handoffs/20261110-1233-native-ui-chat.md)（android_agent-42，基于 `origin/main=0555c3c`；已实现发送/停止/实时流/审批，JVM/lint 通过，PR 待创建，未合并/未发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并）。并行与历史记录保留在 `docs/handoffs/`。
+
+## 原生界面可交互切片（android_agent-42，PR 待创建）
+
+- 基线 `origin/main=0555c3c`；开始分支 `ao/tanuki-native-ui/root`。交付分支计划 `ao/tanuki-native-ui/native-chat`（从 root 建兄弟分支），PR 待创建，不合并、不发布、不触发 AO Review。
+- 官方协议：同一 `/connect?interactions=answer` API Peer；一元 `session/list|projections|page|prompt|cancel` 与 `$events/result`；实时 `/api/remote.mux` 的 `$events`（ready/waterfall/cancel/emit）与 `session/follow`（snapshot/event/assistant-stream）。不另造聊天协议。
+- 原生能力：发送（`session/prompt`，`mode=queue`）、停止（`session/cancel`）、切换会话、实时增量 `text-delta`、运行状态、错误提示、审批显示与“允许一次/拒绝/去官方处理”、提问只读+跳官方；附件/图片/模型选择/提问多选/自动重连未实现。
+- 安全与兼容：只连精确 loopback origin；WebSocket 握手校验/掩码/ping-pong；token/Cookie 不落日志/状态；关闭 mux 即丢弃失效 Cookie；列表失败回退官方，实时/单次失败只提示；通知目标会重连；远程 origin 复用同一 loopback 转发地址；安全模式与 WebView 路径未改。
+- 已验证（本轮）：目标协议/客户端/控制器/WebSocket 回归 51 项通过；最终完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
+- 详细端点、未实现项与设备验收清单见 [原生界面](NATIVE-UI.md)。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -205,6 +214,7 @@
 
 ## 环境与阻塞
 
+- 当前分支：原生界面交付分支 `ao/tanuki-native-ui/native-chat`（计划从 `ao/tanuki-native-ui/root` 创建，基线 `origin/main=0555c3c`）；本轮未启动设备、未安装、未跑仪器。
 - 当前分支：DOCX 原生预览分支 `ao/docx-preview/root`，已 merge `main=f5f3bf3`；独立 `/tmp` clone 验证/提交，PR [#28](https://github.com/leezzou/tanuki/pull/28) 待审。
 - 当前分支：温控分支 `ao/thermal-policy/device-condition-policy`，已合并 `origin/main=d9b4aa2` 解决冲突；在 `/tmp/tanuki-thermal-30` 独立 clone 验证/提交，未使用共享 worktree 的 `.git` 写操作。
 - 当前分支：后台更新检查分支 `ao/workmanager-updates/background-update-check`（已 rebase 到 `origin/main=9b32051`，独立 `/tmp` clone 验证/提交）；视频任务分支 `ao/video-fullscreen-rotatio/full-sensor`（基于 `origin/main` `41609cb`，rebase 解决文档冲突后 `--force-with-lease` 推送）；F1 分支 `ao/tanuki-android-dsh/workspace-file-preview` 已随 PR #16 合并。两轮均在独立 `/tmp` clone 完成验证，未使用共享 worktree 的 `.git` 写操作。

@@ -193,14 +193,17 @@ HTTP 200..399 或 401 → 存活
 
 ### 1.7 可选原生界面的官方 DSH 接口
 
-设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话，不另造协议：
+设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读写会话，不另造聊天协议：
 
-- 认证：同一启动 token 调 `GET /connect?token=...&interactions=none`，只取签名 API Cookie；不跟随 302。
-- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；当前使用 `session/list`、`session/projections`、`session/page`。
-- 实时流/审批：官方 `session/follow`、`session/control` 与审批 waterfall 只经 `/api/remote.mux` WebSocket；原生最小切片未实现，列表失败时回退官方界面。
-- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebView 同源与 Cookie 策略不变。
+- 认证：同一启动 token 调 `GET /connect?token=...&interactions=answer`，只取签名 API Cookie；`answer` 是 `$events` 审批 waterfall 所需，不跟随 302。只读场景仍可显式传 `interactions=none`。
+- 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；会话读取用 `session/list`、`session/projections`、`session/page`，发送用 `session/prompt`（`mode=queue`，至少一个非空文本块），停止用 `session/cancel`，审批答辩用 `$events/result`。
+- 实时流：`/api/remote.mux` WebSocket 只接受文本帧，客户端帧必须掩码；逻辑流用 `open/item/end/cancel`，下行用 `item/error/end`。原生页打开两个流：`$events`（`{args:{}}`）与 `session/follow`（`request.address.kind=session`、`assistantStream=true`、`maxMessages=120`）。
+- `$events`：`ready` 返回 `clientId`；`waterfall` 只接受 `approval/request`、`user-questions/request`；`cancel` 撤回事件；`emit` 只使用 `api-session/status`/`api-session/error` 的会话 id 与运行状态，不把错误原文或消息正文带入通知/日志。
+- `session/follow`：`snapshot` 给历史窗口与可选 `assistantStream` 基线；`event` 给增量事件；`assistant-stream` 的 `start/chunk/end` 只聚合 `text-delta`，忽略 reasoning/tool-call；`assistant/message` 落盘后替代临时流式气泡。
+- 审批：`approval/request` 只展示 `toolName` 与 `displayReason`/`reason`，不读工具参数；用户选择后以 `{"kind":"result","value":"allowed-once"|"rejected"}` 回答。`user-questions/request` 在原生页只读展示问题与选项，明确跳官方界面处理；不伪造多选答案。
+- 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 不发送 `Origin`，只连当前精确 loopback origin；列表失败才回退官方界面，实时流/单次操作失败只提示并保留历史/发送能力。关闭物理 mux 会销毁该 API Peer，Native 客户端同时丢弃 Cookie，下次重新 `/connect`。
 
-细节、端点缺口与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
+细节、端点、未实现项与验证见 [原生界面与官方界面切换](NATIVE-UI.md)。
 
 ## 2. 工具面：Browser RPC
 

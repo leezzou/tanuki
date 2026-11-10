@@ -8,7 +8,13 @@ import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshSessionPage
-import com.tanuki.web.DshSessionSource
+import com.tanuki.web.DshApproval
+import com.tanuki.web.DshApprovalKind
+import com.tanuki.web.DshChatSource
+import com.tanuki.web.DshLiveEvent
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -113,8 +119,99 @@ class DshNativeControllerTest {
         assertEquals(listOf("message-C"), state.messages.map { it.text })
     }
 
-    private fun controller(source: DshSessionSource): DshNativeController =
+
+    @Test fun sendKeepsPendingBubbleUntilOfficialMessageAndClearsOnSuccess() = runBlocking {
+        val source = FakeSource(listOf(session("A")))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertTrue(controller.send("你好 DSH"))
+        val state = controller.state.value
+        assertTrue(state.messages.any { it.pending && it.text == "你好 DSH" })
+        assertFalse(state.sending)
+        assertTrue(state.notice!!.contains("官方"))
+    }
+
+    @Test fun sendFailureRemovesPendingBubbleAndShowsOfficialCode() = runBlocking {
+        val source = FakeSource(listOf(session("A")), sendFailure = com.tanuki.web.DshApiException("session/agent-busy"))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertFalse(controller.send("会失败"))
+        val state = controller.state.value
+        assertFalse(state.messages.any { it.pending })
+        assertTrue(state.sendError!!.contains("session/agent-busy"))
+        assertFalse(state.running)
+    }
+
+    @Test fun stopAsksOfficialCancelWithoutStoppingNativePage() = runBlocking {
+        val source = FakeSource(listOf(session("A")))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertTrue(controller.stop())
+        val state = controller.state.value
+        assertTrue(state.notice!!.contains("停止"))
+        assertFalse(state.stopping)
+    }
+
+    @Test fun liveSnapshotAndStreamingTextAreVisible() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(
+                    messages = listOf(DshMessage(5, DshMessageRole.ASSISTANT, "已收到", 2L)),
+                    hasMore = false,
+                    liveText = ""
+                ),
+                DshLiveEvent.Streaming("正在"),
+                DshLiveEvent.Streaming("正在回复")
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.messages.any { m -> m.text == "已收到" } }
+        assertEquals("已收到", state.messages.last().text)
+        assertEquals("正在回复", controller.state.value.streamingText)
+    }
+
+    @Test fun approvalIsShownAndAnsweredOnlyThroughOfficialChannel() = runBlocking {
+        val approval = DshApproval("event-1", "A", DshApprovalKind.APPROVAL, "Bash", "需要执行命令")
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(DshLiveEvent.Connected, DshLiveEvent.Approvals(listOf(approval)))
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.currentApprovals.isNotEmpty() }
+        assertEquals("Bash", state.currentApprovals.single().title)
+        assertTrue(controller.answerApproval(approval, allow = true))
+        assertTrue(controller.state.value.approvals.isEmpty())
+        assertTrue(controller.state.value.notice!!.contains("允许"))
+    }
+
+    @Test fun liveFailureDoesNotForceOfficialFallback() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(DshLiveEvent.Failure("实时连接失败"))
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.liveError != null }
+        assertNull(state.unavailableReason)
+        assertTrue(state.sessions.any { it.id == "A" })
+    }
+
+    private fun controller(source: DshChatSource): DshNativeController =
         DshNativeController(source, CoroutineScope(Dispatchers.Unconfined))
+
+    private suspend fun awaitState(
+        controller: DshNativeController,
+        predicate: (com.tanuki.ui.DshNativeState) -> Boolean
+    ): com.tanuki.ui.DshNativeState = withTimeout(2_000) {
+        controller.state.first(predicate)
+    }
 
     private fun awaitSelection(controller: DshNativeController, id: String) = runBlocking {
         withTimeout(2_000) {
@@ -135,8 +232,10 @@ class DshNativeControllerTest {
     private class FakeSource(
         private val items: List<DshSession>,
         private val failSessions: Boolean = false,
-        messages: Map<String, String> = emptyMap()
-    ) : DshSessionSource {
+        messages: Map<String, String> = emptyMap(),
+        private val liveEvents: List<DshLiveEvent> = emptyList(),
+        private val sendFailure: Throwable? = null
+    ) : DshChatSource {
         private val current = messages.toMutableMap()
 
         fun setMessage(sessionId: String, text: String) {
@@ -159,5 +258,15 @@ class DshNativeControllerTest {
                 hasMore = false
             )
         )
+
+        override suspend fun send(sessionId: String, text: String): Result<Unit> =
+            sendFailure?.let { Result.failure(it) } ?: Result.success(Unit)
+
+        override suspend fun cancel(sessionId: String): Result<Unit> = Result.success(Unit)
+
+        override suspend fun answer(eventId: String, allow: Boolean): Result<Unit> = Result.success(Unit)
+
+        override fun live(sessionId: String): Flow<DshLiveEvent> =
+            if (liveEvents.isEmpty()) emptyFlow() else flowOf(*liveEvents.toTypedArray())
     }
 }

@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-2310-release-0.1.10.md",
-  "recordSha256": "7f8e7a7191445d459d776d001922f07a4effa7d4ce945412ce2868ec51ffca0e",
-  "sourceFingerprint": "fcad28f82f5a2b9a35661d8e04d0c1f8837e872b3d3215308f2e2b82d60c5387",
-  "fileCount": 591
+  "record": "docs/handoffs/20261110-1233-native-ui-chat.md",
+  "recordSha256": "a93c3b28ec615ffe0181cebdba7e2bc3f67c71733f6347d4269d276c6ee45b35",
+  "sourceFingerprint": "5b193c4989498fedf9239e2fa4ec7a58fb6b28d2d9859abd89c198b16b730644",
+  "fileCount": 598
 }

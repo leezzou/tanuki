@@ -229,7 +229,7 @@ class DshNativeApiTest {
         assertEquals(4, requests.size)
         val connect = requests.first { it.target.startsWith("/connect?") }
         assertTrue(connect.target.contains("token=top-secret"))
-        assertTrue(connect.target.contains("interactions=none"))
+        assertTrue(connect.target.contains("interactions=answer"))
         assertNull(connect.headers["cookie"])
         assertNull(connect.headers["origin"])
         val api = requests.filter { it.target.startsWith("/api/") }
