@@ -18,6 +18,7 @@
 - 已验证：`python3 scripts/check-native-parity.py --self-test` PASS；`python3 scripts/check-native-parity.py` PASS（166 行、14 域）；`python3 -c "compile(...)"` 语法检查 PASS；`python3 scripts/check-handoff.py --record ...` 与无参数 `check-handoff.py` PASS（594 public files）。
 - 待验证：所有 JVM/仪器/手工验收用例均未执行；矩阵中的“原生现状”来自源码/既有测试与只读分支核对，不代表当前设备行为。
 - 当前目标包名、分支/无 Git 状态：分支 `ao/parity-audit/root`，基线 `0555c3c0`；无运行中产品任务；未安装 APK、未启动设备。
+- 编排器范围确认（2026-11-10）：`android_agent-44` 是实现会话管理（DshSessionManagerActivity/Controller/Page、DshSessionAdminApi），不与本审计重复；`docs/NATIVE-PARITY.md` 与 `scripts/check-native-parity.py` 由 android_agent-47 唯一维护，其他 worker 只提交证据、不双写矩阵。P0 已拆到 INPUT-01/02/03、CHAT-15/11、SESS-02/04/12、APPROVAL-01/02/05/06 等行，并标注 42 聊天链路 / 45 审批 / 46 输入 / 44 会话管理。
 - 关键事实与可定位源码/公共文档：
   - 原生只读页：`app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt`、`DshNativeController.kt`、`app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt`；PR #26（android_agent-33）已合并 `d9b4aa2`。
   - 官方/原生切换：`app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt`；`docs/NATIVE-UI.md`、`docs/INTERFACES.md` 第 1.7 节。
@@ -28,7 +29,7 @@
 
 | 文件 | 改动与目的 |
 |---|---|
-| `docs/NATIVE-PARITY.md` | 新增功能对齐审计：状态/优先级图例、14 类矩阵、44 个验收用例、自动化与设备前置、并行归属与阻塞、不做/不宣称、维护规则。 |
+| `docs/NATIVE-PARITY.md` | 新增功能对齐审计：状态/优先级图例、P0 拆解与 42/45/46/44 归属、14 类矩阵、44 个验收用例、自动化与设备前置、并行归属与阻塞、矩阵唯一所有权、不做/不宣称、维护规则。 |
 | `scripts/check-native-parity.py` | 新增只读文档门禁：校验 14 域、行 ID 唯一/归属正确、状态/优先级/验收引用、验收用例定义、反引号仓库路径存在；`--self-test` 用内置样例验证能发现坏行。 |
 | `.github/workflows/verify.yml` | 在 Host job 增加 `Check native parity matrix` 步骤，运行同一脚本，避免矩阵随代码漂移。 |
 | `docs/handoffs/20261110-1140-native-parity-audit.md` | 本记录。 |
@@ -50,6 +51,7 @@
 
 - 哪些是前一轮结果，哪些是本次新验证：本次只新跑矩阵检查器与自测；PR #22/#25/#29/#28/#23/#24 等是既有记录，未在本轮复跑。
 - 内容复核：修正 10 处措辞，区分 Tanuki 专有运行时/存储能力与官方网页能力，并把 android_agent-42 的 mux/follow 明确标为“未提交、进行中”；矩阵门禁复跑 PASS。
+- 范围确认后更新：新增 1.1 P0 拆解表，44 行矩阵补充 42/45/46/44 归属；矩阵仍为 166 行、14 域，门禁复跑 PASS。
 - 未测试、超时、失败和暂未复现的情况：所有产品验收用例未执行；真实模型/账号、真机、ROM、远程 sshd、Keystore 均未测试；矩阵中的 `进行中` 分支未提交，不能写成已实现。
 
 ## 未完成与暂停项
@@ -58,7 +60,7 @@
   - P0 缺口：原生页无 composer/发送/停止/审批回答；android_agent-42 的 mux 解析尚未接 UI，45/46 尚未提交。
   - P1 缺口：会话生命周期、模型、附件、会话搜索、工作区管理未排期。
   - P2 缺口：工具卡片、终端/浏览器/任务/子代理、插件/技能、交付物、完整设置、远程中继/多主机/Ed25519。
-- 外部阻塞：需要编排器确认 android_agent-44 与本审计的边界，避免双写矩阵；需要 42/45/46 的接口稳定后再更新矩阵状态。
+- 外部阻塞：44 已确认实现会话管理，边界已明确；仍需 42/45/46 的接口稳定并提交后再更新矩阵状态。矩阵/检查器由 47 唯一维护，其他 worker 只提交证据。
 - 用户暂停：API Key 保存；真实模型/账号验收；真机验收。
 - 设备：本审计未启动/安装/跑仪器；仪器用例需独立 Android QA 会话执行。
 
@@ -67,7 +69,7 @@
 1. 运行 `python3 -m py_compile scripts/check-native-parity.py`、`python3 scripts/check-handoff.py --record docs/handoffs/20261110-1140-native-parity-audit.md`、`python3 scripts/check-handoff.py`，回填本记录。
 2. 运行 `python3 scripts/check-publication.py --git`，按实际路径暂存 `docs/NATIVE-PARITY.md`、`scripts/check-native-parity.py`、`.github/workflows/verify.yml`、本记录与 `docs/AGENT-STATE.md` 链接；文档提交用 `docs: add native UI parity audit and acceptance matrix`，CI 接线用 `ci: check native parity matrix`。
 3. 推送分支并创建 PR（base `main`），正文写摘要、实际验证命令、未验证范围与风险；不合并、不发布、不触发 AO Review（除非用户/编排器明确要求）。
-4. 编排器确认 android_agent-44 与 42/45/46 的范围后，按矩阵优先级排期；42 的 mux 接 UI 后优先更新 CHAT-15、SESS-12、APPROVAL-01/05 状态。
+4. 44 实现会话管理、42 接 mux/UI、45 接审批、46 接输入后，由矩阵属主核对 PR/commit/测试证据并更新 SESS/CHAT/INPUT/APPROVAL 行；42 的 mux 接 UI 后优先更新 CHAT-15、SESS-12、APPROVAL-01/05 状态。
 5. 独立 Android QA 按第 4 节仪器/手工用例执行；真实模型/账号用例等用户恢复授权。
 
 ## 约束与风险
