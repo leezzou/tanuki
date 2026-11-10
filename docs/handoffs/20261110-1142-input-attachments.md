@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-46
 - 时间：2026-11-10 11:42 CST
-- 状态：部分完成（新文件与本地验证完成；42 接线待办；PR #39 已创建并认领，边界修正提交待推送）
+- 状态：部分完成（新文件与本地验证完成；42 接线待办；PR #39 已认领，边界修正已推送 head `4d03319`）
 - 前一记录：[0.1.10 Pre-release 发布准备](20261109-2310-release-0.1.10.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步，并更新 `docs/AGENT-STATE.md`。只读Agent交回同格式文本，由主Agent保存。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -77,20 +77,20 @@
 | `./gradlew ... :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshComposerProtocolTest' --tests 'com.tanuki.DshComposerClientTest' --tests 'com.tanuki.DshComposerControllerTest'` | BUILD SUCCESSFUL；**34 tests / 0 failures / 0 errors / 0 skipped** | 15 + 8 + 11；不含 transport 认证/HTTP |
 | `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；68 个结果文件、**569 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 95 warnings / 1 hint** | 基线 535 + 新增 34；新增文件无 lint 告警 |
 | `git diff --check` | 无输出 | 无空白错误 |
-| PR #39 首轮 CI（边界修正前） | Host/Android 均 pass | 边界修正提交推送后需以新 head 复跑为准 |
+| PR #39 新 head `4d03319` CI | Host 29s、Android build+JVM+lint 6m24s，均 pass | 以 PR 页面当前 head 为准 |
 
 - 哪些是前一轮结果，哪些是本次新验证：569/0/0/0、lint 0 errors/95 warnings/1 hint、34 项目标回归均为边界修正后本次新跑；535 是 0.1.10 基线记录，不是本轮复跑；PR #39 首轮 CI pass 是修正前 head，不能作为新 head 依据。
 - 未测试、超时、失败和暂未复现的情况：42 接线后的真实设备 UI/键盘/选择器/粘贴/拖入/上传失败重试、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 交互没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试；transport 认证/HTTP 由 42 统一实现，本分支未测。
 
 ## 未完成与暂停项
 
-- 未完成：42 按上节 hook 接线；边界修正提交推送与 PR 更新；新 head CI；独立 Codex High Review；适用 Android QA。
+- 未完成：42 按上节 hook 接线；独立 Codex High Review；适用 Android QA。
 - 外部阻塞：transport 最小接口由 42 定稿；在拿到前本分支只保留 `DshComposerRemote` 抽象，不阻塞其余新文件与回归。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按项目既有暂停项保留；本次未触碰。
 
 ## 下一步
 
-1. 提交并推送边界修正：移除 `DshNativePage.kt`/`MainActivity.kt` 改动、删除自建 HTTP 传输与 `DshComposerHttpTest`；推送后更新 PR #39 正文与 hook 清单，等待新 head CI。
+1. 边界修正已推送 `4d03319`，PR #39 正文已更新 hook 清单，新 head CI 已 pass；等待 42 接线与独立 Review。
 2. 把本交接“需要 42 的接线 hook”发给 android_agent-42/编排器；由 42 在其独占文件中接线，不在本分支自行合并对方改动。
 3. 42 接线后复跑 `compileModernDebugKotlin`、目标/完整 JVM、lint；设备 QA 由编排器另派独立 QA 会话，使用既有 ARM64 AVD，不把宿主/JVM 结果当 Android 验收。
 
