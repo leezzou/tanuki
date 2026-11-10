@@ -157,7 +157,28 @@ HTTP 200..399 或 401 → 存活
 | 失败 | 认证、超时、主机密钥变化、端口不可达都返回中文错误并关闭隧道；不自动重试、不静默降级为明文 |
 | 未实现 | 中继/WebRTC、远程 DSH 启停、多远程主机、Ed25519 私钥/主机密钥；均标注为后续切片 |
 
-### 1.6 `WebState` 语义
+### 1.6 无公网 IP 中继配对（反向注册切片）
+
+当手机和远程主机都没有公网 IP 时，主机端 agent 主动向 TLS 中继注册房间，手机用一次性配对链接加入；中继只转发 SSH 密文字节，SSH 仍由手机 JSch 与远程 sshd 端到端协商。方案与资源边界见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
+
+| 项目 | 契约 |
+|---|---|
+| 配对链接 | `tanuki-relay://v1?relay=<host:port>&room=<16B base64url>&token=<32B base64url>&host=<16B hex>&pin=sha256-<32B base64url>`；`pin` 可省略但仅当系统 CA + 主机名校验可用；自签名中继必须提供 |
+| 传输 | TLS 1.2/1.3；有 pin 时只信任该证书 DER 的 SHA-256 并检查有效期；无 pin 时使用系统 CA + 主机名；不存在忽略证书/明文回退开关 |
+| 帧 | `4 字节大端总长 | 1 字节类型 | 4 字节流号 | 负载`；总长 ≤64 KiB，控制帧负载 ≤1 KiB |
+| 类型 | `CONTROL=1`、`OPEN=2`、`OPEN_OK=3`、`DATA=4`、`CLOSE=5`、`PING=6`、`PONG=7`、`ERROR=8` |
+| 主机握手 | `HELLO 1 host <room> <hostId> <token> <hostNonce>` → `CHALLENGE <serverNonce>` → `AUTH <hostProof>` → `REGISTERED <expiresAt>` |
+| 客户端握手 | `HELLO 1 client <room> - <clientNonce>` → `CHALLENGE` → `AUTH <clientProof>` → `QUEUED` → `OPEN(stream)` → `OPEN_OK(stream)` |
+| 证明 | `hostProof=HMAC-SHA256(token,"tanuki-relay-v1|host|room|hostId|hostNonce|serverNonce")`；`clientProof=HMAC-SHA256(token,"tanuki-relay-v1|client|room|clientNonce|serverNonce")`；无 padding base64url，常量时间比较 |
+| 数据 | `OPEN_OK` 后同一 TLS 流只承载 `DATA/CLOSE/PING/PONG/ERROR`；`DATA` 就是 SSH 密文，中继不解析 |
+| 错误码 | `room_not_found`、`bad_token`、`room_busy`、`host_offline`、`host_timeout`、`expired`、`too_large`、`protocol`、`internal`；客户端映射中文，不回显原始载荷 |
+| 身份与 Cookie | SSH 主机密钥仍按 `SHA256:` 首次确认/后续比对；中继模式 known_hosts 键为 `relay:<hostId>`，Cookie 作用域为 `relay:<hostId>`，换房间不串 Cookie |
+| origin | 中继模式仍只暴露 `http://127.0.0.1:<本地转发端口>`；`OriginPolicy`、TLS/明文策略、Cookie 校验和 Blob 导出边界不变 |
+| 重连 | 控制握手仅对网络/房间忙/主机离线按指数退避（最多 4 次）；认证/钉扎/协议错误立即失败；已建立 SSH 会话不透明迁移，隧道断开回退本地 |
+| 资源 | 中继需一个双方可达的 TLS 端口；无公网服务器时降级为局域网直连、全局 IPv6、用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连 |
+| 实现边界 | 参考中继/主机端见 `scripts/remote-relay/`；中继是字节转发，不是 SSH 代理，也不是恶意远程主机沙箱；参考实现未做高可用/限流/审计 |
+
+### 1.7 `WebState` 语义
 
 `WebState` 描述管理网页连接，不表示 DSH 进程或环境状态。定义见 `runtime/State.kt`，中文标签见 `ui/Labels.kt`。
 
@@ -173,7 +194,7 @@ HTTP 200..399 或 401 → 存活
 
 `ServiceState`、`EnvironmentState`、`HealthState` 与 `WebState` 相互独立；不能把网页未连接写成 DSH 未运行，也不能把 401 写成进程失败。
 
-### 1.6 DSH 页面事件旁路（聊天通知）
+### 1.8 DSH 页面事件旁路（聊天通知）
 
 不新增 RPC。聊天通知只旁路 DSH 官方 `/api/remote.mux` WebSocket 的 `$events` 转发流，事件白名单来自官方 `dsh-api-remotes`：
 
@@ -191,7 +212,7 @@ HTTP 200..399 或 401 → 存活
 - 通知身份与正文：通知使用会话 tag + 固定通知 id，跨进程更新同一会话而不覆盖其他会话；PendingIntent 的 action/data 绑定会话。每个通过策略去重的新事件都再次提醒，摘要静默。正文仅使用 `ChatNotificationCopy` 的四类固定最小文案；应用内总开关、系统权限/渠道设置可关闭或调整。
 - 限制：需要 WebView 支持 `DOCUMENT_START_SCRIPT`/`WEB_MESSAGE_LISTENER`（当前最低 WebView 123 覆盖）；DSH 升级若调整转发事件表或侧栏 `data-*` 属性，必须先更新本节和回归；页面在回合已运行时才加载，靠会话行 `[data-state="ongoing"]` 补种一次 running；错误以官方 `api-session/error` 为准，若某类失败只写入 `turn/end` 而不触发该事件，只能按回合完成提示；WebView 后台节流和 ROM 后台限制可能延迟事件。
 
-### 1.7 可选原生界面的官方 DSH 接口
+### 1.9 可选原生界面的官方 DSH 接口
 
 设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读取会话，不另造协议：
 

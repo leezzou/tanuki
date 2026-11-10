@@ -42,3 +42,12 @@ API Key 通过官方 Web UI 配置，不编译入 APK 或写进仓库。账号�
 停止只作用于本 App 记录的 Java Process 与相应进程组，发送信号前检查 /proc starttime，防止 PID 重用；不使用 killall node。supervisor 设置独立 session 和 parent-death 信号，PRoot 额外启用 PTRACE_O_EXITKILL，避免 tracer 消失后客体失去路径转换仍继续执行。进程退出后不自动重放用户操作。系统强制停止后的恢复以实际文件和新进程检查为准。
 
 手机文件工具使用独立loopback RPC、随机短期连接能力与原生授权状态；拒绝网页Origin、未认证/超限/未知方法请求，接口不提供自授权写入方法。DSH只挂载工具客户端与私有连接描述，真实手机卷不直接bind；默认读取，写入必须由用户在原生文件页单独允许，停止DSH/撤回/进程重启默认恢复只读。每次分块及提交核对授权epoch、系统权限与路径/原版本；读写限制作用于此受控接口，不把PRoot或同UID连接能力宣传为恶意代码沙箱。客户端/服务不在日志中输出token或原始手机文件内容；测试只用新建UUID合成文件。实现见storage/PhoneFileAccess.kt、PhoneFileService.kt、PhoneFileIntegration.kt及assets/phone。
+
+无公网 IP 中继切片的边界：
+
+- 中继连接只允许 TLS 1.2/1.3。中继证书必须由系统 CA 加主机名校验，或由配对链接中的 `sha256-<base64url(证书 DER SHA-256)>` 钉扎；钉扎时仍检查证书有效期。没有“忽略证书”、明文 scheme 或无 pin 的信任全部开关，失败不回退明文。
+- 配对 token 是 32 字节随机房间秘密，不是 SSH 密码/私钥。中继只在内存保存，手机经 Android Keystore AES-256-GCM 加密后保存；主机端配对文件 0600。token 不写入日志、`toString()`、错误消息或项目导出。
+- 中继只转发 SSH 密文字节，不解析 SSH，也不终止 SSH。SSH 主机密钥首次确认/后续比对、用户认证和 `direct-tcpip` 转发仍在手机 JSch 与远程 sshd 之间完成；中继被攻破不能解密 SSH 或替代主机密钥校验，但可以拒绝服务、观察流量元数据或尝试房间抢占。
+- 主机端 agent 不监听端口、不执行命令、不读取项目文件；只主动连接中继和本机回环 sshd。中继不能让它连接任意地址/端口。
+- 中继模式的管理页 origin 仍是精确 `http://127.0.0.1:<本地转发端口>`；Cookie 按 `relay:<hostId>` 隔离，TLS/明文策略、Cookie 校验、Blob 导出和本地/远程回退边界不因中继而放宽。
+- 参考中继/agent 用于最小可用验证，不是高可用公网服务：没有持久化、限流、审计、每连接 TLS 握手线程或水平扩展；公开部署前必须补齐。参考实现也不防同 UID 恶意代码，不提供发布者签名验证。

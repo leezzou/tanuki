@@ -1,6 +1,19 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并；0.1.10/code12 候选已生成，准备提交并发布）。上一记录：[DOCX 应用内原生预览](handoffs/20261109-1836-docx-native-preview.md)（PR #28）；并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，基线 `main=0555c3c0`，进行中）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；远程主机直连切片见 [远程主机 SSH](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34）；历史记录保留在 `docs/handoffs/`。
+
+## 无公网 IP 远程连接中继切片（android_agent-48，进行中）
+
+- 基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；分支 `ao/tanuki-remote/relay-pairing`（从 `ao/tanuki-remote/root` 创建），未合并、未发布、未触发 AO Review。
+- 选型：第一阶段采用“反向注册中继 + 既有 SSH 端到端 + 局域网/全局 IPv6/既有跳板降级”；WebRTC DataChannel + STUN/TURN 与 SSH 打洞因需要信令/TURN、Android 原生 DataChannel 依赖重、TCP 打洞不可靠，留后续。评估与端到端流程见 [无公网 IP 远程连接](REMOTE-CONNECT.md)。
+- 已实现：
+  - `RemoteRelayPairing` 严格配对链接解析/生成、16/32 字节房间/token 校验、`sha256-` 证书钉扎、IPv4/IPv6/域名规范化、`toString` 脱敏；帧编解码（64 KiB 上限/1 KiB 控制帧）、HMAC-SHA256 host/client 证明、`RelayReconnectPolicy` 与错误码中文映射。
+  - `RelayTransport`：生产 TLS 1.2/1.3 客户端（系统 CA + 主机名或证书 DER 钉扎）、客户端 JOIN/CHALLENGE/AUTH/QUEUED/OPEN_OK、只绑定 `127.0.0.1` 的 loopback 桥、DATA/CLOSE/PING/PONG；`RoutingSshTransport` 按配置在直连 SSH 与中继之间路由。
+  - `RemoteHostConfig`/`RemoteHostStorage`/`RemoteHostController`：中继稳定 `relay:<hostId>` known_hosts 键与 Cookie 作用域、token 加密保存、切回直连清理中继秘密；设置页新增配对链接输入，失败/回退沿用原状态机。
+  - `scripts/remote-relay/`：Python 标准库参考中继、只出站的主机端 agent、0600 配对文件、自签名证书生成脚本、回环端到端自测；共享 HMAC 向量 `app/src/test/resources/relay-protocol-vectors.json`。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；`RemoteRelayTest` 16 tests / 0 failures / 0 errors / 0 skipped；Python 参考实现 6 项回环端到端自测 OK（自签名 TLS + pin、注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）；完整 JVM + lint BUILD SUCCESSFUL，551 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 95 warnings / 1 hint。
+- 待验证：真实 Android 设备到真实中继/sshd/DSH、Android Keystore token、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN；完整 JVM/lint 结果与 PR 以最终页面为准。
+- 所需资源：一个手机和远程主机都能访问的 TLS 中继端口；无公网服务器时按文档降级为局域网直连、全局 IPv6 或用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连。
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
@@ -216,7 +229,8 @@
 
 ## 下一步
 
-1. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
+1. 无公网 IP 中继切片：完成完整 JVM/lint、交接印章与 PR；不合并、不发布。真实设备/公网中继 QA 需独立 QA session 与明确资源。
+2. 设备温控/省电 PR [#21](https://github.com/leezzou/tanuki/pull/21)：等待独立 Review 与合并；真机温控/低电量/恢复 QA 另行授权。
 2. 远程主机 PR [#29](https://github.com/leezzou/tanuki/pull/29)：8 条 review 已修复并 resolve；复跑 CI 后由 Orchestrator 安排独立 Review；真实 sshd/Keystore/Cookie/UI QA 另行授权。
 3. 原生界面 PR [#26](https://github.com/leezzou/tanuki/pull/26) 已合并 `d9b4aa2`：真机/PRoot DSH 原生界面验收另行授权。
 4. DSH 聊天通知 PR [#22](https://github.com/leezzou/tanuki/pull/22)：复跑 JVM/Node/lint 与 CI 后安排独立 Review；设备 QA 另行授权。

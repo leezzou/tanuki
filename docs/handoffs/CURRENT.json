@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "record": "docs/handoffs/20261109-2310-release-0.1.10.md",
-  "recordSha256": "7f8e7a7191445d459d776d001922f07a4effa7d4ce945412ce2868ec51ffca0e",
-  "sourceFingerprint": "fcad28f82f5a2b9a35661d8e04d0c1f8837e872b3d3215308f2e2b82d60c5387",
-  "fileCount": 591
+  "record": "docs/handoffs/20261110-1138-remote-relay-pairing.md",
+  "recordSha256": "3103eada3352001690030327dc11da1d19f00dcd3e0211f8b853d0caa8422c25",
+  "sourceFingerprint": "11abd9350315e33caccffc9dcb788a8a867182eb7994f61e581454ba1bc62e38",
+  "fileCount": 602
 }

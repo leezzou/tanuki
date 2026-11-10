@@ -2,6 +2,17 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 无公网 IP 中继切片验证（2026-11-10，android_agent-48，非设备）
+
+- 范围：反向注册中继 + 既有 SSH 端到端最小切片；Kotlin 配对链接/帧/HMAC/TLS 钉扎/重连/loopback 桥；中继配置存储/控制器/设置页；Python 参考中继/主机端 agent；共享协议向量。基线 `origin/main=0555c3c0`，分支 `ao/tanuki-remote/relay-pairing`。
+- 实际执行（本轮新跑）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.RemoteRelayTest' -x buildNativeRuntime` → BUILD SUCCESSFUL，16 tests / 0 failures / 0 errors / 0 skipped。
+  - `cd scripts/remote-relay && python3 test_remote_relay.py` → OK，6 tests / 0 failures（回环自签名 TLS + pin、主机注册、JOIN/OPEN_OK/DATA 双向、错误 token、未知房间、明文拒绝、日志不含 token）。
+  - `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（3m28s）；66 个结果文件，**551 tests / 0 failures / 0 errors / 0 skipped**（既有 535 + 新增 16）；lint **0 errors / 95 warnings / 1 hint**（与基线告警数相同）。
+- 新增覆盖：配对链接 IPv4/IPv6/域名往返与未知/重复/非规范字段拒绝；帧编解码/64 KiB/1 KiB/截断/未知类型；共享 HMAC host/client 向量；证书 DER SHA-256 钉扎；指数退避与仅瞬时错误重试；假中继配对 + 早期字节不丢失 + DATA 回声；错误 token；中继稳定 `relay:<hostId>` 身份/Cookie 作用域；token 加密存储/篡改拒绝/切回直连；控制器使用稳定身份跳过首次指纹探测。
+- 未执行：真实 Android 设备到真实中继/sshd/DSH、Android Keystore 真机、真实公网 TLS/域名/CGNAT、弱网/断线、多客户端/限流、二维码扫描、Ed25519、WebRTC/TURN。JVM/Python 回环不能替代设备或公网验收。
+
 ## 0.1.10 Pre-release 最终验证（2026-11-09，android_agent-32，非设备）
 
 - 范围：最终 `main=9e7edbb929cbde4e3560e94a7c157803cac11e95` 上的 0.1.10/code12、workspacecheck 渠道发布；包含 PR #21 设备温控、#22 DSH 通知、#23 XLSX、#24 PDF、#25 失败分类、#26 原生界面切换、#27 冷启动、#28 DOCX、#29 远程主机。
