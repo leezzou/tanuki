@@ -317,4 +317,19 @@ class TanukiDesignTokensTest {
             }
         }
     }
+
+    @Test
+    fun `动画缩放可在不重建页面时双向切换 reduced motion`() {
+        var scale = 1f
+        assertFalse(reducedMotionFromScale(scale))
+        scale = 0f
+        assertTrue(reducedMotionFromScale(scale))
+        scale = 1f
+        assertFalse(reducedMotionFromScale(scale))
+        assertEquals(0, TanukiMotion.durationMs(TanukiMotion.ambientPulse, reducedMotionFromScale(0f)))
+        assertEquals(
+            TanukiMotion.ambientPulse.durationMs,
+            TanukiMotion.durationMs(TanukiMotion.ambientPulse, reducedMotionFromScale(1f)),
+        )
+    }
 }

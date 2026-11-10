@@ -1,6 +1,5 @@
 package com.tanuki.ui.design
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -28,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,9 +43,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -82,78 +87,112 @@ internal fun TanukiBottomSheet(
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
     val settle = remember { Animatable(0f) }
+    var dialogVisible by remember { mutableStateOf(visible) }
 
     LaunchedEffect(visible) {
         if (visible) {
+            dialogVisible = true
             dragOffset = 0f
             dragging = false
             settle.snapTo(0f)
+        } else if (dialogVisible) {
+            // 先让退出动画跑完，再移除 Dialog 窗口；焦点恢复由平台 Dialog 完成。
+            delay(exitMs.toLong())
+            dialogVisible = false
         }
     }
-    BackHandler(enabled = visible) { dismiss() }
+    if (!dialogVisible) return
 
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn(animationSpec = tween(enterMs)),
-            exit = fadeOut(animationSpec = tween(exitMs)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(tokens.colors.scrim))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { dismiss() },
-                    ),
-            )
+    Dialog(
+        onDismissRequest = { dismiss() },
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            // 弹层自己绘制遮罩，避免 Dialog 默认 window dim 再叠加一层。
+            (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f)
         }
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(animationSpec = tween(enterMs)),
+                exit = fadeOut(animationSpec = tween(exitMs)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color(tokens.colors.scrim))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { dismiss() },
+                        ),
+                )
+            }
 
-        AnimatedVisibility(
-            visible = visible,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(
-                animationSpec = tween(enterMs, easing = FastOutSlowInEasing),
-            ) { fullHeight -> fullHeight } + fadeIn(animationSpec = tween(enterMs)),
-            exit = slideOutVertically(
-                animationSpec = tween(exitMs, easing = FastOutSlowInEasing),
-            ) { fullHeight -> fullHeight } + fadeOut(animationSpec = tween(exitMs)),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        translationY = if (dragging) dragOffset else settle.value
-                    }
-                    .shadow(
-                        elevation = spec.shadowDp.dp,
-                        shape = sheetShape,
-                        clip = false,
-                    )
-                    .clip(sheetShape)
-                    .background(Color(tokens.colors.sheet))
-                    .border(0.75.dp, Color(tokens.colors.hairline), sheetShape)
-                    .pointerInput(visible, dismissThreshold) {
-                        detectVerticalDragGestures(
-                            onDragStart = {
-                                dragging = true
-                                dragOffset = 0f
-                            },
-                            onVerticalDrag = { change, amount ->
-                                change.consume()
-                                dragOffset = (dragOffset + amount).coerceAtLeast(0f)
-                            },
-                            onDragEnd = {
-                                val shouldDismiss = dragOffset > dismissThreshold
-                                if (shouldDismiss) {
-                                    // 保持当前拖动位移进入退出动画，避免先跳回 0 再滑出。
-                                    scope.launch {
-                                        settle.snapTo(dragOffset)
-                                        dragging = false
-                                        dismiss()
+            AnimatedVisibility(
+                visible = visible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically(
+                    animationSpec = tween(enterMs, easing = FastOutSlowInEasing),
+                ) { fullHeight -> fullHeight } + fadeIn(animationSpec = tween(enterMs)),
+                exit = slideOutVertically(
+                    animationSpec = tween(exitMs, easing = FastOutSlowInEasing),
+                ) { fullHeight -> fullHeight } + fadeOut(animationSpec = tween(exitMs)),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            translationY = if (dragging) dragOffset else settle.value
+                        }
+                        .shadow(
+                            elevation = spec.shadowDp.dp,
+                            shape = sheetShape,
+                            clip = false,
+                        )
+                        .clip(sheetShape)
+                        .background(Color(tokens.colors.sheet))
+                        .border(0.75.dp, Color(tokens.colors.hairline), sheetShape)
+                        .pointerInput(visible, dismissThreshold) {
+                            detectVerticalDragGestures(
+                                onDragStart = {
+                                    dragging = true
+                                    dragOffset = 0f
+                                },
+                                onVerticalDrag = { change, amount ->
+                                    change.consume()
+                                    dragOffset = (dragOffset + amount).coerceAtLeast(0f)
+                                },
+                                onDragEnd = {
+                                    val shouldDismiss = dragOffset > dismissThreshold
+                                    if (shouldDismiss) {
+                                        // 保持当前拖动位移进入退出动画，避免先跳回 0 再滑出。
+                                        scope.launch {
+                                            settle.snapTo(dragOffset)
+                                            dragging = false
+                                            dismiss()
+                                        }
+                                    } else {
+                                        scope.launch {
+                                            settle.snapTo(dragOffset)
+                                            dragging = false
+                                            settle.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = tween(
+                                                    durationMillis = if (tokens.reducedMotion) 0 else TanukiMotion.sheetDismiss.durationMs,
+                                                    easing = FastOutSlowInEasing,
+                                                ),
+                                            )
+                                        }
                                     }
-                                } else {
+                                },
+                                onDragCancel = {
                                     scope.launch {
                                         settle.snapTo(dragOffset)
                                         dragging = false
@@ -165,60 +204,47 @@ internal fun TanukiBottomSheet(
                                             ),
                                         )
                                     }
-                                }
-                            },
-                            onDragCancel = {
-                                scope.launch {
-                                    settle.snapTo(dragOffset)
-                                    dragging = false
-                                    settle.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = tween(
-                                            durationMillis = if (tokens.reducedMotion) 0 else TanukiMotion.sheetDismiss.durationMs,
-                                            easing = FastOutSlowInEasing,
-                                        ),
-                                    )
-                                }
-                            },
-                        )
-                    }
-                    .navigationBarsPadding()
-                    .semantics { paneTitle = title },
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = TanukiSpace.SM_DP.dp, bottom = TanukiSpace.XS_DP.dp),
-                    contentAlignment = Alignment.Center,
+                                },
+                            )
+                        }
+                        .navigationBarsPadding()
+                        .semantics { paneTitle = title },
                 ) {
                     Box(
-                        Modifier
-                            .size(width = 36.dp, height = 4.dp)
-                            .clip(CircleShape)
-                            .background(Color(tokens.colors.outline)),
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = TanukiSpace.XL_DP.dp)
-                        .padding(bottom = TanukiSpace.XL_DP.dp),
-                ) {
-                    Text(
-                        text = title,
-                        color = Color(tokens.colors.textPrimary),
-                        style = tokens.type.titleMedium,
-                    )
-                    if (subtitle != null) {
-                        Spacer(Modifier.height(TanukiSpace.XS_DP.dp))
-                        Text(
-                            text = subtitle,
-                            color = Color(tokens.colors.textSecondary),
-                            style = tokens.type.bodySmall,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = TanukiSpace.SM_DP.dp, bottom = TanukiSpace.XS_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(width = 36.dp, height = 4.dp)
+                                .clip(CircleShape)
+                                .background(Color(tokens.colors.outline)),
                         )
                     }
-                    Spacer(Modifier.height(TanukiSpace.MD_DP.dp))
-                    content()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = TanukiSpace.XL_DP.dp)
+                            .padding(bottom = TanukiSpace.XL_DP.dp),
+                    ) {
+                        Text(
+                            text = title,
+                            color = Color(tokens.colors.textPrimary),
+                            style = tokens.type.titleMedium,
+                        )
+                        if (subtitle != null) {
+                            Spacer(Modifier.height(TanukiSpace.XS_DP.dp))
+                            Text(
+                                text = subtitle,
+                                color = Color(tokens.colors.textSecondary),
+                                style = tokens.type.bodySmall,
+                            )
+                        }
+                        Spacer(Modifier.height(TanukiSpace.MD_DP.dp))
+                        content()
+                    }
                 }
             }
         }

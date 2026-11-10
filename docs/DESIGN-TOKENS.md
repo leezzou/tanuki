@@ -151,7 +151,7 @@
 | 环境 | `ambientPulse` | 2400ms | 状态点呼吸 |
 | 环境 | `ambientShimmer` | 2400ms | 骨架/环境微动 |
 
-约束：反馈 ≤160ms；结构 240–340ms；环境约 2.4s。`TanukiMotion.durationMs(token, reducedMotion=true)` 恒为 **0**；状态点和流式光标在 reduced-motion 下保持静态常亮。
+约束：反馈 ≤160ms；结构 240–340ms；环境约 2.4s。`TanukiMotion.durationMs(token, reducedMotion=true)` 恒为 **0**；状态点和流式光标在 reduced-motion 下保持静态常亮。`rememberTanukiReducedMotion()` 订阅系统 `ANIMATOR_DURATION_SCALE`，设置变更时更新 Compose State，不需要重建 Activity。
 
 ## 7. 基础组件
 
@@ -169,7 +169,7 @@
 | `TanukiGlassChrome` | `backdrop, contentPadding` | 顶栏/底栏 chrome，至少 56dp |
 | `TanukiCardSurface` | `onClick, content` | 不模糊内容卡；可点击时走 `TanukiPressable` |
 | `TanukiPressable` | `onClick, enabled, shape, pressScale` | 0.98 缩放 + 按压反馈；无回调时不拦截触摸 |
-| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌 |
+| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, content` | 平台 Dialog 独立窗口隔离焦点；遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌 |
 | `TanukiStreamingCursor` | `visible` | 2×18dp 竖条；2.4s 明暗周期；reduced-motion 常亮 |
 | `TanukiCodeText` | `text, maxLines` | 唯一允许等宽的命令/代码文本 |
 | `TanukiPathText` | `path, maxLines` | 等宽路径文本，默认单行省略 |
@@ -204,7 +204,7 @@
 
 ## 9. 对比度校验
 
-审计代码在 `TanukiContrastAudit`，每个主题 28 项，共 56 项；正文/容器正文最低 4.5:1，停用文字/图标/状态点最低 3.0:1。测试结果：**19 tests / 0 failures / 0 errors / 0 skipped**。
+审计代码在 `TanukiContrastAudit`，每个主题 28 项，共 56 项；正文/容器正文最低 4.5:1，停用文字/图标/状态点最低 3.0:1。测试结果：**20 tests / 0 failures / 0 errors / 0 skipped**。
 
 关键实测值：
 
@@ -240,7 +240,7 @@
   :app:lintModernDebug -x buildNativeRuntime
 ```
 
-结果：编译通过；定向 JVM 19 tests / 0 failures / 0 errors / 0 skipped；完整 JVM 952 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped；lint `BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint，新增的 `ui/design` 文件没有 lint 告警；assemble 通过。该 APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。未执行：完整原生构建、Android 仪器测试、模拟器/真机视觉验收。页面尚未接入，因此本轮不能宣称任何业务页面的最终视觉已经验收。
+结果：编译通过；定向 JVM 20 tests / 0 failures / 0 errors / 0 skipped；完整 JVM 953 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped；lint `BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint，新增的 `ui/design` 文件没有 lint 告警；assemble 通过。AndroidTest 源码用 `-PtestBuildType=debug :app:compileModernDebugAndroidTestKotlin` 编译通过；`TanukiBottomSheetFocusTest` 未在设备执行。该 APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。未执行：完整原生构建、Android 仪器执行、模拟器/真机视觉验收。页面尚未接入，因此本轮不能宣称任何业务页面的最终视觉已经验收。
 
 ## 11. 文件清单
 
@@ -253,4 +253,5 @@
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiComponents.kt` | 胶囊按钮、状态点/chip、按压容器、流式光标、代码/路径文本 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiGlass.kt` | chrome/sheet/card/pill 表面、玻璃胶囊、内容卡 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 可拖拽关闭的底部弹层骨架 |
-| `app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt` | JVM 对比度、转换、令牌取值回归 |
+| `app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt` | JVM 对比度、转换、令牌取值、leading 内容色与动画缩放回归 |
+| `app/src/androidTest/kotlin/com/tanuki/TanukiBottomSheetFocusTest.kt` | 设备回归：底层输入框聚焦后打开弹层，输入/Tab/Enter 不修改底层，返回恢复焦点 |

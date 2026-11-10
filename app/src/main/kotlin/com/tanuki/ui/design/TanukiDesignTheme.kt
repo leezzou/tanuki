@@ -1,6 +1,11 @@
 package com.tanuki.ui.design
 
 import android.animation.ValueAnimator
+import android.content.ContentResolver
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,12 +17,17 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -126,9 +136,45 @@ internal fun TanukiDesignTheme(
     }
 }
 
-/** 系统关闭动画时返回 true；组件据此把动效时长压到 0 并停用循环动画。 */
+/**
+ * 系统关闭动画时返回 true；组件据此把动效时长压到 0 并停用循环动画。
+ *
+ * 不能只读一次：设置里的“移除动画”可以在 Activity 存活期间改变。这里订阅
+ * `ANIMATOR_DURATION_SCALE`，变更时更新 Compose State，让状态点、光标和按钮
+ * 在不重建页面时双向切换。
+ */
 @Composable
-internal fun rememberTanukiReducedMotion(): Boolean = !ValueAnimator.areAnimatorsEnabled()
+internal fun rememberTanukiReducedMotion(): Boolean {
+    val context = LocalContext.current.applicationContext
+    val resolver = context.contentResolver
+    var reduced by remember { mutableStateOf(readReducedMotion(resolver)) }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                reduced = readReducedMotion(resolver)
+            }
+        }
+        resolver.registerContentObserver(
+            Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+            false,
+            observer,
+        )
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    return reduced
+}
+
+/** 把系统动画缩放映射为 reduced-motion；0 或负值都视为关闭。 */
+internal fun reducedMotionFromScale(scale: Float): Boolean = scale <= 0f
+
+private fun readReducedMotion(resolver: ContentResolver): Boolean {
+    val scale = Settings.Global.getFloat(
+        resolver,
+        Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+    )
+    return reducedMotionFromScale(scale) || !ValueAnimator.areAnimatorsEnabled()
+}
 
 private fun buildTextStyles(): TanukiTextStyles {
     fun style(token: TanukiTypeToken): TextStyle = TextStyle(
