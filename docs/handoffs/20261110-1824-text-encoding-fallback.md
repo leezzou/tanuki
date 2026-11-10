@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-57（DSH Worker）
 - 时间：2026-11-10 18:24 CST
-- 状态：已完成（PR 待独立审查与设备验证；不合并、不发布）
+- 状态：已完成（PR [#53](https://github.com/leezzou/tanuki/pull/53) 待独立审查与设备验证；不合并、不发布）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 ## 用户目标与范围
@@ -17,7 +17,7 @@
 - 已实现：BOM/严格 UTF-8/无 BOM UTF-16/GB18030/Big5/Shift_JIS 顺序识别与 Latin-1 兜底；显示解码使用替代字符，不再向界面抛解码异常；二进制专用面板；4 MiB 截断；顶部可关闭编码提示与手动切换；自动识别后跨页沿用具体编码。
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 JVM 28 tests / 0 failures；完整 `testModernDebugUnitTest` 802 tests / 90 个结果文件 / 0 failures / 0 errors / 0 skipped，`lintModernDebug` 0 errors / 102 warnings / 1 hint。
 - 待验证：Android 设备/模拟器打开真实 GBK `.txt`/`.cpp`、二进制伪装文本、4 MiB 大文件、手动切换与深色/大字体下的提示条布局；Android 仪器测试；独立 Codex High Review。
-- 当前目标包名：未构建/安装新 APK；源码分支 `ao/text-decoding/text-encoding`（从 `ao/text-decoding/root` 建立），基线 `4f2a3717`；fetch 发现远端 `origin/main` 已前进到 `326726c`（仅文档），按用户指定 SHA 保留基线，未合并该文档提交。
+- 当前目标包名：未构建/安装新 APK；源码分支 `ao/text-decoding/text-encoding`（从 `ao/text-decoding/root` 建立），基线 `4f2a3717`，PR [#53](https://github.com/leezzou/tanuki/pull/53)；fetch 发现远端 `origin/main` 已前进到 `326726c`（仅文档），按用户指定 SHA 保留基线，未合并该文档提交。
 - 关键事实与可定位源码：探测/解码在 `app/src/main/kotlin/com/tanuki/storage/TextFileReader.kt`；文本分类与二进制标记传递在 `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt`；提示条/手动切换/二进制面板在 `app/src/main/kotlin/com/tanuki/ui/WorkspaceFileViewer.kt`；4 MiB 截断在 `app/src/main/kotlin/com/tanuki/ui/TextPageLayout.kt`。
 
 ## 本次改动
@@ -54,7 +54,7 @@
 
 ## 下一步
 
-1. 推送 `ao/text-decoding/text-encoding` 并创建面向 `main` 的 PR；PR 正文写明识别策略、改动文件、测试命令与未覆盖编码。
+1. PR [#53](https://github.com/leezzou/tanuki/pull/53) 的正文已写明识别策略、改动文件、测试命令与未覆盖编码；后续修复按该 PR 的 review/CI 跟进。
 2. 独立 Codex High Review 绑定 PR 当前完整 SHA；推送新提交后需重新审查。
 3. 设备验证建议：在 ARM64 测试 AVD 打开合成 GBK 中文 `.txt`、GB18030 生僻字、UTF-16LE/BE 无 BOM、UTF-8 BOM、非法字节和二进制 `.bin`；检查提示条关闭/切换编码、二进制按钮、4 MiB 截断和深色/大字体布局；再补 Android 仪器测试。
 
@@ -66,7 +66,7 @@
 
 ## 产物与校验
 
-- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建 APK、未生成源码 ZIP；PR 以分支 `ao/text-decoding/text-encoding` 交付。
+- 新/旧 APK、源码 ZIP 及校验文件：本轮未构建 APK、未生成源码 ZIP；PR [#53](https://github.com/leezzou/tanuki/pull/53) 以分支 `ao/text-decoding/text-encoding` 交付，代码提交 `ea60853`。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未覆盖、未签名、未发布、未建 tag/Release。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：本轮未删除既有 `docs/handoffs/` 记录；它们仍承载未合并 PR、待验证设备项或历史发布证据，且不属于本次范围。本次只新增记录并更新 `docs/TEST-REPORT.md` 与 `docs/WORKSPACE-STORAGE.md`。
 - 仍需保留的验证/未完成记录：`docs/TEST-REPORT.md` 的 0.1.11 与设备历史记录、各 PR 交接记录。
