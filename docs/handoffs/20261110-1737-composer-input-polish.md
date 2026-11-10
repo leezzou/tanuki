@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-52
 - 时间：2026-11-10 17:37 CST
-- 状态：组件实现与 JVM 回归完成；页面接线、设备验证、独立审查待后续
+- 状态：组件实现与 JVM 回归完成；PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建，等待 CI 与独立审查；页面接线、设备验证待后续
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 每任Agent创建唯一记录，不覆盖前任。开始填写目标/范围；结束或中断前补齐证据与可执行下一步。不要包含真实Key、Cookie、token、会话/备份或私有原始日志。
@@ -23,7 +23,7 @@
   - 附件：图片/文件选择、粘贴图片、拖入文件；中文类型/大小/数量提示；上传卡片显示不定进度和“取消”，取消立即移除并阻止晚到响应回写；读取/拖入期间显示“正在读取附件…”。
   - @/斜杠：候选上下键循环、Enter/Tab 插入、Esc 关闭；斜杠候选按名称/描述/参数提示搜索排序；插入只替换当前查询并保留后续参数/换行；查询变化清空过期候选。
   - 停止：`session/cancel` 客户端与参数；`generationRunning`/`stopping`/`stopOutcome`；成功显示“已停止”，失败显示“停止失败”并保留运行状态；发送成功后自动置运行中。
-- 已验证：定向 52 tests；完整 JVM 805 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors（最终以复跑为准）。
+- 已验证：定向 52 tests；完整 JVM 805 tests / 90 文件 / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 102 warnings / 1 hint；交接检查与发布过滤通过。
 - 待验证：真实设备/模拟器的软键盘避让、输入法组合、焦点、图片/文件选择器、粘贴/拖入、上传取消、候选键盘导航；页面接线后的停止入口与运行状态同步；真实 PRoot DSH；assemble、Android 仪器、真机。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki.modern`；分支 `ao/composer-input/root`；无设备任务。
 
@@ -51,7 +51,8 @@
 | `... :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL；**805 tests / 90 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**；`DshComposer*` 无新增 lint 项 | 含 main 既有回归；lint 其余告警为既有文件 |
 | `git diff --check` | 无输出 | 无空白错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1737-composer-input-polish.md` | Handoff PR check passed | 普通 PR 模式；`AGENT-STATE`/`CURRENT.json` 未修改 |
-| `python3 scripts/check-publication.py --git` | 待运行/运行中 | 提交前按结果处理 |
+| `python3 scripts/check-publication.py --git` | Publication check passed；673 public files / 672 index entries / 0 findings | 未输出匹配值 |
+| `gh pr create --base main --head ao/composer-input/input-polish` | PR [#48](https://github.com/leezzou/tanuki/pull/48) 已创建 | 未合并、未发布；CI、独立审查待后续 |
 
 - 哪些是前一轮结果，哪些是本次新验证：52 项目标回归、805 项完整 JVM、lint 均为本分支新跑；805 中既有回归不是本切片新增。
 - 未测试、超时、失败和暂未复现的情况：真实设备 UI/输入法/选择器/粘贴/拖入/跨应用临时权限/上传取消/停止、真实 PRoot DSH、assemble、Android 仪器、真机均未执行；`DshComposerBar` 的 Compose 焦点/键盘事件没有 JVM 自动化覆盖；`DshAttachmentReader` 的 Android URI/剪贴板路径没有仪器测试。
@@ -60,14 +61,16 @@
 
 - 页面接线：`DshNativePage`/`MainActivity` 归集成方；需要把 `DshNativeState.running` 同步到 `nativeComposer.setGenerationRunning(running)`，并在需要时把页面停止按钮与 `nativeComposer.requestStop()` 统一，避免两处状态不一致。
 - 未验证：设备/模拟器、真实 DSH、上传取消的服务端残留（官方无上传取消端点，本地不保留残缺文件）、真实键盘导航。
+- 未完成：PR #48 的 CI 结果与独立 Codex High 审查；按项目规则最新 SHA 必须独立审查。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收按项目既有暂停项保留；本次未触碰。
 
 ## 下一步
 
-1. 集成方接线 `setGenerationRunning(running)`，在设备/模拟器验证输入法避让、焦点、候选键盘、图片/文件/粘贴/拖入、上传取消与停止。
-2. 由独立 Codex High 审查本 PR 当前 SHA；按审查意见补修。
-3. 通过后由有合并授权的人合并；本 worker 不合并、不发布。
+1. 等待 PR #48 CI；失败则在本分支修复并推送。
+2. 集成方接线 `setGenerationRunning(running)`，在设备/模拟器验证输入法避让、焦点、候选键盘、图片/文件/粘贴/拖入、上传取消与停止。
+3. 由独立 Codex High 审查 PR #48 最新 SHA；按审查意见补修。
+4. 通过后由有合并授权的人合并；本 worker 不合并、不发布。
 
 ## 约束与风险
 
@@ -78,6 +81,7 @@
 
 ## 产物与校验
 
+- PR：https://github.com/leezzou/tanuki/pull/48（head `2a41f1c77e3e134e4e250a3c0327ba24cfcf9f6e`，后续文档提交会刷新 head）。
 - 新/旧APK、源码ZIP及校验文件：本轮未生成 APK、源码 ZIP 或发布附件；只改源码/测试/文档。
 - 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未签名、未发布、未合并。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：普通 PR 只新增本记录，不改共享状态。
