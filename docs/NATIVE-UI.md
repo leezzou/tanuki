@@ -76,6 +76,8 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 46 渲染层：标题/嵌套列表/任务列表/引用/表格/分隔线/代码块/行内样式；代码横向滚动与可选行号、链接确认、图片/附件占位与查看器 |
 | `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：消息窗口、底部跟随、流式增量合并、图片采样、composer 发送记录/失败跟踪、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析；51 已改用 `DshToolMerge.merge` 保留真实起止时间 |
+| `app/src/main/kotlin/com/tanuki/web/DshQuestion.kt` | 用户提问模型与保守解析；单选/多选/文本、选项、草稿选择与必填校验 |
+| `app/src/main/kotlin/com/tanuki/ui/DshQuestionCard.kt` | 用户提问独立卡片：单选/多选/文本、选项与本地提交草稿；`onSubmit=null` 时明确标注“回答入口待协议确认” |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、单个与批量归档、写操作与中文错误 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 按 cwd 分组的会话列表、多选批量归档、主机切换、详情分页、模型/权限面板与确认交互 |
 | `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立会话管理页入口、本机未读/置顶偏好与本机/远程主机切换 |
@@ -160,11 +162,12 @@
    - `DshApprovalController.forgetRemembered(choice)` 立即撤销单条记忆；之后相同会话/工具/风险的请求不会再自动回答。已经回传官方的结果不能撤回，也不伪造撤回。
    - `DshApprovalState.errorRetryable` 表示当前错误可重试；断线/回答失败始终保留 `pending`，界面显示中文原因和“重试连接”。服务地址变化导致旧审批无法回答时，`notice` 明确告知失效数量，不静默丢弃；`onDismissNotice` 可关闭提示。
    - 记忆的独立入口：`DshApprovalEntryBar` 在无待审批但有记忆时显示“审批记忆 N 项”，点击进入同一抽屉逐条撤销/全部清除。
+   - 抽屉内容有受视口约束的滚动容器；打开期间有新审批到达时只更新计数并显示 3 秒轻提示，不自动滚动或跳走当前处理项。
 
 2. 工具卡片 `DshToolCard`
    - 签名不变。`DshToolItem` 新增只读字段：`startedAt`、`finishedAt`、`durationMs`。
    - `DshToolTimeline.parse` 已用 `tool/call.time` 与 `tool/result.time` 填充；只显示真实耗时，进行中/孤儿结果显示“耗时未知”，不伪造。
-   - 输出/错误复制、diff 增删行背景色和耗时均由组件内部处理；实时 follow 分批到达时，51 必须用 `DshToolMerge.merge(current, incoming)` 替换 `DshNativeController` 的私有 `mergeTools`，否则终态会丢失 `finishedAt`、完成后仍显示“耗时未知”。该 helper 同时保留“迟到 RUNNING 不回退终态”的规则。
+   - 输出/错误复制、diff 增删行背景色和耗时均由组件内部处理；实时 follow 分批到达时，本 PR 已把 `DshNativeController.mergeTools` 委托给 `DshToolMerge.merge(current, incoming)`，终态保留 `finishedAt` 和已知调用起点；51 复核该跨文件改动。该 helper 同时保留“迟到 RUNNING 不回退终态”的规则。
 
 3. 计划审阅 `DshPlanCard` + `DshPlanParser`
    - `DshPlanParser.extract(records)` 返回 `DshPlanExtraction(plans, planCallIds)`，`latest` 为最新计划。
@@ -185,6 +188,21 @@
    - 解析支持计划事件（`plan/update`、`plan/review`、`plan`、`todo/update`、`todos/update`）与计划工具调用（`update_plan`、`plan`、`set_plan`、`plan_update`、`todo_write`、`write_todo`、`todowrite`、`update_todos`）。
    - 若官方计划审阅是 `user-questions/request` 或独立 waterfall，集成方可调用 `DshPlanParser.fromReviewPayload(seq, id, request)`，默认得到 `review=AWAITING`；解析失败时回退官方界面，不猜计划内容。
    - 真实字段以合成回归为准，未在真实 PRoot DSH 验证。
+
+4. 用户提问卡 `DshQuestionCard` + `DshQuestionParser`
+   - `DshQuestionParser.parse(eventId, sessionId, request)` 从 `user-questions/request` 的 `questions[]` 解析单选/多选/文本、选项、`allowCustom`、`required`；只保留短文本，不复制原始请求。
+   - `DshQuestionDraft` 负责本地选择：单选覆盖、多选切换、文本保存、必填校验；编辑态保留原始空格/换行（只限长度），必填用 `isBlank`，提交边界才 trim；可独立 JVM 回归。
+   - 组件调用：
+     ```kotlin
+     DshQuestionCard(
+         request = question,
+         onSubmit = null, // 协议未确认时必须为 null，界面显示“回答入口待协议确认”
+         submitting = false,
+         error = null
+     )
+     ```
+   - 回答 RPC 未在本切片确认；`onSubmit` 为可空接口，未接线时禁止伪造提交。51 接线时若官方协议确认，再把 `onSubmit` 接到真实回答；否则保持只读/待确认。
+   - 官方回答字段确认前，不要把 `user-questions/request` 当作普通消息，也不要把它静默回 `next` 后当作已处理。
 
 ### 51 接线状态（2026-11-10）
 
@@ -236,7 +254,7 @@
 
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
 - 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 17 项、`DshNativeControllerTest` 22 项：54 tests / 0 failures / 0 errors / 0 skipped。
-- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**965 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 103 warnings / 1 hint**。
+- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**979 tests / 104 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 103 warnings / 1 hint**。
 - 覆盖：窗口/底部判定、流式累计/增量/去重/重置、链接协议拒绝、图片/附件分类、错误分类、代码/表格上限、Markdown 块与行内语法、控制器按帧合并/committed 取消/失败重试。
 - 未执行：真实 Android 设备、PRoot DSH、仪器测试、assemble；JVM 与 lint 不能替代设备验收。
 

@@ -497,7 +497,7 @@ class DshNativeControllerTest {
         status: DshToolStatus,
         seq: Int,
         output: String? = null,
-        startedAt: Long = 1L,
+        startedAt: Long = 0L,
         finishedAt: Long? = null
     ) = DshToolItem(
         seq = seq,

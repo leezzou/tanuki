@@ -4,6 +4,7 @@ import com.tanuki.storage.ChannelSeekableInput
 import com.tanuki.storage.SeekableInput
 import com.tanuki.storage.StreamSeekableInput
 import com.tanuki.storage.TextFileReader
+import com.tanuki.ui.TextPageLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -351,6 +352,38 @@ class TextFileReaderTest {
             assertEquals("", capped.text)
             assertFalse(capped.hasMore)
             assertEquals(total, capped.totalBytes)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun fourMebibyteCapDoesNotTurnPartialCharacterIntoLatin1() {
+        val file = Files.createTempFile("text-cap-multibyte", ".txt")
+        try {
+            // 3 字节汉字正好横跨 4 MiB 上限：最后一页只能读到首字节，不能显示成 Latin-1 的 ä。
+            val prefix = "a".repeat((TextFileReader.MAX_VIEW_BYTES - 1).toInt())
+            val original = prefix + "中"
+            Files.write(file, original.toByteArray())
+
+            var offset = 0L
+            val shown = StringBuilder()
+            var last: TextFileReader.Page? = null
+            while (true) {
+                val page = TextFileReader.read(file, offset)
+                shown.append(page.text)
+                last = page
+                if (!page.hasMore) break
+                offset = page.nextOffset
+                assertTrue("未到 4 MiB 上限前应继续分页", offset < TextFileReader.MAX_VIEW_BYTES)
+            }
+            assertEquals(prefix, shown.toString())
+            assertFalse("被上限切断的字符不能单独成段", shown.contains('ä'))
+
+            val end = requireNotNull(last)
+            assertFalse(end.hasMore)
+            assertEquals(original.toByteArray().size.toLong(), end.totalBytes)
+            assertTrue(
+                "上限切在多字节字符内部也要保留截断提示",
+                TextPageLayout.isTruncated(end.nextOffset, end.totalBytes, end.hasMore),
+            )
         } finally { Files.delete(file) }
     }
 

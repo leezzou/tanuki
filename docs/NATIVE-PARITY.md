@@ -35,7 +35,7 @@
 | ATT-01..04/06 | ◐ | 附件选择、上传、限制、失败重试与文件引用；历史图片读取未接 |
 | ATT-05 | ☐ | `session/attachment` 授权图片加载未接 |
 | APPROVAL-01/02 | ✅ | 53 审批入口窄条+底部抽屉：来源/工具名/风险/参数摘要/长参数折叠；批量逐条编号、高风险二次确认；`$events/result` 允许一次/拒绝 |
-| APPROVAL-05 | ◐ | 提问只读展示 + 跳官方；多选/自定义答案未接 |
+| APPROVAL-05 | ◐ | 提问组件/解析/本地草稿就绪；回答 RPC 待协议确认，页面接线待 51 |
 | APPROVAL-07/08 | ✅ | 按审批会话查参数；本次运行记忆可逐条撤销/全部清除，不写配置 |
 | APPROVAL-06/10 | ◐ | 计划卡片/解析组件就绪，`DshNativePage` 接线待集成方；审计展示未接；持久策略不做（官方一次性） |
 | MODEL-01..10 | ☐ | 模型/推理/用量/配额均未接 |
@@ -213,7 +213,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | APPROVAL-02 | 批准/拒绝 | Enter 批准、Esc 拒绝、按钮拒绝，一次性决定 | `原生完整`：允许一次/拒绝经 `$events/result` 回传 | — · `DshApprovalSession` · android_agent-45 + 42 接线 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-03 | 权限预设 | 进程级预设目录，会话内切换 | `仅官方`：原生只读显示沙箱能力 | P1 · `permissionPresets/catalog` · 未排期 · A-APPROVAL-04 |
 | APPROVAL-04 | 沙箱/命令限制 | workspace-write 无后端时拒绝 bash；danger-full-access 需用户明确选择 | `原生部分`：`SetupScreens` 显示 bwrap/Landlock 探测与说明，不修改策略 | — · `RuntimeManager`/`SetupScreens.kt` · 既有 · A-SAFE-03 |
-| APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：android_agent-42 未提交的 `DshMuxProtocol` 已解析问题与选项，未接 UI | P0 · `userQuestions/*` · 45 审批（42 提供事件） · A-APPROVAL-01、A-APPROVAL-02 |
+| APPROVAL-05 | 用户提问 | `ask_user_question` 卡片、选项/自定义答案、跳过、倒计时 | `进行中`：`DshQuestionParser`/`DshQuestionDraft`/`DshQuestionCard` 已支持单选/多选/文本、选项与本地必填校验；回答 RPC 待协议确认，页面接线待 51 | P0 · `userQuestions/*` · android_agent-53 + 51 · A-APPROVAL-01、A-APPROVAL-02 |
 | APPROVAL-06 | 计划审阅 | 计划待审条、查看全文、同意执行/要求修改 | `进行中`：`DshPlanCard` 多步骤进度与审阅按钮、`DshPlanParser` 解析计划事件/计划工具调用；`DshNativePage` 状态接线待集成方 | P1 · `userQuestions/*`/计划事件 · android_agent-53 + 42 接线 · A-APPROVAL-02 |
 | APPROVAL-07 | 工具详情/参数 | 按需渲染关联工具详情，不泄露敏感参数 | `原生完整`：按审批会话查工具参数，摘要+完整参数折叠 | — · `DshNativeController.tool`/`DshApprovalPanel` · android_agent-53 · A-TOOL-02 |
 | APPROVAL-08 | 记住/一次性批准 | 每次批准只对应一个请求，不跨请求复用 | `原生完整（本次运行内存）`：按会话+工具+风险复用，可逐条撤销/全部清除；不写官方持久配置 | — · `DshApprovalMemory`/`DshApprovalController` · android_agent-53 · A-APPROVAL-01 |
