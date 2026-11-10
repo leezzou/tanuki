@@ -342,6 +342,32 @@ class RelayReferenceTest(unittest.TestCase):
             p.host_proof(vectors["token"], vectors["room"], vectors["hostId"], vectors["hostNonce"], vectors["serverNonce"]),
         )
 
+    def test_default_system_ca_start_emits_pairing_code(self) -> None:
+        """默认系统 CA 路径下，首次 logging.warning 不能把 INFO 日志吞掉。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Path(__file__).resolve().parent / "host_agent.py"
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(agent),
+                    "--relay",
+                    "127.0.0.1:1",
+                    "--state-dir",
+                    tmp,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                time.sleep(0.6)
+            finally:
+                proc.terminate()
+                _, stderr = proc.communicate(timeout=5)
+        self.assertIn("pairing file written:", stderr)
+        self.assertIn("pairing code:", stderr)
+        self.assertIn("未提供 --cert-pin/--ca-file", stderr)
+
     def test_pairing_code_matches_shared_vector(self) -> None:
         uri = (
             "tanuki-relay://v1?relay=relay.example.test%3A8443"

@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-55
 - 时间：2026-11-10 17:36（UTC+8）
-- 状态：后续增量已完成（PR [#57](https://github.com/leezzou/tanuki/pull/57)；MainActivity 相对 #52 前基线零 diff）
+- 状态：后续增量已完成（PR [#57](https://github.com/leezzou/tanuki/pull/57)；MainActivity 保留 #52 接线，相对当前 main 零 diff，待 51 接线落地后单独迁移）
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 - 前置 PR：[#52](https://github.com/leezzou/tanuki/pull/52) 已合并（head `7a13988`）。
 - 后续 PR：[#57](https://github.com/leezzou/tanuki/pull/57)（MainActivity 回退 + 6 位码 + 主机 chip hook）。
@@ -37,7 +37,7 @@
 | `app/src/main/kotlin/com/tanuki/runtime/RelayTransport.kt` | 中继与路由传输实现阶段回调，复用同一套 JSch 校验 |
 | `app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt` | 注入命名连接库 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` | 重做设置页：状态/影响、命名连接列表、全屏六步向导、阶段进度、失败面板、私钥文件选择与口令 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 保留命名连接、阶段、失败、attempt 配置等状态字段与回调；MainActivity 已回退为**零 diff**，由 51 按 hook 清单接线 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 保留命名连接、阶段、失败、attempt 配置等状态字段与回调；MainActivity 保留 #52 接线（相对 main 零 diff），51 迁移见 hook 清单 |
 | `app/src/main/kotlin/com/tanuki/runtime/RemotePairingCode.kt` | 新增配对链接的 6 位人工核对码（SHA-256 前 8 字节 mod 1e6），与 Python 参考主机端共享向量 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` 中的 `RemoteHostSwitchChip`/`RemoteHostSwitchSheet` | 提供给 DshNativePage 头部的主机切换组件与 sheet；本 PR 不接线，见 hook 清单 |
 | `scripts/remote-relay/protocol.py`、`host_agent.py`、`test_remote_relay.py` | 主机端输出 6 位配对码并新增共享向量回归 |
@@ -45,9 +45,9 @@
 | `docs/REMOTE-HOST.md`、`docs/REMOTE-CONNECT.md`、`docs/INTERFACES.md` | 同步向导流程、阶段错误语义与命名连接契约；按普通 PR 规则不修改 `docs/TEST-REPORT.md` |
 | `docs/handoffs/20261110-1736-remote-ssh-wizard.md` | 本轮唯一交接记录；未改 `AGENT-STATE.md`/`CURRENT.json` |
 
-## 给 51 的接线 hook（MainActivity 零 diff）
+## 给 51 的接线 hook（当前保留 #52 接线）
 
-本 PR 已把 `MainActivity.kt` 回退到 `origin/main`，该文件零 diff。以下字段/组件已存在于本分支，由 51 接线：
+当前 `MainActivity.kt` 保留 #52 已合并的 12 行向导入口接线，本 PR 相对 main 零 diff，因此设置页向导仍可用。以下字段/组件供 51 迁移接线；等 51 的接线合并后，再单独小 PR 删除这 12 行重复入口。
 
 ### 1. TanukiUiModel（MainActivity 构造 `TanukiUiModel(...)` 处）
 
@@ -136,8 +136,9 @@ if (showRemoteHostSheet) {
 | `python3 scripts/check-publication.py --git` | 通过：677 public files / 672 index entries / 0 findings | 上传检查 |
 | 评审修复与后续增量：4 个 P2、6 位码、chip 映射、MainActivity 回退 | 通过：924 tests / 0 failures；lint 0 errors / 103 warnings / 1 hint | 合并最新 main 后复验；MainActivity 相对 #52 前基线零 diff |
 | 第三轮 P2：活动副本按 sourceProfileId 归属；迟到私钥读取按请求版本丢弃 | 通过：924 tests / 0 failures | 编辑目标后删除、同服务双 profile、切换认证/进入测试后迟到回调均有回归 |
-| `python3 scripts/remote-relay/test_remote_relay.py` | 通过：8 tests（含 6 位码共享向量 308002） | Python 3.9 标准库回环 |
-| `git diff origin/main -- app/src/main/kotlin/com/tanuki/MainActivity.kt` | 空（MainActivity 零 diff） | 接线改交 51，hook 清单见上 |
+| 最终 P1/P2：保留 #52 向导接线；host_agent 默认系统 CA 路径先配 INFO 日志 | 通过：MainActivity 相对 main 零 diff；Python 9 tests | 设置页向导入口不消失；配对码在默认路径可见 |
+| `python3 scripts/remote-relay/test_remote_relay.py` | 通过：9 tests（含 6 位码共享向量 308002、默认系统 CA 路径配对码输出） | Python 3.9 标准库回环 |
+| `git diff origin/main -- app/src/main/kotlin/com/tanuki/MainActivity.kt` | 空（MainActivity 相对当前 main 零 diff） | 保留 #52 接线；51 迁移后单独删除重复入口 |
 
 - 哪些是前一轮结果，哪些是本次新验证：以上编译/JVM/lint 均为本次新验证；前一轮 0.1.11 的 794 tests 不应与新数字混算。
 - 未测试、超时、失败和暂未复现的情况：`NpmAdaptiveWorkerPoolTest` 在首次完整套件和单独复跑时曾出现一次 8/9 并发时序失败；随后完整套件通过，未修改该测试，不能据此宣称该测试稳定。真实设备/真实 SSH/中继/DSH、系统文件选择器、Keystore 真机、弱网/断线、深色/大字体均未执行。
