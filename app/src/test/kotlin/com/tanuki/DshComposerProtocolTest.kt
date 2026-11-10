@@ -290,6 +290,20 @@ class DshComposerProtocolTest {
         assertNull(imageBudget.limitFor(5, 0))
     }
 
+    @Test fun blockedFileBudgetReturnsChineseMessage() {
+        val budget = DshAttachmentReadBudget(
+            maxItems = 0,
+            remainingBytes = 50L * 1024 * 1024,
+            maxItemBytes = 20 * 1024 * 1024,
+            totalLabelBytes = 50L * 1024 * 1024,
+            typeMaxItems = 5,
+            typeLabel = "文件"
+        )
+        assertEquals("还能添加 0 个附件", budget.blockedMessage())
+        val noFileQuota = budget.copy(maxItems = 10, typeMaxItems = 0)
+        assertTrue(noFileQuota.blockedMessage().orEmpty().contains("文件"))
+    }
+
     @Test fun dragPolicyUsesStartMetadataWithoutClipData() {
         assertTrue(DshComposerDragPolicy.accepts(setOf("text/uri-list")))
         assertTrue(DshComposerDragPolicy.accepts(setOf("image/png")))

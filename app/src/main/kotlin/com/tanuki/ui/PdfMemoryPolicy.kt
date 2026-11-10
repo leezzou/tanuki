@@ -41,7 +41,8 @@ internal object PdfMemoryPolicy {
 
 /** PDF 打开前的文件大小限制；超过时给出明确中文提示而不是尝试加载。 */
 internal object PdfOpenPolicy {
-    const val MAX_FILE_BYTES = 512L * 1024 * 1024
+    // 与外部 content:// 查看共用同一上限，避免两条入口给出不同大小边界。
+    const val MAX_FILE_BYTES = com.tanuki.storage.ExternalDocumentPolicy.MAX_PDF_BYTES
 
     fun fileTooLarge(bytes: Long): Boolean = bytes > MAX_FILE_BYTES
 }

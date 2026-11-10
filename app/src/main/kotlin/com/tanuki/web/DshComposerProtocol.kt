@@ -62,6 +62,10 @@ data class DshAttachmentReadBudget(
         acceptedItems >= maxItems -> "还能添加 $maxItems 个附件"
         else -> "附件总大小不能超过 ${DshComposerPolicy.formatBytes(totalLabelBytes)}"
     }
+
+    /** 该类型已无名额/字节时返回中文提示，避免整批结果被静默丢弃。 */
+    fun blockedMessage(): String? =
+        if (maxItems <= 0 || typeMaxItems <= 0 || remainingBytes <= 0) exhaustionMessage(0) else null
 }
 
 /** 官方 prompt 的内容块；顺序由调用方决定，原生输入栏按附件后文本发送。 */

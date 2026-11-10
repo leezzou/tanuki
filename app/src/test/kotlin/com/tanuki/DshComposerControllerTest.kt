@@ -112,7 +112,7 @@ class DshComposerControllerTest {
         val store = MemoryDshDraftStore()
         val controller = controller(remote, store)
         controller.setSession("s1")
-        controller.addImages(listOf(image(png(100, 100), "a.png")))
+        controller.addImages(listOf(image(png(100, 100), "a.png")), controller.captureSessionToken())
         assertEquals(1, controller.state.value.attachments.size)
         controller.updateText("看看这张图", 5)
         controller.send()
@@ -147,7 +147,8 @@ class DshComposerControllerTest {
                     bytes = "hello".toByteArray(),
                     kind = DshAttachmentKind.FILE
                 )
-            )
+            ),
+            controller.captureSessionToken()
         )
         val uploaded = awaitState(controller) {
             it.attachments.singleOrNull()?.status == DshAttachmentStatus.UPLOADED
@@ -196,7 +197,7 @@ class DshComposerControllerTest {
         awaitState(controller) { it.commands.size == 2 }
 
         controller.updateText("/compact", 8)
-        controller.addImages(listOf(image(png(20, 20), "a.png")))
+        controller.addImages(listOf(image(png(20, 20), "a.png")), controller.captureSessionToken())
         controller.send()
         assertTrue(controller.state.value.error.orEmpty().contains("不接受附件"))
         assertFalse(remote.calls.any { it.method == "commands/execute" })
@@ -209,7 +210,7 @@ class DshComposerControllerTest {
         assertEquals(0, compact.args.getJSONArray("submittedAttachments").length())
 
         controller.updateText("/goal 完成目标", 8)
-        controller.addImages(listOf(image(png(20, 20), "b.png")))
+        controller.addImages(listOf(image(png(20, 20), "b.png")), controller.captureSessionToken())
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
         val goal = remote.calls.filter { it.method == "commands/execute" }.last()
@@ -229,7 +230,7 @@ class DshComposerControllerTest {
         val controller = controller(remote)
         controller.setSession("s1")
         awaitState(controller) { it.limits.maxImageBytes == 64 * 1024 }
-        controller.addImages(listOf(image(png(100, 100) + ByteArray(70 * 1024), "big.png")))
+        controller.addImages(listOf(image(png(100, 100) + ByteArray(70 * 1024), "big.png")), controller.captureSessionToken())
         assertTrue(controller.state.value.attachments.isEmpty())
         assertTrue(controller.state.value.error.orEmpty().contains("单张图片不能超过"))
     }
@@ -251,16 +252,23 @@ class DshComposerControllerTest {
         val store = MemoryDshDraftStore()
         val controller = controller(remote, store)
         controller.setSession("s1")
-        controller.addImages(listOf(image(png(20, 20), "old.png")))
+        controller.addImages(listOf(image(png(20, 20), "old.png")), controller.captureSessionToken())
         controller.updateText("A", 1)
         controller.send()
         controller.updateText("B", 1)
-        controller.addImages(listOf(image(png(21, 21), "new.png")))
+        controller.addImages(listOf(image(png(21, 21), "new.png")), controller.captureSessionToken())
         val state = awaitState(controller) { it.notice?.startsWith("已发送") == true }
         assertEquals("B", state.text)
         assertEquals(listOf("new.png"), state.attachments.map { it.name })
         assertEquals("B", store.read("s1"))
         assertTrue(state.notice!!.contains("新编辑已保留"))
+    }
+
+    @Test fun restoredPickerResultWithoutTokenIsRejected() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        assertFalse(controller.canApplyAttachmentResult(null))
+        assertTrue(controller.canApplyAttachmentResult(controller.captureSessionToken()))
     }
 
     @Test fun staleAttachmentTokenIsRejectedAfterSessionSwitch() {
@@ -282,7 +290,7 @@ class DshComposerControllerTest {
         val controller = controller(remote)
         controller.setSession("s1")
         controller.updateText("不要丢", 3)
-        controller.addImages(listOf(image(png(20, 20), "a.png")))
+        controller.addImages(listOf(image(png(20, 20), "a.png")), controller.captureSessionToken())
         controller.send()
         val state = awaitState(controller) { it.error != null }
         assertTrue(state.error!!.contains("网络请求失败"))

@@ -88,7 +88,7 @@ object DshApiProtocol {
      * 原生页需要 `$events` 审批 waterfall 与 `session/follow` 实时流，因此默认声明
      * `interactions=answer`；只读调用也复用同一 Peer，不再另开 `none` 连接。
      */
-    fun connectUrl(endpoint: DshEndpoint, interactions: String = "answer"): String? = runCatching {
+    fun connectUrl(endpoint: DshEndpoint, interactions: String = "none"): String? = runCatching {
         if (interactions != "answer" && interactions != "none") return null
         if (!validOrigin(endpoint.origin) || !OriginPolicy.sameOrigin(endpoint.launchUrl, endpoint.origin)) return null
         val uri = URI(endpoint.launchUrl)
@@ -623,7 +623,7 @@ class DshNativeClient(
             val existing = cookie
             if (existing != null && boundOrigin == endpoint.origin && boundLaunchUrl == endpoint.launchUrl) return existing
         }
-        val url = DshApiProtocol.connectUrl(endpoint) ?: throw IOException("DSH 启动地址无效")
+        val url = DshApiProtocol.connectUrl(endpoint, interactions = "answer") ?: throw IOException("DSH 启动地址无效")
         // 连接失败时不把带 token 的 URL 放进异常文本。
         val connection = try { open(url) } catch (_: IOException) { throw IOException("DSH 接口认证失败") }
         try {

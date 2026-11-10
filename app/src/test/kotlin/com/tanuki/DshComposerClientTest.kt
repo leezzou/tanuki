@@ -174,7 +174,7 @@ class DshComposerClientTest {
         )
         val url = com.tanuki.web.DshApiProtocol.connectUrl(endpoint)
         assertTrue(url!!.startsWith("http://127.0.0.1:4567/connect?"))
-        assertTrue(url.contains("interactions=answer"))
+        assertTrue(url.contains("interactions=none"))
         // 这是实际发送给 /connect 的地址，token 必须保留；不得进入日志或错误文本。
         assertTrue(url.contains("token=secret"))
         assertTrue(DshComposerProtocol.validSessionId("session-1"))

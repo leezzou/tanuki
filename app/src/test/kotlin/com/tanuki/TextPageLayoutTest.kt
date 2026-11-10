@@ -83,6 +83,12 @@ class TextPageLayoutTest {
         assertEquals(4L * 1024 * 1024, TextPageLayout.MAX_VIEW_BYTES)
     }
 
+    @Test fun unknownTotalSizeStillAllowsPagingUntilHasMoreIsFalseOrCap() {
+        assertTrue(TextPageLayout.canAdvance(64 * 1024, totalBytes = -1, hasMore = true))
+        assertFalse(TextPageLayout.canAdvance(64 * 1024, totalBytes = -1, hasMore = false))
+        assertFalse(TextPageLayout.canAdvance(TextPageLayout.MAX_VIEW_BYTES, totalBytes = -1, hasMore = true))
+    }
+
     @Test fun reportsTruncationOnlyWhenContentRemainsPastTheCap() {
         val cap = TextPageLayout.MAX_VIEW_BYTES
         assertTrue(TextPageLayout.isTruncated(cap, totalBytes = cap * 2, hasMore = true))

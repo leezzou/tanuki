@@ -13,6 +13,11 @@ class WorkspaceFileKindTest {
         assertEquals(FileKind.DOCX, WorkspaceFileManager.classifyFileKind("方案.DOCX", "application/octet-stream"))
         assertEquals(FileKind.DOC, WorkspaceFileManager.classifyFileKind("旧版.doc", "application/msword"))
         assertEquals(FileKind.DOC, WorkspaceFileManager.classifyFileKind("旧版.DOC", null))
+        // 外部 content:// 提供方可能只给 MIME、显示名没有扩展名。
+        assertEquals(FileKind.PDF, WorkspaceFileManager.classifyFileKind("document", "application/pdf"))
+        assertEquals(FileKind.DOCX, WorkspaceFileManager.classifyFileKind(
+            "document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+        assertEquals(FileKind.DOC, WorkspaceFileManager.classifyFileKind("document", "application/msword"))
     }
 
     @Test fun mapsXlsxWithoutTreatingLegacyXlsAsSupported() {
@@ -20,6 +25,8 @@ class WorkspaceFileKindTest {
         assertEquals(FileKind.XLSX, WorkspaceFileManager.classifyFileKind("报表.xlsx", "application/octet-stream"))
         assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind("旧版.xls", "application/vnd.ms-excel"))
         assertEquals(FileKind.OTHER, WorkspaceFileManager.classifyFileKind("宏.xlsm", null))
+        assertEquals(FileKind.XLSX, WorkspaceFileManager.classifyFileKind(
+            "sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
     }
 
     @Test fun keepsExistingImageAudioVideoTextAndOtherKinds() {
