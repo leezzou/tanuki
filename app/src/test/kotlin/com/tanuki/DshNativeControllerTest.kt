@@ -12,6 +12,7 @@ import com.tanuki.web.DshRiskAssessment
 import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolStatus
+import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshChatSource
 import com.tanuki.web.DshLiveEvent
 import kotlinx.coroutines.flow.Flow
@@ -306,7 +307,9 @@ class DshNativeControllerTest {
         messages: Map<String, String> = emptyMap(),
         private val liveEvents: List<DshLiveEvent> = emptyList(),
         private val sendFailure: Throwable? = null,
-        private val sendGate: CompletableDeferred<Unit>? = null
+        private val sendGate: CompletableDeferred<Unit>? = null,
+        private val pageGate: CompletableDeferred<Unit>? = null,
+        private val timelines: Map<String, List<DshTimelineItem>> = emptyMap()
     ) : DshChatSource {
         private val current = messages.toMutableMap()
 
@@ -317,19 +320,23 @@ class DshNativeControllerTest {
         override suspend fun sessions(): Result<List<DshSession>> =
             if (failSessions) Result.failure(IOException("DSH 接口认证失败")) else Result.success(items)
 
-        override suspend fun messages(sessionId: String): Result<DshSessionPage> = Result.success(
-            DshSessionPage(
-                messages = listOf(
-                    DshMessage(
-                        seq = 1,
-                        role = DshMessageRole.USER,
-                        text = current[sessionId] ?: "message-$sessionId",
-                        time = 1L
-                    )
-                ),
-                hasMore = false
+        override suspend fun messages(sessionId: String): Result<DshSessionPage> {
+            pageGate?.await()
+            return Result.success(
+                DshSessionPage(
+                    messages = listOf(
+                        DshMessage(
+                            seq = 1,
+                            role = DshMessageRole.USER,
+                            text = current[sessionId] ?: "message-$sessionId",
+                            time = 1L
+                        )
+                    ),
+                    hasMore = false,
+                    timeline = timelines[sessionId].orEmpty()
+                )
             )
-        )
+        }
 
         override suspend fun send(sessionId: String, text: String): Result<Unit> {
             sendGate?.await()
@@ -340,6 +347,37 @@ class DshNativeControllerTest {
 
         override fun live(sessionId: String): Flow<DshLiveEvent> =
             if (liveEvents.isEmpty()) emptyFlow() else flowOf(*liveEvents.toTypedArray())
+    }
+
+    @Test fun lateHistoryPageCannotRegressCompletedTool() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val running = toolItem("call-1", DshToolStatus.RUNNING, 7)
+        val completed = toolItem("call-1", DshToolStatus.SUCCESS, 7, output = "完成")
+        val source = FakeSource(
+            listOf(session("A")),
+            messages = mapOf("A" to "历史页"),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(
+                    messages = listOf(DshMessage(1, DshMessageRole.USER, "实时页", 1L)),
+                    hasMore = false,
+                    liveText = "",
+                    tools = listOf(running)
+                ),
+                DshLiveEvent.Timeline(listOf(completed))
+            ),
+            pageGate = gate,
+            timelines = mapOf("A" to listOf(DshTimelineItem.Tool(running)))
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitState(controller) { it.tools.singleOrNull()?.status == DshToolStatus.SUCCESS }
+        gate.complete(Unit)
+        val state = awaitState(controller) { state ->
+            !state.loading && state.messages.any { it.text == "历史页" }
+        }
+        assertEquals(DshToolStatus.SUCCESS, state.tools.single().status)
+        assertEquals("完成", state.tools.single().output)
     }
 
     private fun toolItem(

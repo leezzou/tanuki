@@ -43,7 +43,7 @@
 | WORK/文件树/diff/搜索 | ☐ | 另行工作区切片 |
 | SET/技能/插件 | ☐/◐ | 通知设置已有；主题/语言/链接打开/技能列表/插件管理未接 |
 
-现有实现测试：目标 96 项、完整 JVM 785 tests / 0 failures / 0 errors / 0 skipped（合并 `main=b075725`、含 #41 审批/工具与 #43 composer），lint 0 errors / 101 warnings / 1 hint。**设备、真实 PRoot DSH、输入法、附件上传、审批 waterfall、通知、远程、安全模式均未验证。**
+现有实现测试：目标 96 项、完整 JVM 786 tests / 0 failures / 0 errors / 0 skipped（合并 `main=b075725`、含 #41 审批/工具与 #43 composer），lint 0 errors / 101 warnings / 1 hint。**设备、真实 PRoot DSH、输入法、附件上传、审批 waterfall、通知、远程、安全模式均未验证。**
 
 ## 1. 状态、优先级与目标层级
 

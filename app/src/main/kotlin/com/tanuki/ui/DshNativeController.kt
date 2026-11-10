@@ -9,6 +9,7 @@ import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshToolItem
+import com.tanuki.web.DshToolStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -353,7 +354,10 @@ class DshNativeController(
                     state.copy(
                         loading = false,
                         messages = mergeMessages(state.messages, page.messages, replace = true),
-                        tools = page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool },
+                        tools = mergeTools(
+                            state.tools,
+                            page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
+                        ),
                         hasMore = page.hasMore
                     )
                 } else {
@@ -416,6 +420,10 @@ class DshNativeController(
         current.forEach { merged[it.callId] = it }
         incoming.forEach { item ->
             val previous = merged[item.callId]
+            // 迟到的历史页可能仍是 RUNNING；已经收到终态的卡片不能被回退。
+            if (previous != null && previous.status != DshToolStatus.RUNNING &&
+                item.status == DshToolStatus.RUNNING
+            ) return@forEach
             merged[item.callId] = if (previous == null) item else previous.copy(
                 name = item.name.takeIf { it.isNotBlank() && it != "未知工具" } ?: previous.name,
                 arguments = item.arguments ?: previous.arguments,
