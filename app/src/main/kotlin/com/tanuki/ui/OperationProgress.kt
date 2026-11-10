@@ -14,16 +14,20 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.*
+import com.tanuki.storage.ImportProgress
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 
 private data class ProgressItem(val id: String, val title: String, val fraction: Float?, val detail: String,
-    val timing: OperationTiming)
+    val timing: OperationTiming, val transferId: Long? = null)
 
 /** Outside every page's scroll area, including the DSH and browser tabs. */
 @Composable
-internal fun OperationBanner(snapshot: Snapshot, transfers: List<FileTransferProgress>, onCancel: () -> Unit,
-    modifier: Modifier = Modifier) {
+internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileTransferProgress>>, onCancel: () -> Unit,
+    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier) {
+    // 只有进度区订阅传输流；复制大文件时不会让整个页面跟着重组。
+    val transferItems by transfers.collectAsState()
     val items = buildList {
         if (snapshot.operationActive) {
             val download = snapshot.download
@@ -35,9 +39,9 @@ internal fun OperationBanner(snapshot: Snapshot, transfers: List<FileTransferPro
                 else -> "正在执行，完成后会自动更新"
             }, snapshot.timing))
         }
-        transfers.forEach { add(ProgressItem("file-${it.id}", it.label,
-            if (it.total > 0) (it.received.toDouble() / it.total).toFloat().coerceIn(0f, 1f) else null,
-            transferDetail(it.received, it.total), it.timing)) }
+        transferItems.forEach { add(ProgressItem("file-${it.id}", it.label,
+            ImportProgress.fraction(it.received, it.total),
+            transferDetail(it.received, it.total), it.timing, it.id)) }
     }
     if (items.isEmpty()) return
     var details by remember { mutableStateOf(false) }
@@ -64,6 +68,11 @@ internal fun OperationBanner(snapshot: Snapshot, transfers: List<FileTransferPro
                 key(item.id) {
                     Text(item.title, style = MaterialTheme.typography.titleMedium)
                     ProgressBody(item, compact = false)
+                    // 文件复制可协作取消；取消只清理本次暂存，不弹出新页面。
+                    item.transferId?.let { id ->
+                        OutlinedButton(onClick = { onCancelTransfer(id) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消此文件任务") }
+                    }
                 }
             }
             Text("有总量时显示当前阶段的真实进度；解析、解压或等待服务响应时显示持续动效，不估造整体百分比。",

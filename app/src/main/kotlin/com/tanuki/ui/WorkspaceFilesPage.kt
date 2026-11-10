@@ -7,8 +7,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
@@ -38,11 +40,6 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
-
-private class FileDisplayRequest(
-    val entries: List<WorkspaceFileManager.Entry>, val query: String, val hidden: Boolean, val sort: Int,
-)
-private class FileDisplayResult(val request: FileDisplayRequest, val entries: List<WorkspaceFileManager.Entry>)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -130,35 +127,19 @@ fun WorkspaceFilesPage(
     }
     // 每次路径或筛选变化生成独立请求，旧请求的结果不能作为新目录的显示内容。
     val displayRequest = remember(files, directory, entries, query, hidden, sort) {
-        FileDisplayRequest(entries, query, hidden, sort)
+        FileDisplayRequest(FileListPresentation.source(location, directory), entries, query, hidden, sort)
     }
     var display by remember(files) { mutableStateOf<FileDisplayResult?>(null) }
-    val sorting = display?.request !== displayRequest
-    val shown = if (sorting) emptyList() else display!!.entries
+    val sorting = FileListPresentation.isStale(display, displayRequest)
+    // 同目录刷新先保留旧列表，换目录才清空；避免排序期间闪空并重置滚动位置。
+    val shown = FileListPresentation.visible(display, displayRequest)
+    // 滚动状态随目录保存，排序、筛选和进度更新不会把列表拉回顶部；旋转后仍可恢复。
+    val listState = rememberSaveable(files, directory, saver = LazyListState.Saver) { LazyListState() }
+    val gridState = rememberSaveable(files, directory, saver = LazyGridState.Saver) { LazyGridState() }
     LaunchedEffect(displayRequest) {
-        val prepared = withContext(Dispatchers.Default) {
-            val context = currentCoroutineContext()
-            val visible = ArrayList<WorkspaceFileManager.Entry>()
-            for ((index, entry) in displayRequest.entries.withIndex()) {
-                if (index % 256 == 0) context.ensureActive()
-                if ((displayRequest.hidden || !entry.name.startsWith('.')) && entry.name.contains(displayRequest.query, ignoreCase = true)) visible += entry
-            }
-            val ordering = when (displayRequest.sort) {
-                1 -> compareByDescending<WorkspaceFileManager.Entry> { it.modified }
-                2 -> compareByDescending { it.bytes }
-                else -> compareBy { it.name.lowercase(Locale.ROOT) }
-            }
-            val comparator = compareByDescending<WorkspaceFileManager.Entry> { it.directory }.then(ordering).thenBy { it.name }
-            var comparisons = 0
-            visible.sortWith { left, right ->
-                if (comparisons++ % 256 == 0) context.ensureActive()
-                comparator.compare(left, right)
-            }
-            context.ensureActive()
-            visible.toList()
-        }
+        val prepared = withContext(Dispatchers.Default) { FileListPresentation.prepare(displayRequest) }
         currentCoroutineContext().ensureActive()
-        display = FileDisplayResult(displayRequest, prepared)
+        display = FileListPresentation.result(display, FileDisplayResult(displayRequest, prepared))
     }
     if (writePermissionDialog) AlertDialog(onDismissRequest = { writePermissionDialog = false },
         title = { Text("允许 DSH 写入手机文件？") },
@@ -246,7 +227,10 @@ fun WorkspaceFilesPage(
                 }
             } else if (!location.writable) Text(if (location == FileLocation.PHONE) "手机共享存储 · 只读浏览，可打开或导出文件" else "只读位置 · 按 Agent 实际挂载路径显示，不修改运行环境", Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (busy || sorting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // 固定高度的进度槽：加载/排序开始或结束时列表不会上下位移。
+            Box(Modifier.fillMaxWidth().height(4.dp)) {
+                if (busy || sorting) LinearProgressIndicator(Modifier.fillMaxSize())
+            }
             if (canBrowse) Text(if (sorting) "正在整理 ${entries.size} 项…" else "显示 ${shown.size} 项 · 共 ${entries.size} 项",
                 Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -318,6 +302,7 @@ fun WorkspaceFilesPage(
                 } else if (grid) LazyVerticalGrid(
                     GridCells.Adaptive(160.dp),
                     Modifier.fillMaxSize(),
+                    state = gridState,
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + bottomInset),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -325,6 +310,7 @@ fun WorkspaceFilesPage(
                     gridItems(shown, key = { it.path }) { entry -> row(entry, true) }
                 } else LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp + bottomInset),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
