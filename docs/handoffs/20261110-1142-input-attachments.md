@@ -20,7 +20,7 @@
 - 已验证：`compileModernDebugKotlin` BUILD SUCCESSFUL；输入/附件目标回归 34 项全过；完整 JVM 592 tests / 0 failures / 0 errors / 0 skipped；`lintModernDebug` 0 errors / 95 warnings / 1 hint，新增文件无 lint 告警。
 - 待验证：42 接线后的真实 Android 设备/模拟器输入栏布局、软/硬件键盘、图片/文件选择、缩略图/大图预览、粘贴/拖入、上传失败重试；真实 PRoot DSH `/connect`/`session/prompt`/`fileUploads/upload`/`commands`；assemble、Android 仪器、真机；独立 Review、CI 与合并。
 - 当前目标包名、分支/无Git状态、是否有运行中任务：`com.tanuki`（modern flavor 为 `com.tanuki.modern`）；分支 `ao/input-attachments/root`，基线 `origin/main=0555c3c0eaeeed181269b5e68733ccfdd48d9e75`；PR [#39](https://github.com/leezzou/tanuki/pull/39) 已认领；无设备/模拟器任务。
-- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。最新 `main=533eff4` 已合入本分支，冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，两边记录均已保留。
+- 关键事实与可定位源码/公共文档：官方 `@deepseek-ai/dsh@0.2.1-rc.5` 包中的 `session/prompt`、`fileUploads/upload`、`commands/list|execute`、`fileReferences/list`、`sessionReferenceResolver/candidates` 参数结构；实现见 `app/src/main/kotlin/com/tanuki/web/DshComposerProtocol.kt`、`DshComposerClient.kt`、`ui/DshComposerController.kt`、`ui/DshComposerBar.kt`、`ui/DshAttachmentReader.kt`、`ui/DshComposerDraftStore.kt`；契约见 `docs/INTERFACES.md` 1.7.1，行为见 `docs/NATIVE-UI.md` 4.1。最新 `main=533eff4` 与 `main=1cb7ad9`（原生功能对齐审计）已合入本分支；冲突仅在 `AGENT-STATE`/`TEST-REPORT`/`CURRENT.json`，两边记录均已保留。
 
 ## 本次改动
 
