@@ -136,6 +136,10 @@ class DshComposerController(
     val state: StateFlow<DshComposerState> = _state.asStateFlow()
 
     private var generation = 0L
+    /** 页面是否已把官方 running 状态接入；未接入时不把提交回执当成回合运行态。 */
+    private var generationStateBound = false
+    /** 官方 running 状态版本；提交回执只在版本未变化时更新运行态，避免覆盖已确认的 idle。 */
+    private var officialStateVersion = 0L
     private var draftJob: Job? = null
     private var mentionJob: Job? = null
     private var commandJob: Job? = null
@@ -377,6 +381,7 @@ class DshComposerController(
         val submittedText = current.text
         val submittedAttachmentIds = attachments.map { it.id }.toSet()
         val requestGeneration = generation
+        val officialVersionAtSend = officialStateVersion
         _state.update {
             it.copy(
                 sending = true,
@@ -447,13 +452,21 @@ class DshComposerController(
                         attachments = keepAttachments,
                         sending = false,
                         sendFailed = false,
-                        // 普通 prompt 被接受后本轮进入运行；斜杠命令不一定产生回合，
-                        // 不默认置运行中，页面仍可用官方 running 状态纠正。
-                        generationRunning = command == null,
-                        // 停止回执可能与 prompt 回执交错到达；保留仍在收尾的请求状态。
-                        stopOutcome = if (it.stopOutcome == DshStopOutcome.REQUESTED) {
-                            DshStopOutcome.REQUESTED
-                        } else null,
+                        // 提交回执只负责提交状态/草稿清理：官方 running 状态在等待期间
+                        // 已变化时，回执不能覆盖已确认的 idle；未接线时也不能把发送键
+                        // 永久换成停止键。
+                        generationRunning = if (officialStateVersion != officialVersionAtSend) {
+                            it.generationRunning
+                        } else {
+                            command == null && generationStateBound &&
+                                it.stopOutcome != DshStopOutcome.STOPPED
+                        },
+                        // 停止回执/已确认 idle 与 prompt 回执可能交错；保留更强状态。
+                        stopOutcome = when (it.stopOutcome) {
+                            DshStopOutcome.STOPPED -> DshStopOutcome.STOPPED
+                            DshStopOutcome.REQUESTED -> DshStopOutcome.REQUESTED
+                            else -> null
+                        },
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
@@ -478,9 +491,15 @@ class DshComposerController(
      * 运行状态，避免隐藏仍在收尾的停止入口。
      */
     fun setGenerationRunning(running: Boolean) {
+        generationStateBound = true
+        officialStateVersion++
         _state.update { state ->
             if (running) {
-                if (state.generationRunning) state else state.copy(generationRunning = true)
+                // 官方确认新回合运行：旧的“已停止”不再适用；仍在收尾的停止请求保留。
+                state.copy(
+                    generationRunning = true,
+                    stopOutcome = if (state.stopOutcome == DshStopOutcome.STOPPED) null else state.stopOutcome
+                )
             } else {
                 stopTimeoutJob?.cancel()
                 val awaitingStop = state.stopping || state.stopOutcome == DshStopOutcome.REQUESTED
@@ -531,8 +550,14 @@ class DshComposerController(
             if (sessionId != _state.value.sessionId) return@launch
             result.onSuccess {
                 // 停止只影响生成；在途 prompt 的回执必须继续走完，不能在这里 cancel sendJob。
+                val latest = _state.value
+                if (latest.stopOutcome == DshStopOutcome.STOPPED && !latest.generationRunning) {
+                    // 官方 idle 已先到；迟到的 accepted 不能把已确认的停止重新打开。
+                    _state.update { it.copy(stopping = false) }
+                    return@onSuccess
+                }
                 // 只要回合仍在运行或还有提交回执在途，就不能把 accepted 当成“已停止”。
-                val awaitingOfficial = _state.value.generationRunning || _state.value.sending
+                val awaitingOfficial = latest.generationRunning || latest.sending
                 if (awaitingOfficial) {
                     _state.update {
                         it.copy(
@@ -554,7 +579,12 @@ class DshComposerController(
                 }
             }.onFailure { error ->
                 stopTimeoutJob?.cancel()
-                val stillActive = _state.value.generationRunning || _state.value.sending
+                val latest = _state.value
+                if (latest.stopOutcome == DshStopOutcome.STOPPED && !latest.generationRunning) {
+                    _state.update { it.copy(stopping = false) }
+                    return@onFailure
+                }
+                val stillActive = latest.generationRunning || latest.sending
                 _state.update {
                     it.copy(
                         stopping = false,

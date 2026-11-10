@@ -416,6 +416,7 @@ class DshComposerControllerTest {
         val remote = FakeRemote()
         val controller = controller(remote)
         controller.setSession("s1")
+        controller.setGenerationRunning(false)
         controller.updateText("运行中", 3)
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
@@ -440,6 +441,7 @@ class DshComposerControllerTest {
         val remote = FakeRemote()
         val controller = controller(remote, stopConfirmTimeoutMillis = 40)
         controller.setSession("s1")
+        controller.setGenerationRunning(false)
         controller.updateText("运行中", 3)
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
@@ -461,6 +463,7 @@ class DshComposerControllerTest {
         val remote = FakeRemote().apply { promptDelayMillis = 120 }
         val controller = controller(remote)
         controller.setSession("s1")
+        controller.setGenerationRunning(false)
         controller.updateText("B", 1)
         controller.send()
         assertTrue(controller.state.value.sending)
@@ -485,6 +488,7 @@ class DshComposerControllerTest {
         val remote = FakeRemote().apply { cancelAccepted = false }
         val controller = controller(remote)
         controller.setSession("s1")
+        controller.setGenerationRunning(false)
         controller.updateText("运行中", 3)
         controller.send()
         awaitState(controller) { it.notice == "已发送" }
@@ -493,6 +497,50 @@ class DshComposerControllerTest {
         val failed = awaitState(controller) { it.stopOutcome == DshStopOutcome.FAILED }
         assertTrue(failed.error.orEmpty().contains("停止失败"))
         assertTrue(failed.generationRunning)
+    }
+
+    @Test fun unboundControllerKeepsSendPathAfterPromptAccepted() {
+        val remote = FakeRemote()
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" }
+        // 未接入官方 running 时不能把唯一发送键永久换成停止键。
+        assertFalse(controller.state.value.generationRunning)
+
+        controller.clearNotice()
+        controller.updateText("B", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+        assertFalse(controller.state.value.generationRunning)
+    }
+
+    @Test fun latePromptReceiptDoesNotReopenConfirmedStop() {
+        val remote = FakeRemote().apply { promptDelayMillis = 120 }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("B", 1)
+        controller.send()
+        controller.requestStop()
+        val requested = awaitState(controller) {
+            it.stopOutcome == DshStopOutcome.REQUESTED && it.stopping
+        }
+        assertTrue(requested.sending)
+
+        // cancel accepted 后先确认 idle，再让延迟的 prompt accepted 到达。
+        controller.setGenerationRunning(false)
+        val stopped = awaitState(controller) {
+            it.stopOutcome == DshStopOutcome.STOPPED && !it.generationRunning
+        }
+        assertTrue(stopped.sending)
+        val sent = awaitState(controller) {
+            it.notice == "已发送" && !it.sending && !it.generationRunning
+        }
+        assertEquals(DshStopOutcome.STOPPED, sent.stopOutcome)
+        assertEquals(1, remote.calls.count { it.method == "session/prompt" })
     }
 
     @Test fun commandCandidatesSearchNameAndDescription() {
