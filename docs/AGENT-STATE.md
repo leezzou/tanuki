@@ -1,6 +1,6 @@
 # Tanuki 当前状态
 
-当前交接：[原生界面可交互切片](handoffs/20261110-1233-native-ui-chat.md)（android_agent-42，基于 `origin/main=0555c3c`；已实现发送/停止/实时流/审批，JVM/lint 通过，PR [#40](https://github.com/leezzou/tanuki/pull/40) 待审，未合并/未发布）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32，最终 `main=9e7edbb9`，9 个 PR 全部合并）。并行与历史记录保留在 `docs/handoffs/`。
+当前交接：[原生界面可交互切片](handoffs/20261110-1233-native-ui-chat.md)（android_agent-42，基于 `origin/main=0555c3c`，已合并 `main=533eff4`；PR [#40](https://github.com/leezzou/tanuki/pull/40) 待审，未合并/未发布）。上一记录：[文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)（android_agent-41，PR #34 已合并为 `533eff4`）。并行与历史记录保留在 `docs/handoffs/`。
 
 ## 原生界面可交互切片（android_agent-42，PR #40 待审）
 
@@ -10,6 +10,18 @@
 - 安全与兼容：只连精确 loopback origin；WebSocket 握手校验/掩码/ping-pong；token/Cookie 不落日志/状态；关闭 mux 即丢弃失效 Cookie；列表失败回退官方，实时/单次失败只提示；通知目标会重连；远程 origin 复用同一 loopback 转发地址；安全模式与 WebView 路径未改。
 - 已验证（本轮）：目标协议/客户端/控制器/WebSocket 回归 51 项通过；最终完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**，`lintModernDebug` **0 errors / 94 warnings / 1 hint**。未跑 assemble、仪器、设备/PRoot DSH。
 - 详细端点、未实现项与设备验收清单见 [原生界面](NATIVE-UI.md)。
+
+## 文件查看器格式支持扩展（android_agent-41，PR #34 已合并）
+
+- 分支 `ao/file-viewer/formats`，基线 `0555c3c0eaeeed181269b5e68733ccfdd48d9e75`，已随 PR #34 合并到 `main=533eff4`；未发布、未创建 tag/Release。
+- 新增纯 Kotlin `FileTypeCatalog` 集中维护扩展名、规范 MIME 与类别：C/C++/头文件（c、h、cpp、cc、cxx、hpp、hh、hxx、inl、ipp、m、mm、cu 等）、Java/Kotlin/Python/JS/TS/Go/Rust/Shell 及多种语言、JSON/XML/YAML/TOML/INI/属性/`.env` 等已知点号配置、Markdown/纯文本/日志、HTML/CSS/SQL/CSV/TSV、SVG；点号配置只匹配已知名称与 `.env`/`.env.*`，`.DS_Store` 归为隐藏二进制、`.env-image.png` 按媒体扩展名处理；图片/音频/视频扩展名在缺少系统 MIME 时仍能进入对应查看器；PDF/DOCX/XLSX 保持内置预览，`.doc` 保持旧版提示，`.xls`/`.xlsm`/`.pptx`/`.odt` 等归为不支持并回退。
+- 分类改为扩展名优先于 MIME，修复 `.ts` 在 Android 上可能被 `video/mp2t` 当成视频的问题；未知类型仅在非明确二进制/归档/旧版 Office 时做有界 UTF-8 内容探测，避免误判。
+- 文本查看器保留 64 KiB 分页，新增可开关行号（行号与正文同一段文本，自动换行不错位）、当前行范围与已显示字节、单次查看 4 MiB 上限与中文截断提示；仍为等宽字体、只读选择复制、搜索/编码切换。
+- 未知/不支持类型显示“暂不支持内置预览”中文说明，提供“用文本打开”“复制路径”和返回类型说明；读取失败显示错误兜底，不白屏。
+- 已验证（本轮新跑）：`compileModernDebugKotlin` BUILD SUCCESSFUL；定向 29 tests / 0 failures；完整 `testModernDebugUnitTest` **558 tests / 0 failures / 0 errors / 0 skipped**（67 个结果文件，0.1.10 基线 535 + 新增 23）、`lintModernDebug` 0 errors / 95 warnings / 1 hint，最终代码组合 BUILD SUCCESSFUL（2m49s）。
+- 待验证：真机/模拟器上的行号对齐、自动换行/深色主题、大日志截断提示、未知类型面板与复制路径、真实 `.c`/`.cpp` 打开；assemble/Android 仪器未跑。已合并，真实设备验收仍待办。
+- 详细交接与命令见 [文件查看器格式支持扩展](handoffs/20261110-1142-file-viewer-formats.md)，验证摘要见 [测试报告](TEST-REPORT.md)。
+
 
 ## 0.1.10 Pre-release（最终发布准备，本地候选）
 
