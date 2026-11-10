@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "record": "docs/handoffs/20261110-1140-native-parity-audit.md",
-  "recordSha256": "bb96d85fa8f1adc07ec6cb9e4feca7917e034bd2d8d4f4f29f04e71f9a27a5f0",
-  "sourceFingerprint": "c87823a569973fb59d79305e35cfd337d5e030dbb9770ebce80d03e2f5201002",
-  "fileCount": 594
+  "recordSha256": "ac30af31863888b4aa4439d4582550d03f158d00e2f13c762644771fd4563306",
+  "sourceFingerprint": "527f28f76d345c6b75b12c879cef09ff35edc87e178ee796a9d4decd5f62ef0c",
+  "fileCount": 599
 }

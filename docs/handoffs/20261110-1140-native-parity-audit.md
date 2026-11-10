@@ -18,6 +18,7 @@
 - 已验证：`python3 scripts/check-native-parity.py --self-test` PASS；`python3 scripts/check-native-parity.py` PASS（166 行、14 域）；`python3 -c "compile(...)"` 语法检查 PASS；`python3 scripts/check-handoff.py --record ...` 与无参数 `check-handoff.py` PASS（594 public files）。
 - 待验证：所有 JVM/仪器/手工验收用例均未执行；矩阵中的“原生现状”来自源码/既有测试与只读分支核对，不代表当前设备行为。
 - 当前目标包名、分支/无 Git 状态：分支 `ao/parity-audit/root`，基线 `0555c3c0`；无运行中产品任务；未安装 APK、未启动设备。
+- Rebase（2026-11-10）：PR 从 `0555c3c0` rebase 到 `origin/main=533eff4`；冲突仅 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。AGENT-STATE 保留 main 的 PR #34 内容并追加本审计链接；CURRENT.json 按新 main 指纹重新生成。
 - Review P2 补强（2026-11-10）：检查器新增“跨功能域复用”校验；29 个合理跨域用例均补 `- 跨域：` 理由，未说明理由的跨域复用直接失败。这样既保留共享用例，又能发现“同一用例被不同能力蹭用”的可疑情况。
 - Review P2 已处理（2026-11-10）：SESS-14/15、SET-05/07/15 等缺口不再引用不覆盖它们的共享用例；新增 22 个缺口用例（goals、schedule、快捷键、语言、遥测、工作区管理、消息操作/链接/查找/滚动/中断、权限预设、Office/PDF、自动审查/CoT、账户配额、语音、计划模式、全局搜索、应用内徽标、文件管理器打开、应用更新、存储/备份、复制会话 ID/日志导出、@ 提及 UI），每个用例用 `- 覆盖：` 声明真正验证的矩阵行；检查器升级为拒绝“行引用了不覆盖该行的用例”。
 - Review P2 第二轮（2026-11-10）：A-INPUT-01 增加 `fileReferences/list`、`@` 提及解析/候选/引用提交断言；新增 A-INPUT-06（@ 提及 UI/引用卡片）；SESS-16 改接 A-SESS-07（复制完整 ID/日志导出）；MODEL-10 改接 A-MODEL-05（account 余额/配额）；A-FILE-06 区分“文件管理器显示”（不复制）与“系统关联打开”（允许 `cacheDir/workspace-open` 单文件只读副本，验证只共享选中文件、只读 URI、原文件不变、临时目录清理）；同步移除不诚实覆盖（MODEL-10 从 A-MODEL-01，SESS-16 从 A-SESS-02/04，FILE-14/16 从 A-FILE-02，SET-10/13/14 从 A-SET-03，CHAT-19 从 A-SESS-05）。
