@@ -99,6 +99,97 @@ object DshStreamPolicy {
 
     fun shouldPublish(pending: String?, current: String): Boolean =
         pending != null && pending != current
+
+    /** reset 帧直接替换旧内容；普通帧按累计/增量规则合并。 */
+    fun mergeFrame(current: String, frame: DshStreamFrame): String =
+        if (frame.reset) frame.text.take(MAX_TEXT_CHARS) else merge(current, frame.text)
+}
+
+/** 一个流式帧：reset=true 表示官方开启了新一轮 assistant-stream，必须替换旧前缀而不是追加。 */
+data class DshStreamFrame(
+    val text: String,
+    val reset: Boolean = false
+)
+
+/**
+ * 图片采样：BitmapFactory 只会按 2 的幂缩小，因此必须用**原始宽高**除以 sampling，
+ * 不能每轮同时把工作宽高减半，否则会低估采样倍数并突破解码上限。
+ */
+object DshImageSampling {
+    const val MAX_DIMENSION = 2_048
+
+    fun sampleSize(width: Int, height: Int, maxDimension: Int = MAX_DIMENSION): Int {
+        if (width <= 0 || height <= 0 || maxDimension <= 0) return 1
+        var sample = 1
+        while ((width / sample > maxDimension || height / sample > maxDimension) &&
+            sample <= (1 shl 29)
+        ) {
+            sample = sample shl 1
+        }
+        return sample
+    }
+
+    fun fits(width: Int, height: Int, sample: Int, maxDimension: Int = MAX_DIMENSION): Boolean {
+        if (width <= 0 || height <= 0 || sample <= 0) return false
+        return width / sample <= maxDimension && height / sample <= maxDimension
+    }
+}
+
+/** 审批停靠条文案；当前会话有待审批时始终提供可见入口。 */
+data class DshApprovalDock(
+    val count: Int,
+    val otherCount: Int,
+    val text: String
+)
+
+object DshApprovalDockPolicy {
+    fun describe(toolNames: List<String>, otherCount: Int): DshApprovalDock? {
+        if (toolNames.isEmpty()) return null
+        val first = toolNames.first().ifBlank { "未知工具" }
+        val base = if (toolNames.size == 1) {
+            "待审批：$first"
+        } else {
+            "待审批 ${toolNames.size} 项 · 最近：$first"
+        }
+        val text = if (otherCount > 0) "$base；其他会话 $otherCount 项" else base
+        return DshApprovalDock(toolNames.size, otherCount, text)
+    }
+}
+
+/**
+ * 输入栏真实发送链路的观察器。
+ *
+ * 输入栏走 `DshComposerController.send()`；这里只观察其公开 state 的 sending/error 变化，
+ * 捕获本次提交文本。失败时返回可重试/可复制的原文，避免呈现层另造一份发送状态。
+ */
+class DshComposerSendTracker {
+    private var sending = false
+    private var submittedText = ""
+    private var submittedAt = 0L
+
+    fun observe(sendingNow: Boolean, text: String, error: String?): DshFailedPrompt? {
+        if (!sending && sendingNow) {
+            sending = true
+            submittedText = text
+            submittedAt = System.currentTimeMillis()
+            return null
+        }
+        if (sending && !sendingNow) {
+            sending = false
+            val payload = submittedText
+            val time = submittedAt
+            submittedText = ""
+            submittedAt = 0L
+            if (!error.isNullOrBlank()) return DshFailedPrompt(payload, error, time)
+        }
+        return null
+    }
+
+    fun reset() {
+        sending = false
+        submittedText = ""
+        submittedAt = 0L
+    }
 }
 
 enum class DshLinkKind { WEB, MAIL, PHONE, ATTACHMENT, BLOCKED }

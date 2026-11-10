@@ -1,14 +1,31 @@
 package com.tanuki
 
+import com.tanuki.ui.DshApprovalDockPolicy
 import com.tanuki.ui.DshAttachmentPolicy
+import com.tanuki.ui.DshComposerController
+import com.tanuki.ui.MemoryDshDraftStore
 import com.tanuki.ui.DshChatRenderPolicy
+import com.tanuki.ui.DshComposerSendTracker
 import com.tanuki.ui.DshErrorKind
 import com.tanuki.ui.DshErrorPresenter
 import com.tanuki.ui.DshImageKind
 import com.tanuki.ui.DshImagePolicy
+import com.tanuki.ui.DshImageSampling
 import com.tanuki.ui.DshLinkKind
 import com.tanuki.ui.DshLinkPolicy
+import com.tanuki.ui.DshStreamFrame
 import com.tanuki.ui.DshStreamPolicy
+import com.tanuki.web.DshComposerClient
+import com.tanuki.web.DshComposerRemote
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -67,6 +84,102 @@ class DshChatRenderTest {
     @Test fun streamMergeNeverExceedsMessageLimit() {
         val merged = DshStreamPolicy.merge("a".repeat(DshStreamPolicy.MAX_TEXT_CHARS), "增量")
         assertEquals(DshStreamPolicy.MAX_TEXT_CHARS, merged.length)
+    }
+
+    @Test fun streamResetFrameReplacesSnapshotPrefix() {
+        assertEquals(
+            "回答",
+            DshStreamPolicy.mergeFrame("历史前缀", DshStreamFrame("回答", reset = true))
+        )
+        assertEquals(
+            "",
+            DshStreamPolicy.mergeFrame("历史前缀", DshStreamFrame("", reset = true))
+        )
+        assertEquals(
+            "历史前缀回答",
+            DshStreamPolicy.mergeFrame("历史前缀", DshStreamFrame("回答", reset = false))
+        )
+        assertEquals(
+            "abc",
+            DshStreamPolicy.mergeFrame("abc", DshStreamFrame("abc", reset = true))
+        )
+    }
+
+    @Test fun imageSamplingUsesOriginalDimensionsAndNeverExceedsLimit() {
+        assertEquals(1, DshImageSampling.sampleSize(2_048, 2_048))
+        assertEquals(2, DshImageSampling.sampleSize(4_096, 2_048))
+        assertEquals(4, DshImageSampling.sampleSize(8_192, 8_192))
+        assertEquals(16, DshImageSampling.sampleSize(32_768, 32_768))
+        assertEquals(8, DshImageSampling.sampleSize(10_000, 100))
+        assertEquals(1, DshImageSampling.sampleSize(0, 100))
+        listOf(8_192, 32_768).forEach { dimension ->
+            val sample = DshImageSampling.sampleSize(dimension, dimension)
+            assertTrue(
+                "$dimension 在 sample=$sample 时仍超过解码上限",
+                DshImageSampling.fits(dimension, dimension, sample)
+            )
+        }
+    }
+
+    @Test fun approvalDockSummarizesCurrentAndOtherSessions() {
+        assertEquals(null, DshApprovalDockPolicy.describe(emptyList(), otherCount = 0))
+        val single = DshApprovalDockPolicy.describe(listOf("Bash"), otherCount = 0)!!
+        assertEquals(1, single.count)
+        assertTrue(single.text.contains("Bash"))
+        val multiple = DshApprovalDockPolicy.describe(listOf("Bash", "Write"), otherCount = 2)!!
+        assertEquals(2, multiple.count)
+        assertTrue(multiple.text.contains("2 项"))
+        assertTrue(multiple.text.contains("其他会话 2 项"))
+        val unknown = DshApprovalDockPolicy.describe(listOf(""), otherCount = 0)!!
+        assertTrue(unknown.text.contains("未知工具"))
+    }
+
+    @Test fun realComposerSendFailureFlowsIntoFailureCardState() = runBlocking {
+        val remote = object : DshComposerRemote {
+            override suspend fun call(method: String, args: JSONObject): Any? = when (method) {
+                "session/prompt" -> throw java.io.IOException("网络连接中断")
+                "commands/list" -> JSONObject().put("commands", JSONArray())
+                else -> null
+            }
+        }
+        val controller = DshComposerController(
+            client = DshComposerClient(remote),
+            drafts = MemoryDshDraftStore(),
+            scope = CoroutineScope(Dispatchers.Unconfined)
+        )
+        val tracker = DshComposerSendTracker()
+        var failure: com.tanuki.ui.DshFailedPrompt? = null
+        val collector = launch(Dispatchers.Unconfined) {
+            controller.state.collect { state ->
+                tracker.observe(state.sending, state.text, state.error)?.let { failure = it }
+            }
+        }
+        controller.setSession("session-A")
+        withTimeout(2_000) { controller.state.first { it.sessionId == "session-A" } }
+        controller.updateText("真实输入栏原文")
+        controller.send()
+        withTimeout(2_000) {
+            while (failure == null) delay(10)
+        }
+        assertEquals("真实输入栏原文", failure!!.text)
+        assertTrue(failure!!.reason.contains("网络"))
+        collector.cancel()
+        controller.close()
+    }
+
+    @Test fun composerSendTrackerConnectsRealInputBarFailures() {
+        val tracker = DshComposerSendTracker()
+        assertEquals(null, tracker.observe(sendingNow = false, text = "草稿", error = "校验错误"))
+        assertEquals(null, tracker.observe(sendingNow = true, text = "提交原文", error = null))
+        val failure = tracker.observe(sendingNow = false, text = "提交原文", error = "网络连接中断")!!
+        assertEquals("提交原文", failure.text)
+        assertTrue(failure.reason.contains("网络"))
+        assertTrue(failure.time > 0)
+
+        tracker.reset()
+        assertEquals(null, tracker.observe(sendingNow = true, text = "第二次", error = null))
+        assertEquals(null, tracker.observe(sendingNow = false, text = "", error = null))
+        assertEquals(null, tracker.observe(sendingNow = false, text = "草稿", error = "校验错误"))
     }
 
     @Test fun linkPolicyClassifiesSupportedAndDangerousSchemes() {

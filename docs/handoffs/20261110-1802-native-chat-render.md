@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-51（native chat render worker）
 - 时间：2026-11-10 18:02 CST
-- 状态：实现与 JVM/lint 已完成；PR [#51](https://github.com/leezzou/tanuki/pull/51) 已创建，待独立审查；设备效果未验证
+- 状态：实现与 JVM/lint 已完成；PR [#51](https://github.com/leezzou/tanuki/pull/51) 的 4 条评审意见已修复，待复审；设备效果未验证
 - 前一记录：[0.1.11 发布准备与交接集成](20261110-1636-release-0.1.11.md)
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
@@ -17,6 +17,11 @@
 
 ## 当前状态
 
+- 评审修复（PR #51，2026-11-10）：
+  - [P1] 图片采样改为只对原始宽高除以 2 的幂采样，8192×8192→sample 4、32768×32768→sample 16，并补 `DshImageSampling` 边界回归，避免突破 2048 上限。
+  - [P2] 待审批时在消息区上方固定审批停靠条（条数/最近工具/查看审批）；点击回到顶部审批面板并暂停自动跟随，长历史初始或新到审批不再被滚出屏幕。
+  - [P2] 帧合并显式保留 `Streaming("")` 的新流重置语义；`mergeFrame(reset=true)` 直接替换旧前缀，补跨 start 的控制器回归。
+  - [P2] 失败卡片改为观察输入栏真实 `DshComposerController` 的 sending/error，失败保留本次提交原文，重试走 composer；发送中显示 composer 占位。未修改 `DshComposer*` 内部。
 - 已实现：
   - 流式：控制器把 `assistant-stream` 累计全文按约 32ms 合并，同一帧只发布最后一版；`Finished(committed)` 同步发布最后一帧；assistant 消息/非 committed 结束取消待发布增量；`DshStreamPolicy.merge` 兼容累计全文、纯增量、重复尾段与空串重置。
   - 长消息/历史：`LazyColumn` 只渲染末尾窗口（80，步进 40，上限 400），更早本地消息可“显示更早”；时间线按 messages/tools 记忆化；单条 Markdown 300 块、代码 400 行、表格 60 行/12 列上限并明确提示；代码/表格超限时复制仍用完整原文。
@@ -25,20 +30,20 @@
   - 链接：`http/https/mailto/tel` 点击先确认再调起系统应用；`javascript/data/intent/file/content` 拒绝并显示中文原因；附件/相对路径提示需要工作区授权。
   - 图片/附件：图片占位卡片、中文原因、点击查看；本地/内嵌图片按尺寸采样解码，失败显示“图片加载失败：文件不可读、已损坏或格式不支持”；远程与会话授权图片仍不自动联网。独立附件链接显示占位卡片，可查看/复制地址。
   - 发送状态：发送中占位气泡 + 进度圈；失败保留原文与可读原因，提供“重试/填入输入框/复制内容”；错误 banner 显示中文分类、原始短错误并支持“复制错误”；整条消息可复制。
-- 已验证：定向 46 tests；完整 JVM **818 tests / 91 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**；`check-native-parity.py` 通过。详见下方验证记录。
-- 待验证：真实 Android 设备/模拟器上的流式帧率、链接与文本选择手势冲突、图片解码内存、长代码/表格横向滚动、深色/大字体、输入法；PRoot DSH 实时流；仪器、assemble。
+- 已验证：评审修复后定向 52 tests；完整 JVM **824 tests / 91 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**；`check-native-parity.py` 通过。详见下方验证记录。
+- 待验证：真实 Android 设备/模拟器上的流式帧率、链接与文本选择手势冲突、图片解码内存、长代码/表格横向滚动、深色/大字体、输入法、审批停靠条与 composer 失败卡片；PRoot DSH 实时流；仪器、assemble。
 - 关键事实与定位：`DshChatRender.kt` 纯策略；`DshMarkdown.kt` 解析与渲染；`DshNativeController.kt` 流式/失败状态；`DshNativePage.kt` 窗口/跟随/卡片；见 [NATIVE-UI](../NATIVE-UI.md) 第 46 节。
 
 ## 本次改动
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 新增纯策略：消息窗口、底部判定/跟随、流式合并、链接/图片/附件分类、错误可读化、代码行号、表格上限。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 新增纯策略：消息窗口、底部判定/跟随、流式合并/重置帧、图片采样、审批停靠条、composer 失败跟踪、链接/图片/附件分类、错误可读化、代码行号、表格上限。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 解析器支持嵌套/任务列表、表格对齐与转义、附件块、块上限；渲染器支持代码行号/不换行、链接确认、图片/附件占位与查看器、本地图片有界解码。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 窗口化消息与“显示更早”、底部跟随/“↓ 最新”、发送失败卡片、错误复制、消息复制、附件/图片入口接线。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 窗口化消息与“显示更早”、底部跟随/“↓ 最新”、审批停靠条、composer 发送中/失败卡片、错误复制、消息复制、附件/图片入口接线。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 新增 `DshFailedPrompt` 与 `failedPrompt` 状态、流式按帧合并/取消、失败重试与切会话清理；不改协议。 |
 | `app/src/test/kotlin/com/tanuki/DshMarkdownTest.kt` | 15 项 Markdown/代码/表格/链接/截断回归。 |
-| `app/src/test/kotlin/com/tanuki/DshChatRenderTest.kt` | 新增 11 项纯策略回归：窗口、跟随、流式合并、链接协议、图片/附件、错误分类。 |
+| `app/src/test/kotlin/com/tanuki/DshChatRenderTest.kt` | 新增 16 项纯策略回归：窗口、跟随、流式合并/重置、图片采样、审批停靠条、composer 失败跟踪、链接协议、图片/附件、错误分类。 |
 | `app/src/test/kotlin/com/tanuki/DshNativeControllerTest.kt` | 新增流式合并、committed 取消、失败保留/重试、切会话清理；更新原有流式断言为最终帧。 |
 | `docs/NATIVE-UI.md` | 新增第 46 节渲染切片、文件表与验证结果；更新图片/附件事件描述。 |
 | `docs/NATIVE-PARITY.md` | 更新 CHAT-02/03/04/05/11/12/13/15 的本轮落地状态与边界。 |
@@ -52,13 +57,13 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` | BUILD SUCCESSFUL | 本 worktree、JDK17、Android SDK；仅既有/剪贴板弃用告警。 |
-| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshMarkdownTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest'` | BUILD SUCCESSFUL；15 + 11 + 20 = 46 tests / 0 failures / 0 errors / 0 skipped | 纯 JVM；`DshNativeControllerTest` 使用 `Dispatchers.Unconfined` 与合成 source，不连真实 DSH。 |
-| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（5m43s）；**818 tests / 91 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint** | 本轮新跑；lint 仅既有存量告警，不改产品安全策略。 |
+| `./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime --tests 'com.tanuki.DshMarkdownTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest'` | BUILD SUCCESSFUL；15 + 16 + 21 = 52 tests / 0 failures / 0 errors / 0 skipped | 纯 JVM；`DshNativeControllerTest` 使用 `Dispatchers.Unconfined` 与合成 source，不连真实 DSH。 |
+| `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` | BUILD SUCCESSFUL（6m14s）；**824 tests / 91 结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint** | 评审修复后新跑；lint 仅既有存量告警，不改产品安全策略。 |
 | `python3 scripts/check-native-parity.py` | PASS：166 行、14 功能域、ID/状态/验收/路径检查通过 | 文档结构检查，不证明设备行为。 |
 | 设备/仪器/assemble | 未执行 | JVM/lint 不能替代 Android 设备验收；本轮未安装/启动 App。 |
 
 - 首次定向运行 4 项失败：窗口上限测试期望值写错、列表正则捕获组取错、重发成功后仍保留本地“发送中”占位的断言写反；已按实现语义修正并重跑通过。未将失败计为通过。
-- 未测试：真实设备/模拟器、PRoot DSH、真实 follow/streaming、图片 content:// 解码、链接调起系统应用、深色/大字体/输入法、assemble、仪器。
+- 未测试：真实设备/模拟器、PRoot DSH、真实 follow/streaming、图片 content:// 解码、链接调起系统应用、审批停靠条与 composer 失败卡片的设备界面、深色/大字体/输入法、assemble、仪器。
 
 ## 未完成与暂停项
 
@@ -68,10 +73,10 @@
 
 ## 下一步
 
-1. PR [#51](https://github.com/leezzou/tanuki/pull/51) 已创建，目标 `main`；描述附改动摘要、818 tests/lint 结果、未验证设备范围与风险。按 CI/审查结果继续修复，不在未授权时合并。
-2. 按需运行 `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261110-1802-native-chat-render.md`、`python3 scripts/check-publication.py --git`、`git diff --check`；确认 composer/共享状态零 diff。
-3. 由编排器安排当前 SHA 的独立审查与设备 QA；未获授权不合并、不发布。
-4. 后续可做：历史向前分页协议、远程/授权图片加载、文件链接工作区预览、语法高亮/代码折叠、逐轮失败行与反馈接口。
+1. PR [#51](https://github.com/leezzou/tanuki/pull/51) 已创建，目标 `main`；4 条评审意见已修复并待复审。汇报新 head、完整 JVM/lint、check-handoff/check-publication 结果，回复并 resolve 四条 thread。
+2. 复审通过前不推新提交；未获授权不合并、不发布。
+3. 由编排器安排当前 SHA 的复审与设备 QA。
+4. 后续可做：居中锚定滚动/双段列表、输入框上方目标/待办/审批三条停靠条、历史向前分页、远程/授权图片加载、文件链接工作区预览、语法高亮/代码折叠、逐轮失败行与反馈接口。
 
 ## 约束与风险
 

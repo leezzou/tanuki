@@ -78,7 +78,28 @@ fun DshNativePage(
     onClearRemembered: () -> Unit = {}
 ) {
     val state by controller.state.collectAsState()
+    val composerState by composer.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val sendTracker = remember(composer) { DshComposerSendTracker() }
+    var composerFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
+    var composerPendingText by remember { mutableStateOf("") }
+    var approvalFocusRequest by remember { mutableIntStateOf(0) }
+    // 输入栏的真实发送链路在 composer；这里只观察其公开状态，失败时保留本次提交原文。
+    LaunchedEffect(composerState.sending, composerState.error) {
+        if (composerState.sending) {
+            composerPendingText = composerState.text
+            composerFailure = null
+        }
+        sendTracker.observe(composerState.sending, composerState.text, composerState.error)?.let {
+            composerFailure = it
+        }
+        if (!composerState.sending) composerPendingText = ""
+    }
+    LaunchedEffect(state.selectedId) {
+        composerFailure = null
+        composerPendingText = ""
+        sendTracker.reset()
+    }
     LaunchedEffect(state.unavailableReason) {
         state.unavailableReason?.let(onFallback)
     }
@@ -109,6 +130,7 @@ fun DshNativePage(
             return@Column
         }
         SessionStrip(state.sessions, state.selectedId, controller::select)
+        ApprovalDockBar(approvalState, state.selectedId) { approvalFocusRequest++ }
         Box(Modifier.weight(1f)) {
             MessageList(
                 state = state,
@@ -117,7 +139,13 @@ fun DshNativePage(
                 onApprovalRetry = onApprovalRetry,
                 onClearRemembered = onClearRemembered,
                 onRetryFailed = { scope.launch { controller.retryFailedPrompt() } },
-                onFillFailed = { text -> composer.updateText(text) }
+                onFillFailed = { text -> composer.updateText(text) },
+                composerFailure = composerFailure,
+                composerPendingText = composerPendingText,
+                composerSending = composerState.sending,
+                approvalFocusRequest = approvalFocusRequest,
+                onRetryComposer = { composer.send() },
+                onFillComposer = { text -> composer.updateText(text) }
             )
             if (state.loading && state.messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -179,7 +207,13 @@ private fun MessageList(
     onApprovalRetry: () -> Unit,
     onClearRemembered: () -> Unit,
     onRetryFailed: () -> Unit,
-    onFillFailed: (String) -> Unit
+    onFillFailed: (String) -> Unit,
+    composerFailure: DshFailedPrompt?,
+    composerPendingText: String,
+    composerSending: Boolean,
+    approvalFocusRequest: Int,
+    onRetryComposer: () -> Unit,
+    onFillComposer: (String) -> Unit
 ) {
     // 只有消息或工具列表变化时才重排时间线；流式文本更新不会重建整段历史。
     val timeline = remember(state.messages, state.tools) {
@@ -194,6 +228,8 @@ private fun MessageList(
     val window = remember(timeline, extraWindow) {
         DshChatRenderPolicy.window(timeline, DshChatRenderPolicy.WINDOW_SIZE + extraWindow)
     }
+    val activeFailure = composerFailure ?: state.failedPrompt
+    val failureFromComposer = composerFailure != null
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var following by remember(state.selectedId) { mutableStateOf(true) }
@@ -213,6 +249,13 @@ private fun MessageList(
     LaunchedEffect(following, totalItems, state.streamingText.length, timeline.size) {
         // 用户手势进行中不抢滚动；手势结束后由 followAfterDrag 决定是否恢复。
         if (following && totalItems > 0 && !listState.isScrollInProgress) listState.scrollToBottom()
+    }
+    // 审批停靠条固定可见；点击后回到顶部审批面板，并暂停自动跟随，避免又被滚走。
+    LaunchedEffect(approvalFocusRequest) {
+        if (approvalFocusRequest > 0 && listState.layoutInfo.totalItemsCount > 0) {
+            following = false
+            listState.animateScrollToItem(0)
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -239,7 +282,7 @@ private fun MessageList(
                     )
                 }
             }
-            if (timeline.isEmpty() && state.failedPrompt == null && !state.loading &&
+            if (timeline.isEmpty() && activeFailure == null && !composerSending && !state.loading &&
                 state.error == null && state.streamingText.isBlank()
             ) {
                 item(key = "empty", contentType = "empty") {
@@ -270,14 +313,21 @@ private fun MessageList(
                     is DshTimelineItem.Tool -> DshToolCard(item.tool)
                 }
             }
-            state.failedPrompt?.let { failed ->
+            activeFailure?.let { failed ->
                 item(key = "failed-${failed.time}", contentType = "failed") {
                     FailedPromptCard(
                         failed = failed,
-                        sending = state.sending,
-                        onRetry = onRetryFailed,
-                        onFill = { onFillFailed(failed.text) }
+                        sending = if (failureFromComposer) composerSending else state.sending,
+                        onRetry = if (failureFromComposer) onRetryComposer else onRetryFailed,
+                        onFill = {
+                            if (failureFromComposer) onFillComposer(failed.text) else onFillFailed(failed.text)
+                        }
                     )
+                }
+            }
+            if (composerSending) {
+                item(key = "composer-pending", contentType = "pending") {
+                    ComposerPendingCard(composerPendingText)
                 }
             }
             if (state.streamingText.isNotBlank()) {
@@ -301,6 +351,63 @@ private fun MessageList(
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
             ) { Text("↓ 最新") }
+        }
+    }
+}
+
+@Composable
+private fun ApprovalDockBar(
+    state: DshApprovalState,
+    sessionId: String?,
+    onOpen: () -> Unit
+) {
+    val pending = state.pendingFor(sessionId)
+    val other = state.otherPendingCount(sessionId)
+    val dock = remember(pending, other) {
+        DshApprovalDockPolicy.describe(pending.map { it.request.toolName }, other)
+    } ?: return
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                dock.text,
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (dock.count > 0) {
+                TextButton(onClick = onOpen) { Text("查看审批") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerPendingCard(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("你 · 发送中", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.size(6.dp))
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
+            }
+            Text(
+                text.ifBlank { "正在发送附件…" },
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -438,7 +545,7 @@ private fun FailedPromptCard(
                 Text(timeLabel(failed.time), style = MaterialTheme.typography.labelSmall)
             }
             Text(
-                failed.text,
+                failed.text.ifBlank { "（附件消息）" },
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis
@@ -449,8 +556,11 @@ private fun FailedPromptCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onRetry, enabled = !sending) { Text("重试") }
-                TextButton(onClick = onFill, enabled = !sending) { Text("填入输入框") }
-                TextButton(onClick = { clipboard.setText(AnnotatedString(failed.text)) }) { Text("复制内容") }
+                TextButton(onClick = onFill, enabled = !sending && failed.text.isNotBlank()) { Text("填入输入框") }
+                TextButton(
+                    onClick = { clipboard.setText(AnnotatedString(failed.text)) },
+                    enabled = failed.text.isNotBlank()
+                ) { Text("复制内容") }
             }
         }
     }

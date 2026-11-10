@@ -1017,8 +1017,6 @@ private fun DshAttachmentViewer(attachment: DshMarkdownBlock.Attachment, onClose
  * 远程图片保持不自动联网，由占位卡片提示用户查看地址。
  */
 private object DshLocalImageLoader {
-    private const val MAX_DIMENSION = 2_048
-
     fun load(context: Context, info: DshImageInfo): Bitmap? = when (info.kind) {
         DshImageKind.EMBEDDED -> decodeEmbedded(info.url)
         DshImageKind.LOCAL -> decodeLocal(context, info.url)
@@ -1069,15 +1067,6 @@ private object DshLocalImageLoader {
         return decodeBytes(output.toByteArray())
     }
 
-    private fun sampleSize(bounds: BitmapFactory.Options): Int {
-        var sample = 1
-        var width = bounds.outWidth
-        var height = bounds.outHeight
-        while (width / sample > MAX_DIMENSION || height / sample > MAX_DIMENSION) {
-            sample *= 2
-            width /= 2
-            height /= 2
-        }
-        return sample
-    }
+    private fun sampleSize(bounds: BitmapFactory.Options): Int =
+        DshImageSampling.sampleSize(bounds.outWidth, bounds.outHeight)
 }

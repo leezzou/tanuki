@@ -195,6 +195,23 @@ class DshNativeControllerTest {
         assertEquals(400, state.streamingText.length)
     }
 
+    @Test fun newStreamResetWithinOneFrameDropsSnapshotPrefix() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(emptyList(), hasMore = false, liveText = "历史前缀"),
+                DshLiveEvent.Streaming(""),
+                DshLiveEvent.Streaming("回答")
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.streamingText == "回答" }
+        assertEquals("回答", state.streamingText)
+        assertFalse(state.streamingText.contains("历史前缀"))
+    }
+
     @Test fun committedAssistantMessageCancelsPendingStreamFlush() = runBlocking {
         val source = FakeSource(
             listOf(session("A")),

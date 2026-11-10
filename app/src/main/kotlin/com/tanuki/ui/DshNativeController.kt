@@ -76,6 +76,7 @@ class DshNativeController(
     private var pendingSelection: String? = null
     /** 流式文本按帧合并：事件只更新待发布值，真正的状态变更每个帧窗口最多一次。 */
     private var pendingStreamText: String? = null
+    private var pendingStreamReset = false
     private var streamFlushJob: Job? = null
 
     fun refresh() {
@@ -372,8 +373,12 @@ class DshNativeController(
         }
     }
 
-    /** 同一帧窗口内只保留最新全文；旧增量不会逐条触发整段 Markdown 重排。 */
+    /**
+     * 同一帧窗口内只保留最新全文；旧增量不会逐条触发整段 Markdown 重排。
+     * 空串是官方新 assistant-stream 的“重置”信号，必须单独保留，不能被子帧覆盖。
+     */
     private fun scheduleStreaming(text: String) {
+        if (text.isEmpty()) pendingStreamReset = true
         pendingStreamText = text
         if (streamFlushJob?.isActive == true) return
         streamFlushJob = scope.launch {
@@ -385,20 +390,25 @@ class DshNativeController(
     private fun publishPendingStream() {
         streamFlushJob = null
         val pending = pendingStreamText ?: return
+        val reset = pendingStreamReset
         pendingStreamText = null
-        _state.update { state ->
-            val merged = DshStreamPolicy.merge(state.streamingText, pending)
-            if (merged == state.streamingText) state else state.copy(streamingText = merged)
-        }
+        pendingStreamReset = false
+        applyStreamFrame(DshStreamFrame(pending, reset))
     }
 
     private fun commitStreamingNow() {
         streamFlushJob?.cancel()
         streamFlushJob = null
-        val pending = pendingStreamText ?: return
+        val pending = pendingStreamText
+        val reset = pendingStreamReset
         pendingStreamText = null
+        pendingStreamReset = false
+        if (pending != null) applyStreamFrame(DshStreamFrame(pending, reset))
+    }
+
+    private fun applyStreamFrame(frame: DshStreamFrame) {
         _state.update { state ->
-            val merged = DshStreamPolicy.merge(state.streamingText, pending)
+            val merged = DshStreamPolicy.mergeFrame(state.streamingText, frame)
             if (merged == state.streamingText) state else state.copy(streamingText = merged)
         }
     }
@@ -407,6 +417,7 @@ class DshNativeController(
         streamFlushJob?.cancel()
         streamFlushJob = null
         pendingStreamText = null
+        pendingStreamReset = false
     }
 
     private fun resetStreaming() {
