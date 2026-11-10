@@ -98,9 +98,16 @@ internal object TextPageLayout {
         displayedBytes > 0 && hasMore && displayedBytes < MAX_VIEW_BYTES &&
             (totalBytes < 0 || displayedBytes < totalBytes)
 
-    /** 是否因为达到显示上限而截断（文件实际还有内容或大小未知）。 */
-    fun isTruncated(displayedBytes: Long, totalBytes: Long): Boolean =
-        displayedBytes >= MAX_VIEW_BYTES && (totalBytes > MAX_VIEW_BYTES || totalBytes < 0)
+    /**
+     * 是否还有未显示内容：停止翻页且总大小大于已显示游标，或大小未知时已到显示上限。
+     * 多字节字符横跨 4 MiB 边界时会在完整字符处停下，此时 displayed 可能略小于上限，
+     * 仍需提示已截断。
+     */
+    fun isTruncated(displayedBytes: Long, totalBytes: Long, hasMore: Boolean): Boolean = when {
+        hasMore -> false
+        totalBytes < 0 -> true
+        else -> totalBytes > displayedBytes
+    }
 
     /** 下一段第一行的行号：段内换行数即下一段的起始行（跨段拆开的同一行保持相同行号）。 */
     fun nextStartLine(currentStartLine: Int, pageText: String): Int =

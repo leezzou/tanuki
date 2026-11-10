@@ -89,13 +89,17 @@ class TextPageLayoutTest {
         assertFalse(TextPageLayout.canAdvance(TextPageLayout.MAX_VIEW_BYTES, totalBytes = -1, hasMore = true))
     }
 
-    @Test fun reportsTruncationOnlyWhenContentRemainsPastTheCap() {
+    @Test fun reportsTruncationWhenPagingStopsBeforeContentEnds() {
         val cap = TextPageLayout.MAX_VIEW_BYTES
-        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = cap * 2))
-        assertFalse(TextPageLayout.isTruncated(cap - 1, totalBytes = cap * 2))
-        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap))
-        // 顺序流不知道总大小时，到达上限仍按截断提示，避免用户误以为已经读完。
-        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = -1))
+        // 还有下一页时不算截断。
+        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap * 2, hasMore = true))
+        // 停止翻页但总大小大于已显示游标：达到上限，或上限切在多字节字符内部。
+        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = cap * 2, hasMore = false))
+        assertTrue(TextPageLayout.isTruncated(cap - 1, totalBytes = cap * 2, hasMore = false))
+        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = cap, hasMore = false))
+        // 顺序流不知道总大小时，停止翻页且到达上限仍按截断提示。
+        assertFalse(TextPageLayout.isTruncated(cap, totalBytes = -1, hasMore = true))
+        assertTrue(TextPageLayout.isTruncated(cap, totalBytes = -1, hasMore = false))
     }
 
     @Test fun countsLogicalLines() {

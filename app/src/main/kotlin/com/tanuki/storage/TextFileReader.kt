@@ -181,11 +181,19 @@ object TextFileReader {
         }
 
         val atEof = if (size != null) start + filled >= size else eof
-        val decoded = decodePage(buffer, filled, detected.encoding, atEof)
+        // 4 MiB 显示上限可能落在多字节字符中间；此时只显示完整字符，不能把残字节当 Latin-1。
+        val reachesViewCap = limit == MAX_VIEW_BYTES && start + filled >= MAX_VIEW_BYTES &&
+            (size == null || size > MAX_VIEW_BYTES)
+        val decoded = decodePage(buffer, filled, detected.encoding, atEof, atViewCap = reachesViewCap)
         val next = start + decoded.consumed
+        val splitAtViewCap = reachesViewCap && !atEof && decoded.consumed < filled
         // 未知大小的顺序流读到 EOF 后必须停止分页，并把 EOF 处游标作为实际总大小；
         // 未到 EOF 且未到 4 MiB 上限时才继续返回“大小未知”。
-        val hasMore = if (size == null && eof) false else next < limit
+        val hasMore = when {
+            splitAtViewCap -> false
+            size == null && eof -> false
+            else -> next < limit
+        }
         val total = size ?: if (eof) next else ExternalDocumentPolicy.UNKNOWN_SIZE
         return Page(decoded.text, offset, next, total, detected.encoding, hasMore, false)
     }
@@ -362,7 +370,13 @@ object TextFileReader {
      * 解码当前页；界面解码一律使用替代字符，任何非法字节都不会变成用户可见的异常。
      * 只消费到完整字符边界，下一页从剩余字节继续，跨页的多字节字符不会被拆坏。
      */
-    private fun decodePage(bytes: ByteArray, count: Int, encoding: String, atEof: Boolean): Decoded {
+    private fun decodePage(
+        bytes: ByteArray,
+        count: Int,
+        encoding: String,
+        atEof: Boolean,
+        atViewCap: Boolean = false,
+    ): Decoded {
         if (count == 0) return Decoded("", 0)
         val charset = runCatching { Charset.forName(encoding) }.getOrDefault(StandardCharsets.ISO_8859_1)
         val input = ByteBuffer.wrap(bytes, 0, count)
@@ -381,6 +395,10 @@ object TextFileReader {
         }
         var consumed = input.position()
         if (consumed == 0) {
+            if (atViewCap) {
+                // 上限切在多字节字符内部：不显示伪造字符，由调用方在完整字符处结束本页。
+                return Decoded("", 0)
+            }
             // 页首落在不完整字符或异常序列上：按 Latin-1 消费本页，保证翻页始终前进。
             chars.clear()
             chars.put(String(bytes, 0, count, StandardCharsets.ISO_8859_1))
