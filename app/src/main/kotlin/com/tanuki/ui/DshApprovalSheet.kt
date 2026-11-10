@@ -3,10 +3,12 @@ package com.tanuki.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -22,7 +24,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -154,50 +155,72 @@ fun DshApprovalSheet(
     if (!hasContent) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scroll = rememberScrollState()
-    var knownPending by remember { mutableIntStateOf(state.pendingFor(sessionId).size) }
-    var arrivalNotice by remember { mutableStateOf(false) }
     val pendingNow = state.pendingFor(sessionId).size
+    var arrival by remember { mutableStateOf(DshApprovalArrivalState(pendingNow)) }
+    // 只负责“检测新增 + 更新基线”；不要在这里 delay，否则数量变化会取消隐藏计时。
     LaunchedEffect(pendingNow) {
-        if (pendingNow > knownPending) {
-            arrivalNotice = true
+        arrival = DshApprovalArrivalPolicy.onCount(arrival, pendingNow)
+    }
+    // 隐藏计时绑定 token：新增会重置 3 秒；数量减少不会取消已显示的提示。
+    LaunchedEffect(arrival.token) {
+        if (arrival.visible) {
             delay(3_000)
-            arrivalNotice = false
+            arrival = DshApprovalArrivalPolicy.hidden(arrival)
         }
-        knownPending = pendingNow
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 640.dp)
-                .verticalScroll(scroll)
-                .navigationBarsPadding()
-        ) {
-            if (arrivalNotice) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(
-                        "有新的审批请求，计数已更新；当前处理项不会跳转。",
-                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelSmall
-                    )
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            // 固定预留槽：提示切换不参与滚动内容排版，审批卡和按钮位置不会上下跳。
+            Box(Modifier.fillMaxWidth().height(40.dp)) {
+                if (arrival.visible) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            "有新的审批请求，计数已更新；当前处理项不会跳转。",
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
             }
-            DshApprovalPanel(
-                state = state,
-                sessionId = sessionId,
-                onAnswer = onAnswer,
-                onRetry = onRetry,
-                onClearRemembered = onClearRemembered,
-                sessionTitle = sessionTitle,
-                onForgetRemembered = onForgetRemembered,
-                onDismissNotice = onDismissNotice,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-            )
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(scroll)
+            ) {
+                DshApprovalPanel(
+                    state = state,
+                    sessionId = sessionId,
+                    onAnswer = onAnswer,
+                    onRetry = onRetry,
+                    onClearRemembered = onClearRemembered,
+                    sessionTitle = sessionTitle,
+                    onForgetRemembered = onForgetRemembered,
+                    onDismissNotice = onDismissNotice,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                )
+            }
         }
     }
+}
+
+/** 抽屉到达提示状态；token 变化表示需要重新计时。 */
+data class DshApprovalArrivalState(
+    val knownCount: Int,
+    val visible: Boolean = false,
+    val token: Int = 0
+)
+
+/** 到达提示的纯策略：数量增加才显示；数量减少不取消已显示的 3 秒计时。 */
+object DshApprovalArrivalPolicy {
+    fun onCount(state: DshApprovalArrivalState, currentCount: Int): DshApprovalArrivalState =
+        if (currentCount > state.knownCount) {
+            state.copy(knownCount = currentCount, visible = true, token = state.token + 1)
+        } else {
+            state.copy(knownCount = currentCount)
+        }
+
+    fun hidden(state: DshApprovalArrivalState): DshApprovalArrivalState = state.copy(visible = false)
 }
