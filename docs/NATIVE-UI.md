@@ -105,7 +105,7 @@
 
 - `:app:compileModernDebugKotlin`：BUILD SUCCESSFUL。
 - 目标回归：`DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest` 全部通过（见 [测试报告](TEST-REPORT.md)）。
-- 完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug`：BUILD SUCCESSFUL，558 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 94 warnings / 1 hint。
+- 完整 `:app:testModernDebugUnitTest` 与 `:app:lintModernDebug`：BUILD SUCCESSFUL；合并最新 `main=533eff4` 后 581 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 94 warnings / 1 hint。
 - 新增覆盖：mux 帧合法性/请求体、`$events` ready/waterfall/cancel/status、审批字段与不泄露参数、`session/follow` 快照过滤与流式 text-delta、WebSocket 握手/掩码、发送/取消/审批 HTTP 路径、控制器发送占位/失败/停止/实时/审批/回退。
 - 未在真实 Android 设备/PRoot DSH 上验证：`/connect` Cookie、WebSocket Upgrade、真实 `$events`/`session/follow` 帧、审批 waterfall 的实际到达与回答、发送/停止的设备交互、通知点击、远程主机隧道、安全模式 rescue、暗色/长文本/大字体/输入法。
 - 未运行 assemble、Android 仪器测试、真机与发布流程；编译、JVM 与 lint 不能替代设备验收。

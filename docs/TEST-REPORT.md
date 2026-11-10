@@ -8,7 +8,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 实际执行（本 worktree，`-x buildNativeRuntime`）：
   - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
   - 目标回归 `DshMuxProtocolTest`、`DshNativeLiveTest`、`DshNativeControllerTest`、`DshNativeApiTest`、`DshUiSwitchTest`、`DshWebSocketTest` → BUILD SUCCESSFUL，51 tests / 0 failures / 0 errors / 0 skipped。
-  - 完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（3m36s）；68 个结果文件、**558 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 94 warnings / 1 hint**。
+  - 合并最新 `main=533eff4`（PR #34 文件查看器）后，完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（6m28s）；70 个结果文件、**581 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 94 warnings / 1 hint**。
 - 新增 23 项回归：
   - `DshMuxProtocolTest` 10 项：mux open/item/end/cancel 形状、非法端点/流 id、下行 item/error/end、`$events` ready/waterfall/cancel/status、审批字段（不泄露工具参数）、提问只读字段、snapshot 过滤 replace/注入并按 seq 排序、`text-delta`/baseline 流式聚合与 committed 替换、append-origin 文本、RFC 握手 accept 与客户端掩码/长帧。
   - `DshNativeLiveTest` 5 项：`session/prompt`/`session/cancel` 请求体与 `interactions=answer`、`accepted=false` 不当成功、合成 mux 的 snapshot/assistant text/status/approval、`$events/result` 的 `clientId/eventId/allowed-once`、未连接审批失败关闭。
