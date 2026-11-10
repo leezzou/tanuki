@@ -1,4 +1,6 @@
-当前交接：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，基线 `main=0555c3c0`，PR [#36](https://github.com/leezzou/tanuki/pull/36) 待审）。上一记录：[0.1.10 Pre-release 发布准备](handoffs/20261109-2310-release-0.1.10.md)（android_agent-32）；远程主机直连切片见 [远程主机 SSH](handoffs/20261109-1810-remote-host-ssh.md)（android_agent-34）；历史记录保留在 `docs/handoffs/`。
+# Tanuki 当前状态
+
+当前交接：[交接机制改造：普通 PR 不再改共享状态](handoffs/20261110-1333-handoff-pr-mode.md)（android_agent-49，基线 `main=0068c872`，分支 `ao/handoff-conflicts/pr-mode`，PR [#42](https://github.com/leezzou/tanuki/pull/42) 待审；脚本/文档非设备验证通过，不合并、不发布）。共享状态现由单一集成维护方在批量合并后统一刷新，规则、指针 + 最近 N 条目标格式与迁移步骤见 [交接机制](HANDOFFS.md)；本 PR 之后的普通 PR 只新增自己的 `docs/handoffs/<日期>-<主题>.md`，不再修改本文件或 `CURRENT.json`。上一记录：[无公网 IP 远程连接：反向注册中继切片](handoffs/20261110-1138-remote-relay-pairing.md)（android_agent-48，PR [#36](https://github.com/leezzou/tanuki/pull/36) 已合并为 `0068c872`）；文件复制、文件查看器、0.1.10 与并行历史保留在 `docs/handoffs/`。
 
 ## 无公网 IP 远程连接中继切片（android_agent-48，PR #36 待审）
 
@@ -268,7 +270,7 @@
 8. PDF 原生阅读 PR [#24](https://github.com/leezzou/tanuki/pull/24) 已合并为 `0ba11da`：大文档滚动/内存、加密/损坏样本与缩放手感 QA 另行授权。
 9. PR #20：由 Orchestrator 触发当前完整 SHA 的独立 Codex High Review；真实设备/弱网镜像切换与 4000 包规模 QA 另行授权。
 10. Review 意见逐条修复并重审；通过且用户明确授权后才合并，不代合、不直推 main。
-11. 合并后在 main 复跑 `check-handoff.py`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
+11. 合并后由集成维护方先运行 `check-handoff.py --integrate --record <最新记录>`，再跑 `--release`、`check-publication.py --git`、`test-development-gates.py` 与适用的 `verify-workspace.sh`。
 12. PR #19 已合并为 `6136451`：后台更新检查的设备 QA 与真实 WorkManager/通知验证另行授权。
 13. 视频全屏 PR #17 的设备旋转/恢复验收与 F1 设备 QA 仍按原记录执行；设备须无真实任务并记录 AVD/serial。
 14. 0.1.8 的 Ubuntu/Node/DSH/真实模型验证另开授权任务；API Key 保存与真实模型/账号验收继续等待用户恢复。
