@@ -16,16 +16,16 @@
 | SESS-12 | ◐ | 45 审批面板显示其他会话待处理计数；无完整未读模型 |
 | SESS-17 | ✅ | 通知点击目标强制重读/重连；失败保留 pending 给官方回退 |
 | CHAT-01 | ✅ | append-origin 用户/助手文本；过滤 replace/注入 |
-| CHAT-02 | ◐ | Markdown 标题/段落/粗体/斜体/行内代码/列表/引用/分隔线；非完整 GFM |
-| CHAT-03 | ◐ | 围栏代码块、语言标签、复制、横向滚动；无语法高亮/行号/折叠 |
-| CHAT-04 | ◐ | Markdown 图片占位，不自动联网；无授权图片加载/浮层 |
-| CHAT-05 | ◐ | 输入侧附件/文件引用；历史消息附件卡片未渲染 |
+| CHAT-02 | ◐ | 46：标题/段落/粗体/斜体/粗斜体/删除线/行内代码/嵌套与任务列表/引用/分隔线/带对齐表格；非完整 GFM，HTML 不执行 |
+| CHAT-03 | ◐ | 46：围栏代码块、语言标签、复制、横向滚动、长行不换行、可选行号、400 行展示上限；无语法高亮/折叠 |
+| CHAT-04 | ◐ | 46：图片占位、中文失败提示、点击查看；本地/内嵌图片采样解码，远程与会话授权图片仍不自动加载 |
+| CHAT-05 | ◐ | 46：历史消息中的独立附件链接显示占位卡片并可查看地址；不静默读取工作区文件，文件预览未接 |
 | CHAT-06/07 | ✅ | `DshToolCard` 展示工具名/状态/参数摘要/输出/diff/命令；来自 page/follow 工具事件 |
 | CHAT-08/09/10 | ☐ | reasoning、token/上下文、轮次过程折叠未接 |
-| CHAT-11 | ◐ | 错误 banner + “重发上一条”；无逐轮失败行/官方 regenerate |
-| CHAT-12 | ◐ | 代码块复制；无整条消息复制/反馈 |
-| CHAT-13 | ☐ | Markdown 链接显示 label/URL，未接应用内/外打开 |
-| CHAT-15 | ✅ | `$events` + `session/follow` + `assistant-stream` text-delta；committed 消息替换临时气泡 |
+| CHAT-11 | ◐ | 46：发送中占位、失败原文卡片、重试/回填/复制、错误分类与复制；无逐轮失败行/官方 regenerate |
+| CHAT-12 | ◐ | 46：代码块与整条消息复制；点赞/点踩反馈仍未接 |
+| CHAT-13 | ◐ | 46：链接可点击并二次确认，支持 http/https/mailto/tel；危险协议拒绝，文件链接打开工作区预览未接 |
+| CHAT-15 | ✅ | `$events` + `session/follow` + `assistant-stream`；46 按约 32ms 合并累计增量，committed 消息取消待发布帧，避免重复气泡 |
 | CHAT-17 | ✅ | 不显示系统提示/普通注入/permission 命令行 |
 | INPUT-01/02 | ✅ | composer 多行/键盘发送；`session/prompt` 文本/图片/文件 receipt |
 | INPUT-03 | ✅ | 停止按钮 + `session/cancel`，由状态流收敛 |
@@ -137,20 +137,20 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
 | CHAT-01 | 用户/助手文本 | 按官方事件渲染用户与助手文本，保留来源/时间/操作 | `原生部分`：`DshNativePage` 只显示 append-origin 的 `user/message` 与 `assistant/message` 文本，单条上限 12,000 字符 | — · `DshNativeApi.kt` · android_agent-33/PR #26 · A-CHAT-01 |
-| CHAT-02 | Markdown/GFM | 标题、列表、表格、链接、引用、任务列表、代码块 | `仅官方`：原生 `Text` 纯文本 | P1 · 原生消息渲染 · 未排期 · A-CHAT-02、A-CHAT-03 |
-| CHAT-03 | 代码块/高亮/复制 | 语法高亮、复制、行号/折叠 | `仅官方` | P2 · 原生消息渲染 · 未排期 · A-CHAT-03 |
-| CHAT-04 | 消息图片 | 用户/助手图片、内嵌预览、点击浮层、失败状态 | `仅官方`：原生跳过图片 | P1 · `session/attachment` · 未排期 · A-ATT-01、A-CHAT-03 |
-| CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `仅官方` | P1 · `fileUploads/*`、`fileReferences/list` · 46 输入（未提交） · A-ATT-01、A-CHAT-03 |
+| CHAT-02 | Markdown/GFM | 标题、列表、表格、链接、引用、任务列表、代码块 | `原生部分`：46 已支持标题/列表/引用/表格/分隔线/行内样式/代码块；HTML 不执行，非完整 GFM | P2 · `DshMarkdown.kt` · android_agent-51 · A-CHAT-02、A-CHAT-03 |
+| CHAT-03 | 代码块/高亮/复制 | 语法高亮、复制、行号/折叠 | `原生部分`：等宽/横向滚动/长行不换行/复制/可选行号；无高亮与折叠 | P2 · `DshMarkdown.kt` · android_agent-51 · A-CHAT-03 |
+| CHAT-04 | 消息图片 | 用户/助手图片、内嵌预览、点击浮层、失败状态 | `原生部分`：占位/中文失败提示/点击查看；本地与内嵌图可解码，远程与会话授权图不自动加载 | P1 · `DshMarkdown.kt` · android_agent-51 · A-ATT-01、A-CHAT-03 |
+| CHAT-05 | 文件附件/引用卡片 | 附件按输入顺序显示，文件引用可打开右侧预览 | `原生部分`：独立附件链接显示占位卡片并可复制地址；不静默读工作区，预览未接 | P1 · `DshMarkdown.kt` · android_agent-51 · A-ATT-01、A-CHAT-03 |
 | CHAT-06 | 工具调用卡片 | 工具名、状态、参数摘要、可展开详情、关联审批 | `原生完整`：`DshToolCard`，来自 page/follow 工具事件 | — · `DshToolTimeline`/`DshNativeController.tools` · android_agent-45 + 42 接线 · A-TOOL-01、A-TOOL-02 |
 | CHAT-07 | 工具结果/错误/输出折叠 | 结果、错误、退出码、长输出折叠/展开 | `原生完整`：输出/错误折叠、长输出截断、diff/文件变更 | — · `DshToolCard` · android_agent-45 + 42 接线 · A-TOOL-01 |
 | CHAT-08 | 推理/思考过程 | 思考预览、过程分组、完全展开模式 | `仅官方`：原生只取 text-delta，不显示 reasoning | P2 · `DshFollowParser` · android_agent-42 · A-CHAT-02 |
 | CHAT-09 | Token 用量/上下文 | 每轮 token、输出速度、缓存命中、会话统计 | `仅官方` | P2 · 原生统计条 · 未排期 · A-CHAT-02 |
 | CHAT-10 | 轮次折叠/过程分组 | 已完成轮次过程可折叠，最终答案不隐藏 | `仅官方` | P2 · 原生消息分组 · 未排期 · A-CHAT-03 |
-| CHAT-11 | 失败行/重试/欠费 | 终止轮次红点、失败摘要、重试、欠费中立文案 | `仅官方`：原生只有整页错误 banner | P0/P1 · 原生消息状态 · 42 聊天链路（错误/失败行） · A-CHAT-01、A-CHAT-03 |
-| CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `仅官方`：原生只支持文本选择 | P2 · `messageFeedback/*` · 未排期 · A-CHAT-05 |
-| CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `仅官方` | P2 · `workspaceFiles/*` · 未排期 · A-CHAT-05 |
+| CHAT-11 | 失败行/重试/欠费 | 终止轮次红点、失败摘要、重试、欠费中立文案 | `原生部分`：46 发送失败卡片保留原文，支持重试/回填/复制，错误分类可读；无逐轮失败行/regenerate | P0/P1 · `DshNativePage.kt` · android_agent-51 · A-CHAT-01、A-CHAT-03 |
+| CHAT-12 | 复制/反馈 | 消息复制、点赞/点踩反馈 | `原生部分`：46 代码块与整条消息复制；点赞/点踩未接 | P2 · `DshNativePage.kt` · android_agent-51 · A-CHAT-05 |
+| CHAT-13 | 文件链接/侧栏预览 | Markdown 文件链接在右侧栏打开，支持 `#L24` 行号 | `原生部分`：46 链接可点击并二次确认；危险协议拒绝；文件/工作区链接只提示授权，侧栏预览未接 | P2 · `DshMarkdown.kt` · android_agent-51 · A-CHAT-05 |
 | CHAT-14 | 计划审阅卡片 | 计划待审条、查看全文、同意执行/要求修改 | `仅官方` | P1 · `userQuestions/*`、`approval/request` · 45 审批（42 提供事件） · A-APPROVAL-02 |
-| CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `进行中`：android_agent-42 未提交的 `DshFollowParser` 已解析 snapshot/event/assistant-stream，未接 UI | P0 · `DshMuxProtocol.kt`/`DshWebSocket.kt` · 42 聊天链路 · A-CHAT-01、A-CHAT-03 |
+| CHAT-15 | 实时流式回复 | follow 快照 + assistant-stream 增量 + settlement | `原生部分`：46 已接 UI 并按帧合并累计增量，committed 取消待发布帧；设备流式未验 | P0 · `DshNativeController.kt`/`DshChatRender.kt` · android_agent-51 · A-CHAT-01、A-CHAT-03 |
 | CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-05 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
 | CHAT-18 | 交付物（deliverables） | 轮次页脚交付物卡片、右侧预览 | `仅官方` | P2 · 官方交付物协议 · 未排期 · A-FILE-03 |

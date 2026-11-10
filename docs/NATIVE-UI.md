@@ -10,7 +10,7 @@
 - 实时流：`/api/remote.mux` WebSocket。
 - 审批/提问：Agent-scoped waterfall 事件，经 WebSocket 的 `$events` 通道回答。
 
-原生页现已覆盖：官方会话列表/切换、历史文本与工具事件、`session/follow` 实时流、`session/prompt` 发送、`session/cancel` 停止、输入/附件、Markdown、审批面板与工具卡片。官方网页版始终保留为可切换、可回退入口；用户提问仍只读展示并跳官方处理。
+原生页现已覆盖：官方会话列表/切换、历史文本与工具事件、`session/follow` 实时流、`session/prompt` 发送、`session/cancel` 停止、输入/附件、Markdown、审批面板与工具卡片。渲染层（46）补齐流式按帧合并、长列表窗口、代码行号、表格/链接/图片附件交互与发送失败卡片。官方网页版始终保留为可切换、可回退入口；用户提问仍只读展示并跳官方处理。
 
 ## 2. 认证与传输（可复用）
 
@@ -50,7 +50,7 @@
 - 只保留官方 append-origin 事件（`surfaceOp === "append"`）；`surfaceOp=replace` 的模型上下文替换副本、compact-checkpoint 不显示。
 - `user/message` 仅保留 `source.kind=user` 的真实用户消息；注入上下文不标成“你”。
 - `tool/call` 与 `tool/result` 进入工具时间线：显示工具名、参数、命令、输出、错误、`meta.diffs` 文件变更与 diff；没有结果时明确标为“进行中/未读取到结果”。
-- 其他事件（`turn/end`、未知事件）跳过；图片、附件、富媒体不显示。
+- 其他事件（`turn/end`、未知事件）跳过；图片、附件显示占位卡片，远程图片不自动联网，本地/内嵌图片点击后才能查看，读取失败给中文原因。
 - 空文本、损坏记录跳过；不生成占位消息。
 - 单条消息上限 12,000 字符，响应上限 2 MiB。
 
@@ -68,7 +68,9 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 审批状态机、连接生命周期、允许/拒绝/记住本次运行 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：状态、命令、diff、文件变更、折叠输出 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 42 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息；46 增加窗口化消息、滚动跟随/回到底部、发送失败卡片与可复制错误 |
+| `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 46 渲染层：标题/嵌套列表/任务列表/引用/表格/分隔线/代码块/行内样式；代码横向滚动与可选行号、链接确认、图片/附件占位与查看器 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：消息窗口、底部跟随、流式增量合并、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | **android_agent-44 独占**；设置开关、DSH 页原生/官方切换、回退提示与“重试” |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面 |
 
@@ -102,6 +104,17 @@
 
 临时 WebSocket：`DshWebSocketClient.kt` 只作为 `DshApprovalTransport` 的默认实现保留，待 42 的 `DshWebSocket.kt`/transport 可用后替换；不要再扩展它。
 
+### 46 渲染质量切片（2026-11-10）
+
+- 流式：`assistant-stream` 全文在控制器内按约 32ms 合并，同一帧只发布最后一版；committed/assistant 消息到达时取消待发布增量，避免临时气泡与落盘消息重复。
+- 长列表：`LazyColumn` 只渲染末尾窗口（默认 80 项，每次“显示更早”增加 40，最多 400）；时间线按 `messages/tools` 记忆化，流式文本不重建整段历史。官方无向前分页参数，更早于已加载页的历史仍跳官方界面。
+- 跟随：只有用户回到底部才恢复自动跟随；拖动开始时立即停止跟随，松手/惯性结束后若在底部自动恢复，并提供“↓ 最新”按钮。滚动对齐最后一项底部，长流式回复仍能看到最新一行。
+- Markdown：标题、段落、引用、分隔线、有序/无序/嵌套/任务列表、带对齐表格、围栏代码块（等宽、横向滚动、长行不换行、可选行号）、行内粗体/斜体/粗斜体/删除线/行内代码/链接。单条消息最多 300 个块、代码 400 行、表格 60 行/12 列，超出明确提示且复制仍用全文。
+- 链接：`http/https/mailto/tel` 点击先弹确认框，确认后才调起系统应用；`javascript/data/intent/file/content` 等直接拒绝并给中文原因，附件/相对路径只提示需要工作区授权。
+- 图片/附件：Markdown 图片显示占位卡片与中文原因；本地/内嵌图片点击后在对话框按尺寸采样解码，失败显示“图片加载失败：文件不可读、已损坏或格式不支持”；远程图片保持不自动联网。附件链接显示占位卡片，可查看地址/复制，不静默读取工作区文件。
+- 发送状态：发送中显示占位气泡与进度圈；失败保留原文、可读原因、“重试/填入输入框/复制内容”；错误 banner 提供中文提示与“复制错误”，不隐藏原始短错误码。
+- 未验证：真实设备上的链接点击、文本选择与链接手势冲突、图片解码内存、长代码/表格滚动、深色/大字体、低端机帧率。
+
 ### 切换语义
 
 - 默认官方界面；不改变现有 WebView 加载、Cookie、同源策略或 DSH 启动参数。
@@ -126,6 +139,14 @@
 - 请求不带 `Origin` 头；与官方“工具客户端”语义一致。
 
 ## 6. 验证
+
+46 渲染质量切片（2026-11-10，基线 `origin/main=4f2a3717`，非设备）新跑：
+
+- `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
+- 定向 `DshMarkdownTest` 15 项、`DshChatRenderTest` 11 项、`DshNativeControllerTest` 20 项：46 tests / 0 failures / 0 errors / 0 skipped。
+- 完整 `:app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，**818 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。
+- 覆盖：窗口/底部判定、流式累计/增量/去重/重置、链接协议拒绝、图片/附件分类、错误分类、代码/表格上限、Markdown 块与行内语法、控制器按帧合并/committed 取消/失败重试。
+- 未执行：真实 Android 设备、PRoot DSH、仪器测试、assemble；JVM 与 lint 不能替代设备验收。
 
 本轮（android_agent-42，合并 `main=b075725`，含 #34/#35/#36/#37/#38/#41/#42/#43）新跑：
 

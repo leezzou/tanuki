@@ -44,10 +44,19 @@ data class DshNativeState(
     val notice: String? = null,
     val streamingText: String = "",
     /** 与文本消息按 seq 交错渲染的工具调用卡片；来自同一官方 session/page 或 follow 事件。 */
-    val tools: List<DshToolItem> = emptyList()
+    val tools: List<DshToolItem> = emptyList(),
+    /** 最近一次发送失败的原文与原因；保留在页面上供复制、重试或回填输入框。 */
+    val failedPrompt: DshFailedPrompt? = null
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
 }
+
+/** 发送失败后保留的本地内容；不写入官方会话，也不伪造已送达。 */
+data class DshFailedPrompt(
+    val text: String,
+    val reason: String,
+    val time: Long
+)
 
 /**
  * 原生页控制器。列表/历史失败仍按原策略回退官方；实时流或单次操作失败只提示，
@@ -65,12 +74,16 @@ class DshNativeController(
     private var pendingSeq = 0
     /** 通知点击目标；会话列表尚未加载时先保存，加载完成后选中。 */
     private var pendingSelection: String? = null
+    /** 流式文本按帧合并：事件只更新待发布值，真正的状态变更每个帧窗口最多一次。 */
+    private var pendingStreamText: String? = null
+    private var streamFlushJob: Job? = null
 
     fun refresh() {
         val token = ++generation
         val target = pendingSelection
         pageJob?.cancel()
         liveJob?.cancel()
+        resetStreaming()
         _state.value = DshNativeState(loading = true)
         pageJob = scope.launch {
             val result = client.sessions()
@@ -137,6 +150,7 @@ class DshNativeController(
         val token = ++generation
         pageJob?.cancel()
         liveJob?.cancel()
+        resetStreaming()
         val session = current.sessions.firstOrNull { it.id == sessionId }
         _state.update {
             it.copy(
@@ -151,7 +165,8 @@ class DshNativeController(
                 sendError = null,
                 actionError = null,
                 notice = null,
-                streamingText = ""
+                streamingText = "",
+                failedPrompt = null
             )
         }
         startLive(sessionId, token)
@@ -185,6 +200,7 @@ class DshNativeController(
                 actionError = null,
                 notice = null,
                 running = true,
+                failedPrompt = null,
                 messages = it.messages + pending
             )
         }
@@ -194,7 +210,7 @@ class DshNativeController(
                 if (token != generation || _state.value.selectedId != sessionId) {
                     return@fold false
                 }
-                _state.update { it.copy(sending = false, notice = "已交给官方 DSH") }
+                _state.update { it.copy(sending = false, notice = "已交给官方 DSH", failedPrompt = null) }
                 // follow 正常时由实时消息替换占位；follow 已结束/滞后时也补一次历史读取，避免停在“发送中”。
                 refreshMessages(sessionId, token)
                 true
@@ -203,10 +219,12 @@ class DshNativeController(
                 if (token != generation || _state.value.selectedId != sessionId) {
                     return@fold false
                 }
+                val reason = messageOf(error)
                 _state.update { state ->
                     state.copy(
                         sending = false,
-                        sendError = messageOf(error),
+                        sendError = reason,
+                        failedPrompt = DshFailedPrompt(prompt, reason, System.currentTimeMillis()),
                         running = wasRunning,
                         messages = state.messages.filterNot { it.pending && it.text == prompt }
                     )
@@ -216,10 +234,18 @@ class DshNativeController(
         )
     }
 
+    /** 重试最近一次发送失败的原文；不清空用户已编辑的输入框，也不伪造官方重发。 */
+    suspend fun retryFailedPrompt(): Boolean {
+        val failed = _state.value.failedPrompt ?: return false
+        if (_state.value.sending) return false
+        return send(failed.text)
+    }
+
     /** 官方没有独立“重新生成”一元方法；这里明确重发上一条用户消息，不伪造隐藏重试。 */
     suspend fun retryLastPrompt(): Boolean {
         val state = _state.value
         if (state.running) return false
+        state.failedPrompt?.let { failed -> return send(failed.text) }
         val last = state.messages.lastOrNull { it.role == DshMessageRole.USER && !it.pending } ?: return false
         return send(last.text)
     }
@@ -255,6 +281,7 @@ class DshNativeController(
         generation++
         pageJob?.cancel()
         liveJob?.cancel()
+        resetStreaming()
         pageJob = null
         liveJob = null
         pendingSelection = null
@@ -297,42 +324,94 @@ class DshNativeController(
             DshLiveEvent.Connected -> _state.update {
                 it.copy(live = true, liveError = null)
             }
-            is DshLiveEvent.Snapshot -> _state.update { state ->
-                state.copy(
-                    loading = false,
-                    live = true,
-                    liveError = null,
-                    messages = mergeMessages(state.messages, event.messages, replace = true),
-                    tools = mergeTools(state.tools, event.tools),
-                    hasMore = event.hasMore,
-                    streamingText = event.liveText
-                )
+            is DshLiveEvent.Snapshot -> {
+                cancelStreamFlush()
+                _state.update { state ->
+                    state.copy(
+                        loading = false,
+                        live = true,
+                        liveError = null,
+                        messages = mergeMessages(state.messages, event.messages, replace = true),
+                        tools = mergeTools(state.tools, event.tools),
+                        hasMore = event.hasMore,
+                        streamingText = event.liveText
+                    )
+                }
             }
-            is DshLiveEvent.Message -> _state.update { state ->
-                state.copy(
-                    messages = mergeMessages(state.messages, listOf(event.message), replace = false),
-                    streamingText = if (event.message.role == DshMessageRole.ASSISTANT) "" else state.streamingText
-                )
+            is DshLiveEvent.Message -> {
+                if (event.message.role == DshMessageRole.ASSISTANT) cancelStreamFlush()
+                _state.update { state ->
+                    state.copy(
+                        messages = mergeMessages(state.messages, listOf(event.message), replace = false),
+                        streamingText = if (event.message.role == DshMessageRole.ASSISTANT) "" else state.streamingText
+                    )
+                }
             }
             is DshLiveEvent.Timeline -> _state.update { state ->
                 state.copy(tools = mergeTools(state.tools, event.tools))
             }
-            is DshLiveEvent.Streaming -> _state.update { it.copy(streamingText = event.text) }
-            is DshLiveEvent.Finished -> _state.update {
-                if (event.committed) it else it.copy(streamingText = "")
+            is DshLiveEvent.Streaming -> scheduleStreaming(event.text)
+            is DshLiveEvent.Finished -> {
+                // 结束事件到达时先同步发布最后一帧，避免 committed 文本停在上一帧。
+                if (event.committed) commitStreamingNow() else resetStreaming()
             }
-            is DshLiveEvent.Running -> _state.update { state ->
-                state.copy(
-                    running = event.running,
-                    stopping = if (event.running) state.stopping else false,
-                    streamingText = if (event.running) state.streamingText else "",
-                    sessions = state.sessions.map { session ->
-                        if (session.id == state.selectedId) session.copy(running = event.running) else session
-                    }
-                )
+            is DshLiveEvent.Running -> {
+                if (!event.running) resetStreaming()
+                _state.update { state ->
+                    state.copy(
+                        running = event.running,
+                        stopping = if (event.running) state.stopping else false,
+                        streamingText = if (event.running) state.streamingText else "",
+                        sessions = state.sessions.map { session ->
+                            if (session.id == state.selectedId) session.copy(running = event.running) else session
+                        }
+                    )
+                }
             }
             is DshLiveEvent.Failure -> _state.update { it.copy(liveError = event.message) }
         }
+    }
+
+    /** 同一帧窗口内只保留最新全文；旧增量不会逐条触发整段 Markdown 重排。 */
+    private fun scheduleStreaming(text: String) {
+        pendingStreamText = text
+        if (streamFlushJob?.isActive == true) return
+        streamFlushJob = scope.launch {
+            delay(DshStreamPolicy.FRAME_MILLIS)
+            publishPendingStream()
+        }
+    }
+
+    private fun publishPendingStream() {
+        streamFlushJob = null
+        val pending = pendingStreamText ?: return
+        pendingStreamText = null
+        _state.update { state ->
+            val merged = DshStreamPolicy.merge(state.streamingText, pending)
+            if (merged == state.streamingText) state else state.copy(streamingText = merged)
+        }
+    }
+
+    private fun commitStreamingNow() {
+        streamFlushJob?.cancel()
+        streamFlushJob = null
+        val pending = pendingStreamText ?: return
+        pendingStreamText = null
+        _state.update { state ->
+            val merged = DshStreamPolicy.merge(state.streamingText, pending)
+            if (merged == state.streamingText) state else state.copy(streamingText = merged)
+        }
+    }
+
+    private fun cancelStreamFlush() {
+        streamFlushJob?.cancel()
+        streamFlushJob = null
+        pendingStreamText = null
+    }
+
+    private fun resetStreaming() {
+        cancelStreamFlush()
+        _state.update { if (it.streamingText.isEmpty()) it else it.copy(streamingText = "") }
     }
 
     private fun refreshMessages(sessionId: String, token: Int) {

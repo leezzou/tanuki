@@ -2,6 +2,17 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 原生聊天渲染质量验证（2026-11-10，android_agent-51，非设备）
+
+- 范围：原生聊天渲染层，不改协议/传输、`DshComposer*` 组件内部、`MainActivity` 与共享状态。基线 `origin/main=4f2a3717`，分支 `ao/chat-render/render-quality`。
+- 实际执行（本 worktree，`-x buildNativeRuntime`）：
+  - `source scripts/ao-worktree-env.sh && ./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime` → BUILD SUCCESSFUL。
+  - 定向 `DshMarkdownTest`、`DshChatRenderTest`、`DshNativeControllerTest` → BUILD SUCCESSFUL，**46 tests / 0 failures / 0 errors / 0 skipped**（15 + 11 + 20）。
+  - 完整 `./gradlew :app:testModernDebugUnitTest :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（5m43s），**818 tests / 91 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**。
+  - `python3 scripts/check-native-parity.py` → PASS（166 行、14 功能域、路径/验收引用通过）。
+- 新增覆盖：消息窗口与“显示更早”、底部判定/拖动脱离跟随、流式累计/增量/去重/重置、按帧合并、committed 取消待发布增量、链接协议白名单与危险协议拒绝、图片/附件分类、错误分类、代码行号/行数上限、表格行/列上限、嵌套/任务列表、表格对齐/转义竖线、附件块、块数截断、发送失败保留/重试/切会话清理。
+- 未执行：真实 Android 设备/模拟器、PRoot DSH 实时流、图片 `content://` 解码、链接调起系统应用、深色/大字体/输入法、assemble、Android 仪器测试、合并/发布。JVM/lint 不能替代设备验收；设备上的帧率、手势与内存表现仍待独立 QA。
+
 ## 0.1.11 发布准备验证（2026-11-10，android_agent-49，非设备）
 
 - 范围：`0.1.11/code13` workspacecheck 候选准备，最终基线 `main=1f7222d0e4ac`（#40 已合并）；同步版本/发布/取包/更新/兼容性文档，精简 `AGENT-STATE`，修正 #38 交接断链并重建印章。不改产品代码/协议。
