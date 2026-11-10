@@ -1,17 +1,24 @@
 package com.tanuki
 
+import com.tanuki.ui.DshModelPresentation
+import com.tanuki.ui.DshPermissionPresentation
 import com.tanuki.ui.DshReadStore
+import com.tanuki.ui.DshSessionCapabilities
 import com.tanuki.ui.DshSessionFilter
 import com.tanuki.ui.DshSessionFiltering
 import com.tanuki.ui.DshSessionManagerController
+import com.tanuki.ui.DshSessionPinStore
+import com.tanuki.ui.NoopDshSessionPinStore
 import com.tanuki.web.DshAdminSession
 import com.tanuki.web.DshApiException
+import com.tanuki.web.DshCatalogModel
 import com.tanuki.web.DshCommand
 import com.tanuki.web.DshModelCatalog
 import com.tanuki.web.DshModelGroup
 import com.tanuki.web.DshModelSelection
 import com.tanuki.web.DshPermissionCatalog
 import com.tanuki.web.DshPermissionOption
+import com.tanuki.web.DshReasoningEffort
 import com.tanuki.web.DshSessionAdminSource
 import com.tanuki.web.DshSessionSearchResult
 import com.tanuki.web.DshSkill
@@ -51,8 +58,160 @@ class DshSessionManagerControllerTest {
         assertEquals(listOf("s2"), DshSessionFiltering.visible(all, "", DshSessionFilter.UNREAD, setOf("s2")).map { it.id })
     }
 
-    @Test fun openingSessionMarksItReadWithoutTouchingOfficialData() {
+    @Test fun pinnedSessionsSortFirstAndSurviveRefresh() {
         val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 2_000L), session("s2", "乙", 1_000L)))
+        val pins = MemoryPinStore()
+        val controller = controller(source, MemoryReadStore(), pins)
+        controller.refresh()
+        assertEquals(listOf("s1", "s2"), controller.state.value.visibleSessions.map { it.id })
+
+        controller.togglePinned("s2")
+
+        assertEquals(setOf("s2"), controller.state.value.pinnedIds)
+        assertEquals(listOf("s2", "s1"), controller.state.value.visibleSessions.map { it.id })
+        assertTrue(controller.state.value.notice.orEmpty().contains("置顶"))
+        controller.refresh()
+        assertEquals(setOf("s2"), controller.state.value.pinnedIds)
+        assertEquals(listOf("s2", "s1"), controller.state.value.visibleSessions.map { it.id })
+
+        controller.togglePinned("s2")
+        assertEquals(listOf("s1", "s2"), controller.state.value.visibleSessions.map { it.id })
+    }
+
+    @Test fun pinStoreFailureDoesNotShowUnsavedPin() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 2_000L)))
+        val pins = object : DshSessionPinStore {
+            override fun pinnedIds(): Set<String> = emptySet()
+            override fun setPinned(sessionId: String, pinned: Boolean) = throw IllegalStateException("磁盘失败")
+        }
+        val controller = controller(source, MemoryReadStore(), pins)
+        controller.refresh()
+
+        controller.togglePinned("s1")
+
+        assertTrue(controller.state.value.pinnedIds.isEmpty())
+        assertTrue(controller.state.value.error.orEmpty().contains("置顶保存失败"))
+    }
+
+    @Test fun refreshWithExistingListUsesRefreshingInsteadOfFullLoading() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 1_000L)))
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+        source.sessionsAwait = CompletableDeferred()
+
+        controller.refresh()
+
+        val refreshing = controller.state.value
+        assertTrue(refreshing.refreshing)
+        assertFalse(refreshing.loading)
+        assertEquals(listOf("s1"), refreshing.sessions.map { it.id })
+
+        source.sessionsAwait?.complete(Unit)
+        source.sessionsAwait = null
+        assertFalse(controller.state.value.refreshing)
+        assertEquals(listOf("s1"), controller.state.value.sessions.map { it.id })
+    }
+
+    @Test fun initialLoadFailureExposesRetryableErrorState() {
+        val source = FakeSource()
+        source.sessionsResult = Result.failure(DshApiException("session/list-unavailable"))
+        val controller = controller(source, MemoryReadStore())
+
+        controller.refresh()
+
+        val failed = controller.state.value
+        assertTrue(failed.initialLoadFailed)
+        assertFalse(failed.hasLoaded)
+        assertFalse(failed.loading)
+        assertTrue(failed.loadError.orEmpty().contains("官方接口返回"))
+        assertTrue(failed.sessions.isEmpty())
+
+        source.sessionsResult = Result.success(emptyList())
+        controller.refresh()
+
+        val recovered = controller.state.value
+        assertFalse(recovered.initialLoadFailed)
+        assertTrue(recovered.hasLoaded)
+        assertNull(recovered.loadError)
+    }
+
+    @Test fun modelSwitchFailureShowsChineseReasonAndKeepsSelection() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 1_000L)))
+        source.selectModelResult = Result.failure(DshApiException("session/model-unavailable"))
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+
+        controller.selectModel("s1", DshModelSelection("deepseek", "other", "high"))
+
+        val state = controller.state.value
+        assertFalse(state.busy)
+        assertEquals(DshModelSelection("deepseek", "chat"), state.sessions.single().model)
+        assertEquals("所选模型不可用", state.modelSelectionError)
+        assertNull(state.error)
+    }
+
+    @Test fun permissionSwitchFailureShowsChineseReasonAndKeepsCurrentPreset() {
+        val source = FakeSource()
+        source.sessionsResult = Result.success(listOf(session("s1", "甲", 1_000L)))
+        source.selectPermissionResult = Result.failure(DshApiException("permission/denied"))
+        val controller = controller(source, MemoryReadStore())
+        controller.refresh()
+
+        controller.selectPermission("s1", "read-only")
+
+        val state = controller.state.value
+        assertFalse(state.busy)
+        assertEquals("workspace-write", state.sessions.single().currentPermission)
+        assertEquals("官方拒绝了权限切换", state.permissionSelectionError)
+        assertNull(state.error)
+    }
+
+    @Test fun permissionGuidanceIsPlainChineseAndCustomIsReadOnly() {
+        assertTrue(DshPermissionPresentation.guidance("read-only").contains("只读"))
+        assertTrue(DshPermissionPresentation.guidance("workspace-write").contains("工作区"))
+        assertTrue(DshPermissionPresentation.guidance("danger-full-access").contains("工作区边界"))
+        assertFalse(DshPermissionPresentation.canSelect("custom"))
+        assertTrue(DshPermissionPresentation.canSelect("workspace-write"))
+        assertEquals(3, DshPermissionPresentation.fullAccessRisks().size)
+    }
+
+    @Test fun modelSelectionLabelUsesCatalogEffortName() {
+        val catalog = DshModelCatalog(
+            default = DshModelSelection("deepseek", "chat", "high"),
+            groups = listOf(
+                DshModelGroup(
+                    id = "deepseek",
+                    name = "DeepSeek",
+                    models = listOf(
+                        DshCatalogModel(
+                            id = "chat",
+                            name = "Chat",
+                            description = null,
+                            efforts = listOf(DshReasoningEffort("high", "高", "更慢但更深入")),
+                            defaultEffort = "high"
+                        )
+                    )
+                )
+            ),
+            failures = emptyList()
+        )
+        assertEquals(
+            "deepseek / chat · 高",
+            DshModelPresentation.selectionLabel(catalog, DshModelSelection("deepseek", "chat", "high"))
+        )
+    }
+
+    @Test fun deleteIsExplicitlyMarkedUnsupported() {
+        assertFalse(DshSessionCapabilities.DELETE_SUPPORTED)
+        assertTrue(DshSessionCapabilities.DELETE_UNAVAILABLE_REASON.contains("没有会话硬删除"))
+        assertTrue(DshSessionCapabilities.archiveSupported())
+    }
+
+    @Test fun openingSessionMarksItReadWithoutTouchingOfficialData() {        val source = FakeSource()
         source.sessionsResult = Result.success(listOf(session("s1", "甲", 2_000L)))
         val read = MemoryReadStore()
         val controller = controller(source, read)
@@ -363,8 +522,11 @@ class DshSessionManagerControllerTest {
         assertEquals("local-review", controller.state.value.skills.single().name)
     }
 
-    private fun controller(source: DshSessionAdminSource, read: DshReadStore) =
-        DshSessionManagerController(source, read, CoroutineScope(Dispatchers.Unconfined))
+    private fun controller(
+        source: DshSessionAdminSource,
+        read: DshReadStore,
+        pins: DshSessionPinStore = NoopDshSessionPinStore
+    ) = DshSessionManagerController(source, read, CoroutineScope(Dispatchers.Unconfined), pins)
 
     private fun session(
         id: String,
@@ -392,6 +554,13 @@ class DshSessionManagerControllerTest {
         override fun lastRead(sessionId: String): Long = map[sessionId] ?: 0L
         override fun markRead(sessionId: String, updatedAt: Long) {
             map[sessionId] = updatedAt
+        }
+    }
+
+    private class MemoryPinStore(val map: MutableSet<String> = mutableSetOf()) : DshSessionPinStore {
+        override fun pinnedIds(): Set<String> = map.toSet()
+        override fun setPinned(sessionId: String, pinned: Boolean) {
+            if (pinned) map += sessionId else map -= sessionId
         }
     }
 

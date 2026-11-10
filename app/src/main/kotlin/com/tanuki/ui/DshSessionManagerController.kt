@@ -30,19 +30,27 @@ object DshSessionFiltering {
         sessions: List<DshAdminSession>,
         query: String,
         filter: DshSessionFilter,
-        unreadIds: Set<String>
+        unreadIds: Set<String>,
+        pinnedIds: Set<String> = emptySet()
     ): List<DshAdminSession> {
         val text = query.trim()
-        return sessions.filter { session ->
-            val matches = text.isEmpty() ||
-                session.displayTitle.contains(text, ignoreCase = true) ||
-                session.id.contains(text, ignoreCase = true)
-            matches && when (filter) {
-                DshSessionFilter.ALL -> true
-                DshSessionFilter.RUNNING -> session.running
-                DshSessionFilter.UNREAD -> session.id in unreadIds
+        return sessions.asSequence()
+            .filter { session ->
+                val matches = text.isEmpty() ||
+                    session.displayTitle.contains(text, ignoreCase = true) ||
+                    session.id.contains(text, ignoreCase = true)
+                matches && when (filter) {
+                    DshSessionFilter.ALL -> true
+                    DshSessionFilter.RUNNING -> session.running
+                    DshSessionFilter.UNREAD -> session.id in unreadIds
+                }
             }
-        }
+            // 置顶是本机显示偏好：只影响本页顺序，不写回官方会话。
+            .sortedWith(
+                compareByDescending<DshAdminSession> { it.id in pinnedIds }
+                    .thenByDescending { it.updatedAt }
+            )
+            .toList()
     }
 }
 
@@ -52,27 +60,55 @@ interface DshReadStore {
     fun markRead(sessionId: String, updatedAt: Long)
 }
 
+/**
+ * 本机置顶存储。
+ *
+ * 置顶只改变原生列表顺序，不是官方会话字段；存储失败时页面会明确提示，
+ * 不能把未保存的置顶状态继续当成已生效。
+ */
+interface DshSessionPinStore {
+    fun pinnedIds(): Set<String>
+    fun setPinned(sessionId: String, pinned: Boolean)
+}
+
+/** 不提供本机置顶时的空实现；测试和只读场景可直接使用。 */
+object NoopDshSessionPinStore : DshSessionPinStore {
+    override fun pinnedIds(): Set<String> = emptySet()
+    override fun setPinned(sessionId: String, pinned: Boolean) = Unit
+}
+
 data class DshSessionManagerState(
     val available: Boolean = false,
     val loading: Boolean = false,
+    /** 已有列表时的下拉/手动刷新；与首次加载分开，避免整页闪空。 */
+    val refreshing: Boolean = false,
     val sessions: List<DshAdminSession> = emptyList(),
     val query: String = "",
     val filter: DshSessionFilter = DshSessionFilter.ALL,
     val unreadIds: Set<String> = emptySet(),
+    /** 本机置顶；排序时优先，刷新后保留。 */
+    val pinnedIds: Set<String> = emptySet(),
     val contentHits: List<DshSessionSearchHit> = emptyList(),
     val contentHasMore: Boolean = false,
     val contentSearching: Boolean = false,
     val contentSearched: Boolean = false,
     val busy: Boolean = false,
+    /** 写操作失败；与列表读取失败分开，避免错误态被误判。 */
     val error: String? = null,
+    /** 官方会话列表读取失败；有旧列表时保留旧列表并提示。 */
+    val loadError: String? = null,
     val notice: String? = null,
     val selectedId: String? = null,
     val models: DshModelCatalog? = null,
     val modelsLoading: Boolean = false,
     val modelsError: String? = null,
+    /** 模型切换失败的中文原因，只在模型面板展示。 */
+    val modelSelectionError: String? = null,
     val permissions: DshPermissionCatalog? = null,
     val permissionsLoading: Boolean = false,
     val permissionsError: String? = null,
+    /** 权限切换失败的中文原因，只在权限面板展示。 */
+    val permissionSelectionError: String? = null,
     val skills: List<DshSkill> = emptyList(),
     val commands: List<DshCommand> = emptyList(),
     val catalogLoading: Boolean = false,
@@ -82,12 +118,16 @@ data class DshSessionManagerState(
     val hasLoaded: Boolean = false
 ) {
     val visibleSessions: List<DshAdminSession>
-        get() = DshSessionFiltering.visible(sessions, query, filter, unreadIds)
+        get() = DshSessionFiltering.visible(sessions, query, filter, unreadIds, pinnedIds)
 
     val selected: DshAdminSession?
         get() = sessions.firstOrNull { it.id == selectedId }
 
     val canWrite: Boolean get() = !readOnly && !busy
+
+    /** 首次加载失败且没有任何可展示旧数据；页面据此显示错误态而不是空态。 */
+    val initialLoadFailed: Boolean
+        get() = !loading && sessions.isEmpty() && !hasLoaded && loadError != null
 }
 
 /**
@@ -99,9 +139,12 @@ data class DshSessionManagerState(
 class DshSessionManagerController(
     private val source: DshSessionAdminSource,
     private val readStore: DshReadStore,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val pinStore: DshSessionPinStore = NoopDshSessionPinStore
 ) {
-    private val _state = MutableStateFlow(DshSessionManagerState())
+    private val _state = MutableStateFlow(
+        DshSessionManagerState(pinnedIds = runCatching { pinStore.pinnedIds() }.getOrDefault(emptySet()))
+    )
     val state: StateFlow<DshSessionManagerState> = _state.asStateFlow()
 
     private var listJob: Job? = null
@@ -129,7 +172,17 @@ class DshSessionManagerController(
         if (_state.value.busy) return
         val token = ++listGeneration
         listJob?.cancel()
-        _state.update { it.copy(loading = true, error = null, notice = null) }
+        val hasContent = _state.value.sessions.isNotEmpty()
+        // 有旧列表时只显示下拉刷新，不清空列表；首次读取才显示整页加载态。
+        _state.update {
+            it.copy(
+                loading = !hasContent,
+                refreshing = hasContent,
+                error = null,
+                loadError = null,
+                notice = null
+            )
+        }
         listJob = scope.launch {
             val result = source.sessions()
             if (token != listGeneration) return@launch
@@ -141,11 +194,13 @@ class DshSessionManagerController(
                         _state.update {
                             it.copy(
                                 loading = false,
+                                refreshing = false,
                                 sessions = sessions,
                                 unreadIds = unreadOf(sessions),
                                 available = true,
                                 hasLoaded = true,
                                 selectedId = it.selectedId?.takeIf { id -> sessions.any { session -> session.id == id } },
+                                loadError = null,
                                 error = "目标会话不在当前列表，可能已归档"
                             )
                         }
@@ -159,7 +214,13 @@ class DshSessionManagerController(
                     }
                 },
                 onFailure = { error ->
-                    _state.update { it.copy(loading = false, error = messageOf(error)) }
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            refreshing = false,
+                            loadError = messageOf(error)
+                        )
+                    }
                 }
             )
         }
@@ -188,6 +249,30 @@ class DshSessionManagerController(
         _state.update { it.copy(filter = filter) }
     }
 
+    /**
+     * 切换本机置顶。
+     *
+     * 置顶不是官方写操作，安全模式下仍可调整本机顺序；但存储失败必须回退并
+     * 提示，不能显示一个并未保存的置顶标记。
+     */
+    fun togglePinned(sessionId: String) {
+        if (!validId(sessionId)) return
+        val next = sessionId !in _state.value.pinnedIds
+        val stored = runCatching { pinStore.setPinned(sessionId, next) }
+        if (stored.isFailure) {
+            _state.update { it.copy(error = "置顶保存失败：${messageOf(stored.exceptionOrNull()!!)}") }
+            return
+        }
+        val pinned = runCatching { pinStore.pinnedIds() }.getOrDefault(_state.value.pinnedIds)
+        _state.update {
+            it.copy(
+                pinnedIds = pinned,
+                notice = if (next) "已置顶（仅本机，不写回官方）" else "已取消置顶",
+                error = null
+            )
+        }
+    }
+
     /** 打开会话详情并记为本机已读；目标不在列表时等待刷新后再选中。 */
     fun openSession(sessionId: String) {
         if (!validId(sessionId)) return
@@ -210,13 +295,15 @@ class DshSessionManagerController(
                 skills = emptyList(),
                 commands = emptyList(),
                 catalogLoading = false,
-                catalogError = null
+                catalogError = null,
+                modelSelectionError = null,
+                permissionSelectionError = null
             )
         }
     }
 
     fun clearMessages() {
-        _state.update { it.copy(error = null, notice = null) }
+        _state.update { it.copy(error = null, loadError = null, notice = null) }
     }
 
     fun createSession(title: String = "") {
@@ -321,7 +408,7 @@ class DshSessionManagerController(
         if (!force && (_state.value.models != null || _state.value.modelsLoading)) return
         val token = ++modelGeneration
         modelJob?.cancel()
-        _state.update { it.copy(modelsLoading = true, modelsError = null) }
+        _state.update { it.copy(modelsLoading = true, modelsError = null, modelSelectionError = null) }
         modelJob = scope.launch {
             source.models().fold(
                 onSuccess = { catalog ->
@@ -340,7 +427,7 @@ class DshSessionManagerController(
         if (!force && (_state.value.permissions != null || _state.value.permissionsLoading)) return
         val token = ++permissionGeneration
         permissionJob?.cancel()
-        _state.update { it.copy(permissionsLoading = true, permissionsError = null) }
+        _state.update { it.copy(permissionsLoading = true, permissionsError = null, permissionSelectionError = null) }
         permissionJob = scope.launch {
             source.permissions().fold(
                 onSuccess = { catalog ->
@@ -392,10 +479,20 @@ class DshSessionManagerController(
 
     fun selectModel(sessionId: String, selection: DshModelSelection) {
         if (!validId(sessionId) || !beginAction()) return
+        _state.update { it.copy(modelSelectionError = null) }
         actionJob = scope.launch {
             source.selectModel(sessionId, selection).fold(
                 onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换模型") },
-                onFailure = { failAction(it) }
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(
+                            busy = false,
+                            loading = false,
+                            refreshing = false,
+                            modelSelectionError = messageOf(error)
+                        )
+                    }
+                }
             )
         }
     }
@@ -414,19 +511,32 @@ class DshSessionManagerController(
             failAction(IllegalArgumentException("完全权限需要用户明确确认"))
             return
         }
+        _state.update { it.copy(permissionSelectionError = null) }
         actionJob = scope.launch {
             source.selectPermission(sessionId, preset).fold(
                 onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已切换权限模式") },
-                onFailure = { failAction(it) }
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(
+                            busy = false,
+                            loading = false,
+                            refreshing = false,
+                            permissionSelectionError = messageOf(error)
+                        )
+                    }
+                }
             )
         }
     }
 
-    /** 服务停止时清空列表与选中状态，保留安全模式标记；Cookie 在 close() 中一并丢弃。 */
+    /** 服务停止时清空列表与选中状态，保留安全模式与本机置顶；Cookie 在 close() 中一并丢弃。 */
     fun clearForStopped() {
         close()
         endpointIdentity = null
-        _state.value = DshSessionManagerState(readOnly = _state.value.readOnly)
+        _state.value = DshSessionManagerState(
+            readOnly = _state.value.readOnly,
+            pinnedIds = runCatching { pinStore.pinnedIds() }.getOrDefault(_state.value.pinnedIds)
+        )
     }
 
     fun close() {
@@ -445,6 +555,7 @@ class DshSessionManagerController(
         _state.update {
             it.copy(
                 loading = false,
+                refreshing = false,
                 busy = false,
                 contentSearching = false,
                 modelsLoading = false,
@@ -478,6 +589,7 @@ class DshSessionManagerController(
                 available = false,
                 hasLoaded = false,
                 loading = false,
+                refreshing = false,
                 busy = false,
                 sessions = emptyList(),
                 unreadIds = emptySet(),
@@ -489,14 +601,17 @@ class DshSessionManagerController(
                 models = null,
                 modelsLoading = false,
                 modelsError = null,
+                modelSelectionError = null,
                 permissions = null,
                 permissionsLoading = false,
                 permissionsError = null,
+                permissionSelectionError = null,
                 skills = emptyList(),
                 commands = emptyList(),
                 catalogLoading = false,
                 catalogError = null,
                 error = null,
+                loadError = null,
                 notice = null
             )
         }
@@ -513,12 +628,12 @@ class DshSessionManagerController(
         listJob?.cancel()
         actionJob?.cancel()
         // 已取消的列表读取不能继续显示加载态，否则失败后刷新按钮会被永久禁用。
-        _state.update { it.copy(busy = true, loading = false, error = null, notice = null) }
+        _state.update { it.copy(busy = true, loading = false, refreshing = false, error = null, notice = null) }
         return true
     }
 
     private fun failAction(error: Throwable) {
-        _state.update { it.copy(busy = false, loading = false, error = messageOf(error)) }
+        _state.update { it.copy(busy = false, loading = false, refreshing = false, error = messageOf(error)) }
     }
 
     private suspend fun loadAfterAction(
@@ -541,6 +656,7 @@ class DshSessionManagerController(
                     it.copy(
                         busy = false,
                         loading = false,
+                        refreshing = false,
                         selectedId = selectedId ?: it.selectedId,
                         notice = notice,
                         error = "操作已完成，但列表刷新失败：${messageOf(error)}"
@@ -561,6 +677,7 @@ class DshSessionManagerController(
         _state.update {
             it.copy(
                 loading = false,
+                refreshing = false,
                 busy = false,
                 sessions = sessions,
                 unreadIds = unreadOf(sessions),
@@ -568,6 +685,9 @@ class DshSessionManagerController(
                 available = true,
                 hasLoaded = true,
                 notice = notice ?: it.notice,
+                loadError = null,
+                modelSelectionError = null,
+                permissionSelectionError = null,
                 error = if (keepError) it.error else null
             )
         }
@@ -600,7 +720,12 @@ class DshSessionManagerController(
             "session/provider-credentials-unavailable" -> "模型服务凭据不可用"
             "session/provider-models-unavailable" -> "模型目录暂时不可用"
             "session/model-unavailable" -> "所选模型不可用"
+            "session/model-unsupported" -> "当前会话不支持所选模型"
             "session/migration-required" -> "会话需要迁移，原生管理暂不可用"
+            "permission/preset-unknown" -> "官方不支持该权限预设"
+            "permission/denied" -> "官方拒绝了权限切换"
+            "commands/unknown" -> "官方未识别该命令"
+            "workspace/session-not-found" -> "会话不存在或已被归档"
             else -> "官方接口返回 ${error.code}"
         }
         is JSONException, is IllegalArgumentException ->

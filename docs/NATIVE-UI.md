@@ -69,8 +69,13 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：状态、命令、diff、文件变更、折叠输出 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 42 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | **android_agent-44 独占**；设置开关、DSH 页原生/官方切换、回退提示与“重试” |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerController.kt` | 会话列表状态机、搜索/置顶/未读、写操作与中文错误 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 会话列表、详情、模型/权限面板与确认交互 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerActivity.kt` | 独立会话管理页入口与本机未读/置顶偏好 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionPresentation.kt` | 权限人话说明、删除能力与模型强度展示的纯函数 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiThemeMode.kt` | 原生主题偏好（跟随系统/浅色/深色）与纯解析 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置入口、官方/原生 DSH 切换、回退提示、外观/语言/通知/存储入口 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面；54 接线主题偏好 |
 
 偏好文件 `ui`、键 `dsh-ui`，值 `official` / `native`；未知值回到 `official`。设置入口在“设置 → 网页与兼容性 → 界面：官方界面 / 原生界面”。
 
@@ -112,6 +117,17 @@
 - 服务未运行时原生页不显示；停止服务会清空原生页内存 Cookie；再次启动由新 `origin` 自动重新认证。
 - 原生页通过官方 `session/prompt`/`session/cancel` 发送与停止，附件走官方上传/引用；不直接写 `userdata/dsh`。审批只回答官方已下发的 `approval/request`，不主动创建审批。
 - “记住本次运行”不是官方持久授权：只在内存中按 `sessionId + toolName + 风险等级` 复用，关闭原生页/服务停止即清空；高风险与不同工具不会被低风险记忆自动放行。
+
+## 4.1 原生会话管理与设置（android_agent-54）
+
+原生会话管理页把官方 `session/*`、`workspace/archiveSession`、`permissionPresets/catalog` 与 `commands/execute "/permission <preset>"` 组合成一个独立界面；所有会话数据仍来自当前 DSH 实例，不建立第二套会话库。
+
+- 列表：首次读取显示骨架加载态；读取失败且无旧数据时显示可重试错误态；有旧数据时保留列表并提示刷新失败。搜索对标题/会话 ID 即时过滤，消息内容搜索仍需显式点击搜索图标。未读与置顶都是本机偏好：未读按本机最后查看的 `updatedAt` 计算，置顶只改变本页顺序并保存在应用私有偏好中，不写回官方会话。运行中标识来自官方 `running` 字段。
+- 刷新：已有列表时使用下拉刷新，不再清空列表；首次读取才显示整页加载态。
+- 操作：新建、重命名、归档都有确认或明确的输入/后果说明；归档运行中会话会请求官方先停止当前回合、子代理、后台任务与提醒。官方当前没有会话硬删除端点，详情页只展示“删除会话（官方接口不支持）”，不提供假按钮；归档也没有本页撤销按钮。
+- 模型与推理强度：展示官方模型目录、当前选择、模型默认推理强度和每个模型的强度选项；切换失败保留原选择并在面板内显示中文原因（如“所选模型不可用”）。
+- 权限模式：标准预设使用人话说明，并同时展示官方说明；`custom` 只展示、不能切换。`danger-full-access` 需要二次确认对话框、逐条风险说明和勾选确认后才提交，Tanuki 不会自动切换。
+- 设置：新增「外观与语言」入口。主题可选跟随系统/浅色/深色并持久化，只影响 Tanuki Compose 界面；官方 DSH 网页主题仍由 DSH 控制。语言如实显示“仅简体中文”，不提供未实现的切换开关。通知与存储沿用真实能力：聊天通知受系统权限和用户开关约束，存储入口读取真实容量/目录占用。
 
 ## 5. 安全边界
 

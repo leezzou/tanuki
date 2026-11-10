@@ -114,6 +114,8 @@ data class TanukiUiModel(
     val earlyStart: Boolean = true,
     /** 用户偏好；默认官方界面。 */
     val nativeDshPreferred: Boolean = false,
+    /** 原生界面主题；只影响 Tanuki Compose 界面，不改官方网页。 */
+    val themeMode: TanukiThemeMode = TanukiThemeMode.SYSTEM,
     /** 原生接口不可用时的回退原因；为空表示未回退。 */
     val nativeDshFallback: String? = null)
 
@@ -171,6 +173,7 @@ data class TanukiUiCallbacks(
     val toggleChatNotifications: (Boolean) -> Unit = {},
     val toggleNativeDsh: (Boolean) -> Unit = {},
     val retryNativeDsh: () -> Unit = {},
+    val setThemeMode: (TanukiThemeMode) -> Unit = {},
     val cancelTransfer: (Long) -> Unit = {},
     /** 打开发送独立原生会话管理页；不改变官方/原生 DSH 页选择。 */
     val openSessionManager: () -> Unit = {}
@@ -636,6 +639,7 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     val s = model.snapshot
     if (section == null) {
         val categories = listOf(
+            "外观与语言" to "原生界面主题、语言与显示能力",
             "应用更新" to "Tanuki ${model.versionName} · 检查、下载与覆盖安装",
             "存储与空间" to "工作区容量、可用空间与目录占用",
             "项目与备份" to "文件导入、项目导出与私有快照",
@@ -658,6 +662,10 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
                 if (index != categories.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
             } }
         }
+        return
+    }
+    if (section == "外观与语言") {
+        AppearanceSettings(model, c, select)
         return
     }
     if (section == "应用更新") {
@@ -689,23 +697,26 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
             Caption("私有快照只保存在应用内，卸载即丢失。导出 ZIP 前请检查源文件中的敏感内容。")
         }
     }
-    if (section == "运行与后台") SettingsGroup("运行与后台") {
-        ToggleRow("DSH 聊天通知", model.chatNotifications.permission.userEnabled, c.toggleChatNotifications)
-        Caption("回合完成、等待确认、错误或权限请求时提醒；只在对应会话不可见时发送，正文不含会话内容。")
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ActionRow("聊天通知权限与系统入口", model.chatNotifications.summaryText(), onClick = c.chatNotifications)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ActionRow("更新通知权限", "后台发现新版本时提示；手动检查时申请", onClick = c.notifications)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ToggleRow("启动应用时自动运行 DSH", model.earlyStart, c.toggleEarlyStart)
-        Caption("只自动运行上次正常停止的实例；启动中、运行中、安装中或上次任务中断时不会自动启动，仍可手动运行。")
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        DeviceConditionSettings(model.deviceCondition, c)
-        TanukiDetails("后台运行说明") {
-            Caption("关闭自动运行后，服务只在你主动点击“启动 DSH”时运行；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
-            Caption("部分厂商系统还需要在系统的通知、电池或自启动设置中允许 Tanuki，否则后台提醒可能被延迟或拦截。")
+    if (section == "运行与后台") {
+        SettingsGroup("通知") {
+            ToggleRow("DSH 聊天通知", model.chatNotifications.permission.userEnabled, c.toggleChatNotifications)
+            Caption("回合完成、等待确认、错误或权限请求时提醒；只在对应会话不可见时发送，正文不含会话内容。")
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ActionRow("聊天通知权限与系统入口", model.chatNotifications.summaryText(), onClick = c.chatNotifications)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ActionRow("更新通知权限", "后台发现新版本时提示；手动检查时申请", onClick = c.notifications)
+        }
+        SettingsGroup("后台与启动") {
+            ToggleRow("启动应用时自动运行 DSH", model.earlyStart, c.toggleEarlyStart)
+            Caption("只自动运行上次正常停止的实例；启动中、运行中、安装中或上次任务中断时不会自动启动，仍可手动运行。")
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ActionRow("电池与应用设置", "管理后台与锁屏行为", onClick = c.appSettings)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            DeviceConditionSettings(model.deviceCondition, c)
+            TanukiDetails("后台运行说明") {
+                Caption("关闭自动运行后，服务只在你主动点击“启动 DSH”时运行；唤醒锁在运行期间自动续期，停止后释放。后台和息屏运行仍受系统限制。")
+                Caption("部分厂商系统还需要在系统的通知、电池或自启动设置中允许 Tanuki，否则后台提醒可能被延迟或拦截。")
+            }
         }
     }
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {
@@ -737,6 +748,49 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         ActionRow("许可与组件来源", "${model.versionName} · ARM64 · GPL-3.0-or-later", onClick = c.showNotices)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("清除下载缓存", "保留运行环境和项目", enabled = s.tanukiIdle) { c.command("CACHE") }
+    }
+}
+
+@Composable
+private fun AppearanceSettings(model: TanukiUiModel, c: TanukiUiCallbacks, select: (String) -> Unit) {
+    SettingsGroup("主题") {
+        TanukiThemeMode.entries.forEachIndexed { index, mode ->
+            Row(
+                Modifier.fillMaxWidth()
+                    .selectable(
+                        selected = model.themeMode == mode,
+                        role = Role.RadioButton,
+                        onClick = { c.setThemeMode(mode) }
+                    )
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(selected = model.themeMode == mode, onClick = null)
+                Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(mode.label, style = MaterialTheme.typography.labelLarge)
+                    Caption(
+                        when (mode) {
+                            TanukiThemeMode.SYSTEM -> "跟随系统深浅色，系统切换时自动更新。"
+                            TanukiThemeMode.LIGHT -> "始终使用浅色方案，不随系统切换。"
+                            TanukiThemeMode.DARK -> "始终使用深色方案，不随系统切换。"
+                        }
+                    )
+                }
+            }
+            if (index != TanukiThemeMode.entries.lastIndex) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+        Caption("主题只作用于 Tanuki 原生界面，并立即生效、重启后保留；官方 DSH 网页主题仍由 DSH 页面自身设置控制。")
+    }
+    SettingsGroup("语言") {
+        ReadOnlyRow("界面语言", "简体中文")
+        Caption("当前版本的原生界面只有简体中文，尚未接入语言切换，因此这里不提供可切换开关。官方 DSH 网页语言由 DSH 自身设置控制。")
+    }
+    SettingsGroup("其他常用设置") {
+        ActionRow("通知", "会话提醒、更新通知与系统权限") { select("运行与后台") }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ActionRow("存储占用", "工作区容量、可用空间与目录占用") { select("存储与空间") }
     }
 }
 
@@ -982,6 +1036,14 @@ private fun StopButton(c: TanukiUiCallbacks, enabled: Boolean) {
     TextButton(onClick = { c.command("STOP") }, enabled=enabled, modifier=Modifier.heightIn(min=48.dp),contentPadding = PaddingValues(horizontal = 12.dp)) {
         TanukiIcon(TanukiGlyph.Stop, "停止 DSH 服务", modifier = Modifier.size(17.dp))
         Spacer(Modifier.width(4.dp)); Text("停止")
+    }
+}
+
+@Composable
+private fun ReadOnlyRow(title: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

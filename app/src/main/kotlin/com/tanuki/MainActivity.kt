@@ -51,6 +51,8 @@ import com.tanuki.ui.DshSessionManagerActivity
 import com.tanuki.ui.SharedPreferencesDshDraftStore
 import com.tanuki.ui.WorkspaceFilesPage
 import com.tanuki.ui.TanukiTheme
+import com.tanuki.ui.TanukiThemeMode
+import com.tanuki.ui.TanukiThemePreference
 import com.tanuki.ui.TanukiUi
 import com.tanuki.ui.TanukiUiCallbacks
 import com.tanuki.ui.TanukiUiModel
@@ -97,6 +99,8 @@ class MainActivity : ComponentActivity() {
     private var browserOpenRequest by mutableIntStateOf(0)
     private var dshOpenRequest by mutableIntStateOf(0)
     private var pendingChatSession by mutableStateOf<String?>(null)
+    /** 原生界面的主题偏好；只影响 Compose 界面，不改官方 DSH 网页。 */
+    private var themeMode by mutableStateOf(TanukiThemeMode.SYSTEM)
     private var activityResumed = false
     private var dshTabVisible = false
     private val overlayPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -331,8 +335,9 @@ class MainActivity : ComponentActivity() {
                     .onFailure { withContext(Dispatchers.Main) { browserUnavailable = "Agent 连接准备失败，普通浏览仍可用；请检查同名 Skill 或重新打开应用。" } }
             }
         }.onFailure { browserUnavailable = "受控浏览器需要支持独立资料的新版 WebView，请从设置更新内核。" }
+        themeMode = TanukiThemePreference.load(this)
         setContent {
-            TanukiTheme {
+            TanukiTheme(themeMode) {
                 val s by manager.state.collectAsState()
                 val versions by updates.releases.collectAsState()
                 val components by manager.components.state.collectAsState()
@@ -441,7 +446,7 @@ class MainActivity : ComponentActivity() {
                         delay(5_000)
                     }
                 }
-                val dark = isSystemInDarkTheme()
+                val dark = themeMode.isDark(isSystemInDarkTheme())
                 val colors = MaterialTheme.colorScheme
                 // Pointer/scroll/progress updates in the browser must not recompose DSH.
                 val browserAttention = remember(agentBrowser) {
@@ -486,6 +491,7 @@ class MainActivity : ComponentActivity() {
                         cookieReady=manager.cookieReady(),
                         chatNotifications=chatStatus,
                         nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,
+                        themeMode=themeMode,
                         deviceCondition=deviceCondition),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
@@ -587,6 +593,10 @@ class MainActivity : ComponentActivity() {
                             (application as TanukiApp).chatNotifications.refresh()
                         },
                         toggleNativeDsh = ::setNativePreference,
+                        setThemeMode = { mode ->
+                            themeMode = mode
+                            TanukiThemePreference.save(this@MainActivity, mode)
+                        },
                         openSessionManager = { startActivity(DshSessionManagerActivity.intent(this@MainActivity)) },
                         retryNativeDsh = {
                             nativeFallback = null
