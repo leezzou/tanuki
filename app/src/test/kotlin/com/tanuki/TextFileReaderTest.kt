@@ -48,6 +48,71 @@ class TextFileReaderTest {
         } finally { Files.delete(file) }
     }
 
+    @Test fun stopsExactlyAtPageAndFileSizeBoundaries() {
+        val file = Files.createTempFile("text-size", ".txt")
+        try {
+            // 恰好一页：不应提前截断，也不应多读一页。
+            Files.write(file, "a".repeat(TextFileReader.PAGE_BYTES).toByteArray())
+            val exact = TextFileReader.read(file)
+            assertEquals(TextFileReader.PAGE_BYTES.toLong(), exact.nextOffset)
+            assertFalse("恰好一页不应再提示有下一页", exact.hasMore)
+
+            // 一页多 1 字节：第一页读完仍有下一页，第二页只有一个字符。
+            Files.write(file, "a".repeat(TextFileReader.PAGE_BYTES + 1).toByteArray())
+            val first = TextFileReader.read(file)
+            assertEquals(TextFileReader.PAGE_BYTES.toLong(), first.nextOffset)
+            assertTrue(first.hasMore)
+            val second = TextFileReader.read(file, first.nextOffset)
+            assertEquals("a", second.text)
+            assertEquals(TextFileReader.PAGE_BYTES + 1L, second.totalBytes)
+            assertFalse(second.hasMore)
+
+            // 空文件：一页空文本，没有后续。
+            Files.write(file, byteArrayOf())
+            val empty = TextFileReader.read(file)
+            assertEquals("", empty.text)
+            assertEquals(0L, empty.nextOffset)
+            assertEquals(0L, empty.totalBytes)
+            assertFalse(empty.hasMore)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun doesNotSplitMultiByteCharacterAtPageBoundary() {
+        val file = Files.createTempFile("text-boundary", ".txt")
+        try {
+            // 3 字节汉字正好跨越 64 KiB 边界，第一页必须停在完整字符之后。
+            val original = "a".repeat(TextFileReader.PAGE_BYTES - 1) + "中"
+            Files.write(file, original.toByteArray())
+            val first = TextFileReader.read(file)
+            assertEquals(TextFileReader.PAGE_BYTES - 1L, first.nextOffset)
+            assertFalse(first.text.contains('\ufffd'))
+            assertTrue(first.hasMore)
+            val second = TextFileReader.read(file, first.nextOffset)
+            assertEquals("中", second.text)
+            assertEquals(original, first.text + second.text)
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun rejectsIncompleteCharacterAtEndAndSupportsLatin1Explicitly() {
+        val file = Files.createTempFile("text-encoding-edge", ".txt")
+        try {
+            // UTF-16LE 末尾只剩半个字符：必须报错而不是静默替换。
+            Files.write(file, "a".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0x41))
+            try { TextFileReader.read(file, encoding = "UTF-16LE"); fail("不完整字符应报错") }
+            catch (_: java.io.IOException) { }
+
+            // ISO-8859-1 是显式单选，单个高位字节应正常解码。
+            Files.write(file, byteArrayOf(0x63, 0x61, 0x66, 0xe9.toByte()))
+            val latin1 = TextFileReader.read(file, encoding = "ISO-8859-1")
+            assertEquals("café", latin1.text)
+            assertEquals("ISO-8859-1", latin1.encoding)
+
+            // 未知编码名直接拒绝，不能落回默认编码。
+            try { TextFileReader.read(file, encoding = "NOT-A-CHARSET"); fail("未知编码应拒绝") }
+            catch (_: IllegalArgumentException) { }
+        } finally { Files.delete(file) }
+    }
+
     @Test fun rejectsBinaryAndReportsMalformedEncodingWithoutSilentlyReplacing() {
         val file = Files.createTempFile("text-invalid", ".txt")
         try {

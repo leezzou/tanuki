@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-45（AO worker）
 - 时间：2026-11-10 11:39–14:00 CST
-- 状态：实现与 JVM/lint 验证完成；设备未验证；PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；未合并、未发布
+- 状态：实现与 JVM/lint 验证完成；已合入 `main=533eff4`（含 PR #34 文件查看器格式扩展）；设备未验证；PR [#41](https://github.com/leezzou/tanuki/pull/41) 待审；未合并、未发布
 - 前一记录：[原生界面与官方界面切换](20261109-1829-native-ui-switch.md)
 
 ## 用户目标与范围
@@ -22,8 +22,12 @@
 - 已实现：审批协议/回答、WebSocket 审批通道、工具时间线/卡片、审批面板、控制器生命周期、MainActivity 接线、文档与回归。
 - 已验证：`compileModernDebugKotlin`、完整 `testModernDebugUnitTest`、`lintModernDebug`、`assembleModernDebug` 均通过；完整 JVM 结果见下。最终复核：569 tests / 0 failures / 0 errors / 0 skipped，lint 0 errors / 94 warnings / 1 hint，assemble BUILD SUCCESSFUL（未安装）。
 - 待验证：真实设备/模拟器 UI、真实 PRoot DSH `/connect`/WebSocket/审批回答、远程 SSH 隧道、安全模式 rescue、通知点击过滤、assemble/仪器/真机。
-- 当前目标包名：`com.tanuki.modern`（debug）；分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`；无运行中安装/设备任务。
+- 当前目标包名：`com.tanuki.modern`（debug）；分支 `ao/tool-approval/root`，基线 `origin/main=0555c3c`，已合入 `main=533eff4`；无运行中安装/设备任务。
 - 关键事实：官方 DSH `0.2.1-rc.5` 审批是 Agent-scoped waterfall，经 `/api/remote.mux` `$events` 下发；回答走 `POST /api/$events/result`，outcome 仅 `allowed-once`/`rejected`/`cancelled`/`unavailable`。工具卡片来自 `session/page` 的 `tool/call`、`tool/result` 与 `meta.diffs`。
+
+## 合并说明
+
+- 2026-11-10 合入 `origin/main=533eff4`（PR #34 文件查看器格式扩展）。代码无重叠；仅 `docs/handoffs/CURRENT.json` 冲突，已保留本切片为当前交接、PR #34 为上一记录，并刷新交接印章。合并后需按最终 head 重跑 CI。
 
 ## 本次改动
 
