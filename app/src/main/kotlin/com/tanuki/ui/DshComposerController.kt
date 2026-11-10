@@ -130,7 +130,9 @@ class DshComposerController(
     private val onSent: (String) -> Unit = {},
     private val timeZoneProvider: () -> String? = { TimeZone.getDefault().id },
     /** accepted 后等待官方 idle 的确认窗口；超时只提示仍在收尾，不伪造已停止。 */
-    private val stopConfirmTimeoutMillis: Long = 4_000L
+    private val stopConfirmTimeoutMillis: Long = 4_000L,
+    /** 运行态兜底窗口；超过该时长没有新的 running/stream 事件就恢复发送入口。 */
+    private val runningStaleTimeoutMillis: Long = 30_000L
 ) {
     private val _state = MutableStateFlow(DshComposerState())
     val state: StateFlow<DshComposerState> = _state.asStateFlow()
@@ -147,6 +149,7 @@ class DshComposerController(
     private var sendJob: Job? = null
     private var stopJob: Job? = null
     private var stopTimeoutJob: Job? = null
+    private var runningWatchdogJob: Job? = null
     /** 上传串行锁：取消后立即重启 worker 时，旧请求必须结束后新请求才能开始。 */
     private val uploadLock = Mutex()
 
@@ -163,6 +166,7 @@ class DshComposerController(
         sendJob?.cancel()
         stopJob?.cancel()
         stopTimeoutJob?.cancel()
+        runningWatchdogJob?.cancel()
         _state.value = DshComposerState(
             sessionId = normalized,
             text = normalized?.let(drafts::read).orEmpty().take(DshComposerProtocol.MAX_TEXT_CHARS)
@@ -473,6 +477,7 @@ class DshComposerController(
                         notice = if (keptEdits) "已发送；发送期间的新编辑已保留" else "已发送"
                     )
                 }
+                if (_state.value.generationRunning) scheduleRunningWatchdog()
                 onSent(sessionId)
             }.onFailure { error ->
                 // 失败保留文本与附件，界面显示“重发”；用户可直接再次发送。
@@ -493,14 +498,19 @@ class DshComposerController(
     fun setGenerationRunning(running: Boolean) {
         generationStateBound = true
         officialStateVersion++
-        _state.update { state ->
-            if (running) {
+        if (running) {
+            _state.update { state ->
                 // 官方确认新回合运行：旧的“已停止”不再适用；仍在收尾的停止请求保留。
                 state.copy(
                     generationRunning = true,
                     stopOutcome = if (state.stopOutcome == DshStopOutcome.STOPPED) null else state.stopOutcome
                 )
-            } else {
+            }
+            // 每个 running/stream 事件都重置兜底窗口；长时间无事件会自动恢复发送。
+            scheduleRunningWatchdog()
+        } else {
+            runningWatchdogJob?.cancel()
+            _state.update { state ->
                 stopTimeoutJob?.cancel()
                 val awaitingStop = state.stopping || state.stopOutcome == DshStopOutcome.REQUESTED
                 if (!awaitingStop && !state.generationRunning) return@update state
@@ -597,6 +607,30 @@ class DshComposerController(
         }
     }
 
+    /**
+     * 运行态兜底：一段时间内没有任何新的 running/stream 事件时，恢复发送入口。
+     * 这避免页面忘记接线或 live 事件中断后，发送键被永久替换成停止键。
+     */
+    private fun scheduleRunningWatchdog() {
+        runningWatchdogJob?.cancel()
+        val sessionId = _state.value.sessionId ?: return
+        val requestGeneration = generation
+        val versionAtSchedule = officialStateVersion
+        runningWatchdogJob = scope.launch {
+            delay(runningStaleTimeoutMillis.coerceAtLeast(1L))
+            if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
+            _state.update { state ->
+                if (state.generationRunning && officialStateVersion == versionAtSchedule) {
+                    state.copy(
+                        generationRunning = false,
+                        stopping = false,
+                        notice = "未收到运行事件，已恢复发送"
+                    )
+                } else state
+            }
+        }
+    }
+
     /** accepted 后若官方迟迟未给 idle，超时只降级提示并重新开放停止入口，不宣称已停止。 */
     private fun scheduleStopTimeout(sessionId: String, requestGeneration: Long) {
         stopTimeoutJob?.cancel()
@@ -637,6 +671,7 @@ class DshComposerController(
         sendJob?.cancel()
         stopJob?.cancel()
         stopTimeoutJob?.cancel()
+        runningWatchdogJob?.cancel()
         client.reset()
         _state.value = DshComposerState()
     }

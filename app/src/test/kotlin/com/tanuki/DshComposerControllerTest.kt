@@ -92,14 +92,16 @@ class DshComposerControllerTest {
         remote: FakeRemote,
         store: MemoryDshDraftStore = MemoryDshDraftStore(),
         onSent: (String) -> Unit = {},
-        stopConfirmTimeoutMillis: Long = 4_000L
+        stopConfirmTimeoutMillis: Long = 4_000L,
+        runningStaleTimeoutMillis: Long = 30_000L
     ): DshComposerController = DshComposerController(
         client = DshComposerClient(remote),
         drafts = store,
         scope = CoroutineScope(Dispatchers.Unconfined),
         onSent = onSent,
         timeZoneProvider = { "Asia/Shanghai" },
-        stopConfirmTimeoutMillis = stopConfirmTimeoutMillis
+        stopConfirmTimeoutMillis = stopConfirmTimeoutMillis,
+        runningStaleTimeoutMillis = runningStaleTimeoutMillis
     )
 
     @Test fun draftIsKeptPerSessionAndFlushedOnSwitch() {
@@ -514,6 +516,35 @@ class DshComposerControllerTest {
         controller.send()
         awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
         assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+        assertFalse(controller.state.value.generationRunning)
+    }
+
+    @Test fun runningWatchdogRestoresSendAfterNoEvents() {
+        val remote = FakeRemote()
+        val controller = controller(remote, runningStaleTimeoutMillis = 40)
+        controller.setSession("s1")
+        controller.setGenerationRunning(false)
+        controller.updateText("A", 1)
+        controller.send()
+        awaitState(controller) { it.generationRunning }
+
+        // 接入了 running 但长时间没有新事件：兜底恢复发送，而不是永久停在停止态。
+        val recovered = awaitState(controller) {
+            !it.generationRunning && it.notice.orEmpty().contains("恢复发送")
+        }
+        controller.clearNotice()
+        controller.updateText("B", 1)
+        controller.send()
+        awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
+        assertEquals(2, remote.calls.count { it.method == "session/prompt" })
+    }
+
+    @Test fun runningStateTogglesWithOfficialEvents() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        controller.setGenerationRunning(true)
+        assertTrue(controller.state.value.generationRunning)
+        controller.setGenerationRunning(false)
         assertFalse(controller.state.value.generationRunning)
     }
 
