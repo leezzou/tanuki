@@ -54,6 +54,7 @@ enum class RemoteWizardField {
     PASSWORD,
     PRIVATE_KEY,
     PASSPHRASE,
+    PAIRING_CODE,
     NAME
 }
 
@@ -77,7 +78,9 @@ data class RemoteHostDraft(
     val passphrase: String = "",
     val remoteDshPort: String = "3080",
     val token: String = "",
-    val relayUri: String = ""
+    val relayUri: String = "",
+    /** 电脑端显示的 6 位核对码；与 [relayUri] 一起使用，单独输入无法完成配对。 */
+    val pairingCode: String = ""
 ) {
     override fun toString(): String =
         "RemoteHostDraft(host=$host, sshPort=$sshPort, user=$user, auth=$auth, " +
@@ -96,7 +99,8 @@ data class RemoteHostDraft(
             passphrase = config.passphrase,
             remoteDshPort = config.remoteDshPort.toString(),
             token = config.token,
-            relayUri = config.relay?.toUri().orEmpty()
+            relayUri = config.relay?.toUri().orEmpty(),
+            pairingCode = config.relay?.let(RemotePairingCode::of).orEmpty()
         )
     }
 }
@@ -247,7 +251,19 @@ object RemoteWizardValidation {
             return
         }
         if (method == RemoteConnectionMethod.PAIRING_LINK) {
-            relayLink(state.draft.relayUri)?.let { errors[RemoteWizardField.RELAY_LINK] = it }
+            val linkError = relayLink(state.draft.relayUri)
+            if (linkError != null) {
+                errors[RemoteWizardField.RELAY_LINK] = linkError
+            } else {
+                val pairing = RemoteRelayPairing.parse(state.draft.relayUri).getOrNull()
+                val codeError = RemotePairingCode.validate(state.draft.pairingCode)
+                if (codeError != null) {
+                    errors[RemoteWizardField.PAIRING_CODE] = codeError
+                } else if (pairing != null && !RemotePairingCode.matches(pairing, state.draft.pairingCode)) {
+                    errors[RemoteWizardField.PAIRING_CODE] =
+                        "配对码与配对链接不一致；请确认两者来自电脑上的同一次配对"
+                }
+            }
             val displayName = state.draft.host
             if (displayName.length > 128) {
                 errors[RemoteWizardField.HOST] = "远程主机展示名过长（上限 128 字符）"

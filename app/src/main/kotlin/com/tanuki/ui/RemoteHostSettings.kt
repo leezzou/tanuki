@@ -22,7 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -30,7 +32,9 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -50,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -60,6 +65,7 @@ import com.tanuki.runtime.RemoteConnectionStage
 import com.tanuki.runtime.RemoteFailureInfo
 import com.tanuki.runtime.RemoteHostConfig
 import com.tanuki.runtime.RemoteHostProfile
+import com.tanuki.runtime.RemoteHostStatus
 import com.tanuki.runtime.RemoteHostWizard
 import com.tanuki.runtime.RemotePhase
 import com.tanuki.runtime.RemoteStageStatus
@@ -690,6 +696,22 @@ private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.Re
             supportingText = state.fieldErrors[RemoteWizardField.RELAY_LINK]?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
+        OutlinedTextField(
+            value = state.draft.pairingCode,
+            onValueChange = { value -> session.machine.updateDraft { it.copy(pairingCode = value.filter(Char::isDigit).take(6)) } },
+            label = { Text("6 位配对码") },
+            placeholder = { Text("电脑启动日志里的 pairing code") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            isError = state.fieldErrors[RemoteWizardField.PAIRING_CODE] != null,
+            supportingText = state.fieldErrors[RemoteWizardField.PAIRING_CODE]?.let { message -> { Text(message) } },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "配对码由电脑端与配对链接一起显示，用于确认“链接 + 码”来自同一次配对；它不能单独恢复中继地址/房间/token，仍需上面的完整链接。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Text(
             "配对链接由远程主机端生成；手机只经 TLS 中继转发 SSH 密文，仍会独立校验 SSH 主机密钥。",
             style = MaterialTheme.typography.bodySmall,
@@ -1059,6 +1081,163 @@ private fun RemoteFact(name: String, value: String) {
         )
         SelectionContainer {
             Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+/** chip 的纯展示状态，便于 JVM 回归；不依赖 Compose。 */
+enum class RemoteHostChipTone { LOCAL, REMOTE, BUSY, ERROR, OFFLINE }
+
+data class RemoteHostChipState(val label: String, val tone: RemoteHostChipTone)
+
+object RemoteHostSwitchPresentation {
+    fun of(status: RemoteHostStatus, localRunning: Boolean): RemoteHostChipState = when (status.phase) {
+        RemotePhase.CONNECTING -> RemoteHostChipState("切换中…", RemoteHostChipTone.BUSY)
+        RemotePhase.REMOTE -> RemoteHostChipState("电脑·已连接", RemoteHostChipTone.REMOTE)
+        RemotePhase.FALLBACK -> RemoteHostChipState("本机·已回退", RemoteHostChipTone.ERROR)
+        RemotePhase.LOCAL -> if (localRunning) {
+            RemoteHostChipState("本机·运行中", RemoteHostChipTone.LOCAL)
+        } else {
+            RemoteHostChipState("本机·未运行", RemoteHostChipTone.OFFLINE)
+        }
+    }
+
+    /** 切换中禁止再次点击，避免并发切换；失败后可回到原主机或列表。 */
+    fun canSwitch(status: RemoteHostStatus): Boolean = status.phase != RemotePhase.CONNECTING
+}
+
+/**
+ * 供 DshNativePage 头部复用的主机切换 chip。
+ *
+ * 接线方只需要传入真实的 [status] 与本地服务是否运行；不要用“上次成功”的本地状态冒充。
+ */
+@Composable
+fun RemoteHostSwitchChip(
+    status: RemoteHostStatus,
+    localRunning: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val visual = RemoteHostSwitchPresentation.of(status, localRunning)
+    val dotColor = when (visual.tone) {
+        RemoteHostChipTone.LOCAL, RemoteHostChipTone.REMOTE -> MaterialTheme.colorScheme.primary
+        RemoteHostChipTone.BUSY -> MaterialTheme.colorScheme.tertiary
+        RemoteHostChipTone.ERROR -> MaterialTheme.colorScheme.error
+        RemoteHostChipTone.OFFLINE -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        enabled = RemoteHostSwitchPresentation.canSwitch(status),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(Modifier.size(8.dp).background(dotColor, CircleShape))
+            Text(visual.label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * 主机切换 sheet；由页面根部持有是否显示。
+ *
+ * 切换失败时保留 [RemoteHostStatus.error] 与“返回原主机”动作，不静默回到另一台主机。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RemoteHostSwitchSheet(
+    status: RemoteHostStatus,
+    localRunning: Boolean,
+    profiles: List<RemoteHostProfile>,
+    onDismiss: () -> Unit,
+    onSelectLocal: () -> Unit,
+    onSelectProfile: (RemoteHostProfile) -> Unit,
+    onRestorePrevious: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("切换主机", style = MaterialTheme.typography.titleLarge)
+            Text(
+                RemoteHostSwitchPresentation.of(status, localRunning).label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (status.phase == RemotePhase.CONNECTING) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("正在切换，请稍候…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            SwitchRow(
+                title = "本机",
+                subtitle = if (localRunning) "本地 DSH · 运行中" else "本地 DSH · 未运行",
+                selected = !status.connected,
+                enabled = RemoteHostSwitchPresentation.canSwitch(status),
+                onClick = onSelectLocal
+            )
+            profiles.forEach { profile ->
+                SwitchRow(
+                    title = profile.name,
+                    subtitle = profile.config.relay?.let { "TLS 中继 · ${it.endpointLabel()}" }
+                        ?: "${profile.config.user}@${profile.config.host}:${profile.config.sshPort}",
+                    selected = status.connected && status.host == profile.config.displayName(),
+                    enabled = RemoteHostSwitchPresentation.canSwitch(status),
+                    onClick = { onSelectProfile(profile) }
+                )
+            }
+            if (status.phase == RemotePhase.FALLBACK && status.error.isNotBlank()) {
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("切换失败，已回退本机", style = MaterialTheme.typography.titleSmall)
+                        Text(status.error, style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = onRestorePrevious) { Text("返回原主机") }
+                            TextButton(onClick = onDismiss) { Text("留在本机") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.large,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (selected) Text("当前", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

@@ -168,6 +168,7 @@ HTTP 200..399 或 401 → 存活
 | 项目 | 契约 |
 |---|---|
 | 配对链接 | `tanuki-relay://v1?relay=<host:port>&room=<16B base64url>&token=<32B base64url>&host=<16B hex>&pin=sha256-<32B base64url>`；`pin` 可省略但仅当系统 CA + 主机名校验可用；自签名中继必须提供 |
+| 6 位配对码 | `code = SHA-256(规范配对链接) 前 8 字节大端无符号整数 mod 1,000,000`，零填充 6 位；主机端显示/打印，手机端要求与链接一起输入并比对；它是人工核对码，不是新的传输秘密，单独输入不能恢复 relay/room/token |
 | 传输 | TLS 1.2/1.3；有 pin 时只信任该证书 DER 的 SHA-256 并检查有效期；无 pin 时使用系统 CA + 主机名；不存在忽略证书/明文回退开关 |
 | 帧 | `4 字节大端总长 | 1 字节类型 | 4 字节流号 | 负载`；总长 ≤64 KiB，控制帧负载 ≤1 KiB |
 | 类型 | `CONTROL=1`、`OPEN=2`、`OPEN_OK=3`、`DATA=4`、`CLOSE=5`、`PING=6`、`PONG=7`、`ERROR=8` |

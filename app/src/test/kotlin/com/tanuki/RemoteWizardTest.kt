@@ -15,8 +15,11 @@ import com.tanuki.runtime.RemoteHostKeyChangedException
 import com.tanuki.runtime.RemoteHostMachine
 import com.tanuki.runtime.RemoteHostProfileStore
 import com.tanuki.runtime.RemoteHostStorage
+import com.tanuki.runtime.RemoteHostStatus
+import com.tanuki.ui.RemoteHostSwitchPresentation
 import com.tanuki.runtime.RemoteHostWizard
 import com.tanuki.runtime.RemotePhase
+import com.tanuki.runtime.RemotePairingCode
 import com.tanuki.runtime.RemoteRelayPairing
 import com.tanuki.runtime.RemoteStageStatus
 import com.tanuki.runtime.RemoteWizardField
@@ -292,6 +295,73 @@ class RemoteWizardTest {
         assertNull(RemoteWizardValidation.relayLink(pairing.toUri()))
         assertNotNull(RemoteWizardValidation.relayLink(""))
         assertNotNull(RemoteWizardValidation.relayLink("https://example.test"))
+    }
+
+    @Test
+    fun pairingCodeMatchesSharedPythonVector() {
+        val uri = "tanuki-relay://v1?relay=relay.example.test%3A8443" +
+            "&room=ICEiIyQlJicoKSorLC0uLw" +
+            "&token=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" +
+            "&host=303132333435363738393a3b3c3d3e3f"
+        assertEquals("308002", RemotePairingCode.ofLink(uri))
+        assertNull(RemotePairingCode.validate("308002"))
+        assertNotNull(RemotePairingCode.validate("12345"))
+        assertNotNull(RemotePairingCode.validate("12345a"))
+    }
+
+    @Test
+    fun pairingRequiresMatchingSixDigitCode() {
+        val pairing = RemoteRelayPairing(
+            relayHost = "relay.example.test",
+            relayPort = 8443,
+            roomId = "ICEiIyQlJicoKSorLC0uLw",
+            token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            hostId = "303132333435363738393a3b3c3d3e3f"
+        )
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        wizard.next()
+        wizard.updateDraft { it.copy(relayUri = pairing.toUri(), user = "tanuki") }
+        assertFalse(wizard.next())
+        assertNotNull(wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE])
+
+        wizard.updateDraft { it.copy(pairingCode = "000000") }
+        assertFalse(wizard.next())
+        assertTrue(
+            wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE].orEmpty().contains("不一致")
+        )
+
+        wizard.updateDraft { it.copy(pairingCode = RemotePairingCode.of(pairing)) }
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
+    }
+
+    @Test
+    fun switchChipReflectsRealStatus() {
+        assertEquals(
+            "本机·运行中",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.LOCAL), localRunning = true).label
+        )
+        assertEquals(
+            "本机·未运行",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.LOCAL), localRunning = false).label
+        )
+        assertEquals(
+            "电脑·已连接",
+            RemoteHostSwitchPresentation.of(
+                RemoteHostStatus(phase = RemotePhase.REMOTE, host = "家里电脑"),
+                localRunning = true
+            ).label
+        )
+        assertEquals(
+            "切换中…",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.CONNECTING), localRunning = true).label
+        )
+        assertEquals(
+            "本机·已回退",
+            RemoteHostSwitchPresentation.of(RemoteHostStatus(phase = RemotePhase.FALLBACK), localRunning = true).label
+        )
+        assertFalse(RemoteHostSwitchPresentation.canSwitch(RemoteHostStatus(phase = RemotePhase.CONNECTING)))
     }
 
     @Test

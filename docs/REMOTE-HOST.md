@@ -22,7 +22,7 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 设置 → 远程主机 → “新增远程连接”进入六步向导；每一步都有示例、字段校验和可操作错误。向导只负责收集配置，真正的 SSH 连接仍由控制器执行。
 
 1. **选择连接方式**：直连 SSH（公网/域名/IPv6）、配对链接（双方无公网 IP，经 TLS 中继）或局域网（同一 Wi-Fi/热点）。页面会提示“连接远程会断开本地 DSH 页面，本地运行时继续在后台运行”。
-2. **填写主机与账号**：主机（IPv4/IPv6/域名，不允许协议、路径或端口）、SSH 端口（1-65535，默认 22）、用户名、远程 DSH 端口（默认 3080）和可选 token。配对模式改为粘贴 `tanuki-relay://` 链接，主机字段只作展示名。
+2. **填写主机与账号**：主机（IPv4/IPv6/域名，不允许协议、路径或端口）、SSH 端口（1-65535，默认 22）、用户名、远程 DSH 端口（默认 3080）和可选 token。配对模式改为粘贴 `tanuki-relay://` 链接并输入电脑显示的 6 位核对码；主机字段只作展示名。6 位码由链接派生，只用于人工核对，不能单独恢复中继地址/房间/token。
 3. **选择认证方式**：密码，或私钥文件（系统文件选择器，上限 64 KiB）与私钥口令；也可以粘贴 OpenSSH/PEM 私钥全文。当前支持 RSA/ECDSA，Ed25519 明确提示暂不支持。
 4. **核对主机指纹**：首次连接显示 `SHA256:` 指纹和远程核对命令；必须勾选“我已通过独立渠道核对”才能继续。未勾选或指纹不一致时不会信任、不会发送认证信息。已信任主机按 `host:sshPort`（中继为 `relay:<hostId>`）比对，变化直接拒绝。
 5. **测试连接**：按 TCP → SSH 握手 → 用户认证 → 端口转发 → DSH 探测依次显示进度。失败时停在实际阶段，给出中文原因、下一步建议和“重试”；主机密钥变化不提供直接重试。测试成功不保留隧道、不切换 origin。
@@ -50,8 +50,8 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 
 1. 在可访问的主机上运行中继：`relay.py --cert ... --key ...`；启动时打印 `relay_pin=sha256-...`（证书指纹，不是私钥）。
 2. 在远程 DSH 主机运行 agent：`host_agent.py --relay <host:port> --cert-pin <pin> --ssh-port 22`。agent 只向中继发起出站 TLS，并连接本机 `127.0.0.1:22`；不监听端口。
-3. agent 把 `tanuki-relay://v1?...` 配对链接写入 `~/.tanuki-relay/pairing.txt`（0600）。把该链接/二维码交给手机；链接含一次性 token，不要截图或公开转发。
-4. 手机设置 → 远程主机 → 配置，粘贴配对链接，填写 SSH 用户名/密码或私钥、远程 DSH 端口和可选 token；主机字段可留空（仅作展示名）。
+3. agent 把 `tanuki-relay://v1?...` 配对链接写入 `~/.tanuki-relay/pairing.txt`（0600），并在启动日志打印 `pairing code: XXXXXX`。把链接与 6 位码一起交给手机；链接含一次性 token，不要截图或公开转发。
+4. 手机设置 → 远程主机 → 新增远程连接 → 配对链接，粘贴链接并输入 6 位配对码，填写 SSH 用户名/密码或私钥、远程 DSH 端口和可选 token；主机字段可留空（仅作展示名）。
 5. 首次连接仍展示远程 SSH 主机密钥 `SHA256:` 指纹，确认后才发送认证信息；之后按 `relay:<hostId>` 比对。中继证书钉扎失败/主机密钥变化都会拒绝，不降级明文。
 6. 中继模式与直连模式共用同一个 loopback origin、Cookie 隔离、失败回退本地和“断开远程并切回本地”流程。
 
@@ -90,14 +90,15 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 | 向导状态机、字段校验、步骤/阶段状态 | `app/src/main/kotlin/com/tanuki/runtime/RemoteHostWizard.kt` |
 | 阶段化错误映射（原因 + 下一步 + 可重试） | `app/src/main/kotlin/com/tanuki/runtime/RemoteConnectionError.kt` |
 | 命名连接库（加密凭据、增删改） | `app/src/main/kotlin/com/tanuki/runtime/RemoteHostProfiles.kt` |
-| 设置页、六步向导、文件选择器、连接列表 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` |
+| 设置页、六步向导、文件选择器、连接列表、主机切换 chip/sheet | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` |
+| 6 位配对码（与 Python 主机端共享向量） | `app/src/main/kotlin/com/tanuki/runtime/RemotePairingCode.kt`、`scripts/remote-relay/protocol.py`、`host_agent.py` |
 | JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt`、`RemoteHostTest.kt`、`DshRemoteIsolationTest.kt`、`RemoteRelayTest.kt` |
 | Python 参考中继/主机端/自测 | `scripts/remote-relay/` |
 | 设备回归（仅编译，未运行） | `app/src/androidTest/kotlin/com/tanuki/DshCookieIsolationTest.kt`、`RemoteHostKeystoreTest.kt` |
 
 ## 6. 验证与未验证
 
-已执行（JVM）：本轮新增 `RemoteWizardTest` 30 项，覆盖六步状态机（不可跳步、返回保留草稿、指纹必须显式勾选、失败停在阶段、重试重置、主机密钥变化不可重试、阶段只前进）、host/端口/用户名/密码/私钥/口令/token/配对链接/名称校验、DNS/拒绝/超时/认证/转发/DSH/主机密钥变化的阶段映射与文案不泄露、命名连接新增/编辑/删除/活动标记/密文无明文、删除连接清理活动副本但保留隧道、失败重试绑定本次尝试配置、IPv6 向导配置可被下游再次校验、控制器测试连接全阶段完成且不切 origin、未知主机停在指纹、DSH 失败关闭隧道。既有 `RemoteHostTest`、`RemoteRelayTest`、`DshRemoteIsolationTest` 全部通过；完整 JVM 824 tests / 91 文件 / 0 失败，lint 0 errors。配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、HTTP 探测 200/302/401/500 与连接拒绝、Cookie 分区、活动端点认证/重试策略仍由既有回归覆盖。本轮完整结果见 PR #52 与交接记录；历史验证见 [测试报告](TEST-REPORT.md)。
+已执行（JVM）：本轮新增 `RemoteWizardTest` 33 项，覆盖六步状态机（不可跳步、返回保留草稿、指纹必须显式勾选、失败停在阶段、重试重置、主机密钥变化不可重试、阶段只前进）、host/端口/用户名/密码/私钥/口令/token/配对链接/名称校验、DNS/拒绝/超时/认证/转发/DSH/主机密钥变化的阶段映射与文案不泄露、命名连接新增/编辑/删除/活动标记/密文无明文、删除连接清理活动副本但保留隧道、失败重试绑定本次尝试配置、IPv6 向导配置可被下游再次校验、配对链接 + 6 位码校验与共享向量、主机 chip 状态映射、控制器测试连接全阶段完成且不切 origin、未知主机停在指纹、DSH 失败关闭隧道。既有 `RemoteHostTest`、`RemoteRelayTest`、`DshRemoteIsolationTest` 全部通过；完整 JVM 827 tests / 91 文件 / 0 失败，lint 0 errors。配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、HTTP 探测 200/302/401/500 与连接拒绝、Cookie 分区、活动端点认证/重试策略仍由既有回归覆盖。本轮完整结果见 PR #52 与交接记录；历史验证见 [测试报告](TEST-REPORT.md)。
 
 未验证：真实 Android 设备到真实 sshd/中继的端到端、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、真实公网中继/证书、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。新增 Cookie 隔离/Keystore 设备回归仅编译，未运行；设备/真实主机验收需要独立 QA 会话和明确目标。
 
@@ -106,5 +107,6 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 - WebRTC DataChannel/STUN/TURN 的 P2P 优化（复用现有配对/身份契约；TURN 仍需公网中继）。
 - Ed25519（评估 BouncyCastle 体积后引入）。
 - 远程 DSH 启停、多台远程主机同时连接；命名连接库已支持多份配置，但同一时间仍只有一个活动远程连接。
+- P1 相机扫码：CameraX + ZXing core（Apache-2.0），需另测权限拒绝降级与 APK 体积；P0 先用“链接 + 6 位码”。
 - 已建立 SSH 会话的断线透明恢复；当前只做控制握手退避与失败回退，不自动重放用户操作。
 - 中继生产化：每连接握手线程、限流、审计、TLS 证书自动轮换和高可用；参考实现不提供这些。

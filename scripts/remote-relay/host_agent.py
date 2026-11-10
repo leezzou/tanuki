@@ -274,12 +274,16 @@ def main() -> int:
 
     pairing_path = Path(args.pairing_out).expanduser() if args.pairing_out else state_dir / "pairing.txt"
     uri = p.build_pairing_uri(host, port, room, token, host_id, args.cert_pin)
+    code = p.pairing_code(uri)
     write_pairing(pairing_path, uri)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.info("pairing file written: %s", pairing_path)
+    # 6 位码只用于人工核对链接，和链接一起输入手机；单独输入无法恢复中继/房间/token。
+    logging.info("pairing code: %s (请输入到手机，并与配对链接一起使用)", code)
     logging.info("ssh target: %s:%s", args.ssh_host, args.ssh_port)
     if args.print_pairing:
         print(uri, flush=True)
+        print("pairing_code=" + code, flush=True)
 
     agent = HostAgent(args)
     try:
