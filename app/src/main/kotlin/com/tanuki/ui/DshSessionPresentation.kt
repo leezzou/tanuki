@@ -7,6 +7,18 @@ import com.tanuki.web.DshAdminSession
 import com.tanuki.web.DshModelCatalog
 import com.tanuki.web.DshModelSelection
 
+/** 主机连接过程/失败的可见反馈；error 为 true 时使用错误样式。 */
+data class DshHostFeedback(val message: String, val error: Boolean)
+
+object DshSessionHostFeedback {
+    fun forState(busy: Boolean, message: String, error: String): DshHostFeedback? = when {
+        error.isNotBlank() -> DshHostFeedback("远程主机连接失败：$error", true)
+        message.isNotBlank() -> DshHostFeedback("远程主机：$message", false)
+        busy -> DshHostFeedback("正在连接远程主机…", false)
+        else -> null
+    }
+}
+
 /** 会话管理页可切换的数据源主机；只描述展示状态，不持有连接或凭据。 */
 data class DshSessionHost(
     val id: String,

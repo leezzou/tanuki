@@ -120,6 +120,8 @@ fun DshSessionManagerPage(
     remote: Boolean = false,
     hosts: List<DshSessionHost> = emptyList(),
     hostBusy: Boolean = false,
+    hostMessage: String = "",
+    hostError: String = "",
     onSelectHost: (String) -> Unit = {}
 ) {
     val state by controller.state.collectAsState()
@@ -138,12 +140,15 @@ fun DshSessionManagerPage(
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable { mutableStateOf(listOf<String>()) }
     var batchArchiveConfirm by remember { mutableStateOf(false) }
+    var batchLimitWarning by remember { mutableStateOf(false) }
     var hostSheet by remember { mutableStateOf(false) }
+    var hostFeedbackDismissed by remember(hostMessage, hostError, hostBusy) { mutableStateOf(false) }
 
     val detailMode = runCatching { DshDetailMode.valueOf(detailModeName) }.getOrDefault(DshDetailMode.DETAIL)
     val detailTab = runCatching { DshDetailTab.valueOf(detailTabName) }.getOrDefault(DshDetailTab.OVERVIEW)
     val session = detailId?.let { id -> state.sessions.firstOrNull { it.id == id } }
     val currentHost = hosts.firstOrNull { it.active } ?: hosts.firstOrNull()
+    val hostFeedback = DshSessionHostFeedback.forState(hostBusy, hostMessage, hostError)
     // 过滤与排序只在输入/数据变化时计算；输入过程中列表保持旧顺序，不会闪空。
     val visibleSessions = remember(state.sessions, state.query, state.filter, state.unreadIds, state.pinnedIds) {
         state.visibleSessions
@@ -235,6 +240,11 @@ fun DshSessionManagerPage(
                 onContentSearch = controller::searchContent,
                 onFilter = controller::setFilter
             )
+            if (hostFeedback != null && !hostFeedbackDismissed) {
+                ManagerBanner(hostFeedback.message, error = hostFeedback.error) {
+                    hostFeedbackDismissed = true
+                }
+            }
             if (state.sessions.isNotEmpty()) {
                 state.loadError?.let { message ->
                     ManagerBanner("刷新失败，仍显示上次结果：$message", error = true, onClose = controller::clearMessages)
@@ -246,15 +256,19 @@ fun DshSessionManagerPage(
             state.notice?.let { message ->
                 ManagerBanner(message, error = false, onClose = controller::clearMessages)
             }
-            if (selectionMode) {
+            if (state.batchTotal > 0) {
+                BatchProgressBar(state.batchDone, state.batchTotal)
+            } else if (selectionMode) {
                 SelectionBar(
                     selectedCount = selectedIdSet.size,
                     runningCount = selectedSessions.count { it.running },
-                    busy = state.busy || state.batchTotal > 0,
-                    batchDone = state.batchDone,
-                    batchTotal = state.batchTotal,
+                    busy = state.busy,
                     onArchive = {
-                        if (selectedIdSet.isNotEmpty() && !state.busy) batchArchiveConfirm = true
+                        when {
+                            selectedIdSet.isEmpty() || state.busy -> Unit
+                            selectedIdSet.size > DshSessionManagerController.MAX_BATCH_ARCHIVE -> batchLimitWarning = true
+                            else -> batchArchiveConfirm = true
+                        }
                     },
                     onCancel = {
                         selectionMode = false
@@ -493,12 +507,29 @@ fun DshSessionManagerPage(
                 TextButton(
                     onClick = {
                         batchArchiveConfirm = false
-                        selectionMode = false
-                        selectedIds = emptyList()
-                        controller.archiveSessions(ids, stopRunning = true)
+                        // 只有控制器接受请求才清空选择；超限/只读等拒绝时保留选择。
+                        if (controller.archiveSessions(ids, stopRunning = true)) {
+                            selectionMode = false
+                            selectedIds = emptyList()
+                        }
                     },
-                    enabled = ids.isNotEmpty() && !state.busy
+                    enabled = ids.isNotEmpty() && ids.size <= DshSessionManagerController.MAX_BATCH_ARCHIVE && !state.busy
                 ) { Text(if (running > 0) "停止并归档" else "归档") }
+            }
+        )
+    }
+
+    if (batchLimitWarning) {
+        AlertDialog(
+            onDismissRequest = { batchLimitWarning = false },
+            title = { Text("一次最多归档 ${DshSessionManagerController.MAX_BATCH_ARCHIVE} 个会话") },
+            text = {
+                Text(
+                    "当前已选择 ${selectedIdSet.size} 个会话，超过单次上限。请取消部分选择后再归档；当前选择会保留，不会静默截断。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { batchLimitWarning = false }) { Text("知道了") }
             }
         )
     }
@@ -993,8 +1024,6 @@ private fun SelectionBar(
     selectedCount: Int,
     runningCount: Int,
     busy: Boolean,
-    batchDone: Int,
-    batchTotal: Int,
     onArchive: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -1019,14 +1048,30 @@ private fun SelectionBar(
                 }
                 TextButton(onClick = onCancel, enabled = !busy) { Text("取消") }
             }
-            if (batchTotal > 0) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("正在归档 $batchDone / $batchTotal", style = MaterialTheme.typography.labelSmall)
-            }
             Text(
                 "删除：官方无会话硬删除端点，暂不支持；归档只从列表移除，不删除项目文件。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+/** 批量归档进行中的独立进度条；不依赖多选模式，确认后仍持续显示到批次结束。 */
+@Composable
+private fun BatchProgressBar(done: Int, total: Int) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("正在批量归档", style = MaterialTheme.typography.labelLarge)
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(
+                "已完成 $done / $total；请保持页面打开，全部完成后会刷新列表。",
+                style = MaterialTheme.typography.labelSmall
             )
         }
     }
