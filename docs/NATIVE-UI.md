@@ -106,7 +106,7 @@
 - `:app:compileModernDebugKotlin -x buildNativeRuntime`：BUILD SUCCESSFUL。
 - 新增 `DshSessionAdminApiTest` 7 项：会话权限/模型 projection、搜索/模型/权限/Skills/命令解析、业务错误短码、命令 success 判定、本地合成服务器验证 11 个官方 method 与 Cookie 只发 `/api`、非法权限 preset 不发网络、404 不含 token。
 - 新增 `DshSessionManagerControllerTest` 14 项：列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 stopActivity、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、custom 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie。
-- 完整 `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，67 个结果文件、**556 tests / 0 failures / 0 errors / 0 skipped**。
+- 预合并完整 `:app:testModernDebugUnitTest -x buildNativeRuntime`：BUILD SUCCESSFUL，67 个结果文件、**556 tests / 0 failures / 0 errors / 0 skipped**；合并 `origin/main=533eff4` 后 **69 个结果文件、579 tests / 0 failures / 0 errors / 0 skipped**。
 - `:app:lintModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL，0 errors / 95 warnings / 1 hint。
 - `:app:assembleModernDebug -x buildNativeRuntime`：BUILD SUCCESSFUL（3m29s；未安装设备）。
 

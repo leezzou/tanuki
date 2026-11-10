@@ -22,6 +22,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `./gradlew :app:lintModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL，**0 errors / 95 warnings / 1 hint**。
   - `./gradlew :app:assembleModernDebug -x buildNativeRuntime` → BUILD SUCCESSFUL（3m29s，40 tasks；只验证打包与清单，未安装设备）。
 - 新增回归：`DshSessionAdminApiTest` 7 项（会话权限/模型 projection；搜索/模型/权限/Skills/命令解析；业务错误短码；命令 success 判定；本地合成服务器验证 `session/list|create|rename|search|modelCatalog|selectModel`、`permissionPresets/catalog`、`commands/execute|list`、`skills/list`、`workspace/archiveSession` 共 11 个 method 的参数与 Cookie 只发 `/api`；非法权限 preset 不发网络；404 不含 token）；`DshSessionManagerControllerTest` 14 项（列表/本机未读、标题/ID/运行/未读过滤、打开标记已读、新建+重命名、非法标题拒绝、运行中归档 `stopActivity`、安全模式全写拒绝、内容搜索与查询失效、完全权限二次确认、`custom` 拒绝、Skills/命令部分失败保留、模型/权限加载与选择、缺失目标不伪造会话、close 丢 Cookie）。
+- 合并 `origin/main=533eff4`（文件查看器 PR #34）后 `testModernDebugUnitTest` → BUILD SUCCESSFUL，**69 个结果文件、579 tests / 0 failures / 0 errors / 0 skipped**；`lintModernDebug` 与 `assembleModernDebug` 同次 BUILD SUCCESSFUL，lint 0 errors / 95 warnings / 1 hint。
 - 一次 `--rerun-tasks` 全量组合中 `NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 并发时序失败；该测试单独重跑与随后完整 JVM 重跑均通过（556/0/0/0），属既有并发 flake，本轮未修改该测试或下载代码。
 - 明确限制：`workspace/archiveSession` 的运行中停止由官方执行，本轮只用合成响应验证参数；官方 `0.2.1-rc.5` 无会话硬删除端点，归档恢复需要 `workspace/follow` WebSocket，未实现；未读是本机 `updatedAt` 比较，不是官方字段。
 - PR [#38](https://github.com/leezzou/tanuki/pull/38) 代码 head `1e40b33` 的 Host handoff 检查与 Android build/JVM/lint 均 pass；最终 head 以 PR 页面为准。
