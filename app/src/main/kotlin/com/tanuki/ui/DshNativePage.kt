@@ -211,7 +211,8 @@ private fun MessageList(
             }
     }
     LaunchedEffect(following, totalItems, state.streamingText.length, timeline.size) {
-        if (following && totalItems > 0) listState.scrollToBottom()
+        // 用户手势进行中不抢滚动；手势结束后由 followAfterDrag 决定是否恢复。
+        if (following && totalItems > 0 && !listState.isScrollInProgress) listState.scrollToBottom()
     }
 
     Box(Modifier.fillMaxSize()) {

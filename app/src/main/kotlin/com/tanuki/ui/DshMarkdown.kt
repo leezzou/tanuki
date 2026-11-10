@@ -684,8 +684,9 @@ private fun DshList(block: DshMarkdownBlock.ListBlock, codeBackground: Color, on
             Row(Modifier.padding(start = (item.depth * 16).dp)) {
                 Text(
                     marker,
-                    Modifier.width(28.dp),
+                    Modifier.width(32.dp),
                     style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
                     fontWeight = FontWeight.SemiBold
                 )
                 SelectionContainer {
