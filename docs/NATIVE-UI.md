@@ -2,6 +2,8 @@
 
 本文件记录“官方界面 / 原生界面”开关的接口发现、已实现最小切片、回退与安全边界。默认始终是官方界面；原生界面是可切换的交互层，复用官方 Typert Remote 读写会话；不修改官方 npm 包、DSH 数据目录、会话内容或 WebView 安全策略。
 
+导航、适配、三态、无障碍与冷启动的通用组件和接线清单见 [原生界面导航、适配与可用性打磨](NATIVE-UI-POLISH.md)。
+
 ## 1. 结论
 
 官方 DSH `0.2.1-rc.5` 没有 REST 会话列表端点，也没有 SSE。会话、消息、发送与审批都通过 **Typert Remote** 暴露：
@@ -66,8 +68,11 @@
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 断开重连/独立 Peer |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析 |
 | `app/src/main/kotlin/com/tanuki/ui/DshApprovalController.kt` | 审批状态机、连接生命周期、允许/拒绝/记住本次运行 |
-| `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：工具名、参数、风险、允许/拒绝/记住 |
-| `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：状态、命令、diff、文件变更、折叠输出 |
+| `app/src/main/kotlin/com/tanuki/ui/DshApprovalPanel.kt` | 审批卡片：来源、工具名、风险等级、参数摘要/长参数折叠、逐条编号、高风险二次确认、允许/拒绝/记住；记忆列表可逐条撤销/全部清除 |
+| `app/src/main/kotlin/com/tanuki/ui/DshApprovalSheet.kt` | 审批入口窄条 `DshApprovalEntryBar` 与底部抽屉 `DshApprovalSheet`；窄条只显示数量和风险，不把待审批卡片散落在消息流 |
+| `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：运行/成功/失败、耗时、命令与 cwd、文件变更、增删行配色 diff、折叠输出与复制 |
+| `app/src/main/kotlin/com/tanuki/web/DshPlan.kt` | 计划步骤/审阅状态模型；保守解析计划事件与计划工具调用，返回计划与需从普通工具卡剔除的 callId |
+| `app/src/main/kotlin/com/tanuki/ui/DshPlanCard.kt` | 计划卡片：多步骤状态、进度条、当前步骤、待审阅时“同意执行/要求修改”；不复用普通消息气泡 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 42 已挂载 `DshApprovalPanel`、`DshToolCard`、输入栏与 Markdown 消息 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | **android_agent-44 独占**；设置开关、DSH 页原生/官方切换、回退提示与“重试” |
 | `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 42 已创建/释放审批控制器，按服务状态启停并传入页面 |
@@ -98,9 +103,68 @@
    - 复用同一 `endpointProvider` 创建 `DshApprovalController(endpointProvider, lifecycleScope, toolLookup = { sessionId, callId -> ... })`；`toolLookup` 必须按 `sessionId+callId` 查询，不能用当前选中会话的旧快照。
    - 在原生模式 + 服务 `RUNNING` 时 `start()`；停止/切官方/页面销毁时 `close()`；origin 变化时重建。
    - 收集 `approvalController.state`，把状态与回调传给 `DshNativePage`。
-5. 通知点击：42 切换 `selectedId` 后，审批面板自然按当前会话过滤；无需新增通知协议。
+5. 通知点击：42 切换 `selectedId` 后，审批入口窄条/抽屉按当前会话过滤；无需新增通知协议。
 
 临时 WebSocket：`DshWebSocketClient.kt` 只作为 `DshApprovalTransport` 的默认实现保留，待 42 的 `DshWebSocket.kt`/transport 可用后替换；不要再扩展它。
+
+### 53 本轮组件与接线 hook（DshNativePage/MainActivity 由集成方接线）
+
+本轮只改审批/工具/计划组件，不修改 `DshNativePage.kt` 与 `MainActivity.kt`。以下 hook 保持源兼容：既有命名参数调用无需改动即可编译；集成方补传新增可选参数即可启用增强。
+
+1. 审批入口：窄条 + 底部抽屉（推荐接线）
+   - 输入框上方只放 `DshApprovalEntryBar`，显示“⚑ 待审批 N 项”/高风险数量/记忆数量；点击打开 `DshApprovalSheet`。不要把 `DshApprovalPanel` 直接放进消息流。
+   - 页面状态示例：
+     ```kotlin
+     var showApprovalSheet by rememberSaveable { mutableStateOf(false) }
+     DshApprovalEntryBar(
+         state = approvalState,
+         sessionId = state.selectedId,
+         onClick = { showApprovalSheet = true },
+         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+     )
+     DshApprovalSheet(
+         visible = showApprovalSheet,
+         onDismiss = { showApprovalSheet = false },
+         state = approvalState,
+         sessionId = state.selectedId,
+         sessionTitle = state.selectedSession?.displayTitle,
+         onAnswer = { eventId, outcome, remember -> approvalController.answer(eventId, outcome, remember) },
+         onRetry = approvalController::retry,
+         onClearRemembered = approvalController::clearRemembered,
+         onForgetRemembered = approvalController::forgetRemembered,
+         onDismissNotice = approvalController::dismissNotice
+     )
+     ```
+   - 抽屉逐条显示审批卡；没有“一键全允许”。高风险“允许一次”需卡片内二次确认；拒绝立即生效。批量按“第 i/N 条”编号，勾选“记住”只作用于本卡片本次回答。
+   - `DshApprovalPanel` 保留为抽屉内容和旧调用兼容；其新可选参数：`sessionTitle`、`onForgetRemembered`、`onDismissNotice`。
+   - `DshApprovalController.forgetRemembered(choice)` 立即撤销单条记忆；之后相同会话/工具/风险的请求不会再自动回答。已经回传官方的结果不能撤回，也不伪造撤回。
+   - `DshApprovalState.errorRetryable` 表示当前错误可重试；断线/回答失败始终保留 `pending`，界面显示中文原因和“重试连接”。服务地址变化导致旧审批无法回答时，`notice` 明确告知失效数量，不静默丢弃；`onDismissNotice` 可关闭提示。
+   - 记忆的独立入口：`DshApprovalEntryBar` 在无待审批但有记忆时显示“审批记忆 N 项”，点击进入同一抽屉逐条撤销/全部清除。
+
+2. 工具卡片 `DshToolCard`
+   - 签名不变。`DshToolItem` 新增只读字段：`startedAt`、`finishedAt`、`durationMs`。
+   - `DshToolTimeline.parse` 已用 `tool/call.time` 与 `tool/result.time` 填充；只显示真实耗时，进行中/孤儿结果显示“耗时未知”，不伪造。
+   - 输出/错误复制、diff 增删行背景色和耗时均由组件内部处理；实时 follow 分批到达时，51 必须用 `DshToolMerge.merge(current, incoming)` 替换 `DshNativeController` 的私有 `mergeTools`，否则终态会丢失 `finishedAt`、完成后仍显示“耗时未知”。该 helper 同时保留“迟到 RUNNING 不回退终态”的规则。
+
+3. 计划审阅 `DshPlanCard` + `DshPlanParser`
+   - `DshPlanParser.extract(records)` 返回 `DshPlanExtraction(plans, planCallIds)`，`latest` 为最新计划。
+   - 集成方在历史页/follow 快照中：
+     - 把 `planCallIds` 从 `DshToolTimeline.parse(records)` 的结果中剔除，避免计划同时显示为普通工具卡；
+     - 不要从普通消息文本中提取/渲染计划；
+     - 把 `latest` 放进页面状态（例如 `DshNativeState.plans`），在 `LazyColumn` 中渲染 `DshPlanCard`。
+   - 建议调用：
+     ```kotlin
+     DshPlanCard(
+         plan = plan,
+         submitting = planReviewSubmitting,
+         onApprove = { requestPlanReview(plan.id, approve = true) },
+         onRequestChanges = { requestPlanReview(plan.id, approve = false) }
+     )
+     ```
+   - `DshPlanCard` 只在 `plan.review == AWAITING` 时显示“同意执行/要求修改”；不自动批准。审阅回答的官方 RPC/事件字段仍由集成方按真实协议接线，本轮没有新增 RPC。
+   - 解析支持计划事件（`plan/update`、`plan/review`、`plan`、`todo/update`、`todos/update`）与计划工具调用（`update_plan`、`plan`、`set_plan`、`plan_update`、`todo_write`、`write_todo`、`todowrite`、`update_todos`）。
+   - 若官方计划审阅是 `user-questions/request` 或独立 waterfall，集成方可调用 `DshPlanParser.fromReviewPayload(seq, id, request)`，默认得到 `review=AWAITING`；解析失败时回退官方界面，不猜计划内容。
+   - 真实字段以合成回归为准，未在真实 PRoot DSH 验证。
 
 ### 切换语义
 
