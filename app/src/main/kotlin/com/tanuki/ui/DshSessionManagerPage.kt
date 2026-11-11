@@ -223,7 +223,7 @@ fun DshSessionManagerPage(
             if (running && !state.readOnly) {
                 // 主操作统一为胶囊按钮，不再混用 ExtendedFloatingActionButton。
                 TanukiPillButton(
-                    text = "新建会话",
+                    text = "新建对话",
                     onClick = {
                         createTitle = ""
                         controller.clearMessages()
@@ -298,8 +298,8 @@ fun DshSessionManagerPage(
                 TanukiStateCrossfade(target = phase) { currentPhase ->
                     when (currentPhase) {
                         ManagerPhase.STOPPED -> ManagerEmpty(
-                            title = "DSH 未运行",
-                            detail = "会话管理复用当前 DSH 实例的 loopback 接口。请先在应用内启动 DSH，再回到这里读取官方会话。",
+                            title = "助手未运行",
+                            detail = "请返回工作台启动助手，再来查看对话。",
                             action = null
                         )
                         ManagerPhase.LOADING -> ManagerLoading()
@@ -308,16 +308,16 @@ fun DshSessionManagerPage(
                             onRetry = controller::refresh
                         )
                         ManagerPhase.EMPTY -> ManagerEmpty(
-                            title = if (state.hasLoaded) "官方 DSH 尚无会话" else "尚未读取会话",
+                            title = if (state.hasLoaded) "还没有对话" else "尚未读取对话",
                             detail = if (state.hasLoaded) {
-                                "原生页不另建会话库；新建会话会直接写入官方 DSH。"
+                                "新建对话，开始向助手提问。"
                             } else {
-                                "点击读取，从当前 DSH 实例拉取官方会话列表。"
+                                "读取当前助手中的对话，继续之前的交流。"
                             },
                             action = when {
-                                !state.hasLoaded -> "读取会话"
+                                !state.hasLoaded -> "读取对话"
                                 state.readOnly -> null
-                                else -> "新建会话"
+                                else -> "新建对话"
                             },
                             onAction = {
                                 if (state.hasLoaded) createDialog = true else controller.refresh()
@@ -359,13 +359,13 @@ fun DshSessionManagerPage(
                                     item(key = "empty-filter", contentType = "empty") {
                                         ManagerInlineEmpty(
                                             title = when {
-                                                state.query.isNotBlank() -> "没有匹配的会话"
-                                                state.filter == DshSessionFilter.UNREAD -> "没有未读会话"
-                                                state.filter == DshSessionFilter.RUNNING -> "没有运行中的会话"
-                                                else -> "没有可显示的会话"
+                                                state.query.isNotBlank() -> "没有匹配的对话"
+                                                state.filter == DshSessionFilter.UNREAD -> "没有未读对话"
+                                                state.filter == DshSessionFilter.RUNNING -> "没有正在回复的对话"
+                                                else -> "没有可显示的对话"
                                             },
-                                            detail = "标题、会话 ID 会随输入即时过滤；消息内容搜索需要单独点击搜索图标。",
-                                            action = "清除搜索与筛选",
+                                            detail = "当前条件下没有对话，请清除筛选后查看。",
+                                            action = "清除筛选",
                                             onAction = {
                                                 controller.setQuery("")
                                                 controller.clearContentSearch()
@@ -430,15 +430,15 @@ fun DshSessionManagerPage(
     TanukiBottomSheet(
         visible = createDialog,
         onDismissRequest = { if (!state.busy) createDialog = false },
-        title = "新建会话",
-        subtitle = "标题可留空；创建立即调用官方 session/create，非空标题随后调用官方重命名。",
+        title = "新建对话",
+        subtitle = "名称可留空，创建后也能重命名。",
         // 输入法弹出时整体上移弹层，避免按钮被键盘挡住。
         modifier = Modifier.imePadding(),
     ) {
         OutlinedTextField(
             value = createTitle,
             onValueChange = { createTitle = it.take(200) },
-            label = { Text("标题（可留空）") },
+            label = { Text("对话名称（可留空）") },
             singleLine = true,
             shape = TanukiShapeTokens.control,
             modifier = Modifier.fillMaxWidth()
@@ -461,18 +461,18 @@ fun DshSessionManagerPage(
         // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
         AlertDialog(
             onDismissRequest = { if (!state.busy) renameTarget = null },
-            title = { Text("重命名会话") },
+            title = { Text("重命名对话") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
                     OutlinedTextField(
                         value = renameTitle,
                         onValueChange = { renameTitle = it.take(200) },
-                        label = { Text("新标题") },
+                        label = { Text("对话名称") },
                         singleLine = true,
                         shape = TanukiShapeTokens.control,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Text("最多 200 字；保存后以官方返回的标题为准。", style = MaterialTheme.typography.bodySmall)
+                    Text("名称最多 200 字，保存后用于识别这段对话。", style = MaterialTheme.typography.bodySmall)
                 }
             },
             dismissButton = {
@@ -502,13 +502,13 @@ fun DshSessionManagerPage(
         // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
         AlertDialog(
             onDismissRequest = { archiveTarget = null },
-            title = { Text("归档会话") },
+            title = { Text("归档对话") },
             text = {
                 Text(
                     if (target.running) {
-                        "该会话正在运行。归档会请求官方停止当前回合、子代理、后台任务与提醒，然后提交归档；会话会从原生列表移除，项目文件不会删除。本页不提供撤销按钮，请确认后继续。"
+                        "将先请求停止本次回复、子助手、后台任务和提醒，再归档对话。\n对话会移出列表，项目文件保留；本页无法撤销。"
                     } else {
-                        "归档后该会话会从原生列表移除，项目文件不会删除。官方接口当前没有会话硬删除端点，本页不提供删除，也不提供撤销按钮；请确认后继续。"
+                        "归档后对话会移出列表，项目文件保留；本页无法撤销。"
                     }
                 )
             },
@@ -538,18 +538,18 @@ fun DshSessionManagerPage(
     TanukiBottomSheet(
         visible = batchArchiveConfirm,
         onDismissRequest = { batchArchiveConfirm = false },
-        title = "批量归档 ${batchTargets?.size ?: 0} 个会话",
+        title = "归档所选对话？",
     ) {
         val ids = batchTargets.orEmpty()
         val running = batchRunning ?: 0
         Text(
             buildString {
-                append("已选择 ${ids.size} 个会话")
+                append("已选择 ${ids.size} 个对话")
                 if (running > 0) append("，其中 $running 个正在运行")
-                append("。归档会逐个调用官方归档接口")
-                if (running > 0) append("，并先请求停止运行中的会话")
-                append("；会话会从列表移除，项目文件不会删除。")
-                append("官方没有会话硬删除端点，本页不提供批量删除，也不提供撤销按钮。")
+                append("。归档会将所选对话移出列表")
+                if (running > 0) append("，并先请求停止正在回复的对话及其子助手、后台任务和提醒")
+                append("；项目文件保留。")
+                append("本页无法撤销归档。")
             },
             style = MaterialTheme.typography.bodySmall,
         )
@@ -574,10 +574,10 @@ fun DshSessionManagerPage(
     TanukiBottomSheet(
         visible = batchLimitWarning,
         onDismissRequest = { batchLimitWarning = false },
-        title = "一次最多归档 ${DshSessionManagerController.MAX_BATCH_ARCHIVE} 个会话",
+        title = "归档数量超限",
     ) {
         Text(
-            "当前已选择 ${selectedIdSet.size} 个会话，超过单次上限。请取消部分选择后再归档；当前选择会保留，不会静默截断。",
+            "已选 ${selectedIdSet.size} 个对话，一次最多归档 ${DshSessionManagerController.MAX_BATCH_ARCHIVE} 个。请取消部分选择后重试。",
             style = MaterialTheme.typography.bodySmall,
         )
         SheetActions(
@@ -591,14 +591,14 @@ fun DshSessionManagerPage(
         AlertDialog(
             onDismissRequest = { fullAccess = null },
             icon = { Icon(Icons.Default.Warning, null) },
-            title = { Text("完全权限二次确认") },
+            title = { Text("切换为完全权限？") },
             text = {
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
                 ) {
                     Text(
-                        "你正在把会话切到完全权限。这是高于“工作区写入”的第二档风险，请逐条确认后果：",
+                        "完全权限允许助手读写工作区外的文件，风险高于“工作区写入”。请确认以下后果：",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     DshPermissionPresentation.fullAccessRisks().forEach { risk ->
@@ -620,7 +620,7 @@ fun DshSessionManagerPage(
                         Text("我已阅读并理解上述风险，仍要切换", style = MaterialTheme.typography.bodySmall)
                     }
                     Text(
-                        "Tanuki 不会自动切换该模式；切换通过官方 /permission 命令提交。",
+                        "取消将保留当前权限；之后可在对话详情的“权限模式”中修改。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -635,7 +635,7 @@ fun DshSessionManagerPage(
             },
             confirmButton = {
                 TanukiPillButton(
-                    text = "仍要切换为完全权限",
+                    text = "允许完全权限",
                     onClick = {
                         val acknowledged = fullAccessAcknowledged
                         fullAccess = null
@@ -673,12 +673,12 @@ fun DshSessionManagerPage(
                     if (detailMode != DshDetailMode.DETAIL) {
                         IconButton(onClick = { detailModeName = DshDetailMode.DETAIL.name }) {
                         detailTabName = DshDetailTab.OVERVIEW.name
-                            Icon(Icons.Default.ArrowBack, "返回会话详情")
+                            Icon(Icons.Default.ArrowBack, "返回对话详情")
                         }
                     }
                     Text(
                         when (detailMode) {
-                            DshDetailMode.DETAIL -> "会话详情"
+                            DshDetailMode.DETAIL -> "对话详情"
                             DshDetailMode.MODELS -> "模型与推理强度"
                             DshDetailMode.PERMISSIONS -> "权限模式"
                             DshDetailMode.CATALOG -> "Skills 与斜杠命令"
@@ -799,16 +799,16 @@ private fun ManagerHeader(
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
             Column(Modifier.weight(1f).padding(horizontal = TanukiSpace.XS_DP.dp)) {
-                Text("原生会话", style = MaterialTheme.typography.titleLarge)
+                Text("对话", style = MaterialTheme.typography.titleLarge)
                 if (host != null) {
                     HostChip(host = host, onClick = onHostClick)
                 } else {
                     Text(
                         when {
-                            !running -> "DSH 未运行"
+                            !running -> "助手未运行"
                             readOnly -> "安全模式 · 只读"
-                            remote -> "远程 DSH · 已连接"
-                            runningCount > 0 -> "$runningCount 个会话运行中"
+                            remote -> "远程助手 · 已连接"
+                            runningCount > 0 -> "$runningCount 个对话正在回复"
                             else -> "已连接官方 DSH"
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -817,7 +817,7 @@ private fun ManagerHeader(
                 }
             }
             IconButton(onClick = onRefresh, enabled = running && !loading && !busy) {
-                Icon(Icons.Default.Refresh, "刷新官方会话")
+                Icon(Icons.Default.Refresh, "刷新对话")
             }
             if (running && hasSessions && !readOnly) {
                 TextButton(onClick = onToggleSelectionMode, enabled = !busy) {
@@ -1177,7 +1177,7 @@ private fun SelectionBar(
                 )
             }
             Text(
-                "删除：官方无会话硬删除端点，暂不支持；归档只从列表移除，不删除项目文件。",
+                "删除暂不支持；归档会移出列表，项目文件保留。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1229,10 +1229,10 @@ private fun ContentSearchCard(
             }
             if (state.contentSearching) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (!state.contentSearching && !state.contentSearched) {
-                Text("点击搜索框右侧的搜索图标，调用官方接口搜索消息内容。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("点击搜索框右侧的搜索图标，搜索消息内容。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (state.contentSearched && !state.contentSearching && state.contentHits.isEmpty()) {
-                Text("没有匹配的消息。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("没有匹配的消息，请清除搜索后换个关键词。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             state.contentHits.forEach { hit ->
                 val title = state.sessions.firstOrNull { it.id == hit.sessionId }?.displayTitle
@@ -1335,8 +1335,8 @@ private fun ManagerLoading() {
         // 只读取当前实例，不新建或改写会话；加载态不伪造进度。
         TanukiStateView(
             kind = TanukiStateKind.LOADING,
-            subject = "会话",
-            detail = "只读取当前 DSH 实例，不会新建或改写会话。",
+            subject = "对话",
+            detail = "正在读取对话，请稍候。",
         )
         repeat(3) { SkeletonSessionRow() }
     }
@@ -1410,14 +1410,14 @@ private fun DetailHome(
     Text("更新时间：${timeLabel(session.updatedAt)}", style = MaterialTheme.typography.bodySmall)
     session.cwd?.let { Text("工作目录：$it", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Text("会话设置", style = MaterialTheme.typography.titleSmall)
+    Text("对话设置", style = MaterialTheme.typography.titleSmall)
     DetailAction("模型与推理强度", DshModelPresentation.selectionLabel(catalog, session.model), onModels)
     DetailAction(
         "权限模式",
         session.currentPermission?.let(::permissionLabel) ?: "未知",
         onPermissions
     )
-    DetailAction("Skills 与斜杠命令", "查看官方按当前会话返回的目录", onCatalog)
+    DetailAction("技能与快捷命令", "查看这段对话可用的技能和命令", onCatalog)
     DetailAction(
         if (pinned) "取消本机置顶" else "置顶会话",
         if (pinned) "恢复按更新时间排序" else "仅调整本机列表顺序，不写回官方",
@@ -1427,15 +1427,15 @@ private fun DetailHome(
     if (readOnly) {
         Text("安全模式/试用模式下只读，不能重命名、归档或切换会话设置。可在设置中尝试恢复正常模式后再修改。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     } else {
-        DetailAction("重命名会话", "最多 200 字，保存后以官方返回标题为准", onRename)
+        DetailAction("重命名对话", "名称最多 200 字", onRename)
         DetailAction(
-            "归档会话",
-            if (session.running) "会先请求停止当前回合、子代理、后台任务与提醒，再从列表移除" else "从原生列表移除；不删除项目文件",
+            "归档对话",
+            if (session.running) "先请求停止本次回复、子助手、后台任务和提醒，再移出列表" else "移出列表，项目文件保留",
             onArchive
         )
     }
     DetailInfo(
-        title = "删除会话",
+        title = "删除对话",
         detail = DshSessionCapabilities.DELETE_UNAVAILABLE_REASON,
         warning = true,
         icon = Icons.Default.Delete
@@ -1504,7 +1504,7 @@ private fun DetailProgressTab(session: DshAdminSession) {
     }
     DetailUnavailable(
         title = "待办与目标暂不支持",
-        detail = "官方 goals/todos 协议尚未接入原生会话管理；本页不会伪造进度百分比或待办数量。需要查看目标与待办时请使用官方 DSH 页面。"
+        detail = "手机界面暂不支持查看待办和目标，请切换到网页界面。"
     )
 }
 
@@ -1512,7 +1512,7 @@ private fun DetailProgressTab(session: DshAdminSession) {
 private fun DetailArtifactsTab() {
     DetailUnavailable(
         title = "产物列表与预览暂不支持",
-        detail = "官方 artifacts/workspaceFiles 字段契约尚未核对接入；当前运行时也没有向会话管理暴露本地 artifacts 目录。本页不会生成假产物或空预览；后续拿到只读目录后只读列出、不复制。"
+        detail = "手机界面暂不支持查看对话产物，请切换到网页界面。"
     )
 }
 
@@ -1526,7 +1526,7 @@ private fun DetailFilesTab(session: DshAdminSession, onCopyPath: (String) -> Uni
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("工作目录", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(cwd ?: "官方未返回工作目录", style = MaterialTheme.typography.bodyMedium)
+            Text(cwd ?: "暂未提供工作目录", style = MaterialTheme.typography.bodyMedium)
             if (cwd != null) {
                 TextButton(onClick = { onCopyPath(cwd) }) { Text("复制工作目录") }
             }
@@ -1534,7 +1534,7 @@ private fun DetailFilesTab(session: DshAdminSession, onCopyPath: (String) -> Uni
     }
     DetailUnavailable(
         title = "文件浏览与预览暂不支持",
-        detail = "会话详情内的文件列表、只读预览与产物打开需要 workspaceFiles 接口；当前未接入，因此不提供假文件树。请使用文件页查看本机工作区。"
+        detail = "对话详情暂不支持浏览文件，请前往“文件”查看本机工作区。"
     )
 }
 
@@ -1588,12 +1588,12 @@ private fun ModelsPane(
     if (state.modelsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
     state.modelsError?.let { message ->
         SelectionErrorCard("模型目录读取失败", message)
-        TextButton(onClick = onRetry) { Text("重新读取模型目录") }
+        TextButton(onClick = onRetry) { Text("重新读取") }
     }
     if (catalog == null) {
         if (!state.modelsLoading && state.modelsError == null) {
-            Text("尚未读取模型目录。", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onRetry) { Text("读取模型目录") }
+            Text("尚未读取模型选项，请读取后再选择。", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onRetry) { Text("读取模型") }
         }
         return
     }
@@ -1697,10 +1697,10 @@ private fun ModelsPane(
     }
     if (catalog.groups.isEmpty()) {
         Text(
-            "官方未返回可选模型。请先在官方设置中配置模型服务，再回到这里重试。",
+            "没有可选模型，请在网页界面配置模型服务后重试。",
             style = MaterialTheme.typography.bodySmall
         )
-        TextButton(onClick = onRetry) { Text("重新读取模型目录") }
+        TextButton(onClick = onRetry) { Text("重新读取") }
     }
 }
 
@@ -1759,7 +1759,7 @@ private fun PermissionsPane(
                 style = MaterialTheme.typography.titleSmall
             )
             Text(
-                "权限通过官方 /permission 命令提交，不改写 sandbox/approval 事件。",
+                "选择助手可读写的范围；可随时在这里修改，完全权限需再次确认。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1771,12 +1771,12 @@ private fun PermissionsPane(
     if (state.permissionsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
     state.permissionsError?.let { message ->
         SelectionErrorCard("权限目录读取失败", message)
-        TextButton(onClick = onRetry) { Text("重新读取权限目录") }
+        TextButton(onClick = onRetry) { Text("重新读取") }
     }
     if (catalog == null) {
         if (!state.permissionsLoading && state.permissionsError == null) {
-            Text("尚未读取权限目录。", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onRetry) { Text("读取权限目录") }
+            Text("尚未读取权限选项，请读取后再选择。", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onRetry) { Text("读取权限") }
         }
         return
     }
@@ -1839,8 +1839,8 @@ private fun PermissionsPane(
         }
     }
     if (catalog.options.isEmpty()) {
-        Text("官方未返回可选权限预设。", style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = onRetry) { Text("重新读取权限目录") }
+        Text("没有可选权限，请重新读取。", style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = onRetry) { Text("重新读取") }
     }
     Text(
         "完全权限会放宽工作区边界，只在明确需要时选择；切换失败会保留当前权限并显示原因。",
@@ -1853,19 +1853,19 @@ private fun PermissionsPane(
 private fun CatalogPane(state: DshSessionManagerState, onRetry: () -> Unit) {
     state.catalogError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     if (state.catalogLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-    SectionTitle("Skills", state.skills.size)
+    SectionTitle("技能", state.skills.size)
     if (!state.catalogLoading && state.skills.isEmpty()) {
-        Text("当前会话没有可展示的 Skills。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("这段对话还没有技能，请在网页界面添加。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     state.skills.forEach { skill -> SkillRow(skill) }
     Spacer(Modifier.height(4.dp))
-    SectionTitle("斜杠命令", state.commands.size)
+    SectionTitle("快捷命令", state.commands.size)
     if (!state.catalogLoading && state.commands.isEmpty()) {
-        Text("当前会话没有可展示的斜杠命令。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("这段对话没有快捷命令，请在网页界面查看。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     state.commands.forEach { command -> CommandRow(command) }
     if (!state.catalogLoading && state.catalogError != null) TextButton(onClick = onRetry) { Text("重试") }
-    Text("目录由官方按当前会话返回；斜杠命令在本页只展示，不在原生侧执行。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("这里仅供查看；执行快捷命令请前往对话输入栏。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

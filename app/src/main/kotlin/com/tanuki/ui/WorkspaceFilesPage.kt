@@ -430,8 +430,8 @@ internal fun WorkspaceFilesPage(
         display = FileListPresentation.result(display, FileDisplayResult(displayRequest, prepared))
     }
     if (writePermissionDialog) AlertDialog(onDismissRequest = { writePermissionDialog = false },
-        title = { Text("允许 DSH 写入手机文件？") },
-        text = { Text("允许本次 DSH 运行期间新建、修改、重命名和删除系统已授权的手机共享文件。可以随时撤销，停止 DSH 后自动恢复只读。") },
+        title = { Text("允许助手写入手机文件？") },
+        text = { Text("允许助手在本次运行中新建、修改、重命名和删除已授权的手机共享文件。\n拒绝后保持只读；可在文件页的权限入口修改，停止助手后自动恢复只读。") },
         dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
         confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
     externalDocument?.let { document ->
@@ -728,13 +728,13 @@ internal fun WorkspaceFilesPage(
                         ) {
                             TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                             Text("浏览手机文件", style = MaterialTheme.typography.titleLarge)
-                            Text("授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。", style = MaterialTheme.typography.bodyMedium)
+                            Text("用于浏览手机共享文件和存储卡，不会开放其他应用的私有目录。", style = MaterialTheme.typography.bodyMedium)
                             TanukiPillButton(
-                                text = "授权访问手机文件",
+                                text = "允许访问文件",
                                 onClick = onRequestStoragePermission,
                                 tone = TanukiPillButtonTone.Filled,
                             )
-                            Text("不授权也可通过文件操作菜单，从系统文件选择器导入文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("拒绝后仍可从系统文件选择器导入。\n可在系统设置中修改 Tanuki 的文件访问权限（较新系统为“所有文件访问权限”）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
                         // 三态占位只在没有可显示内容时接管页面；列表上的操作失败仍走 Snackbar。
@@ -1144,20 +1144,20 @@ private fun PermissionSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {
                 state.needsStorageGrant -> TanukiPillButton(
-                    text = "授权访问手机文件",
+                    text = "允许访问文件",
                     onClick = onRequestStorage,
                     tone = TanukiPillButtonTone.Filled,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.canGrantPhoneWrite -> TanukiPillButton(
-                    text = "授权本次 DSH 写入",
+                    text = "允许本次写入",
                     onClick = onRequestWrite,
                     enabled = phoneWritingAvailable,
                     tone = TanukiPillButtonTone.Filled,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.canRevokePhoneWrite -> TanukiPillButton(
-                    text = "撤销 DSH 写入权限",
+                    text = "撤销助手写入",
                     onClick = onRevokeWrite,
                     tone = TanukiPillButtonTone.Tonal,
                     modifier = Modifier.fillMaxWidth(),
@@ -1165,7 +1165,7 @@ private fun PermissionSheet(
             }
             if (location == FileLocation.PHONE && phoneStorageGranted &&
                 !state.canGrantPhoneWrite && !state.canRevokePhoneWrite && !state.needsStorageGrant) {
-                Text("授权只在本次 DSH 运行期间有效；停止 DSH 后自动恢复只读。",
+                Text("写入仅本次运行有效；停止助手后恢复只读。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1176,11 +1176,11 @@ private fun PermissionSheet(
             }
             if (state.canStopRuntime) {
                 HorizontalDivider()
-                Text("停止 DSH 后，工作区写入会自动恢复；正在运行的会话也会结束。",
+                Text("停止助手后可修改工作区文件；助手当前任务会中断。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TanukiPillButton(
-                    text = "停止 DSH",
+                    text = "停止助手",
                     onClick = onStopDsh,
                     tone = TanukiPillButtonTone.Outline,
                     modifier = Modifier.fillMaxWidth(),

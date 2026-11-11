@@ -60,7 +60,7 @@ class FileAccessPresentationTest {
         val state = FileAccessPresentation.state(FileLocation.PHONE, false, true, false, false)
         assertEquals(FileAccessMode.READ_ONLY, state.mode)
         assertFalse(state.canGrantPhoneWrite)
-        assertTrue(state.detail.contains("启动 DSH"))
+        assertTrue(state.detail.contains("启动助手"))
     }
 
     @Test fun mountedLocationsStayReadOnlyAndExplainTheBoundary() {
@@ -68,7 +68,7 @@ class FileAccessPresentationTest {
             val state = FileAccessPresentation.state(location, false, true, false, false)
             assertEquals(FileAccessMode.READ_ONLY, state.mode)
             assertEquals("只读", state.label)
-            assertTrue(state.detail.contains("挂载路径"))
+            assertTrue(state.detail.contains("复制到工作区"))
         }
     }
 }

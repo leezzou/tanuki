@@ -36,13 +36,13 @@ internal object FileAccessPresentation {
             if (environmentBusy) FileAccessState(
                 mode = FileAccessMode.READ_ONLY,
                 label = "只读",
-                summary = "环境操作中，修改已暂停",
+                summary = "运行环境准备中，修改已暂停",
                 detail = FILE_INSTALL_WRITE_NOTICE,
             ) else if (runtimeRunning) FileAccessState(
                 mode = FileAccessMode.READ_ONLY,
                 label = "只读",
-                summary = "DSH 运行中，修改已暂停",
-                detail = "工作区本身可写，但 DSH 运行期间会暂停新建、重命名、编辑、复制、移动和删除。停止 DSH 后恢复写入；浏览、打开、导入和导出不受影响。",
+                summary = "助手运行中，修改已暂停",
+                detail = "助手运行时暂停修改；浏览、打开、导入和导出仍可用。\n停止助手后可新建、编辑、重命名、复制、移动和删除文件。",
                 canStopRuntime = true,
             ) else FileAccessState(
                 mode = FileAccessMode.WRITABLE,
@@ -56,14 +56,14 @@ internal object FileAccessPresentation {
                 mode = FileAccessMode.READ_ONLY,
                 label = "只读",
                 summary = "尚未授权手机存储",
-                detail = "授权后可浏览手机共享存储和可用存储卡中的文件。DSH 默认只能读取；写入需要在本次运行中单独授权。",
+                detail = "允许后可浏览手机共享文件和存储卡；拒绝仍可用系统文件选择器导入。\n可在系统设置修改文件访问权限；助手写入需另行授权。",
                 needsStorageGrant = true,
             )
             phoneWriteAllowed -> FileAccessState(
                 mode = FileAccessMode.WRITABLE,
                 label = "可写",
-                summary = "本次 DSH 运行已获写入权限",
-                detail = "手机共享存储由 Android 保护。写入授权只对本次 DSH 运行有效，停止 DSH 或撤销后恢复只读。",
+                summary = "助手本次可写入手机文件",
+                detail = "助手本次可新建、修改和删除手机共享文件。\n可在这里撤销写入，或停止助手以恢复只读。",
                 canRevokePhoneWrite = true,
             )
             else -> FileAccessState(
@@ -71,9 +71,9 @@ internal object FileAccessPresentation {
                 label = "只读",
                 summary = "手机存储当前只读",
                 detail = if (phoneWritingAvailable)
-                    "DSH 默认只能读取手机文件。写入需要在本次运行中单独授权，停止 DSH 或撤销后恢复只读。"
+                    "助手当前只能读取手机文件；如需修改，请允许本次写入。\n可在这里撤销，停止助手后恢复只读。"
                 else
-                    "DSH 默认只能读取手机文件。启动 DSH 后可单独授权写入；当前未运行，所以不能授权。",
+                    "请先启动助手，再允许本次写入；也可保持只读。",
                 canGrantPhoneWrite = phoneWritingAvailable,
             )
         }
@@ -81,7 +81,7 @@ internal object FileAccessPresentation {
             mode = FileAccessMode.READ_ONLY,
             label = "只读",
             summary = "此位置按只读方式展示",
-            detail = "该位置按 Agent 实际挂载路径只读展示，可打开或导出文件，不能在这里修改。需要修改时请复制到工作区。",
+            detail = "此位置只能查看、打开或导出；需要修改时请复制到工作区。",
         )
     }
 }

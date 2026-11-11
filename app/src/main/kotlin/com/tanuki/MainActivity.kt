@@ -853,17 +853,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 if (chatNotifyDialog) AlertDialog(onDismissRequest = { chatNotifyDialog = false },
-                    title = { Text("DSH 聊天通知") },
+                    title = { Text("对话通知权限") },
                     text = {
                         Column {
                             Text(chatStatus.summaryText())
                             Spacer(Modifier.height(8.dp))
-                            Text("只在应用不在前台或对应会话不可见时提醒；正文只说明事件类型，不包含会话内容。", style = MaterialTheme.typography.bodySmall)
+                            Text("用于提醒回复完成、待确认、出错和待授权，不含对话内容。\n拒绝后仍可对话，但不会收到提醒；可在系统设置的“Tanuki → 通知”中开启。", style = MaterialTheme.typography.bodySmall)
                             Row {
                                 if (android.os.Build.VERSION.SDK_INT >= 33 && !chatStatus.permission.runtimeGranted) {
-                                    TextButton(onClick = { chatNotifyDialog = false; requestChatNotificationPermission() }) { Text("申请通知权限") }
+                                    TextButton(onClick = { chatNotifyDialog = false; requestChatNotificationPermission() }) { Text("允许通知") }
                                 }
-                                TextButton(onClick = { openChatChannelSettings() }) { Text("渠道设置") }
+                                TextButton(onClick = { openChatChannelSettings() }) { Text("对话提醒设置") }
                             }
                         }
                     },

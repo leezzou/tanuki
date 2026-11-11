@@ -46,7 +46,7 @@ internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String
     }
     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Tanuki 应用更新", style = MaterialTheme.typography.titleLarge)
+            Text("应用更新", style = MaterialTheme.typography.titleLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("当前版本 $currentVersion", style = MaterialTheme.typography.bodyMedium)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -75,7 +75,7 @@ internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String
             }
             TanukiPillButton(text = "检查更新", onClick = onCheck, enabled = !state.busy,
                 tone = TanukiPillButtonTone.Filled, modifier = Modifier.fillMaxWidth())
-            Text("后台每 30 分钟检查一次（需联网） · 上次 $lastChecked", style = MaterialTheme.typography.bodySmall,
+            Text("联网时约每 30 分钟自动检查 · 上次 $lastChecked", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (background.status == UpdateCheckStatus.FAILED) {
                 Text("上次自动检查未完成，稍后会重试；也可以手动检查。", style = MaterialTheme.typography.bodySmall,
@@ -91,7 +91,7 @@ internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String
                 }
                 if (state.phase == AppUpdatePhase.READY) {
                     Button(onClick = onInstall, enabled = installAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("安装更新") }
-                    if (!installAllowed) Text("请先停止 DSH，并等待环境和文件任务结束；下载文件会保留。", style = MaterialTheme.typography.bodySmall)
+                    if (!installAllowed) Text("请先停止助手，等待运行环境和文件操作结束；已下载的更新会保留。", style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (state.busy) {
@@ -101,10 +101,10 @@ internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String
                     Text("${megabytes(state.received)} / ${megabytes(state.total)} MiB", style = MaterialTheme.typography.labelMedium)
                 } else LinearProgressIndicator(Modifier.fillMaxWidth().semantics { contentDescription = "应用更新正在处理" })
                 Text("已用 ${((now - state.startedAt).coerceAtLeast(0) / 1_000)} 秒", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消更新任务") }
+                TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消更新") }
             }
             TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (details) "收起详情" else "了解详情")
+                Text(if (details) "收起详情" else "查看详情")
             }
             if (details) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
