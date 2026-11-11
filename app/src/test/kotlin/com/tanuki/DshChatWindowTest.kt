@@ -136,32 +136,32 @@ class DshChatWindowTest {
     @Test fun trimBoundaryKeepsBudgetAndReleasesOnlyAboveViewport() {
         val messages = (1..501).map { message(it) }
         val exactly = DshChatWindowPolicy.trim(messages.take(500), keepFromSeq = null)
-        assertEquals(0, exactly.released)
+        assertEquals(0, exactly.releasedMessages)
         assertFalse(exactly.trimmed)
 
         val trimmed = DshChatWindowPolicy.trim(messages, keepFromSeq = null)
-        assertEquals(1, trimmed.released)
+        assertEquals(1, trimmed.releasedMessages)
         assertEquals(1, trimmed.cutSeq)
-        assertEquals(500, trimmed.kept.size)
-        assertEquals(2, trimmed.kept.first().seq)
-        assertEquals(501, trimmed.kept.last().seq)
+        assertEquals(500, trimmed.messages.size)
+        assertEquals(2, trimmed.messages.first().seq)
+        assertEquals(501, trimmed.messages.last().seq)
     }
 
     @Test fun trimNeverReleasesTheRowBeingRead() {
         val messages = (1..600).map { message(it) }
         // 视口顶部在 200：只允许释放 1..199，且最多释放到预算。
         val trimmed = DshChatWindowPolicy.trim(messages, keepFromSeq = 200)
-        assertEquals(100, trimmed.released)
+        assertEquals(100, trimmed.releasedMessages)
         assertEquals(100, trimmed.cutSeq)
-        assertEquals(500, trimmed.kept.size)
-        assertTrue(trimmed.kept.any { it.seq == 200 })
+        assertEquals(500, trimmed.messages.size)
+        assertTrue(trimmed.messages.any { it.seq == 200 })
     }
 
     @Test fun trimAtTopReleasesNothingAndCanStayAboveBudget() {
         val messages = (1..600).map { message(it) }
         val trimmed = DshChatWindowPolicy.trim(messages, keepFromSeq = 1)
-        assertEquals(0, trimmed.released)
-        assertEquals(600, trimmed.kept.size)
+        assertEquals(0, trimmed.releasedMessages)
+        assertEquals(600, trimmed.messages.size)
     }
 
     @Test fun trimSkipsPendingPlaceholdersAndKeepsThemLast() {
@@ -173,15 +173,73 @@ class DshChatWindowTest {
             pending = true
         )
         val trimmed = DshChatWindowPolicy.trim(messages, keepFromSeq = null)
-        assertEquals(1, trimmed.released)
-        assertEquals(501, trimmed.kept.size)
-        assertTrue(trimmed.kept.last().pending)
+        assertEquals(1, trimmed.releasedMessages)
+        assertEquals(501, trimmed.messages.size)
+        assertTrue(trimmed.messages.last().pending)
     }
 
-    @Test fun trimToolsFollowsReleasedMessageBoundary() {
+    @Test fun toolTrimFollowsReleasedMessageBoundary() {
         val tools = listOf(tool(5), tool(150), tool(550))
-        assertEquals(listOf(tool(150), tool(550)), DshChatWindowPolicy.trimTools(tools, cutSeq = 100))
-        assertEquals(tools, DshChatWindowPolicy.trimTools(tools, cutSeq = Int.MIN_VALUE))
+        val messages = (1..10).map { message(it) }
+        val trimmed = DshChatWindowPolicy.trim(
+            messages = messages,
+            tools = tools,
+            keepFromSeq = null,
+            messageBudget = 5
+        )
+        assertEquals((6..10).toList(), trimmed.messages.map { it.seq })
+        // 与已释放消息同段更早的工具随消息一起释放，较新的工具保留。
+        assertEquals(listOf(150, 550), trimmed.tools.map { it.seq })
+        assertEquals(1, trimmed.releasedTools)
+    }
+
+    @Test fun toolBudgetReleasesOnlyToolsAboveViewport() {
+        val tools = (1..250).map { tool(it) }
+        val underBudget = listOf(message(300))
+        // 视口在 1（顶部）时不释放正在阅读的工具；可以暂时超过预算。
+        val atTop = DshChatWindowPolicy.trim(underBudget, tools, keepFromSeq = 1)
+        assertEquals(250, atTop.tools.size)
+        assertEquals(0, atTop.releasedTools)
+
+        // 没有可用视口（列表尚未布局）或已向下滚过旧工具时，按预算保留最新 200 张。
+        val trimmed = DshChatWindowPolicy.trim(underBudget, tools, keepFromSeq = null)
+        assertEquals(50, trimmed.releasedTools)
+        assertEquals(200, trimmed.tools.size)
+        assertEquals(51, trimmed.tools.first().seq)
+        assertEquals(250, trimmed.tools.last().seq)
+        assertEquals(0, trimmed.releasedMessages)
+    }
+
+    @Test fun renderKeysMatchActualListOrderAroundAnchor() {
+        val timeline = (1..6).map { "message-$it" }
+        val keys = DshChatAnchorPolicy.renderKeys(
+            historyKeys = timeline.take(4),
+            liveKeys = timeline.drop(4),
+            topKey = "history-top",
+            anchorKey = "chat-anchor"
+        )
+        assertEquals(
+            listOf(
+                "history-top", "message-1", "message-2", "message-3", "message-4",
+                "chat-anchor", "message-5", "message-6"
+            ),
+            keys
+        )
+        // 锚点前、锚点本身、锚点后的消息都按真实渲染索引恢复。
+        assertEquals(3, DshChatAnchorPolicy.restoreIndex(keys, "message-3", leadingRows = 0))
+        assertEquals(4, DshChatAnchorPolicy.restoreIndex(keys, "message-4", leadingRows = 0))
+        assertEquals(5, DshChatAnchorPolicy.restoreIndex(keys, "chat-anchor", leadingRows = 0))
+        assertEquals(6, DshChatAnchorPolicy.restoreIndex(keys, "message-5", leadingRows = 0))
+        assertEquals(7, DshChatAnchorPolicy.restoreIndex(keys, "message-6", leadingRows = 0))
+
+        // 跟随时没有锚点行，索引只比时间线多顶部提示。
+        val noAnchor = DshChatAnchorPolicy.renderKeys(
+            historyKeys = timeline,
+            liveKeys = emptyList(),
+            topKey = "history-top",
+            anchorKey = null
+        )
+        assertEquals(4, DshChatAnchorPolicy.restoreIndex(noAnchor, "message-4", leadingRows = 0))
     }
 
     @Test fun oldestSeqAndBeforeSeqUseMessagesAndTools() {

@@ -7,8 +7,13 @@ import com.tanuki.web.DshChatSource
 import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
+import com.tanuki.web.DshRiskAssessment
+import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshSessionPage
+import com.tanuki.web.DshToolItem
+import com.tanuki.web.DshToolStatus
+import com.tanuki.web.DshTimelineItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -204,6 +209,76 @@ class DshNativePagingTest {
         assertTrue(state.hasMore)
     }
 
+    @Test fun olderPageKeepsToolsBeyondThePreviousMergeCap() {
+        val newerTools = (300..499).map { tool(it) }
+        val olderTools = listOf(tool(100), tool(101), tool(102))
+        val source = pagedSource(
+            page = page(listOf(message(500)), hasMore = true, tools = newerTools),
+            older = {
+                Result.success(
+                    page((100..102).map { message(it) }, hasMore = false, tools = olderTools)
+                )
+            }
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitLoaded(controller)
+        assertEquals(DshChatWindowPolicy.MAX_TOOLS, controller.state.value.tools.size)
+
+        controller.loadOlder()
+        val state = awaitState(controller) { !it.loadingOlder && it.messages.size == 4 }
+        // 合并阶段不能再按“最新 200 张”截断，否则这一页的工具会立即消失。
+        assertEquals(203, state.tools.size)
+        assertTrue(state.tools.any { it.seq == 100 })
+        assertTrue(state.tools.any { it.seq == 499 })
+    }
+
+    @Test fun downwardScrollReleasesToolsAboveViewportByBudget() {
+        val source = pagedSource(
+            page = page(listOf(message(1_000)), hasMore = false, tools = (1..250).map { tool(it) })
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitLoaded(controller)
+
+        // 首次布局：视口在工具窗口起点，250 张都还在阅读范围内，不能按预算硬裁。
+        controller.onViewportTop(1)
+        assertEquals(250, controller.state.value.tools.size)
+
+        // 向下滚到 seq 100：只释放视口上方的 50 张旧工具，保留最新 200 张。
+        controller.onViewportTop(100)
+        val state = controller.state.value
+        assertEquals(200, state.tools.size)
+        assertEquals(51, state.tools.first().seq)
+        assertEquals(250, state.tools.last().seq)
+        assertEquals(1, state.historyRevision)
+        assertEquals(0, state.releasedOlder)
+    }
+
+    @Test fun upwardScrollDoesNotImmediatelyReleaseLoadedRows() {
+        val source = pagedSource(
+            page = page((1..600).map { message(it) }, hasMore = false, tools = (1..250).map { tool(it) })
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitLoaded(controller)
+
+        controller.onViewportTop(10)
+        val afterFirst = controller.state.value
+        assertTrue(afterFirst.releasedOlder > 0)
+        val releasedBefore = afterFirst.releasedOlder
+        val messagesBefore = afterFirst.messages.size
+
+        // 继续上翻（视口 seq 变小）不能把刚读到的更早内容再释放一轮。
+        controller.onViewportTop(3)
+        assertEquals(releasedBefore, controller.state.value.releasedOlder)
+        assertEquals(messagesBefore, controller.state.value.messages.size)
+
+        // 向下滚动后才继续按预算释放视口上方内容。
+        controller.onViewportTop(400)
+        assertTrue(controller.state.value.releasedOlder > releasedBefore)
+    }
+
     @Test fun sameSeqFromSnapshotAndLiveIsInsertedOnce() {
         val source = pagedSource(
             page = page(emptyList(), hasMore = false),
@@ -272,8 +347,34 @@ class DshNativePagingTest {
     private fun message(seq: Int, text: String = "m$seq") =
         DshMessage(seq = seq, role = DshMessageRole.ASSISTANT, text = text, time = seq.toLong())
 
-    private fun page(messages: List<DshMessage>, hasMore: Boolean) =
-        DshSessionPage(messages = messages, hasMore = hasMore)
+    private fun page(
+        messages: List<DshMessage>,
+        hasMore: Boolean,
+        tools: List<DshToolItem> = emptyList()
+    ) = DshSessionPage(
+        messages = messages,
+        hasMore = hasMore,
+        timeline = messages.map { DshTimelineItem.Text(it) } + tools.map { DshTimelineItem.Tool(it) }
+    )
+
+    private fun tool(seq: Int) = DshToolItem(
+        seq = seq,
+        time = seq.toLong(),
+        callId = "call-$seq",
+        name = "Bash",
+        arguments = null,
+        status = DshToolStatus.SUCCESS,
+        output = "ok",
+        error = null,
+        command = null,
+        cwd = null,
+        diffs = emptyList(),
+        files = emptyList(),
+        outputTruncated = false,
+        risk = DshRiskAssessment(DshRiskLevel.LOW, "只读"),
+        startedAt = seq.toLong(),
+        finishedAt = seq.toLong() + 1
+    )
 
     private fun pagedSource(
         page: DshSessionPage,

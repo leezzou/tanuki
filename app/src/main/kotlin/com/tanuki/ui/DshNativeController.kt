@@ -365,7 +365,8 @@ class DshNativeController(
                         liveError = null,
                         // 快照只覆盖自己的窗口：已加载的更早分页和更新的实时行都要保留。
                         messages = DshMessageLedger.reconcile(state.messages, event.messages),
-                        tools = DshToolMerge.merge(state.tools, event.tools),
+                        // 合并阶段不截断工具，窗口与视口释放统一由 trimWindow 负责。
+                        tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null),
                         hasMore = state.hasMore || event.hasMore,
                         streamingText = event.liveText
                     )
@@ -382,7 +383,7 @@ class DshNativeController(
                 }
             }
             is DshLiveEvent.Timeline -> _state.update { state ->
-                state.copy(tools = DshToolMerge.merge(state.tools, event.tools))
+                state.copy(tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null))
             }
             is DshLiveEvent.Streaming -> scheduleStreaming(event.text)
             is DshLiveEvent.Finished -> {
@@ -490,7 +491,8 @@ class DshNativeController(
                         },
                         tools = DshToolMerge.merge(
                             state.tools,
-                            page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
+                            page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool },
+                            maxTools = null
                         ),
                         hasMore = if (pageReachesLoadedStart) page.hasMore else state.hasMore
                     )
@@ -547,7 +549,7 @@ class DshNativeController(
             val grew = merged.size > state.messages.size
             state.copy(
                 messages = merged,
-                tools = if (grew) DshToolMerge.merge(state.tools, tools) else state.tools,
+                tools = if (grew) DshToolMerge.merge(state.tools, tools, maxTools = null) else state.tools,
                 loadingOlder = false,
                 // 没有新增行时不再续页，避免服务端重复返回同一页导致死循环。
                 hasMore = if (grew) page.hasMore else false,
@@ -563,23 +565,30 @@ class DshNativeController(
      */
     fun onViewportTop(seq: Int?) {
         val normalized = seq?.takeIf { it > 0 }
-        if (normalized == viewportTopSeq) return
+        val previous = viewportTopSeq
+        if (normalized == previous) return
         viewportTopSeq = normalized
-        trimWindow()
+        // 上翻（视口首行 seq 变小）不释放，避免刚加载的更早页立刻被裁掉；
+        // 首次布局或向下滚动时才按预算释放视口上方的行。
+        if (previous == null || (normalized != null && normalized > previous)) trimWindow()
     }
 
-    /** 内存窗口：释放头部行并保持工具时间线一致；界面按 historyRevision 恢复滚动位置。 */
+    /** 内存窗口：消息与工具按同一视口边界释放；界面按 historyRevision 恢复滚动位置。 */
     private fun trimWindow() {
         _state.update { state ->
             if (state.loading) return@update state
-            val window = DshChatWindowPolicy.trim(state.messages, viewportTopSeq)
+            val window = DshChatWindowPolicy.trim(
+                messages = state.messages,
+                tools = state.tools,
+                keepFromSeq = viewportTopSeq
+            )
             if (!window.trimmed) return@update state
             state.copy(
-                messages = window.kept,
-                tools = DshChatWindowPolicy.trimTools(state.tools, window.cutSeq),
+                messages = window.messages,
+                tools = window.tools,
                 // 释放的行仍可从官方历史页重新读取，因此重新标记为“还有更早历史”。
                 hasMore = true,
-                releasedOlder = state.releasedOlder + window.released,
+                releasedOlder = state.releasedOlder + window.releasedMessages,
                 historyRevision = state.historyRevision + 1
             )
         }

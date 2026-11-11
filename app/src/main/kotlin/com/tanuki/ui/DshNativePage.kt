@@ -301,6 +301,15 @@ private fun MessageList(
     val history = split?.history ?: timeline
     val live = split?.live ?: emptyList()
     val unseen = remember(split) { split?.let { DshChatAnchorPolicy.unseenMessages(it.live) } ?: 0 }
+    // 与 LazyColumn 完全一致的渲染 key 顺序：顶部提示、历史段、锚点分隔行、新消息段。
+    val renderKeys = remember(timeline, split) {
+        DshChatAnchorPolicy.renderKeys(
+            historyKeys = history.map { it.stableKey() },
+            liveKeys = live.map { it.stableKey() },
+            topKey = HISTORY_TOP_KEY.takeIf { timeline.isNotEmpty() },
+            anchorKey = ANCHOR_ITEM_KEY.takeIf { split != null }
+        )
+    }
     val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
     val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
 
@@ -366,10 +375,9 @@ private fun MessageList(
     LaunchedEffect(state.historyRevision, state.selectedId) {
         val request = restore ?: return@LaunchedEffect
         if (following) return@LaunchedEffect
-        val target = when (request.key) {
-            ANCHOR_ITEM_KEY -> 1 + history.size
-            else -> DshChatAnchorPolicy.restoreIndex(timeline.map { it.stableKey() }, request.key)
-        } ?: return@LaunchedEffect
+        // 按实际渲染顺序定位：锚点之后的消息也要计入锚点分隔行，不能只按时间线索引 +1。
+        val target = DshChatAnchorPolicy.restoreIndex(renderKeys, request.key, leadingRows = 0)
+            ?: return@LaunchedEffect
         restore = null
         restoring = true
         try {
