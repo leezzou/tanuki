@@ -35,6 +35,51 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DshChatRenderTest {
+    @Test fun missingUsageNeverPretendsToBeZero() {
+        assertEquals("—", DshChatRenderPolicy.contextPercent(null, 100))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(1, null))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(1, 0))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(-1, 100))
+        assertEquals("<1%", DshChatRenderPolicy.contextPercent(1, 1000))
+        assertEquals("0%", DshChatRenderPolicy.contextPercent(0, 1000))
+        assertEquals("25%", DshChatRenderPolicy.contextPercent(250, 1000))
+        assertEquals("100%", DshChatRenderPolicy.contextPercent(Long.MAX_VALUE, 1))
+    }
+
+    @Test fun activityNeverClaimsLiveThinkingAfterDisconnect() {
+        assertEquals("连接未实时", DshChatRenderPolicy.activity(true, false))
+        assertEquals("思考中", DshChatRenderPolicy.activity(true, true))
+        assertEquals("等你回答", DshChatRenderPolicy.activity(true, true, true))
+        assertEquals("就绪", DshChatRenderPolicy.activity(false, true))
+        assertEquals("生成中 · 可直接插话", DshChatRenderPolicy.composerPlaceholder(true))
+    }
+
+    @Test fun toolGroupsKeepMessageBoundariesAndRestorePrependedMember() {
+        val one = renderTool(1)
+        val two = renderTool(2)
+        val message = com.tanuki.web.DshTimelineItem.Text(com.tanuki.web.DshMessage(
+            3, com.tanuki.web.DshMessageRole.ASSISTANT, "步骤说明", 1000L))
+        val three = renderTool(4)
+        val rows = DshChatRenderPolicy.rows(listOf(one, two, message, three))
+        assertEquals(3, rows.size)
+        assertEquals(listOf("call-1", "call-2"), rows[0].tools.map { it.callId })
+        assertTrue(rows[1].tools.isEmpty())
+        assertEquals("tool:call-1", DshChatRenderPolicy.rowKey(rows, "tool:call-2"))
+        assertEquals(null, DshChatRenderPolicy.rowKey(rows, "tool:missing"))
+        // 先拆锚点再聚合，锚点后的工具保持独立；不会被历史组吞并。
+        val before = DshChatRenderPolicy.rows(listOf(one))
+        val after = DshChatRenderPolicy.rows(listOf(two))
+        assertEquals("tool:call-1", before.single().key)
+        assertEquals("tool:call-2", after.single().key)
+    }
+
+    private fun renderTool(seq: Int) = com.tanuki.web.DshTimelineItem.Tool(com.tanuki.web.DshToolItem(
+        seq = seq, time = 1000L, callId = "call-$seq", name = "bash", arguments = null,
+        status = com.tanuki.web.DshToolStatus.RUNNING, output = null, error = null,
+        command = "pwd", cwd = null, diffs = emptyList(), files = emptyList(), outputTruncated = false,
+        risk = com.tanuki.web.DshRiskAssessment(com.tanuki.web.DshRiskLevel.LOW, "只读")
+    ))
+
     @Test fun bottomDetectionNeedsLastItemAndOffset() {
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_000, 1_000))
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_010, 1_000))

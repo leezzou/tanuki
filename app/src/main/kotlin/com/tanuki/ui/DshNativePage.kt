@@ -1,6 +1,22 @@
 package com.tanuki.ui
 
+import android.content.Intent
+import android.os.SystemClock
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.tanuki.ui.design.TanukiDesign
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
@@ -145,105 +161,125 @@ fun DshNativePage(
     LaunchedEffect(state.unavailableReason) {
         state.unavailableReason?.let(onFallback)
     }
-    Column(modifier.fillMaxSize().imePadding().background(MaterialTheme.colorScheme.background)) {
-        Header(
-            state = state,
-            onRefresh = controller::refresh,
-            onSwitchOfficial = onSwitchOfficial,
-            canRename = controller.canRenameSession,
-            onRename = { renameTarget = state.selectedSession },
-            canCreate = controller.canCreateSession,
-            onCreate = controller::createSession,
-        )
-        state.error?.let { ErrorBanner("原生界面读取失败", it) }
-        state.actionError?.let { ErrorBanner("操作未完成", it) }
-        state.liveError?.let {
-            ErrorBanner("实时连接提示", it, retryLabel = "重新连接", onRetry = controller::refresh)
-        }
-        state.notice?.let { NoticeBanner(it) }
-        if (state.loading && state.sessions.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            return@Column
-        }
-        if (state.sessions.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(top = 8.dp)) {
-                EmptyNativeState(
-                    title = "官方 DSH 尚无会话",
-                    detail = "可以直接新建一个会话，也可以到官方界面创建。原生页不另建会话库。",
-                    onRefresh = controller::refresh,
-                    onCreate = if (controller.canCreateSession) controller::createSession else null,
-                )
-            }
-            return@Column
-        }
-        SessionStrip(state.sessions, state.selectedId, controller::select)
-        Box(Modifier.weight(1f)) {
-            MessageList(
-                state = state,
-                onRetryFailed = { scope.launch { controller.retryFailedPrompt() } },
-                onFillFailed = { text -> composer.updateText(text) },
-                composerFailure = composerFailure,
-                composerPendingText = composerPendingText,
-                composerSending = composerState.sending,
-                composerRetryEnabled = composerFailure?.let {
-                    DshComposerDraftPolicy.matches(it, composerState.text, composerState.attachments.size)
-                } == true,
-                composerRetryHint = composerFailure?.let {
-                    DshComposerDraftPolicy.retryHint(it, composerState.text, composerState.attachments.size)
-                },
-                onRetryComposer = {
-                    val failed = composerFailure
-                    if (failed != null &&
-                        DshComposerDraftPolicy.matches(failed, composerState.text, composerState.attachments.size)
-                    ) {
-                        composer.send()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val activity = DshChatRenderPolicy.activity(state.running, state.live)
+    ModalNavigationDrawer(
+        modifier = modifier.fillMaxSize(),
+        drawerState = drawer,
+        drawerContent = {
+            ModalDrawerSheet(drawerContainerColor = Color(TanukiDesign.tokens.colors.surface)) {
+                Text("会话", Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = controller::refresh, enabled = !state.loading) { Text("刷新会话") }
+                TextButton(onClick = onSwitchOfficial) { Text("打开官方界面") }
+                LazyColumn {
+                    items(state.sessions, key = { it.id }) { session ->
+                        TextButton(onClick = {
+                            controller.select(session.id)
+                            scope.launch { drawer.close() }
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(session.displayTitle, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (session.id == state.selectedId) FontWeight.Bold else FontWeight.Normal)
+                        }
                     }
-                },
-                onFillComposer = { text -> composer.updateText(text) },
-                onLoadOlder = controller::loadOlder,
-                onViewportTop = controller::onViewportTop
-            )
-            if (state.loading && state.messages.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            }
-        }
-        if (state.liveError != null && state.messages.any { it.role == DshMessageRole.USER && !it.pending }) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(
-                    onClick = { scope.launch { controller.retryLastPrompt() } },
-                    enabled = !state.running && !state.sending
-                ) { Text("重发上一条") }
-            }
-        }
-        if (state.running) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                OutlinedButton(onClick = { scope.launch { controller.stop() } }, enabled = !state.stopping) {
-                    Text(if (state.stopping) "停止中…" else "停止生成")
                 }
             }
         }
-        // 失败原文已用卡片展示；这里的 sendError 只处理没有失败原文的校验/前置错误。
-        state.sendError?.takeIf { state.failedPrompt == null }?.let { message ->
-            ErrorBanner("发送未完成", message)
-        }
-        // 三条停靠条：审批 > 目标 > 待办，同屏最多两条，其余折叠为 +N。
-        // 目标/待办只来自真实事件，缺失时对应条不占高度；高度动画由组件内部吸收到消息区，
-        // 输入栏始终是页面纵向栈的最后一项（见 DshDockPlacement）。
-        DshDockColumn(
-            approvalVisible = DshApprovalEntry.of(approvalState, state.selectedId).visible,
-            goal = state.goal,
-            todo = state.todos,
-            approvalBar = {
-                DshApprovalEntryBar(
-                    state = approvalState,
-                    sessionId = state.selectedId,
-                    onClick = { showApprovalSheet = true },
-                    modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.fillMaxSize().imePadding().background(Color(TanukiDesign.tokens.colors.canvas))) {
+            Header(
+                activity = activity,
+                onDrawer = { scope.launch { drawer.open() } },
+                state = state,
+                canRename = controller.canRenameSession,
+                onRename = { renameTarget = state.selectedSession },
+                canCreate = controller.canCreateSession,
+                onCreate = controller::createSession,
+            )
+            state.error?.let { ErrorBanner("原生界面读取失败", it) }
+            state.actionError?.let { ErrorBanner("操作未完成", it) }
+            state.liveError?.let {
+                ErrorBanner("实时连接提示", it, retryLabel = "重新连接", onRetry = controller::refresh)
+            }
+            state.notice?.let { NoticeBanner(it) }
+            if (state.loading && state.sessions.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                return@Column
+            }
+            if (state.sessions.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(top = 8.dp)) {
+                    EmptyNativeState(
+                        title = "官方 DSH 尚无会话",
+                        detail = "可以直接新建一个会话，也可以到官方界面创建。原生页不另建会话库。",
+                        onRefresh = controller::refresh,
+                        onCreate = if (controller.canCreateSession) controller::createSession else null,
+                    )
+                }
+                return@Column
+            }
+            Box(Modifier.weight(1f)) {
+                MessageList(
+                    state = state,
+                    pendingApprovalCalls = approvalState.pendingFor(state.selectedId).mapNotNull { it.request.callId }.toSet(),
+                    onOpenApproval = { showApprovalSheet = true },
+                    onRetryFailed = { scope.launch { controller.retryFailedPrompt() } },
+                    onFillFailed = { text -> composer.updateText(text) },
+                    composerFailure = composerFailure,
+                    composerPendingText = composerPendingText,
+                    composerSending = composerState.sending,
+                    composerRetryEnabled = composerFailure?.let {
+                        DshComposerDraftPolicy.matches(it, composerState.text, composerState.attachments.size)
+                    } == true,
+                    composerRetryHint = composerFailure?.let {
+                        DshComposerDraftPolicy.retryHint(it, composerState.text, composerState.attachments.size)
+                    },
+                    onRetryComposer = {
+                        val failed = composerFailure
+                        if (failed != null &&
+                            DshComposerDraftPolicy.matches(failed, composerState.text, composerState.attachments.size)
+                        ) {
+                            composer.send()
+                        }
+                    },
+                    onFillComposer = { text -> composer.updateText(text) },
+                    onLoadOlder = controller::loadOlder,
+                    onViewportTop = controller::onViewportTop
                 )
-            },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-        )
-        DshComposerBar(composer, Modifier.fillMaxWidth())
+                if (state.loading && state.messages.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+            }
+            if (state.liveError != null && state.messages.any { it.role == DshMessageRole.USER && !it.pending }) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = { scope.launch { controller.retryLastPrompt() } },
+                        enabled = !state.running && !state.sending
+                    ) { Text("重发上一条") }
+                }
+            }
+            // 失败原文已用卡片展示；这里的 sendError 只处理没有失败原文的校验/前置错误。
+            state.sendError?.takeIf { state.failedPrompt == null }?.let { message ->
+                ErrorBanner("发送未完成", message)
+            }
+            // 三条停靠条：审批 > 目标 > 待办，同屏最多两条，其余折叠为 +N。
+            // 目标/待办只来自真实事件，缺失时对应条不占高度；高度动画由组件内部吸收到消息区，
+            // 输入栏始终是页面纵向栈的最后一项（见 DshDockPlacement）。
+            DshDockColumn(
+                approvalVisible = DshApprovalEntry.of(approvalState, state.selectedId).visible,
+                goal = state.goal,
+                todo = state.todos,
+                approvalBar = {
+                    DshApprovalEntryBar(
+                        state = approvalState,
+                        sessionId = state.selectedId,
+                        onClick = { showApprovalSheet = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+            ChatActivityBar(state.selectedId, activity, state.running)
+            DshComposerBar(composer, Modifier.fillMaxWidth())
+        }
     }
     renameTarget?.let { target ->
         AlertDialog(
@@ -260,7 +296,7 @@ fun DshNativePage(
                         isError = renameError != null,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    renameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    renameError?.let { Text(it, color = Color(TanukiDesign.tokens.colors.danger)) }
                 }
             },
             confirmButton = {
@@ -300,72 +336,80 @@ fun DshNativePage(
 @Composable
 private fun Header(
     state: DshNativeState,
-    onRefresh: () -> Unit,
-    onSwitchOfficial: () -> Unit,
+    activity: String,
+    onDrawer: () -> Unit,
     canRename: Boolean,
     onRename: () -> Unit,
     canCreate: Boolean,
     onCreate: () -> Unit,
 ) {
+    val colors = TanukiDesign.tokens.colors
     Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(Modifier.weight(1f)) {
-            val session = state.selectedSession
-            if (session != null) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        .clickable(enabled = canRename, onClickLabel = "重命名会话", onClick = onRename),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        session.displayTitle,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (canRename) Text("重命名", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("原生界面", style = MaterialTheme.typography.labelMedium)
-                StatusPill(if (state.live) "实时" else "未实时", state.live)
-                if (state.running) StatusPill("运行中", true)
-            }
-            Text(
-                "和官方界面是同一份会话，随时可切换",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Surface(shape = CircleShape, color = Color(colors.surface), border = BorderStroke(1.dp, Color(colors.outline))) {
+            IconButton(onClick = onDrawer, modifier = Modifier.semantics { contentDescription = "打开会话抽屉" }) { Text("☰", color = Color(colors.textPrimary), fontSize = 20.sp) }
         }
-        if (canCreate) {
-            // 顶部直接入口：一次点击就调用官方创建并进入新会话，不再经过设置多级菜单。
-            TextButton(onClick = onCreate, enabled = !state.loading && !state.creating) {
-                if (state.creating) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(6.dp))
-                    Text("新建中…")
-                } else {
-                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("新建会话")
+        Surface(
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                .clickable(enabled = canRename, onClickLabel = "重命名会话", onClick = onRename),
+            shape = RoundedCornerShape(24.dp), color = Color(colors.surface),
+            border = BorderStroke(1.dp, Color(colors.outline)), shadowElevation = 1.dp
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 5.dp), verticalArrangement = Arrangement.Center) {
+                Text(state.selectedSession?.displayTitle ?: "新对话", fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium, color = Color(colors.textPrimary),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(5.dp).background(Color(colors.accent), CircleShape))
+                    // 当前会话摘要没有工作目录字段，不从其他回合的命令猜测目录。
+                    Text("$activity · 目录未提供", fontSize = 11.sp, color = Color(colors.textSecondary),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
-        IconButton(onClick = onRefresh, enabled = !state.loading) {
-            TanukiIcon(TanukiGlyph.Refresh, "刷新官方会话")
+        Surface(shape = CircleShape, color = Color(colors.surface), border = BorderStroke(1.dp, Color(colors.outline))) {
+            IconButton(onClick = onCreate, enabled = canCreate && !state.loading && !state.creating) {
+                if (state.creating) CircularProgressIndicator(Modifier.size(18.dp), color = Color(colors.primary), strokeWidth = 2.dp)
+                else Icon(Icons.Default.Add, "新建会话", tint = Color(colors.textPrimary))
+            }
         }
-        TextButton(onClick = onSwitchOfficial) { Text("官方界面") }
+    }
+}
+
+/** 本次观察计时不是服务端回合耗时；切换会话或状态后重新开始。 */
+@Composable
+private fun ChatActivityBar(sessionId: String?, activity: String, running: Boolean) {
+    if (!running) return
+    val colors = TanukiDesign.tokens.colors
+    var seconds by remember(sessionId, activity) { mutableStateOf(0L) }
+    LaunchedEffect(sessionId, activity) {
+        val started = SystemClock.elapsedRealtime()
+        while (true) {
+            seconds = (SystemClock.elapsedRealtime() - started) / 1000
+            delay(1000)
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TanukiIconSwap(activity, Modifier.size(20.dp)) {
+            Text(if (it == "思考中") "◌" else "○", color = Color(colors.accent), fontSize = 18.sp)
+        }
+        Text(activity, fontSize = 12.sp, color = Color(colors.textPrimary))
+        Text(when (activity) { "思考中" -> "它在酝酿"; "等你回答" -> "请选择…"; else -> "等待实时连接" }, modifier = Modifier.weight(1f),
+            fontSize = 12.sp, color = Color(colors.textSecondary))
+        TanukiAnimatedCount("观察 $seconds 秒", minWidth = 64.dp,
+            style = MaterialTheme.typography.labelSmall, color = Color(colors.textSecondary))
     }
 }
 
 @Composable
 private fun MessageList(
     state: DshNativeState,
+    pendingApprovalCalls: Set<String>,
+    onOpenApproval: () -> Unit,
     onRetryFailed: () -> Unit,
     onFillFailed: (String) -> Unit,
     composerFailure: DshFailedPrompt?,
@@ -407,12 +451,14 @@ private fun MessageList(
     }
     val history = split?.history ?: timeline
     val live = split?.live ?: emptyList()
+    val historyRows = remember(history) { DshChatRenderPolicy.rows(history) }
+    val liveRows = remember(live) { DshChatRenderPolicy.rows(live) }
     val unseen = remember(split) { split?.let { DshChatAnchorPolicy.unseenMessages(it.live) } ?: 0 }
     // 与 LazyColumn 完全一致的渲染 key 顺序：顶部提示、历史段、锚点分隔行、新消息段。
-    val renderKeys = remember(timeline, split) {
+    val renderKeys = remember(historyRows, liveRows, split) {
         DshChatAnchorPolicy.renderKeys(
-            historyKeys = history.map { it.stableKey() },
-            liveKeys = live.map { it.stableKey() },
+            historyKeys = historyRows.map { it.key },
+            liveKeys = liveRows.map { it.key },
             topKey = HISTORY_TOP_KEY.takeIf { timeline.isNotEmpty() },
             anchorKey = ANCHOR_ITEM_KEY.takeIf { split != null }
         )
@@ -485,7 +531,8 @@ private fun MessageList(
         // 用当前状态而不是组合期快照，避免脱离跟随后仍按旧值跳过恢复。
         if (follow.snapshot.following) return@LaunchedEffect
         // 按实际渲染顺序定位：锚点之后的消息也要计入锚点分隔行，不能只按时间线索引 +1。
-        val target = DshChatAnchorPolicy.restoreIndex(renderKeys, request.key, leadingRows = 0)
+        val rowKey = DshChatRenderPolicy.rowKey(historyRows + liveRows, request.key) ?: request.key
+        val target = DshChatAnchorPolicy.restoreIndex(renderKeys, rowKey, leadingRows = 0)
             ?: return@LaunchedEffect
         restore = null
         restoring = true
@@ -509,8 +556,8 @@ private fun MessageList(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().nestedScroll(detachOnUserScroll),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             if (timeline.isNotEmpty()) {
                 item(key = HISTORY_TOP_KEY, contentType = "history-top") {
@@ -528,18 +575,13 @@ private fun MessageList(
                 }
             }
             items(
-                items = history,
-                key = { item -> item.stableKey() },
-                contentType = { item ->
-                    when (item) {
-                        is DshTimelineItem.Text -> "message"
-                        is DshTimelineItem.Tool -> "tool"
-                    }
-                }
-            ) { item ->
-                when (item) {
+                items = historyRows,
+                key = { it.key },
+                contentType = { if (it.tools.isEmpty()) "message" else "tool-group" }
+            ) { row ->
+                when (val item = row.item) {
                     is DshTimelineItem.Text -> MessageCard(item.message)
-                    is DshTimelineItem.Tool -> DshToolCard(item.tool)
+                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, pendingApprovalCalls, onOpenApproval)
                 }
             }
             if (split != null) {
@@ -549,18 +591,13 @@ private fun MessageList(
                 }
             }
             items(
-                items = live,
-                key = { item -> item.stableKey() },
-                contentType = { item ->
-                    when (item) {
-                        is DshTimelineItem.Text -> "message"
-                        is DshTimelineItem.Tool -> "tool"
-                    }
-                }
-            ) { item ->
-                when (item) {
+                items = liveRows,
+                key = { it.key },
+                contentType = { if (it.tools.isEmpty()) "message" else "tool-group" }
+            ) { row ->
+                when (val item = row.item) {
                     is DshTimelineItem.Text -> MessageCard(item.message)
-                    is DshTimelineItem.Tool -> DshToolCard(item.tool)
+                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, pendingApprovalCalls, onOpenApproval)
                 }
             }
             activeFailure?.let { failed ->
@@ -635,7 +672,7 @@ private fun ReadAnchorDivider(hasLive: Boolean) {
             "以下为新消息",
             Modifier.padding(horizontal = 8.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = Color(TanukiDesign.tokens.colors.textSecondary)
         )
         HorizontalDivider(Modifier.weight(1f))
     }
@@ -665,59 +702,13 @@ private fun HistoryTopRow(state: DshNativeState, onLoadOlder: () -> Unit) {
 
 @Composable
 private fun ComposerPendingCard(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("你 · 发送中", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.size(6.dp))
-                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
-            }
-            Text(
-                text.ifBlank { "正在发送附件…" },
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun SessionStrip(sessions: List<DshSession>, selectedId: String?, onSelect: (String) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        sessions.forEach { session ->
-            val selected = session.id == selectedId
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.widthIn(max = 240.dp).clickable { onSelect(session.id) }
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        session.displayTitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        buildString {
-                            append(if (session.running) "运行中" else "已结束")
-                            append(" · ")
-                            append(timeLabel(session.updatedAt))
-                        },
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Surface(color = Color(TanukiDesign.tokens.colors.primaryContainer),
+            contentColor = Color(TanukiDesign.tokens.colors.textPrimary), shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(0.88f)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text.ifBlank { "正在发送附件…" }, style = MaterialTheme.typography.bodyMedium)
+                Text("发送中…", fontSize = 11.sp, color = Color(TanukiDesign.tokens.colors.textSecondary))
             }
         }
     }
@@ -725,62 +716,64 @@ private fun SessionStrip(sessions: List<DshSession>, selectedId: String?, onSele
 
 @Composable
 private fun MessageCard(message: DshMessage) {
+    val colors = TanukiDesign.tokens.colors
     val clipboard = LocalClipboardManager.current
     val assistant = message.role == DshMessageRole.ASSISTANT
-    Surface(
-        color = when {
-            message.pending -> MaterialTheme.colorScheme.secondaryContainer
-            assistant -> MaterialTheme.colorScheme.surfaceContainerLow
-            else -> MaterialTheme.colorScheme.secondaryContainer
-        },
-        contentColor = if (assistant && !message.pending) {
-            MaterialTheme.colorScheme.onSurface
-        } else {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        },
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (message.pending) "你 · 发送中" else message.role.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                if (message.pending) {
-                    Spacer(Modifier.size(6.dp))
-                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
-                }
-                Spacer(Modifier.weight(1f))
-                Text(timeLabel(message.time), style = MaterialTheme.typography.labelSmall)
-                TextButton(
-                    onClick = { clipboard.setText(AnnotatedString(message.text)) },
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                ) { Text("复制", style = MaterialTheme.typography.labelSmall) }
-            }
+    var details by remember(message.seq) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (assistant) {
             DshMarkdown(message.text)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TanukiCopyButton("复制", identity = message.seq, onCopy = { clipboard.setText(AnnotatedString(message.text)) })
+                DshShareButton(message.text)
+                IconButton(onClick = { details = true }, modifier = Modifier.semantics { contentDescription = "更多消息操作" }) { Text("⋯") }
+                // 原生消息没有回合统计；小字可换行，避免窄屏把操作挤出屏幕。
+                TextButton(onClick = { details = true }, modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 2.dp)) {
+                    Text("耗时 / 步骤 / tokens 未提供 ›", fontSize = 11.sp, color = Color(colors.textSecondary))
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Surface(modifier = Modifier.fillMaxWidth(0.88f), shape = RoundedCornerShape(16.dp),
+                    color = Color(colors.primaryContainer), contentColor = Color(colors.textPrimary)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DshMarkdown(message.text)
+                        if (message.pending) Text("发送中…", fontSize = 11.sp, color = Color(colors.textSecondary))
+                    }
+                }
+            }
         }
     }
+    if (details) AlertDialog(
+        onDismissRequest = { details = false }, title = { Text("消息详情") },
+        text = { Text("消息时间：${timeLabel(message.time)}\n当前协议投影未提供回合耗时、步骤数和 token 用量。") },
+        confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } }
+    )
+}
+
+/** 分享使用系统选择器；只有用户点击后才将本条内容交给目标应用。 */
+@Composable
+internal fun DshShareButton(text: String) {
+    val context = LocalContext.current
+    var failed by remember { mutableStateOf(false) }
+    TextButton(onClick = {
+        failed = runCatching {
+            context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }, "分享内容"))
+        }.isFailure
+    }) { Text("分享") }
+    if (failed) AlertDialog(onDismissRequest = { failed = false }, title = { Text("分享未完成") },
+        text = { Text("系统未能打开分享面板，可复制内容后重试。") },
+        confirmButton = { TextButton(onClick = { failed = false }) { Text("关闭") } })
 }
 
 @Composable
 private fun StreamingCard(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("DSH 正在回复", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.size(6.dp))
-                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
-            }
-            DshMarkdown(text)
-        }
-    }
+    // 流式正文直接显示；状态和停止入口分别由状态条与输入栏承担。
+    DshMarkdown(text, Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -795,8 +788,8 @@ private fun FailedPromptCard(
     val clipboard = LocalClipboardManager.current
     val error = remember(failed.reason) { DshErrorPresenter.describe(failed.reason) }
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        color = Color(TanukiDesign.tokens.colors.dangerContainer),
+        contentColor = Color(TanukiDesign.tokens.colors.onDangerContainer),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -814,7 +807,7 @@ private fun FailedPromptCard(
             )
             Text(error.hint, style = MaterialTheme.typography.labelSmall)
             retryHint?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(it, style = MaterialTheme.typography.labelSmall, color = Color(TanukiDesign.tokens.colors.onDangerContainer))
             }
             SelectionContainer {
                 Text(error.detail, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
@@ -841,10 +834,10 @@ private fun ErrorBanner(
     val clipboard = LocalClipboardManager.current
     val info = remember(detail) { DshErrorPresenter.describe(detail) }
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        color = Color(TanukiDesign.tokens.colors.dangerContainer),
+        contentColor = Color(TanukiDesign.tokens.colors.onDangerContainer),
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -868,9 +861,9 @@ private fun ErrorBanner(
 @Composable
 private fun NoticeBanner(text: String) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = Color(TanukiDesign.tokens.colors.surface),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
     ) {
         Text(text, Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.bodySmall)
     }
@@ -884,9 +877,9 @@ private fun EmptyNativeState(
     onCreate: (() -> Unit)? = null,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = Color(TanukiDesign.tokens.colors.surface),
         shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -905,7 +898,7 @@ private fun EmptyNativeState(
 
 @Composable
 private fun NativeCaption(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, modifier, style = MaterialTheme.typography.bodySmall, color = Color(TanukiDesign.tokens.colors.textSecondary))
 }
 
 /**

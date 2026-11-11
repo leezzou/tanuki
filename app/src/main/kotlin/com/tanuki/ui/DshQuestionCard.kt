@@ -1,9 +1,20 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiDesign
+import androidx.compose.ui.graphics.Color
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.TextButton
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.tanuki.ui.design.TanukiButton as Button
@@ -41,25 +52,27 @@ fun DshQuestionCard(
     modifier: Modifier = Modifier,
     submitting: Boolean = false,
     error: String? = null,
-    onSubmit: ((DshQuestionAnswers) -> Unit)? = null
+    onSubmit: ((DshQuestionAnswers) -> Unit)? = null,
+    onSkip: (() -> Unit)? = null
 ) {
-    var draft by remember(request.eventId) { mutableStateOf(DshQuestionDraft(request.questions)) }
+    var draft by remember(request.sessionId, request.eventId, request.questions) { mutableStateOf(DshQuestionDraft(request.questions)) }
     Surface(
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        color = Color(TanukiDesign.tokens.colors.surface),
+        contentColor = Color(TanukiDesign.tokens.colors.textPrimary),
         shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(TanukiDesign.tokens.colors.outline)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "用户提问",
+                        "? 有个问题想问你",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "请选择后提交；回答会走官方协议。",
+                        if (onSubmit == null) "本地选择 · 回答接口待确认" else "请选择后提交",
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -76,19 +89,20 @@ fun DshQuestionCard(
             }
             error?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error)
+                    color = Color(TanukiDesign.tokens.colors.danger))
             }
             if (onSubmit == null) {
                 Text(
                     "回答入口待协议确认：当前只展示提问与本地选择，不会发送官方回答。",
                     style = MaterialTheme.typography.labelSmall
                 )
-            } else {
-                Button(
-                    enabled = draft.canSubmit() && !submitting,
-                    onClick = { onSubmit(draft.answers()) }
-                ) {
-                    Text(if (submitting) "提交中…" else "提交回答")
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { onSkip?.invoke() }, enabled = onSkip != null && !submitting,
+                    modifier = Modifier.weight(1f)) { Text("不回答") }
+                Button(enabled = onSubmit != null && draft.canSubmit() && !submitting,
+                    onClick = { onSubmit?.invoke(draft.answers()) }, modifier = Modifier.weight(1f)) {
+                    Text(if (submitting) "提交中…" else "提交")
                 }
             }
         }
@@ -103,35 +117,42 @@ private fun QuestionBlock(
     onToggle: (String) -> Unit,
     onCustom: (String) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    var customExpanded by remember(question.id) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 question.text,
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis
             )
             if (question.required) {
                 Text(" *", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error)
+                    color = Color(TanukiDesign.tokens.colors.danger))
             }
         }
-        Text(
-            question.kind.label + if (question.kind == DshQuestionKind.MULTI) "，可多选" else "",
-            style = MaterialTheme.typography.labelSmall
-        )
+        Surface(shape = RoundedCornerShape(8.dp), color = Color(TanukiDesign.tokens.colors.canvas)) {
+            Text(question.kind.label + if (question.kind == DshQuestionKind.MULTI) " · 可多选" else " · 本次提问",
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
+        }
         question.options.forEach { option ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            val optionModifier = if (question.kind == DshQuestionKind.MULTI) {
+                Modifier.toggleable(value = draft.selected(question.id, option.id), enabled = enabled,
+                    role = Role.Checkbox, onValueChange = { onToggle(option.id) })
+            } else {
+                Modifier.selectable(selected = draft.selected(question.id, option.id), enabled = enabled,
+                    role = Role.RadioButton, onClick = { onToggle(option.id) })
+            }
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(optionModifier), verticalAlignment = Alignment.CenterVertically) {
                 when (question.kind) {
                     DshQuestionKind.MULTI -> Checkbox(
                         checked = draft.selected(question.id, option.id),
-                        onCheckedChange = { onToggle(option.id) },
+                        onCheckedChange = null,
                         enabled = enabled
                     )
                     else -> RadioButton(
                         selected = draft.selected(question.id, option.id),
-                        onClick = { onToggle(option.id) },
+                        onClick = null,
                         enabled = enabled
                     )
                 }
@@ -148,7 +169,10 @@ private fun QuestionBlock(
                 }
             }
         }
-        if (question.allowCustom || question.kind == DshQuestionKind.TEXT) {
+        if (question.allowCustom && question.kind != DshQuestionKind.TEXT) {
+            TextButton(enabled = enabled, onClick = { customExpanded = !customExpanded }) { Text("+ 其他回答") }
+        }
+        if (question.kind == DshQuestionKind.TEXT || (question.allowCustom && customExpanded)) {
             OutlinedTextField(
                 value = draft.customFor(question.id),
                 onValueChange = onCustom,

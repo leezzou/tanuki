@@ -63,6 +63,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.tanuki.ui.design.TanukiDesign
 import androidx.core.net.toUri
 import androidx.compose.foundation.Image
 import kotlinx.coroutines.Dispatchers
@@ -544,7 +546,7 @@ private fun AnnotatedString.Builder.appendLink(
 @Composable
 fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
     val blocks = remember(text) { DshMarkdownParser.parse(text) }
-    val codeBackground = MaterialTheme.colorScheme.surfaceContainerHighest
+    val codeBackground = Color(TanukiDesign.tokens.colors.canvas)
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
     var pendingLink by remember { mutableStateOf<DshLinkDecision?>(null) }
@@ -557,13 +559,13 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
         pendingLink = DshLinkPolicy.classify(raw)
     }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         blocks.forEachIndexed { index, block ->
             when (block) {
                 is DshMarkdownBlock.Paragraph -> SelectionContainer {
                     Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
-                        style = MaterialTheme.typography.bodyMedium
+                        dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp)
                     )
                 }
                 is DshMarkdownBlock.Heading -> {
@@ -574,7 +576,7 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
                         else -> MaterialTheme.typography.bodyLarge
                     }
                     Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
+                        dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
                         style = style,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 2.dp)
@@ -589,7 +591,7 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
                 is DshMarkdownBlock.Truncated -> Text(
                     block.message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
                 DshMarkdownBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
             }
@@ -616,7 +618,7 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
                         }
                     }
                     linkError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Text(it, color = Color(TanukiDesign.tokens.colors.danger), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
@@ -652,20 +654,12 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DshQuote(text: String, codeBackground: Color, onLink: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Box(
-            Modifier
-                .width(3.dp)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
-        )
+    Surface(color = Color(TanukiDesign.tokens.colors.surface), shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(TanukiDesign.tokens.colors.outline))) {
         SelectionContainer {
-            Text(
-                dshInlineMarkdown(text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
-                Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(dshInlineMarkdown(text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
+                Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp),
+                color = Color(TanukiDesign.tokens.colors.textSecondary))
         }
     }
 }
@@ -684,14 +678,14 @@ private fun DshList(block: DshMarkdownBlock.ListBlock, codeBackground: Color, on
                 Text(
                     marker,
                     Modifier.width(32.dp),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp),
                     maxLines = 1,
                     fontWeight = FontWeight.SemiBold
                 )
                 SelectionContainer {
                     Text(
-                        dshInlineMarkdown(item.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
-                        style = MaterialTheme.typography.bodyMedium
+                        dshInlineMarkdown(item.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp)
                     )
                 }
             }
@@ -708,10 +702,10 @@ private fun DshTable(
     val view = remember(table) { DshTablePolicy.view(table) }
     val cellModifier = Modifier.widthIn(min = 108.dp, max = 240.dp).padding(8.dp)
     Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        Row(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Row(Modifier.background(Color(TanukiDesign.tokens.colors.surface))) {
             view.headers.forEachIndexed { index, header ->
                 Text(
-                    dshInlineMarkdown(header, codeBackground, onLink, MaterialTheme.colorScheme.primary),
+                    dshInlineMarkdown(header, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
                     cellModifier,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
@@ -722,12 +716,12 @@ private fun DshTable(
         view.rows.forEachIndexed { rowIndex, row ->
             Row(
                 Modifier.background(
-                    if (rowIndex % 2 == 1) MaterialTheme.colorScheme.surfaceContainerLow else Color.Transparent
+                    if (rowIndex % 2 == 1) Color(TanukiDesign.tokens.colors.surface) else Color.Transparent
                 )
             ) {
                 row.forEachIndexed { index, cell ->
                     Text(
-                        dshInlineMarkdown(cell, codeBackground, onLink, MaterialTheme.colorScheme.primary),
+                        dshInlineMarkdown(cell, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
                         cellModifier,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = view.alignments.getOrElse(index) { DshTableAlign.LEFT }.toTextAlign()
@@ -746,7 +740,7 @@ private fun DshTable(
                 },
                 Modifier.padding(8.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color(TanukiDesign.tokens.colors.textSecondary)
             )
         }
     }
@@ -764,7 +758,7 @@ private fun DshCodeBlock(index: Int, language: String?, code: String) {
     val view = remember(code) { DshCodeBlockPolicy.view(code) }
     var showLineNumbers by rememberSaveable("code-lines-$index") { mutableStateOf(false) }
     val numberWidth = remember(view.totalLines) { DshCodeBlockPolicy.numberWidth(view.totalLines) }
-    val lineNumberColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+    val lineNumberColor = Color(TanukiDesign.tokens.colors.textSecondary).copy(alpha = 0.65f)
     val rendered = remember(view, showLineNumbers, numberWidth, lineNumberColor) {
         buildAnnotatedString {
             view.lines.forEachIndexed { lineIndex, line ->
@@ -784,32 +778,30 @@ private fun DshCodeBlock(index: Int, language: String?, code: String) {
         }
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        color = Color(TanukiDesign.tokens.colors.canvas),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(TanukiDesign.tokens.colors.outline).copy(alpha = 0.5f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
             Row(
-                Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     language?.takeIf { it.isNotBlank() } ?: "代码",
+                    modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { showLineNumbers = !showLineNumbers }) {
-                    Text(if (showLineNumbers) "隐藏行号" else "行号")
-                }
-                TextButton(onClick = { clipboard.setText(AnnotatedString(code)) }) { Text("复制") }
+                TanukiCopyButton("复制", identity = index, onCopy = { clipboard.setText(AnnotatedString(code)) })
+                DshShareButton(code)
             }
             Box(
                 Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .padding(12.dp)
             ) {
                 SelectionContainer {
                     Text(
@@ -820,12 +812,15 @@ private fun DshCodeBlock(index: Int, language: String?, code: String) {
                     )
                 }
             }
+            TextButton(onClick = { showLineNumbers = !showLineNumbers }) {
+                Text(if (showLineNumbers) "隐藏行号" else "显示行号")
+            }
             if (view.truncated) {
                 Text(
                     "仅显示前 ${view.lines.size} 行（共 ${view.totalLines} 行）；复制可获取完整代码。",
                     Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
             }
         }
@@ -836,7 +831,7 @@ private fun DshCodeBlock(index: Int, language: String?, code: String) {
 private fun DshImageCard(image: DshMarkdownBlock.Image, onOpen: () -> Unit) {
     val info = remember(image.alt, image.url) { DshImagePolicy.describe(image.alt, image.url) }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = Color(TanukiDesign.tokens.colors.surface),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)
     ) {
@@ -844,7 +839,7 @@ private fun DshImageCard(image: DshMarkdownBlock.Image, onOpen: () -> Unit) {
             Box(
                 Modifier
                     .size(40.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(8.dp)),
+                    .background(Color(TanukiDesign.tokens.colors.canvas), RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text("图", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -860,7 +855,7 @@ private fun DshImageCard(image: DshMarkdownBlock.Image, onOpen: () -> Unit) {
                 Text(
                     info.message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color(TanukiDesign.tokens.colors.textSecondary),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -876,7 +871,7 @@ private fun DshAttachmentCard(attachment: DshMarkdownBlock.Attachment, onOpen: (
         DshAttachmentPolicy.describe(attachment.name, attachment.url)
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = Color(TanukiDesign.tokens.colors.surface),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)
     ) {
@@ -884,7 +879,7 @@ private fun DshAttachmentCard(attachment: DshMarkdownBlock.Attachment, onOpen: (
             Box(
                 Modifier
                     .size(40.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(8.dp)),
+                    .background(Color(TanukiDesign.tokens.colors.canvas), RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text("附", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -900,7 +895,7 @@ private fun DshAttachmentCard(attachment: DshMarkdownBlock.Attachment, onOpen: (
                 Text(
                     info.message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color(TanukiDesign.tokens.colors.textSecondary),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -951,9 +946,9 @@ private fun DshImageViewer(image: DshMarkdownBlock.Image, onClose: () -> Unit) {
                         failure ?: info.message,
                         style = MaterialTheme.typography.bodySmall,
                         color = if (failure != null) {
-                            MaterialTheme.colorScheme.error
+                            Color(TanukiDesign.tokens.colors.danger)
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            Color(TanukiDesign.tokens.colors.textSecondary)
                         }
                     )
                 }
