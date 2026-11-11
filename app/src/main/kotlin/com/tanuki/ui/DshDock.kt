@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -168,23 +167,30 @@ fun DshDockColumn(
             // 兜底动画：任一条整条出现/消失时，容器高度仍按同一时长过渡。
             // 先裁剪再动画，收起过程中内容不会画到消息区或输入栏上。
             .clipToBounds()
-            .animateContentSize(animationSpec = tween(durationMs)),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .animateContentSize(animationSpec = tween(durationMs))
     ) {
         // 每个种类只在这里遍历一次；展开态已把折叠项并入 plan.bars。
         // 隐藏的槽位保留在组合中，以便“+N”展开时仍能播放高度动画。
         DshDockKind.entries.forEach { kind ->
+            val barIndex = plan.bars.indexOf(kind)
             key(kind) {
-                DshDockAnimatedSlot(visible = kind in plan.bars, durationMs = durationMs) {
+                DshDockAnimatedSlot(
+                    visible = barIndex >= 0,
+                    durationMs = durationMs,
+                    // 间距放在可见条内部；隐藏槽位保持 0 高度，不额外占用版面。
+                    hasTopGap = barIndex > 0
+                ) {
                     DshDockBarContent(kind, approvalBar, goal, todo, goalCapabilities, onGoalAction, onTodoExpandedChange)
                 }
             }
             if (kind == plan.overflowAfter && plan.overflowCount > 0) {
-                DshDockOverflowButton(
-                    count = plan.overflowCount,
-                    expanded = plan.overflowExpanded,
-                    onClick = { overflowExpanded = !overflowExpanded }
-                )
+                Box(Modifier.fillMaxWidth().padding(top = if (plan.bars.isNotEmpty()) 4.dp else 0.dp)) {
+                    DshDockOverflowButton(
+                        count = plan.overflowCount,
+                        expanded = plan.overflowExpanded,
+                        onClick = { overflowExpanded = !overflowExpanded }
+                    )
+                }
             }
         }
     }
@@ -216,6 +222,7 @@ private fun DshDockBarContent(
 private fun DshDockAnimatedSlot(
     visible: Boolean,
     durationMs: Int,
+    hasTopGap: Boolean = false,
     content: @Composable () -> Unit
 ) {
     AnimatedVisibility(
@@ -229,7 +236,7 @@ private fun DshDockAnimatedSlot(
             shrinkTowards = Alignment.Top
         ) + fadeOut(tween(durationMs))
     ) {
-        Box(Modifier.fillMaxWidth()) { content() }
+        Box(Modifier.fillMaxWidth().padding(top = if (hasTopGap) 4.dp else 0.dp)) { content() }
     }
 }
 
