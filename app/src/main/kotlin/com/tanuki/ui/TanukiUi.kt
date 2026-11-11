@@ -124,7 +124,9 @@ data class TanukiUiModel(
     /** 用户偏好；默认官方界面。 */
     val nativeDshPreferred: Boolean = false,
     /** 原生接口不可用时的回退原因；为空表示未回退。 */
-    val nativeDshFallback: String? = null)
+    val nativeDshFallback: String? = null,
+    /** 首次启动引导；为空表示从未打开过，不显示提示条。 */
+    val onboarding: com.tanuki.onboarding.OnboardingPresentation? = null)
 
 data class TanukiUiCallbacks(
     val command: (String) -> Unit,
@@ -185,7 +187,19 @@ data class TanukiUiCallbacks(
     val retryNativeDsh: () -> Unit = {},
     val cancelTransfer: (Long) -> Unit = {},
     /** 打开发送独立原生会话管理页；不改变官方/原生 DSH 页选择。 */
-    val openSessionManager: () -> Unit = {}
+    val openSessionManager: () -> Unit = {},
+    // 首次启动引导：界面只转发用户动作，状态与持久化由 OnboardingController 负责。
+    val onboardingContinue: () -> Unit = {},
+    val onboardingBack: () -> Unit = {},
+    val onboardingSkip: () -> Unit = {},
+    val onboardingPrepare: () -> Unit = {},
+    val onboardingCancelPrepare: () -> Unit = { command("CANCEL") },
+    val onboardingRefreshDevice: () -> Unit = {},
+    val onboardingSelectInterface: (Boolean) -> Unit = {},
+    val onboardingComplete: (com.tanuki.onboarding.OnboardingFinish) -> Unit = {},
+    val onboardingOpen: () -> Unit = {},
+    val onboardingDismissBanner: () -> Unit = {},
+    val onboardingDismissUpgrade: () -> Unit = {}
 )
 
 internal val Snapshot.tanukiBusy: Boolean get() = operationActive
@@ -203,7 +217,25 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
              agentBrowserPage: @Composable (Modifier, Boolean, (Boolean) -> Unit, (() -> Unit)?, Dp) -> Unit = { _, _, _, _, _ -> },
              nativeDshPage: @Composable (Modifier) -> Unit = {},
              browserOpenRequest: Int = 0, dshOpenRequest: Int = 0, filesOpenRequest: Int = 0,
-             browserControl: BrowserControlUiState = BrowserControlUiState()) {
+             browserControl: BrowserControlUiState = BrowserControlUiState(),
+             remoteOpenRequest: Int = 0) {
+    // 首次启动引导占据整屏；此时不创建导航与 WebView 相关的页面状态。
+    val onboarding = model.onboarding
+    if (onboarding?.open == true) {
+        OnboardingScreen(
+            presentation = onboarding,
+            snapshot = model.snapshot,
+            onContinue = callbacks.onboardingContinue,
+            onBack = callbacks.onboardingBack,
+            onSkip = callbacks.onboardingSkip,
+            onPrepare = callbacks.onboardingPrepare,
+            onCancelPrepare = callbacks.onboardingCancelPrepare,
+            onRefreshDevice = callbacks.onboardingRefreshDevice,
+            onSelectInterface = callbacks.onboardingSelectInterface,
+            onComplete = callbacks.onboardingComplete,
+        )
+        return
+    }
     var tab by rememberSaveable(key = "tanuki-navigation-5") { mutableIntStateOf(0) }
     val pageStates = rememberSaveableStateHolder()
     var fullscreen by rememberSaveable { mutableStateOf(false) }
@@ -243,6 +275,14 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     }
     var settingsReturn by rememberSaveable { mutableIntStateOf(0) }
     var settingsSection by rememberSaveable { mutableStateOf<String?>(null) }
+    // 首次引导完成时可直接进入远程主机设置；与普通设置返回栈保持同一入口。
+    LaunchedEffect(remoteOpenRequest) {
+        if (remoteOpenRequest > 0) {
+            settingsReturn = tab.takeUnless { it == 4 } ?: 0
+            settingsSection = "远程主机"
+            tab = 4
+        }
+    }
     fun openSettings() { settingsReturn = tab.takeUnless { it == 4 } ?: 0; settingsSection = null; tab = 4 }
     fun settingsBack() { if (settingsSection != null) settingsSection = null else tab = settingsReturn }
     BackHandler(tab != 0 && tab != 1 && tab != 4) {
@@ -344,7 +384,17 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             Column(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize().tanukiEnter().imePadding()
                                 .verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottomSpace),
                                 verticalArrangement = Arrangement.spacedBy(28.dp)) {
-                                if (tab == 0) Overview(model, callbacks, openDsh = { tab = 1 })
+                                if (tab == 0) {
+                                    model.onboarding?.banner?.let { banner ->
+                                        OnboardingBannerCard(
+                                            banner = banner,
+                                            onOpen = callbacks.onboardingOpen,
+                                            onDismiss = if (banner.kind == com.tanuki.onboarding.OnboardingBannerKind.UPGRADE)
+                                                callbacks.onboardingDismissUpgrade else callbacks.onboardingDismissBanner,
+                                        )
+                                    }
+                                    Overview(model, callbacks, openDsh = { tab = 1 })
+                                }
                                 else SettingsPage(model, callbacks, settingsSection) { settingsSection = it }
                             }
                         }
@@ -712,6 +762,10 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
             ActionRow("运行诊断与组件状态", "服务、沙箱、健康检查与组件版本", onClick = { select("组件维护与诊断") })
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ActionRow("高级选项与兼容层", "旧 WebView 兼容、Blob 导出与许可来源", onClick = { select("高级与关于") })
+        }
+        SettingsGroup("首次启动引导") {
+            ActionRow("重新查看引导", "欢迎、环境检查、界面选择和开始入口", onClick = c.onboardingOpen)
+            Caption("已完成的步骤会保留；从引导里跳过后，首页会再次出现“完成设置”提示条。")
         }
         SettingsGroup("关于") {
             ReadOnlyRow("应用版本", model.versionName)

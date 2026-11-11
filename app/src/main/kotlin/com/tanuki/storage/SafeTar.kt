@@ -17,13 +17,19 @@ object SafeTar {
         require(path.startsWith(root)) { "归档路径越界: $name" }
         return path
     }
-    suspend fun extract(archive: File, destination: File, maxBytes: Long = 2L * 1024 * 1024 * 1024) {
+    suspend fun extract(
+        archive: File,
+        destination: File,
+        maxBytes: Long = 2L * 1024 * 1024 * 1024,
+        onBytes: ((Long) -> Unit)? = null,
+    ) {
         require(!destination.exists() || destination.list()?.isEmpty() == true) { "暂存目录必须为空" }
         destination.mkdirs()
         val root = destination.toPath().toAbsolutePath().normalize()
         data class Link(val path: Path, val target: String, val hard: Boolean)
         val links = mutableListOf<Link>(); val directories = mutableListOf<Pair<Path, Int>>()
         var bytes = 0L; var entries = 0
+        var reportedBytes = 0L
         TarArchiveInputStream(GZIPInputStream(archive.inputStream().buffered())).use { tar ->
             while (true) {
                 currentCoroutineContext().ensureActive()
@@ -42,7 +48,16 @@ object SafeTar {
                         require(!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) { "重复归档条目: ${e.name}" }
                         path.toFile().outputStream().use { out ->
                             val b = ByteArray(65536)
-                            while (true) { currentCoroutineContext().ensureActive(); val n = tar.read(b); if (n < 0) break; out.write(b, 0, n); bytes += n; require(bytes <= maxBytes) }
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val n = tar.read(b); if (n < 0) break
+                                out.write(b, 0, n); bytes += n; require(bytes <= maxBytes)
+                                // 解压总量未知，只上报真实写入量；由调用方决定节流与展示。
+                                if (onBytes != null && bytes - reportedBytes >= 8L * 1024 * 1024) {
+                                    reportedBytes = bytes
+                                    onBytes(bytes)
+                                }
+                            }
                         }
                         android.system.Os.chmod(path.toString(), e.mode and 511)
                     }
@@ -51,6 +66,7 @@ object SafeTar {
                 }
             }
         }
+        onBytes?.invoke(bytes)
         // Hard links cannot traverse a symlink because all symlinks are still deferred.
         val fallbackHardLinks = mutableListOf<Pair<String, String>>()
         val hard = links.filter { it.hard }.toMutableList()

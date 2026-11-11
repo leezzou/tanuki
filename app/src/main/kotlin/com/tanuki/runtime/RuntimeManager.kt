@@ -368,7 +368,14 @@ class RuntimeManager(val context: Context) {
         val archive = components.downloadArtifact(RuntimeComponent.UBUNTU)
         phase("Ubuntu 校验与解压", EnvironmentState.INSTALLING)
         deleteTree(paths.stage)
-        SafeTar.extract(archive, paths.stage)
+        // 解压总量未知：只上报真实写入量，界面用不定进度 + 已写入 MB，不造百分比。
+        var lastExtractReport = 0L
+        SafeTar.extract(archive, paths.stage) { written ->
+            if (written - lastExtractReport >= 32L * 1024 * 1024) {
+                lastExtractReport = written
+                state.update { it.copy(stage = "正在解压 Ubuntu（已写入 ${written / (1024 * 1024)} MB）") }
+            }
+        }
         File(paths.stage, "tmp").mkdirs(); File(paths.stage, "home/tanuki").mkdirs()
         File(paths.stage, "etc/resolv.conf").let { file ->
             Files.deleteIfExists(file.toPath())
