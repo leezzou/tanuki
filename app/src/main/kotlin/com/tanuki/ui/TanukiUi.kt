@@ -945,7 +945,7 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     }
     if (section == "网页与兼容性") SettingsGroup("网页与兼容性") {
         ToggleRow("界面：官方界面 / 原生界面", model.nativeDshPreferred, c.toggleNativeDsh)
-        Caption("关闭为官方 DSH 界面；开启后显示原生会话列表与只读消息。接口不可用时自动回退官方界面，切换不重启服务。")
+        Caption("关闭为官方 DSH 界面；原生界面：可查看会话、发送消息、处理审批。接口不可用时自动回退官方界面，切换不重启服务。")
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         ActionRow("原生会话管理", "列表、搜索、新建、重命名、归档、模型与权限", onClick = c.openSessionManager)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

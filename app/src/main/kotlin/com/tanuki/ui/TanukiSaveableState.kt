@@ -65,14 +65,23 @@ private fun Map<String, Any?>.pane(prefix: String): TanukiDshPaneState = TanukiD
 private fun Map<String, Any?>.stringList(key: String): List<String> =
     (this[key] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
 
-/** 阅读页显示状态 Saver；编码、滚动偏移和行号开关随 Activity 重建恢复。 */
+/** 阅读页显示状态 Saver；分段游标、编码、滚动偏移和行号随 Activity 重建恢复。 */
 val ReaderViewStateSaver: Saver<ReaderViewState, Any> = listSaver(
-    save = { state -> listOf(state.encoding, state.scrollOffset, state.showLineNumbers) },
+    save = { state ->
+        with(state.normalized()) {
+            listOf(encoding, scrollOffset, showLineNumbers, pageIndex,
+                offsets.toLongArray(), lineStarts.toIntArray(), resolvedEncoding.orEmpty())
+        }
+    },
     restore = { saved ->
         ReaderViewState(
             encoding = saved.getOrNull(0) as? String ?: "自动",
             scrollOffset = (saved.getOrNull(1) as? Number)?.toInt() ?: 0,
             showLineNumbers = saved.getOrNull(2) as? Boolean ?: true,
+            pageIndex = (saved.getOrNull(3) as? Number)?.toInt() ?: 0,
+            offsets = (saved.getOrNull(4) as? LongArray)?.toList() ?: listOf(0L),
+            lineStarts = (saved.getOrNull(5) as? IntArray)?.toList() ?: listOf(1),
+            resolvedEncoding = saved.getOrNull(6) as? String,
         ).normalized()
     },
 )

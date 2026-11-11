@@ -326,12 +326,14 @@ private fun TextViewerContent(
 ) {
     var requestedEncoding by rememberSaveable(document.key) { mutableStateOf(initialReaderState.encoding) }
     // 自动识别只在第一段做一次，后续分段沿用同一编码，避免从文件中部重新猜测。
-    var resolvedAutoEncoding by remember(document.key, requestedEncoding) { mutableStateOf<String?>(null) }
+    // 初始游标只在创建阅读器时读取；后续切换编码必须从首段重新分页。
+    val cursor = remember(document.key) { initialReaderState.normalized() }
+    var resolvedAutoEncoding by remember(document.key) { mutableStateOf(cursor.resolvedEncoding) }
     var encodingHintDismissed by rememberSaveable(document.key, requestedEncoding) { mutableStateOf(false) }
-    var offsets by remember(document.key, requestedEncoding) { mutableStateOf(listOf(0L)) }
+    var offsets by remember(document.key) { mutableStateOf(cursor.offsets) }
     // 与 offsets 平行保存每段第一行的行号，上一段/下一段不会重新从 1 计数。
-    var lineStarts by remember(document.key, requestedEncoding) { mutableStateOf(listOf(1)) }
-    var pageIndex by remember(document.key, requestedEncoding) { mutableIntStateOf(0) }
+    var lineStarts by remember(document.key) { mutableStateOf(cursor.lineStarts) }
+    var pageIndex by remember(document.key) { mutableIntStateOf(cursor.pageIndex) }
     var page by remember(document.key, requestedEncoding) { mutableStateOf<WorkspaceFileManager.TextPage?>(null) }
     var error by remember(document.key) { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -390,15 +392,21 @@ private fun TextViewerContent(
     }
     // 滚动状态放在非组合读取的槽里：离开页面时立即补一次，滚动过程中不触发重组。
     val latestReaderState = remember(document.key) {
-        mutableStateOf(ReaderViewState(requestedEncoding, initialReaderState.scrollOffset, showLineNumbers))
+        mutableStateOf(cursor)
     }
     val stateCallback by rememberUpdatedState(onReaderStateChange)
     LaunchedEffect(document.key) {
-        snapshotFlow { ReaderViewState(requestedEncoding, vertical.value, showLineNumbers) }
+        snapshotFlow {
+            ReaderViewState(requestedEncoding,
+                if (resetScroll) 0 else pendingRestore.takeIf { it > 0 } ?: vertical.value,
+                showLineNumbers, pageIndex, offsets, lineStarts, resolvedAutoEncoding)
+        }
             .distinctUntilChanged()
             .collectLatest { value ->
+                val previous = latestReaderState.value
                 latestReaderState.value = value
-                delay(250)
+                // 分段/编码改变立即保存；纯滚动仍防抖，避免每帧写偏好并重组父页面。
+                if (value.copy(scrollOffset = previous.scrollOffset) == previous) delay(250)
                 stateCallback(value)
             }
     }
@@ -543,6 +551,9 @@ private fun TextViewerContent(
                                 text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
                                 onClick = {
                                     requestedEncoding = encoding
+                                    offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
+                                    resolvedAutoEncoding = null
+                                    resetScroll = true
                                     encodingMenu = false
                                     encodingHintDismissed = false
                                 },
@@ -654,6 +665,8 @@ private fun TextViewerContent(
                             text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
                             onClick = {
                                 requestedEncoding = encoding
+                                offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
+                                resolvedAutoEncoding = null
                                 resetScroll = true
                                 encodingMenu = false
                                 encodingHintDismissed = false
