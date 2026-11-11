@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-65（AO worker，DSH）
 - 时间：2026-11-11 11:47 CST
-- 状态：已完成（PR #71 待 CI/独立审查；未合并、未发布）
+- 状态：已完成（PR #71 CI 通过，待独立审查；未合并、未发布）
 - 前一记录：[主机端一键 quickstart](20261111-1017-remote-relay-quickstart.md)（PR #64 已合并）
 
 > 普通 PR 只新增本记录，未修改 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。
@@ -19,7 +19,7 @@
 - 已实现：主机端 mDNS 广播（avahi/dns-sd 优先，Python 最小应答兜底）、TXT 契约、`--name/--dsh-port/--no-mdns`、quickstart 局域网提示与 `qrencode` 二维码/退化提示、文档与自测。
 - 已验证：`test_mdns.py` 20 项、`test_quickstart.py` 20 项、`test_remote_relay.py` 9 项通过；host_agent 默认 `dns-sd` 启动且 SIGTERM 退出 0、无 `dns-sd` 残留；quickstart 默认 mDNS 横幅正确、Ctrl+C 后无 `dns-sd` 残留；假 `qrencode` 成功路径与缺失退化路径均验证。
 - 待验证：PR 推送后的 GitHub CI；独立 Codex High 审查；真实手机发现列表、真实 avahi/路由器 AP 隔离/组播屏蔽、真实 `qrencode` 扫码。
-- 当前分支：`ao/relay-quickstart/mdns-qr`，基于 `origin/main=8d620ee`（#64 合并后），已 fast-forward 到 `origin/main=95704ff`（#66 docs-only）；PR：<https://github.com/leezzou/tanuki/pull/71>。
+- 当前分支：`ao/relay-quickstart/mdns-qr`，基于 `origin/main=8d620ee`（#64 合并后），已 fast-forward 到 `origin/main=95704ff`（#66 docs-only）；PR：<https://github.com/leezzou/tanuki/pull/71>（CI 通过 head `69280e5`）。
 - 关键事实与可定位源码：`scripts/remote-relay/discovery.py`、`host_agent.py`、`quickstart.sh`、`quickstart_lib.py`、`test_mdns.py`、`docs/INTERFACES.md` 1.7、`docs/REMOTE-CONNECT.md` 3.4。
 
 ## 本次改动
@@ -50,21 +50,22 @@
 | quickstart 默认 mDNS | 通过：横幅含“列表里应出现「测试主机」”；Ctrl+C 退出 130；`dns-sd` 无残留 | 回环端口；真实手机未验证 |
 | 假 `qrencode` 成功路径 | 通过：输出假二维码内容并打印“扫码配对” | 用临时 PATH 假脚本；真实二维码未扫 |
 | 无 `qrencode` 退化 | 通过：输出“未安装 qrencode”、安装提示和链接大字 | 本机未安装 qrencode |
-| `python3 scripts/check-publication.py --git` / `check-handoff.py --pr` | 待提交前执行 | 新增文件需先 `git add` |
+| `python3 scripts/check-publication.py --git` / `check-handoff.py --pr` | 通过：0 findings / handoff PR check passed | 提交前已重跑 |
+| GitHub Actions（head `69280e5`） | 通过：push run 42955599383（Android 5m41s、Host 34s）与 PR run 42955593842（Android 5m5s、Host 45s），4 个 check 全 pass | 本记录为 CI 后的 docs-only 提交，最终 head 的 CI 以 PR 为准；未跑设备 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本表全部为本次新验证；未引用 #64 的 19 项结果。
 - 未测试、超时、失败和暂未复现的情况：真实手机发现列表、真实 avahi（Linux）与 dns-sd（macOS）跨设备、路由器 AP 隔离/访客网络/组播屏蔽、真实 qrencode 扫码、CI 与独立审查未执行。
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建与推送后的 CI；独立 Codex High 审查绑定当前 head；真实同网段/跨网设备验收。
+- 未完成：独立 Codex High 审查绑定最终 head；真实同网段/跨网设备验收。
 - 外部阻塞：无。
 - 用户暂停：合并/发布；API Key、真实模型/账号、真机验收保持暂停，本次未触碰。
 - P2 审查意见（`--listen` 连接地址、状态目录锁）按编排方要求记为 #64 待办，本 PR 未顺手修改。
 
 ## 下一步
 
-1. PR #71 已创建；观察 CI，并请编排方安排独立 Codex High 审查当前 head（不合并、不发布）。
+1. PR #71 CI 已通过；请编排方安排独立 Codex High 审查最终 head（不合并、不发布）。
 2. 观察 CI；请编排方安排独立 Codex High 审查当前 head。
 3. 有真实同网段手机/路由器时，验证发现列表、AP 隔离、UDP 5353 和二维码扫码；记录设备、网络和失败现象。
 
