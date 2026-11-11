@@ -151,6 +151,8 @@ internal fun WorkspaceFilesPage(
         mutableStateOf(ReaderViewState())
     }
     var readerRestored by rememberSaveable { mutableStateOf(false) }
+    // 异步恢复上次阅读不算用户主动导航；这里只记动效身份，不参与阅读状态保存。
+    var restoredDetailKey by remember { mutableStateOf<String?>(null) }
     var action by remember { mutableStateOf<String?>(null) }
     var actionEntries by remember { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var name by remember { mutableStateOf("") }
@@ -263,12 +265,14 @@ internal fun WorkspaceFilesPage(
     fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机工具路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
     fun openReader(entry: WorkspaceFileManager.Entry) {
+        restoredDetailKey = null
         // 重新打开同一路径才恢复旧偏移；打开新文件从默认位置开始。
         val saved = readerStore.load()?.takeIf { it.location == location && it.path == entry.path }
         readerView = saved?.view ?: ReaderViewState()
         openedEntry = entry
     }
     fun closeReader() {
+        restoredDetailKey = null
         onFullscreen(false)
         openedEntry = null
         readerStore.clear()
@@ -281,6 +285,7 @@ internal fun WorkspaceFilesPage(
                 readerStore.load()?.takeIf { saved ->
                     saved.location == location && (saved.location != FileLocation.PHONE || phoneStorageGranted)
                 }?.let { saved ->
+                    restoredDetailKey = "workspace:${saved.location.name}:${saved.path}"
                     readerView = saved.view
                     openedEntry = WorkspaceFileManager.Entry(
                         path = saved.path,
@@ -434,8 +439,15 @@ internal fun WorkspaceFilesPage(
         text = { Text("允许助手在本次运行中新建、修改、重命名和删除已授权的手机共享文件。\n拒绝后保持只读；可在文件页的权限入口修改，停止助手后自动恢复只读。") },
         dismissButton = { TextButton(onClick = { writePermissionDialog = false }) { Text("保持只读") } },
         confirmButton = { TextButton(onClick = { writePermissionDialog = false; onRequestPhoneWrite() }, enabled = phoneWritingAvailable) { Text("允许本次写入") } })
+    // 页面状态与副作用仍在宿主之外；稳定详情 key 仅驱动单次页面过渡。
+    val detailKey = externalDocument?.key ?: openedEntry?.let { "workspace:${location.name}:${it.path}" }
+    TanukiPageTransitionHost(
+        target = detailKey,
+        navigation = { from, to -> tanukiDetailNavigation(from, to, restoring = to != null && to == restoredDetailKey) },
+        modifier = modifier,
+    ) { pageModifier ->
     externalDocument?.let { document ->
-        Box(modifier.fillMaxSize()) {
+        Box(pageModifier.fillMaxSize()) {
             WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
                 actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
                 onActionBarHeightChanged = { viewerActionBarHeight = it },
@@ -450,11 +462,11 @@ internal fun WorkspaceFilesPage(
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
                 viewerActionBarVisible = !fullscreen, viewerActionBarHeight = viewerActionBarHeight, snackbarHostState = snackbarHostState)
         }
-        return
+        return@TanukiPageTransitionHost
     }
     openedEntry?.let { entry ->
         val document = remember(files, entry.path) { WorkspaceDocument(files, entry.path, entry.name) }
-        Box(modifier.fillMaxSize()) {
+        Box(pageModifier.fillMaxSize()) {
             WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
                 actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
                 onActionBarHeightChanged = { viewerActionBarHeight = it },
@@ -481,9 +493,9 @@ internal fun WorkspaceFilesPage(
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
                 viewerActionBarVisible = !fullscreen, viewerActionBarHeight = viewerActionBarHeight, snackbarHostState = snackbarHostState)
         }
-        return
+        return@TanukiPageTransitionHost
     }
-    Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(pageModifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize().imePadding()) {
             Column(Modifier.fillMaxSize()) {
                 // 顶部只保留位置、一级导入、更多和权限；低频浏览操作放进更多菜单。
@@ -718,7 +730,7 @@ internal fun WorkspaceFilesPage(
                         }
                     }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth().tanukiEnter()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (!canBrowse) {
                         // 未授权页保留原有说明与动作，只换成令牌字号和胶囊主操作。
                         Column(
@@ -803,6 +815,9 @@ internal fun WorkspaceFilesPage(
             )
         }
     }
+    }
+    // 保持查看器原来的提前返回语义，不让列表弹窗在阅读页背后出现。
+    if (externalDocument != null || openedEntry != null) return
     operationOutcome?.takeIf { showOperationDetails }?.let { outcome ->
         FileOperationResultDialog(
             outcome = outcome,

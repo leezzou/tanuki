@@ -685,6 +685,7 @@ class MainActivity : ComponentActivity() {
                             (application as TanukiApp).chatNotifications.refresh()
                         },
                         toggleNativeDsh = ::setNativePreference,
+                        // 独立 Activity 由系统负责进入/返回，不加 Compose 页面或窗口自定义转场。
                         openSessionManager = { startActivity(DshSessionManagerActivity.intent(this@MainActivity)) },
                         retryNativeDsh = {
                             nativeFallback = null

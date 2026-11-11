@@ -141,7 +141,13 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
     BackHandler(enabled = fullscreen || screen != null || showFind || (state.canGoBack && !state.closed)) {
         when { fullscreen -> onFullscreen(false); screen != null -> back(); showFind -> { showFind = false; controller.clearFind() }; else -> controller.back() }
     }
-    if (screen == null) Surface(interactionModifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    TanukiPageTransitionHost(
+        target = screen,
+        navigation = ::tanukiBrowserPageNavigation,
+        modifier = interactionModifier,
+        webView = screen == null,
+    ) { pageModifier ->
+    if (screen == null) Surface(pageModifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().imePadding()) {
             if (!fullscreen) Row(Modifier.fillMaxWidth().zIndex(1f).padding(horizontal = 12.dp, vertical = 4.dp),
@@ -270,7 +276,7 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
             }
         }
         }
-    } else BrowserNativePage(screen!!, ::back, interactionModifier, actions = {
+    } else BrowserNativePage(screen!!, ::back, pageModifier, actions = {
         if (onSettings != null) IconButton(onClick = onSettings) { TanukiIcon(TanukiGlyph.Settings, "设置") }
         if (fullscreen) IconButton(onClick = { onFullscreen(false) }) { TanukiIcon(TanukiGlyph.Contract, "浏览器退出全屏") }
         if (screen == "页面总览") IconButton(onClick = { controller.newTab(); screen = null }) { Icon(Icons.Default.Add, "新建页面") }
@@ -388,6 +394,7 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
                 }
             }
         }
+    }
     }
     menu?.let { page -> BrowserMenuSheet(page == "tools", state.url.isNotEmpty() && !state.loading,
         onBack = { menu = "main" }, onDismiss = { menu = null }, onChoose = { name ->

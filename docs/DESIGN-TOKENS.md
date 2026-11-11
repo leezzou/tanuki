@@ -194,6 +194,26 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 新封装位于 `ui/TanukiMotionFeedback.kt`：`TanukiIconSwap`、`TanukiStateCrossfade`、`TanukiAnimatedCount`、`TanukiCopyButton`。状态区不做高度动画，图标关闭 SizeTransform；系统 sheet 不再包动画。Host 回归见 `TanukiMotionSpecsTest`；Android实际设置通知、五页视觉效果、浮窗触摸、TalkBack与帧率仍待独立QA。
 
+### 6.2 B 批页面转场所有权
+
+`TanukiPageTransitionHost` 位于 `ui/TanukiPageTransitions.kt`，统一使用 A 批时长和曲线。单槽宿主立即提交目标页面，只组合当前内容；旧页不保留返回处理器、不继续发请求、不复制 WebView。初始挂载、恢复和宽度断点变化不当作导航入场；快速切页取消上一段协程，重定向到最新目标。
+
+| 跳转 | 语义与参数 | 所有者 |
+|---|---|---|
+| 工作台 / DSH / 文件 / 浏览器互切（含 rail、通知与程序导航） | alpha 160ms standard；无位移、无缩放 | TanukiUi 页面宿主 |
+| 主目的地 → 设置、设置 → 分区（含远程、存储与组件入口） | alpha + 16dp→0，上移淡入 320ms enter | 同一页面宿主 |
+| 设置分区 → 设置、设置 → 原目的地 | alpha + -16dp→0，反向 240ms exit | 同一页面宿主；沿用现有返回状态 |
+| 文件列表 → 内部/外部查看器 / 返回 | 稳定文档 key，前进 320ms / 返回 240ms，同一文档的加载/滚动不重播 | 文件渲染段的统一宿主；业务状态仍在宿主外 |
+| 浏览器网页 → 原生二级页、设置 → 子项 | 前进 320ms；返回 240ms；网页目标只揭示、不位移 | 浏览器内容段的统一宿主，沿用既有 back() 关系 |
+| 窄屏列表 → 详情 / 返回 | 前进 320ms / 返回 240ms，同上；宽屏双栏即时布局 | TanukiTwoPane（当前为组件储备，无业务调用） |
+| 打开 / 关闭独立会话管理 Activity | 保留系统过渡，不加 Compose 页面入场 | Android 系统；列表内部 S-state 沿用 A 批 |
+
+层级位移按审计约定在 RTL 中镜像；所有同级位移恒为零。返回页采用与进入相反的起点，单槽不保留退出页。`reduced-motion` 直接显示目标态（alpha=1、位移=0、时长=0），动态切换设置也不重建页面内容。
+
+官方 DSH 与浏览器可能持有活 WebView：页面宿主只让原生背景遮罩从不透明到透明，不给网页祖先套 `graphicsLayer` 或移动/缩放，不截图或复制网页。返回网页也只揭示同一实例。嵌套宿主在父宿主正在转场时立即显示目标，保证一次导航只播一层页面动效。文件页旧 `tanukiEnter` 已移除；兼容入口在统一宿主内直接返回原 Modifier，不创建第二段入场。文件查看器保持原来的提前返回和列表弹窗条件，浏览器菜单与授权弹窗不进入页面动效。详情见 [B 批交接](handoffs/20261111-1900-motion-batch-b.md)。
+
+回归 `TanukiPageTransitionsTest` 使用 Compose 实际动画 spec 的时间采样验证主目的地矩阵、层级曲线/方向、RTL、进入/返回方向互逆、0ns 即终态及 WebView 零位移；不把 JVM 策略验证称为 Android 视觉、WebView/Surface 或帧率验收。
+
 ## 7. 基础组件
 
 除三态外，组件位于 `com.tanuki.ui.design`，当前为模块内 `internal`，由同一 App 模块的页面直接使用。
