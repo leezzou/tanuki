@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-65（AO worker，DSH）
 - 时间：2026-11-11 10:17 CST
-- 状态：已完成（PR 待创建/待独立审查；未合并、未发布）
+- 状态：已完成（PR #64 待独立审查；未合并、未发布）
 - 前一记录：[查看器传输胶囊避让](20261111-0538-viewer-transfer-capsule-inset.md)（结论已合并；本任务与其无代码依赖）
 
 > 普通 PR 只新增本记录，未修改 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。
@@ -19,7 +19,7 @@
 - 已实现：`quickstart.sh` 一条命令流程、`quickstart_lib.py` 辅助逻辑、`host_agent.py --pairing-relay`、CI 自测步骤、文档 3.1–3.3。
 - 已验证：19 项 quickstart 离线自测通过；既有 9 项 relay 回归通过；`--print-only` 无副作用；真实回环启动后 SIGINT 退出码 130，relay/agent 均退出、端口释放、pid 文件清理；发布检查 0 findings。
 - 待验证：PR 推送后的 GitHub CI；独立 Codex High 对当前 head 的审查；真实手机 + 真实 sshd/公网中继、真实剪贴板。
-- 当前分支：`ao/relay-quickstart/root`，基于 `origin/main=62e4c30`；无运行中的 relay/agent 测试进程。
+- 当前分支：`ao/relay-quickstart/root`，基于 `origin/main=62e4c30`；PR：<https://github.com/leezzou/tanuki/pull/64>；无运行中的 relay/agent 测试进程。
 - 关键事实与可定位源码：`scripts/remote-relay/quickstart.sh`、`quickstart_lib.py`、`test_quickstart.py`、`host_agent.py`（`--pairing-relay`）、`docs/REMOTE-CONNECT.md` 第 3 节、`.github/workflows/verify.yml` 的 “Test remote relay quickstart”。
 
 ## 本次改动
@@ -51,14 +51,14 @@
 
 ## 未完成与暂停项
 
-- 未完成：PR 创建与推送后的 CI 观察；独立 Codex High 审查绑定当前 head；真实公网/设备验收。
+- 未完成：PR #64 的 CI 观察；独立 Codex High 审查绑定当前 head；真实公网/设备验收。
 - 外部阻塞：无（本地可完成部分已完成）。
 - 用户暂停：API Key、真实模型/账号、真机验收、合并/发布；本次未触碰，也未合并/发布。
 - 未删除任何旧交接记录：没有因本任务而过期的记录；历史验证依据保留。
 
 ## 下一步
 
-1. 推送 `ao/relay-quickstart/root` 并创建 PR，正文写明改动、测试、未验证项；不要合并、不要发布。
+1. PR #64 已创建；观察 CI，并请编排方安排独立 Codex High 审查当前 head；不要合并、不要发布。
 2. 请编排方安排独立 Codex High 审查当前 PR head；CI 与审查通过后再按用户授权决定合并。
 3. 有真实中继主机/手机时，按 `docs/REMOTE-CONNECT.md` 3.1 做一次真实配对，记录中继地址类型、手机网络、证书钉扎与失败码。
 
@@ -71,6 +71,7 @@
 
 ## 产物与校验
 
+- PR：<https://github.com/leezzou/tanuki/pull/64>（不合并、不发布）。
 - 新/旧 APK、源码 ZIP 及校验文件：本次未构建 APK、未生成源码 ZIP（文档/脚本变化后由发布维护方在发布流程中重打并核对外部 SHA）。
 - 是否覆盖安装 / 签名范围 / 未发布事项：无安装、无签名、无 tag/Release、未合并。
 - 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：无删除；本记录为本次唯一记录，未改共享状态/印章。
