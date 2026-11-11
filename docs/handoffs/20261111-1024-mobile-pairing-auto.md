@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-66（AO Worker）
 - 时间：2026-11-11 10:24 CST
-- 状态：已完成（PR 在本提交后创建；未合并、未发布）
+- 状态：已完成（PR [#63](https://github.com/leezzou/tanuki/pull/63)；未合并、未发布）
 - 前一记录：[远程 SSH 六步向导](20261110-1736-remote-ssh-wizard.md)（配对入口来源）
 
 ## 用户目标与范围
@@ -50,7 +50,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：无；PR 待本提交推送后创建。
+- 未完成：无；PR [#63](https://github.com/leezzou/tanuki/pull/63) 已创建，等待独立审查与适用 QA。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收；合并/发布未授权。
 
