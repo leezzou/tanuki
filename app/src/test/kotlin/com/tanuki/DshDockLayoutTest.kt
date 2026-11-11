@@ -3,6 +3,7 @@ package com.tanuki
 import com.tanuki.ui.DshDockKind
 import com.tanuki.ui.DshDockLayout
 import com.tanuki.ui.DshDockMotion
+import com.tanuki.ui.DshDockRenderPlan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -103,6 +104,67 @@ class DshDockLayoutTest {
         assertEquals(listOf(DshDockKind.APPROVAL, DshDockKind.GOAL), layout.visible)
         assertTrue(layout.folded.isEmpty())
         assertFalse(layout.overflowExpanded)
+    }
+
+    @Test fun expandedOverflowPlanRendersTodoExactlyOnce() {
+        // 组件唯一渲染来源：展开“+1”后待办只能出现一次，不能同时出现在常驻与折叠两路。
+        val collapsed = DshDockRenderPlan.of(
+            DshDockLayout.resolve(approvalVisible = true, goalVisible = true, todoVisible = true)
+        )
+        assertEquals(listOf(DshDockKind.APPROVAL, DshDockKind.GOAL), collapsed.bars)
+        assertFalse(collapsed.bars.contains(DshDockKind.TODO))
+        assertEquals(1, collapsed.overflowCount)
+
+        val expanded = DshDockRenderPlan.of(
+            DshDockLayout.resolve(
+                approvalVisible = true,
+                goalVisible = true,
+                todoVisible = true,
+                overflowExpanded = true
+            )
+        )
+        assertEquals(
+            listOf(DshDockKind.APPROVAL, DshDockKind.GOAL, DshDockKind.TODO),
+            expanded.bars
+        )
+        assertEquals(1, expanded.bars.count { it == DshDockKind.TODO })
+        assertEquals(expanded.bars.size, expanded.bars.toSet().size)
+        assertEquals(1, expanded.overflowCount)
+        assertTrue(expanded.overflowExpanded)
+    }
+
+    @Test fun collapsingOverflowPlanHidesTodoSlotAgain() {
+        val collapsed = DshDockRenderPlan.of(
+            DshDockLayout.resolve(
+                approvalVisible = true,
+                goalVisible = true,
+                todoVisible = true,
+                overflowExpanded = false
+            )
+        )
+        assertFalse(collapsed.bars.contains(DshDockKind.TODO))
+        assertEquals(1, collapsed.overflowCount)
+        assertEquals(DshDockKind.APPROVAL, collapsed.bars.first())
+    }
+
+    @Test fun renderPlanNeverRepeatsABarForAnyCombination() {
+        val flags = listOf(false, true)
+        flags.forEach { approval ->
+            flags.forEach { goal ->
+                flags.forEach { todo ->
+                    flags.forEach { expanded ->
+                        val plan = DshDockRenderPlan.of(
+                            DshDockLayout.resolve(approval, goal, todo, expanded)
+                        )
+                        assertEquals(
+                            "渲染计划不能重复停靠条：$approval/$goal/$todo/$expanded",
+                            plan.bars.size,
+                            plan.bars.toSet().size
+                        )
+                    }
+                }
+            }
+        }
     }
 
     @Test fun heightAnimationStaysWithinRequestedWindow() {

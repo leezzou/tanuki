@@ -46,6 +46,9 @@ enum class DshDockKind(val priority: Int, val label: String) {
  * 默认最多显示两条：按 [DshDockKind] 优先级取前两条，其余进入 [folded]。
  * 用户主动点开“+N”时才把折叠项临时铺开；此时 [visible] 包含全部可显示项，
  * 但 [folded] 仍保留折叠集合，便于按钮显示“+N / 收起”。
+ *
+ * 渲染必须只遍历一次 [visible]（见 [DshDockRenderPlan]），不能再用 [folded]
+ * 单独渲染一遍，否则展开时同一停靠条会出现两个实例。
  */
 data class DshDockLayout(
     val eligible: List<DshDockKind>,
@@ -81,6 +84,30 @@ data class DshDockLayout(
                 overflowExpanded = expanded
             )
         }
+    }
+}
+
+/**
+ * 停靠条实际渲染计划；组件只遍历 [bars] 一次，每个种类至多出现一次。
+ *
+ * 展开“+N”时 [DshDockLayout.visible] 已经包含全部可显示条，因此不能再遍历
+ * [DshDockLayout.folded] 渲染第二遍。本计划就是组件的唯一渲染来源，
+ * JVM 回归可直接断言同一停靠条不会出现两份。
+ */
+data class DshDockRenderPlan(
+    val bars: List<DshDockKind>,
+    val overflowCount: Int,
+    val overflowExpanded: Boolean
+) {
+    /** “+N/收起”按钮应插在最后一条可见条之后。 */
+    val overflowAfter: DshDockKind? get() = bars.lastOrNull()
+
+    companion object {
+        fun of(layout: DshDockLayout): DshDockRenderPlan = DshDockRenderPlan(
+            bars = layout.visible.distinct(),
+            overflowCount = layout.overflowCount,
+            overflowExpanded = layout.overflowExpanded
+        )
     }
 }
 
@@ -133,6 +160,8 @@ fun DshDockColumn(
         if (layout.overflowCount == 0) overflowExpanded = false
     }
 
+    val plan = DshDockRenderPlan.of(layout)
+
     Column(
         modifier
             .fillMaxWidth()
@@ -142,26 +171,20 @@ fun DshDockColumn(
             .animateContentSize(animationSpec = tween(durationMs)),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        layout.visible.forEach { kind ->
+        // 每个种类只在这里遍历一次；展开态已把折叠项并入 plan.bars。
+        // 隐藏的槽位保留在组合中，以便“+N”展开时仍能播放高度动画。
+        DshDockKind.entries.forEach { kind ->
             key(kind) {
-                DshDockAnimatedSlot(visible = true, durationMs = durationMs) {
+                DshDockAnimatedSlot(visible = kind in plan.bars, durationMs = durationMs) {
                     DshDockBarContent(kind, approvalBar, goal, todo, goalCapabilities, onGoalAction, onTodoExpandedChange)
                 }
             }
-        }
-        if (layout.overflowCount > 0) {
-            DshDockOverflowButton(
-                count = layout.overflowCount,
-                expanded = layout.overflowExpanded,
-                onClick = { overflowExpanded = !overflowExpanded }
-            )
-        }
-        // 折叠项只在用户点开“+N”后出现；默认不参与同屏两条的版面。
-        layout.folded.forEach { kind ->
-            key(kind) {
-                DshDockAnimatedSlot(visible = layout.overflowExpanded, durationMs = durationMs) {
-                    DshDockBarContent(kind, approvalBar, goal, todo, goalCapabilities, onGoalAction, onTodoExpandedChange)
-                }
+            if (kind == plan.overflowAfter && plan.overflowCount > 0) {
+                DshDockOverflowButton(
+                    count = plan.overflowCount,
+                    expanded = plan.overflowExpanded,
+                    onClick = { overflowExpanded = !overflowExpanded }
+                )
             }
         }
     }
