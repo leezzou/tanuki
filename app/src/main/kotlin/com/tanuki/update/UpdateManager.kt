@@ -60,7 +60,7 @@ class UpdateManager(
                 } catch (cancelled: CancellationException) {
                     manager.state.update { it.copy(update = UpdateState.UNCHECKED, stage = "版本检查已取消，可重新获取") }
                     throw cancelled
-                } catch (t: Throwable) { manager.fail(t); manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") } }
+                } catch (t: Throwable) { manager.fail(t, "dsh-check"); manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") } }
             }
         }
     }

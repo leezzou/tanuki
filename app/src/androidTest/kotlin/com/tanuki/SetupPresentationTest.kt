@@ -1124,6 +1124,47 @@ class SetupPresentationTest {
                 expectedDark, isNight(activity.resources.configuration))
         } finally { runCatching { instrumentation.runOnMainSync { themed.forEach { it.destroy() } } }; cleanup(activity) }
     }
+    @Test fun guidedDiskFailureOpensStorageSettings() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val failure = FailureCatalog.describe(FailureInput("ENOSPC", operation = "component-ubuntu"))
+            val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.FAILED, error = failure.detail, failure = failure)))
+            mount(activity, state, Recorder(), browserOf(activity).view, night = false, fontScale = 1f)
+            click("查看存储占用")
+            assertNotNull(find("存储与空间"))
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun componentCompatibilityActionOpensItsVersionSelector() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val failure = FailureCatalog.describe(FailureInput("所选版本不兼容", operation = "component-node"))
+            val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.FAILED, error = failure.detail, failure = failure)).copy(
+                components = ComponentInventory(ubuntuInstalled = true, ubuntuVersion = RuntimeManager.UBUNTU)
+            ))
+            val record = Recorder()
+            mount(activity, state, record, browserOf(activity).view, night = false, fontScale = 1f)
+            click("选择其他版本")
+            val target = RuntimeCatalog.node.last()
+            click("v${target.version}${if (target.lts) " · LTS" else " · 非 LTS"}")
+            assertEquals(listOf(RuntimeComponent.NODE to target.version), record.versionSelections)
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun updateExceptionIsHiddenUntilTechnicalDetailsAreExpanded() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val raw = "java.net.UnknownHostException: registry.example.invalid"
+            val state = mutableStateOf(model(Snapshot(update = UpdateState.CHECK_FAILED, error = raw, stage = "官方 DSH 版本获取失败，可重试")))
+            mount(activity, state, Recorder(), browserOf(activity).view, night = false, fontScale = 1f)
+            assertFalse(nodes().any { it.text?.toString()?.contains(raw) == true })
+            click("处理")
+            assertFalse(nodes().any { it.text?.toString()?.contains(raw) == true })
+            click("技术细节")
+            assertTrue(nodes().any { it.text?.toString()?.contains(raw) == true })
+        } finally { cleanup(activity) }
+    }
+
     private class Recorder {
         val commands = ArrayList<String>(); val installs = ArrayList<Release>()
         val sourceSelections = ArrayList<Pair<RuntimeComponent, String>>()

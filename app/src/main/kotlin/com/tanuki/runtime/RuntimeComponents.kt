@@ -418,31 +418,36 @@ class RuntimeComponents(private val manager: RuntimeManager) {
             if(meta.optBoolean("ready"))paths.atomic("installed.json",meta.put("node",artifact.version).toString())
         } finally { withContext(NonCancellable) { remove(staging) } }
     }
-    fun install(component: RuntimeComponent, force: Boolean = false) = manager.launchExclusive("component-${component.name.lowercase()}") {
-        recover()
-        migrateLegacyLayers()
-        try {
-            when(component) {
-                RuntimeComponent.NODE -> {
-                    check(installedUbuntuVersion()!=null) { "请先安装已知版本的 Ubuntu，再安装 Node.js" }
-                    ensureNode(force);manager.ensurePnpm()
+    fun install(component: RuntimeComponent, force: Boolean = false, version: String? = null) {
+        // 重试恢复失败时的目标版本；仍走既有清单与空闲校验，不把重装降级为普通安装。
+        if (version != null) selectVersion(component, version)
+        val retry = FailureRetry.component(component, force, selected(component).version)
+        manager.launchExclusive("component-${component.name.lowercase()}", retry) {
+            recover()
+            migrateLegacyLayers()
+            try {
+                when(component) {
+                    RuntimeComponent.NODE -> {
+                        check(installedUbuntuVersion()!=null) { "请先安装已知版本的 Ubuntu，再安装 Node.js" }
+                        ensureNode(force);manager.ensurePnpm()
+                    }
+                    RuntimeComponent.UBUNTU -> {
+                        if(force || !File(paths.root,".base-verified").isFile) {
+                            val artifact=selected(component)
+                            manager.phase("下载 Ubuntu ${artifact.version}",EnvironmentState.DOWNLOADING)
+                            // 只在替换事务内通过 ensureBase 下载一次镜像。
+                            replace("ubuntu") { manager.ensureBase();manager.ensureUbuntuTools();probeInstalledDsh() }
+                        } else manager.ensureUbuntuTools()
+                        val meta=paths.metadata()
+                        if(meta.optBoolean("ready"))paths.atomic("installed.json",meta.put("ubuntu",installedUbuntuVersion()).toString())
+                    }
                 }
-                RuntimeComponent.UBUNTU -> {
-                    if(force || !File(paths.root,".base-verified").isFile) {
-                        val artifact=selected(component)
-                        manager.phase("下载 Ubuntu ${artifact.version}",EnvironmentState.DOWNLOADING)
-                        // ensureBase downloads through downloadArtifact once, inside the replace transaction.
-                        replace("ubuntu") { manager.ensureBase();manager.ensureUbuntuTools();probeInstalledDsh() }
-                    } else manager.ensureUbuntuTools()
-                    val meta=paths.metadata()
-                    if(meta.optBoolean("ready"))paths.atomic("installed.json",meta.put("ubuntu",installedUbuntuVersion()).toString())
-                }
-            }
-            refresh()
-            manager.state.update { it.copy(stage="${if(component==RuntimeComponent.UBUNTU)"Ubuntu" else "Node.js"} 安装完成",error="",failure=null,bytes=0,total=-1,download=null) }
-        } finally { refresh();manager.state.update { it.copy(download=null) } }
+                refresh()
+                manager.state.update { it.copy(stage="${if(component==RuntimeComponent.UBUNTU)"Ubuntu" else "Node.js"} 安装完成",error="",failure=null,bytes=0,total=-1,download=null) }
+            } finally { refresh();manager.state.update { it.copy(download=null) } }
+        }
     }
-    fun uninstall(component: RuntimeComponent) = manager.launchExclusive("component-uninstall-${component.name.lowercase()}") {
+    fun uninstall(component: RuntimeComponent) = manager.launchExclusive("component-uninstall-${component.name.lowercase()}", FailureRetry("${component.name}_UNINSTALL")) {
         recover();migrateLegacyLayers()
         val targets=if(component==RuntimeComponent.UBUNTU)listOf(paths.root,paths.stage) else listOf(paths.node,paths.pnpm,paths.nodeCache,File(paths.root,"opt/node"),File(paths.root,"opt/pnpm"))
         targets.forEach(::owned)
@@ -462,7 +467,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
      * 卸载非当前 DSH 程序版本。先校验当前/运行/更新占用，再走“改名隔离 → 提交日志 → 删除”的两阶段事务；
      * 失败可回滚，且只删除 `engines/<version>` 与隔离目录，不触碰用户数据、项目、快照和共享缓存。
      */
-    fun uninstallDsh(version: String? = null) = manager.launchExclusive("component-uninstall-dsh") {
+    fun uninstallDsh(version: String? = null) = manager.launchExclusive("component-uninstall-dsh", FailureRetry("DSH_UNINSTALL", version)) {
         recover()
         val selected=version?.trim().orEmpty()
         val meta=paths.metadata()
@@ -495,7 +500,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
      * 在已安装程序之间切换当前版本。只改写 installed.json 并保留切换前数据快照；
      * 不重新下载、不删除目标或旧版本程序；较旧目标仍由数据兼容规则拒绝。
      */
-    fun switchDsh(version: String?) = manager.launchExclusive("component-switch-dsh") {
+    fun switchDsh(version: String?) = manager.launchExclusive("component-switch-dsh", FailureRetry("DSH_SWITCH", version)) {
         recover()
         check(manager.state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先处理上次更新恢复，再切换已安装版本" }
         check(manager.versionGate.tryEnter()) { DshVersionGate.BUSY_MESSAGE }

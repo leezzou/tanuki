@@ -63,7 +63,8 @@ data class AppFailure(
     val operation: String? = null,
     val retryCommand: String? = null,
     val occurredAtMillis: Long = 0L,
-    val attempt: Int = 0
+    val attempt: Int = 0,
+    val retry: FailureRetry? = null
 ) {
     /** 同一秒内重复出现的同一错误合并展示；新的失败时间会生成新的 key。 */
     val stableKey: String get() = listOf(
@@ -104,7 +105,8 @@ data class FailureInput(
     val domainHint: FailureDomain? = null,
     val componentId: String? = null,
     val occurredAtMillis: Long = 0L,
-    val attempt: Int = 0
+    val attempt: Int = 0,
+    val retry: FailureRetry? = null
 )
 
 /**
@@ -117,7 +119,7 @@ object FailureCatalog {
     private val installOperations = setOf("initialize", "component-tools")
     private val updateOperations = setOf(
         "dsh-install", "dsh-stage", "dsh-switch", "dsh-restore",
-        "dsh-resume", "dsh-update", "app-update", "component-switch-dsh"
+        "dsh-resume", "dsh-update", "dsh-check", "app-update", "component-switch-dsh"
     )
 
     private val networkMarkers = listOf(
@@ -156,7 +158,11 @@ object FailureCatalog {
         val cause = resolveCause(input, message)
         val componentId = resolveComponentId(input)
         val mode = input.recovery.mode
-        val actions = resolveActions(domain, cause, componentId, mode)
+        val checkingVersions = domain == FailureDomain.UPDATE &&
+            (input.operation == "dsh-check" || (input.operation == null && input.update in setOf(UpdateState.CHECKING, UpdateState.CHECK_FAILED)))
+        val actions = if (checkingVersions) action(FailureActionKind.RETRY, "重新获取版本") to
+            action(FailureActionKind.CLEAN_CACHE, "清理下载缓存") else resolveActions(domain, cause, componentId, mode)
+        val retry = input.retry ?: retryCommand(domain, cause, input.operation, componentId)?.let { FailureRetry(it) }
         val title = titleFor(domain)
         val reason = reasonFor(domain, cause)
         return AppFailure(
@@ -165,13 +171,14 @@ object FailureCatalog {
             title = title,
             reason = reason,
             detail = message.ifBlank { reason },
-            primaryAction = actions.first,
-            secondaryAction = actions.second,
+            primaryAction = actionable(actions.first, domain, retry),
+            secondaryAction = actions.second?.let { actionable(it, domain, retry) },
             componentId = componentId,
             operation = input.operation,
-            retryCommand = retryCommand(domain, cause, input.operation, componentId),
+            retryCommand = retry?.command,
             occurredAtMillis = input.occurredAtMillis,
-            attempt = input.attempt
+            attempt = input.attempt,
+            retry = retry
         )
     }
 
@@ -199,6 +206,9 @@ object FailureCatalog {
         if (input.failureKind != null) return FailureDomain.RUNTIME
         val operation = input.operation.orEmpty()
         if (operation in updateOperations) return FailureDomain.UPDATE
+        // 当前命令比上一次留下的状态更可靠，不能把组件失败误判为更新检查。
+        if (operation in installOperations || operation.startsWith("component-")) return FailureDomain.INSTALL
+        if (operation in setOf("health", "background-probe", "runtime-stop")) return FailureDomain.RUNTIME
         if (input.update in setOf(
                 UpdateState.CHECKING, UpdateState.CHECK_FAILED, UpdateState.STAGING,
                 UpdateState.TESTING, UpdateState.WAITING, UpdateState.BACKUP,
@@ -206,10 +216,6 @@ object FailureCatalog {
                 UpdateState.RECOVERY_REQUIRED
             )
         ) return FailureDomain.UPDATE
-        if (operation in installOperations || operation.startsWith("component-uninstall-")) {
-            return FailureDomain.INSTALL
-        }
-        if (operation.startsWith("component-")) return FailureDomain.INSTALL
         if (input.environment in setOf(
                 EnvironmentState.CHECKING, EnvironmentState.DOWNLOADING,
                 EnvironmentState.INSTALLING, EnvironmentState.VERIFYING,
@@ -257,9 +263,13 @@ object FailureCatalog {
         val operation = input.operation.orEmpty().lowercase(Locale.ROOT)
         val stage = input.stage
         return when {
-            operation.contains("ubuntu") || stage.contains("Ubuntu") -> "ubuntu"
-            operation.contains("node") || stage.contains("Node.js") -> "node"
-            operation.contains("dsh") || stage.contains("DSH") -> "dsh"
+            operation.contains("ubuntu") -> "ubuntu"
+            operation.contains("node") -> "node"
+            operation.contains("dsh") -> "dsh"
+            operation == "component-tools" -> "tools"
+            stage.contains("Ubuntu") -> "ubuntu"
+            stage.contains("Node.js") -> "node"
+            stage.contains("DSH") -> "dsh"
             else -> null
         }
     }
@@ -311,7 +321,7 @@ object FailureCatalog {
             FailureCause.PERMISSION -> action(FailureActionKind.OPEN_SETTINGS, "去系统设置") to
                 action(FailureActionKind.RETRY, "重试")
             FailureCause.COMPATIBILITY -> action(FailureActionKind.VIEW_VERSIONS, "选择其他版本") to
-                action(FailureActionKind.RETRY, "重试")
+                action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             FailureCause.BUSY -> action(FailureActionKind.RETRY, "重试") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             else -> action(FailureActionKind.RETRY, "重试") to
@@ -356,12 +366,19 @@ object FailureCatalog {
         operation == "health" -> "HEALTH"
         operation == "background-probe" -> "BACKGROUND"
         operation == "component-tools" -> "TOOLS"
-        operation == "component-uninstall-ubuntu" -> "UBUNTU_INSTALL"
-        operation == "component-uninstall-node" -> "NODE_INSTALL"
-        operation == "component-uninstall-dsh" -> "DSH_REINSTALL"
-        componentId == "ubuntu" -> "UBUNTU_INSTALL"
-        componentId == "node" -> "NODE_INSTALL"
+        operation == "component-uninstall-ubuntu" -> "UBUNTU_UNINSTALL"
+        operation == "component-uninstall-node" -> "NODE_UNINSTALL"
+        operation == "component-uninstall-dsh" -> "DSH_UNINSTALL"
+        componentId == "ubuntu" && operation == "component-ubuntu" -> "UBUNTU_INSTALL"
+        componentId == "node" && operation == "component-node" -> "NODE_INSTALL"
         else -> null
+    }
+
+    /** 旧错误缺少可重放上下文时，不展示点击无效的重试。 */
+    private fun actionable(selectedAction: FailureAction, domain: FailureDomain, retry: FailureRetry?): FailureAction {
+        if (selectedAction.kind != FailureActionKind.RETRY || retry != null || domain in setOf(FailureDomain.UPDATE, FailureDomain.RUNTIME)) return selectedAction
+        return if (domain == FailureDomain.FILE) action(FailureActionKind.OPEN_STORAGE, "查看存储占用")
+        else action(FailureActionKind.OPEN_SETTINGS, "查看系统设置")
     }
 
     private fun action(kind: FailureActionKind, label: String) = FailureAction(kind, label)
@@ -374,6 +391,27 @@ object FailureCatalog {
 /** 用户关闭顶部提示后，同一条失败不再重复出现；新的失败时间会重新显示。 */
 fun AppFailure?.afterDismiss(dismissedKey: String?): AppFailure? =
     this?.takeIf { it.stableKey != dismissedKey }
+
+/** 兼容进程重建和直接写 error 的路径；原文只进入详情，展示文案始终由分类器生成。 */
+fun Snapshot.displayFailure(): AppFailure? {
+    if (error.isBlank()) return failure.visibleIn(this)
+    failure?.takeIf { it.detail == error }?.let { return it }
+    return FailureCatalog.describe(FailureInput(
+        message = error,
+        operation = operation,
+        stage = stage,
+        environment = environment,
+        update = update,
+        service = service,
+        recovery = recovery,
+        failureKind = recovery.lastFailure?.takeIf {
+            service in setOf(ServiceState.FAILED, ServiceState.INTERRUPTED) &&
+                update != UpdateState.RECOVERY_REQUIRED && environment != EnvironmentState.REPAIR
+        },
+        occurredAtMillis = recovery.lastFailureAtMillis,
+        retry = operationRetry
+    ))
+}
 
 fun AppFailure?.visibleIn(snapshot: Snapshot): AppFailure? {
     if (this == null) return null

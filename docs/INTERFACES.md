@@ -73,6 +73,8 @@ HOME=<files/runtime/safe-home> DSH_HOME=<files/runtime/safe-dsh>
 
 前台通知继续由 `RuntimeService` 持有；自动重启等待期间不退出前台服务，`ServiceState`/`WebState` 的原语义不变。
 
+失败展示同时兼容结构化错误与仅写入 `Snapshot.error` 的恢复路径，原始异常只能放入默认折叠的技术细节。用户重试组件操作时，恢复动作携带原命令及目标版本：`*_REINSTALL` 仍以 `force=true` 重装，卸载/切换不得转换为安装；组件安装命令的可选 `version` extra 指定本次选择的清单版本，执行前仍校验版本、空闲状态和既有确认。明确的当前操作优先于残留更新状态参与失败分类。
+
 #### 1.1.1 启动期只读路径缓存
 
 `RuntimeManager.start()` 在 `web` 启动前把 APK 资源 `dsh-startup/path-cache.cjs` 复制到应用私有目录，并以只读绑定挂到 `/opt/tanuki-startup`；只有准备和绑定都成功时才给 node 注入 `--require`。准备失败、脚本缺失或绑定异常时不注入，按原生方式启动，不阻塞 DSH。

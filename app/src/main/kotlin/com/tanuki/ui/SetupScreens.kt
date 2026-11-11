@@ -66,7 +66,7 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
             OutlinedButton(onClick={step=prerequisite},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
                 Text("返回${steps[prerequisite].title}步骤")
             }
-        } else if(step==2)FoundationTools(model,c) else EnvironmentSection(model,c,step)
+        } else if(step==2)FoundationTools(model,c) else EnvironmentSection(model,c,step,onOpenStorage)
         s.download?.takeIf { it.component!=steps[step].id }?.let { progress ->
             SetupPanel {
                 Text("安装仍在继续",style=MaterialTheme.typography.titleMedium)
@@ -103,7 +103,7 @@ internal fun RuntimeRecoveryCard(
     onOpenStorage: () -> Unit = {}
 ) {
     val recovery = s.recovery
-    val activeRuntimeFailure = s.failure?.takeIf { it.domain == FailureDomain.RUNTIME }
+    val activeRuntimeFailure = s.displayFailure()?.takeIf { it.domain == FailureDomain.RUNTIME }
     // 正常模式且服务已恢复时，旧失败不再占用页面；重启后仍保留上次失败供排查。
     if (recovery.mode == RecoveryMode.NORMAL && s.service == ServiceState.RUNNING) return
     if (recovery.mode == RecoveryMode.NORMAL && recovery.lastFailure == null && activeRuntimeFailure == null) return

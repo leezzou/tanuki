@@ -12,6 +12,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -68,12 +69,7 @@ internal fun InlineFailureBlock(
                 )
             }
             // 技术原文默认折叠；用户需要反馈问题时再展开复制。
-            TanukiDetails("详情") {
-                SelectableCopy(failure.detail, error = true)
-                if (failure.attempt > 0) {
-                    Text("已尝试 ${failure.attempt} 次", style = tokens.type.captionSmall)
-                }
-            }
+            FailureTechnicalDetails(failure.detail, failure.stableKey, failure.attempt)
         }
     }
 }
@@ -133,6 +129,17 @@ internal fun GlobalFailureBar(
  * 错误详情：用 main 的底部弹层展示原因、技术原文与主/次行动；复制内容带时间。
  * 行动执行前先关闭弹层，避免和确认弹窗叠在一起。
  */
+/** 新错误拥有独立折叠状态，展开旧错误不会让下一条异常自动暴露。 */
+@Composable
+internal fun FailureTechnicalDetails(detail: String, identity: Any = detail, attempt: Int = 0) {
+    key(identity) {
+        TanukiDetails("技术细节") {
+            SelectableCopy(detail, error = true)
+            if (attempt > 0) Text("已尝试 $attempt 次", style = TanukiDesign.tokens.type.captionSmall)
+        }
+    }
+}
+
 @Composable
 internal fun FailureDetailSheet(
     failure: AppFailure?,
@@ -153,9 +160,7 @@ internal fun FailureDetailSheet(
                 Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
             ) {
-                TanukiDetails("技术详情") {
-                    SelectableCopy(shown.detail, error = true)
-                }
+                FailureTechnicalDetails(shown.detail, shown.stableKey)
                 TanukiPillButton(
                     text = if (copied) "已复制" else "复制错误信息",
                     onClick = {

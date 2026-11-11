@@ -91,6 +91,7 @@ fun RuntimeComponentCard(
     onUninstall: () -> Unit,
     onCancel: () -> Unit,
     onVersion: (String) -> Unit = {},
+    versionPickerRequest: Int = 0,
     sourceControls: @Composable () -> Unit = {},
     onFailureAction: (FailureActionKind) -> Unit = {}
 ) {
@@ -99,8 +100,8 @@ fun RuntimeComponentCard(
     val p = model.progress
 
     // 下载或失败出现时自动展开：活动进度与恢复动作都不允许被折叠隐藏。
-    LaunchedEffect(model.progress, model.failure?.stableKey) {
-        if (model.progress != null || model.failure != null) isExpanded = true
+    LaunchedEffect(model.progress, model.failure?.stableKey, versionPickerRequest) {
+        if (model.progress != null || model.failure != null || versionPickerRequest > 0) isExpanded = true
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -213,7 +214,8 @@ fun RuntimeComponentCard(
                             enabled = versionSelectorEnabled,
                             notice = model.selectionNotice,
                             installedVersion = if (model.installed) model.version else "",
-                            onSelect = onVersion
+                            onSelect = onVersion,
+                            openRequest = versionPickerRequest
                         )
                     }
                     if(!model.guided)SourceSelector(
@@ -334,9 +336,11 @@ private fun VersionSelector(
     enabled: Boolean,
     notice: String,
     installedVersion: String,
-    onSelect: (String) -> Unit
+    onSelect: (String) -> Unit,
+    openRequest: Int = 0
 ) {
     var open by remember { mutableStateOf(false) }
+    LaunchedEffect(openRequest) { if (openRequest > 0 && enabled) open = true }
     val current = options.firstOrNull { it.id == selectedVersion }
     val currentLabel = current?.title ?: label
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

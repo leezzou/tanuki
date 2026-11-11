@@ -2,6 +2,16 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 错误出口评审与中文失败文案跟进（2026-11-11，android_agent-69，非设备）
+
+- 起点：PR [#73](https://github.com/leezzou/tanuki/pull/73) 的完整 head `cde1644c98d4e6b10d6fc8295fd506fd87376c05`；provider 为 OPEN/MERGEABLE，本地与 fetch 后远端一致，开始时工作区干净。
+- 修复：进程重建/直接写 `error` 的统一展示兜底；当前操作与组件标识优先于旧更新状态/阶段；重试保留原命令、重装标志及目标版本；兼容性错误打开本组件版本选择器；安装引导透传存储导航；版本列表检查失败/空列表先重新获取。断网、超时、域名解析和未知错误主文案中文化，原文只进随错误重置、默认折叠的“技术细节”，含首次启动引导。
+- 新增 `FailureRecoveryFollowupTest` 11 项 JVM 回归，调用实际展示兜底及 UI 动作分发；更新 `OnboardingPrepareTest`，校验未知原文只保留在技术详情。原有回归保留。
+- 新增 `SetupPresentationTest` 三条仪器回归：引导存储导航、组件兼容性版本选择、异常默认隐藏到技术细节；已编译通过，本轮未执行设备测试。
+- 最终验证：`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew -PtestBuildType=debug :app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin --offline` 串行通过（5m02s）；**1179 tests / 120 个结果文件 / 0 skipped / 0 failures / 0 errors**，其中新增类 11 项全部执行；lint **0 errors / 98 warnings**；仪器测试源码编译通过，**未运行**。下方 1168 项属于上一轮结果。
+- 失败记录：受限启动无法写入 `~/.gradle` 缓存锁；按相同命令获准访问共享缓存。首次未指定 `testBuildType`，仓库默认 probe，导致 Debug 仪器编译任务未注册，任务图阶段退出；未把该尝试算成源码或测试通过。
+- 设备边界：`emulator-5554 / Pixel_7_API_34_arm64` 由 android_agent-71 独占 QA。本轮未启动/操作任何模拟器、真机或 adb 安装；本地验证不替代设备截图、点击及手势验收。
+
 ## 错误出口组件对齐（2026-11-11，android_agent-69，非设备）
 
 - 范围：PR [#73](https://github.com/leezzou/tanuki/pull/73) 沿用 main 已接入的 `TanukiDesignTheme`；错误块和顶栏读取设计令牌，主次行动与恢复卡使用 `TanukiPillButton`，错误详情使用 `TanukiBottomSheet`。错误模型、状态机、分类、动作映射和测试源码均未修改。

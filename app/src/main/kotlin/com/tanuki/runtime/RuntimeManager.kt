@@ -168,7 +168,8 @@ class RuntimeManager(val context: Context) {
         }
     }
     fun event(text: String) { log.append(text); state.update { it.copy(events = (it.events + Redact.text(text)).takeLast(12)) } }
-    fun fail(t: Throwable) {
+    fun fail(t: Throwable) = fail(t, null)
+    fun fail(t: Throwable, operation: String?) {
         val detail = when (t) {
             is AccessDeniedException -> "文件访问被拒绝；安装或恢复时无法读取目录：${t.file ?: t.message}"
             else -> t.message ?: t.javaClass.simpleName
@@ -181,7 +182,8 @@ class RuntimeManager(val context: Context) {
             val failure = FailureCatalog.describe(
                 FailureInput(
                     message = message,
-                    operation = current.operation,
+                    operation = operation ?: current.operation,
+                    retry = current.operationRetry.takeIf { operation == null || operation == current.operation },
                     stage = current.stage,
                     environment = current.environment,
                     update = current.update,
@@ -195,7 +197,7 @@ class RuntimeManager(val context: Context) {
     }
     internal fun phase(label: String, env: EnvironmentState) { state.update { it.copy(stage = label, environment = env, bytes = 0, total = -1, download = null, phasePercent = null) }; event(label) }
     fun cancel() { job?.cancel() }
-    internal fun launchExclusive(label: String, block: suspend () -> Unit) {
+    internal fun launchExclusive(label: String, retry: FailureRetry? = null, block: suspend () -> Unit) {
         synchronized(this) {
             if (job?.isActive == true) { event("已有环境操作正在进行"); return }
             job = scope.launch {
@@ -206,7 +208,7 @@ class RuntimeManager(val context: Context) {
                     return@launch
                 }
                 val before=state.value
-                state.update { it.copy(operation=label,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
+                state.update { it.copy(operation=label,operationRetry=retry,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
                     check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
                     paths.atomic("transaction", label)
@@ -226,7 +228,7 @@ class RuntimeManager(val context: Context) {
                     } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理失败，详见错误记录") else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.FAILED) else it.copy(environment = EnvironmentState.FAILED) }
                 } finally {
                     try { components.refresh(false) } finally {
-                        state.update { it.copy(operation=null,download=null,bytes=0,total=-1,phasePercent=null) }
+                        state.update { it.copy(operation=null,operationRetry=null,download=null,bytes=0,total=-1,phasePercent=null) }
                         mutation.unlock()
                     }
                 }

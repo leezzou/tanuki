@@ -94,11 +94,11 @@ class RuntimeService : Service() {
             "TOOLS" -> manager.installRequiredTools()
             "BACKGROUND" -> manager.backgroundProbe()
             "SLIM" -> manager.slimUbuntu()
-            "UBUNTU_INSTALL" -> manager.components.install(RuntimeComponent.UBUNTU)
-            "UBUNTU_REINSTALL" -> manager.components.install(RuntimeComponent.UBUNTU, true)
+            "UBUNTU_INSTALL" -> installComponent(RuntimeComponent.UBUNTU, false, intent)
+            "UBUNTU_REINSTALL" -> installComponent(RuntimeComponent.UBUNTU, true, intent)
             "UBUNTU_UNINSTALL" -> manager.components.uninstall(RuntimeComponent.UBUNTU)
-            "NODE_INSTALL" -> manager.components.install(RuntimeComponent.NODE)
-            "NODE_REINSTALL" -> manager.components.install(RuntimeComponent.NODE, true)
+            "NODE_INSTALL" -> installComponent(RuntimeComponent.NODE, false, intent)
+            "NODE_REINSTALL" -> installComponent(RuntimeComponent.NODE, true, intent)
             "NODE_UNINSTALL" -> manager.components.uninstall(RuntimeComponent.NODE)
             "DSH_UNINSTALL" -> manager.components.uninstallDsh(intent.getStringExtra("version"))
             "DSH_SWITCH" -> manager.components.switchDsh(intent.getStringExtra("version"))
@@ -121,6 +121,10 @@ class RuntimeService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+    private fun installComponent(component: RuntimeComponent, force: Boolean, intent: Intent) {
+        try { manager.components.install(component, force, intent.getStringExtra("version")) }
+        catch (error: Exception) { manager.fail(error, "component-${component.name.lowercase()}") }
     }
     private fun idle(s:Snapshot)=!s.operationActive && !appUpdates.state.value.busy && manager.fileTransfers.state.value.isEmpty() && !manager.hasPendingAutoRestart && s.service in setOf(ServiceState.STOPPED,ServiceState.FAILED,ServiceState.INTERRUPTED)
     private fun keepAwake() {

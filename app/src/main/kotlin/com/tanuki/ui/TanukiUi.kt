@@ -147,6 +147,8 @@ data class TanukiUiCallbacks(
     val appSettings: () -> Unit,
     val notifications: () -> Unit,
     val connectDsh: () -> Unit,
+    /** 生产入口继续走确认框与前台服务，并携带失败时的目标版本。 */
+    val retryFailure: (FailureRetry) -> Unit = { command(it.command) },
     val selectSource: (RuntimeComponent, String) -> Unit = { _, _ -> },
     val reinstallDsh: (Release) -> Unit = { },
     val uninstallDsh: (Release?) -> Unit = { },
@@ -295,7 +297,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     }
 
     // 全局错误条只认一份统一模型；运行失败优先，应用更新失败在其后。
-    val runtimeFailure = s.failure?.visibleIn(s)
+    val runtimeFailure = s.displayFailure()
     val appUpdateFailure = com.tanuki.update.AppUpdateFailure.from(model.appUpdate)
     val activeFailure = runtimeFailure ?: appUpdateFailure
     var dismissedFailureKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -304,15 +306,18 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     val visibleFailure = activeFailure.afterDismiss(dismissedFailureKey)
 
     fun runFailureAction(failure: AppFailure, kind: FailureActionKind) {
-        when (kind) {
-            FailureActionKind.RETRY -> when {
-                failure.componentId == "app" -> if (model.appUpdate.candidate != null) callbacks.downloadAppUpdate() else callbacks.checkAppUpdates()
-                failure.retryCommand != null -> callbacks.command(failure.retryCommand)
-                failure.domain == FailureDomain.UPDATE -> callbacks.checkUpdates()
-                failure.domain == FailureDomain.RUNTIME -> callbacks.command("START")
-                else -> Unit
-            }
-            FailureActionKind.SWITCH_SOURCE -> {
+        if (failure.componentId == "app" && kind == FailureActionKind.RETRY) {
+            if (model.appUpdate.candidate != null) callbacks.downloadAppUpdate() else callbacks.checkAppUpdates()
+            return
+        }
+        performFailureAction(failure, kind, callbacks, ::openStorageSettings,
+            onViewVersions = {
+                settingsReturn = tab.takeUnless { it == 4 } ?: 0
+                settingsSection = "组件维护与诊断"
+                tab = 4
+            },
+            versionsAvailable = model.versions.isNotEmpty(),
+            onSwitchSource = {
                 val component = when (failure.componentId) {
                     "ubuntu" -> RuntimeComponent.UBUNTU
                     "node" -> RuntimeComponent.NODE
@@ -324,19 +329,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                     val next = sources.firstOrNull { it.id != current } ?: sources.firstOrNull()
                     if (next != null) callbacks.selectSource(component, next.id)
                 }
-            }
-            FailureActionKind.CLEAN_CACHE -> callbacks.command("CACHE")
-            FailureActionKind.OPEN_STORAGE -> openStorageSettings()
-            FailureActionKind.OPEN_SETTINGS -> callbacks.appSettings()
-            FailureActionKind.RESTART -> callbacks.command("RESTART")
-            FailureActionKind.SAFE_MODE -> callbacks.command("RECOVERY_SAFE")
-            FailureActionKind.TRY_NORMAL -> callbacks.command("RECOVERY_TRIAL")
-            FailureActionKind.VIEW_VERSIONS -> {
-                settingsReturn = tab.takeUnless { it == 4 } ?: 0
-                settingsSection = "组件维护与诊断"
-                tab = 4
-            }
-        }
+            })
     }
     BackHandler(tab != 0 && tab != 1 && tab != 4) {
         if (tab == 3 && activeFullscreen) browserFullscreen = false else tab = 0
@@ -514,20 +507,13 @@ private fun Overview(model: TanukiUiModel, c: TanukiUiCallbacks, openDsh: () -> 
 @Composable
 internal fun OperationCard(s: Snapshot, c: TanukiUiCallbacks, onOpenStorage: () -> Unit = {}) {
     // 组件卡、更新卡和运行恢复卡各自负责对应错误；这里只收留没有专属位置的失败。
-    val failure = s.failure?.visibleIn(s)?.takeIf {
-        it.domain == FailureDomain.FILE || it.domain == FailureDomain.UNKNOWN
+    val failure = s.displayFailure()?.takeIf {
+        s.failure == null || it.componentId !in setOf("ubuntu", "node", "dsh", "app") || it.domain == FailureDomain.FILE || it.domain == FailureDomain.UNKNOWN
     } ?: return
     InlineFailureBlock(
         failure = failure,
         onAction = { kind ->
-            when (kind) {
-                FailureActionKind.RETRY -> failure.retryCommand?.let(c.command)
-                FailureActionKind.CLEAN_CACHE -> c.command("CACHE")
-                FailureActionKind.OPEN_STORAGE -> onOpenStorage()
-                FailureActionKind.OPEN_SETTINGS -> c.appSettings()
-                FailureActionKind.RESTART -> c.command("START")
-                else -> Unit
-            }
+            performFailureAction(failure, kind, c, onOpenStorage, c.checkUpdates, versionsAvailable = false)
         }
     )
 }
@@ -539,20 +525,15 @@ private fun componentFailureAction(
     sources: List<RuntimeSource>,
     currentSource: String,
     c: TanukiUiCallbacks,
-    onOpenStorage: () -> Unit
+    onOpenStorage: () -> Unit,
+    onViewVersions: () -> Unit
 ): (FailureActionKind) -> Unit = { kind ->
-    when (kind) {
-        FailureActionKind.RETRY -> failure.retryCommand?.let(c.command)
-        FailureActionKind.SWITCH_SOURCE -> {
+    performFailureAction(failure, kind, c, onOpenStorage, onViewVersions,
+        onSwitchSource = {
             // 选一个不是当前源的镜像；切源后仍由用户点安装，避免静默重装。
             val next = sources.firstOrNull { it.id != currentSource } ?: sources.firstOrNull()
             if (next != null) c.selectSource(component, next.id)
-        }
-        FailureActionKind.CLEAN_CACHE -> c.command("CACHE")
-        FailureActionKind.OPEN_STORAGE -> onOpenStorage()
-        FailureActionKind.OPEN_SETTINGS -> c.appSettings()
-        else -> Unit
-    }
+        })
 }
 
 @Composable
@@ -587,6 +568,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
     val guided=guideStep!=null
     val automatic=ComponentSourceOption("auto","自动择优","先测速再使用最快可用源，下载失败后自动换源")
     var showVersions by rememberSaveable { mutableStateOf(false) }
+    var ubuntuVersionRequest by remember { mutableIntStateOf(0) }
+    var nodeVersionRequest by remember { mutableIntStateOf(0) }
     var showInstalledDsh by rememberSaveable { mutableStateOf(false) }
     var selectedVersion by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = model.versions.firstOrNull { it.version == selectedVersion }
@@ -594,7 +577,7 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         ?: model.versions.firstOrNull { it.version == RuntimeManager.DSH }
         ?: model.versions.firstOrNull { it.version == s.candidate } ?: model.versions.firstOrNull()
     val actionsEnabled = s.tanukiIdle && s.update != UpdateState.RECOVERY_REQUIRED
-    val activeFailure = s.failure?.visibleIn(s)
+    val activeFailure = s.displayFailure()
     val ubuntuFailure = activeFailure?.takeIf { it.componentId == "ubuntu" }
     val nodeFailure = activeFailure?.takeIf { it.componentId == "node" }
     val dshFailure = activeFailure?.takeIf { it.componentId == "dsh" }
@@ -628,9 +611,10 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         onReinstall = { c.command("UBUNTU_REINSTALL") },
         onUninstall = { c.command("UBUNTU_UNINSTALL") },
         onCancel = { c.command("CANCEL") },
+        versionPickerRequest = ubuntuVersionRequest,
         onVersion={ c.selectVersion(RuntimeComponent.UBUNTU,it) },
         onFailureAction = ubuntuFailure?.let { failure ->
-            componentFailureAction(failure, RuntimeComponent.UBUNTU, model.ubuntuSources, comps.ubuntuSource, c, onOpenStorage)
+            componentFailureAction(failure, RuntimeComponent.UBUNTU, model.ubuntuSources, comps.ubuntuSource, c, onOpenStorage) { ubuntuVersionRequest++ }
         } ?: {},
         sourceControls={ SourceSpeedControls("Ubuntu",model.ubuntuSources.map { ComponentSourceOption(it.id,it.title,it.detail) },comps.ubuntuSource,
             model.ubuntuSpeed,actionsEnabled,!s.tanukiBusy && !model.nodeSpeed.running,
@@ -652,9 +636,10 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         onReinstall = { c.command("NODE_REINSTALL") },
         onUninstall = { c.command("NODE_UNINSTALL") },
         onCancel = { c.command("CANCEL") },
+        versionPickerRequest = nodeVersionRequest,
         onVersion={ c.selectVersion(RuntimeComponent.NODE,it) },
         onFailureAction = nodeFailure?.let { failure ->
-            componentFailureAction(failure, RuntimeComponent.NODE, model.nodeSources, comps.nodeSource, c, onOpenStorage)
+            componentFailureAction(failure, RuntimeComponent.NODE, model.nodeSources, comps.nodeSource, c, onOpenStorage) { nodeVersionRequest++ }
         } ?: {},
         sourceControls={ SourceSpeedControls("Node.js",model.nodeSources.map { ComponentSourceOption(it.id,it.title,it.detail) },comps.nodeSource,
             model.nodeSpeed,actionsEnabled,!s.tanukiBusy && !model.ubuntuSpeed.running,
@@ -670,15 +655,8 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         failure=dshFailure,
         onFailureAction={ kind ->
             val failure=dshFailure
-            if(failure!=null) when(kind) {
-                FailureActionKind.RETRY -> failure.retryCommand?.let(c.command)
-                FailureActionKind.VIEW_VERSIONS -> showVersions=true
-                FailureActionKind.CLEAN_CACHE -> c.command("CACHE")
-                FailureActionKind.OPEN_STORAGE -> onOpenStorage()
-                FailureActionKind.OPEN_SETTINGS -> c.appSettings()
-                FailureActionKind.RESTART -> c.command("START")
-                else -> Unit
-            }
+            if (failure != null) performFailureAction(failure, kind, c, onOpenStorage,
+                onViewVersions = { showVersions = true }, versionsAvailable = model.versions.isNotEmpty())
         }) {
         val dshProgress=download?.takeIf { it.component.equals("dsh",ignoreCase=true) }
         if(dshProgress!=null) {
@@ -822,7 +800,10 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             // 热/低电时只减少界面展示行数，不影响落盘日志或正在执行的任务。
             SelectableCopy(logs.takeLast(model.deviceCondition.logLineLimit.coerceAtLeast(1)).joinToString("\n").ifBlank { "暂无日志" })
         }
-        if (s.error.isNotBlank()) SelectableCopy(s.error, error = true)
+        s.displayFailure()?.let { failure ->
+            Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
+            FailureTechnicalDetails(failure.detail, failure.stableKey)
+        }
         }
     }
 }
@@ -1061,7 +1042,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
         if (native) {
             // 崩溃或启动失败时，恢复卡直接留在当前页，不必先返回工作台。
             Column(Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInset)) {
-                if (s.failure?.domain == FailureDomain.RUNTIME || s.recovery.mode != RecoveryMode.NORMAL || s.recovery.lastFailure != null) {
+                if (s.displayFailure()?.domain == FailureDomain.RUNTIME || s.recovery.mode != RecoveryMode.NORMAL || s.recovery.lastFailure != null) {
                     Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                         RuntimeRecoveryCard(s, c, model.components, onOpenStorage)
                     }

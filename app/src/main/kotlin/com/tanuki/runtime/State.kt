@@ -40,7 +40,9 @@ data class Snapshot(
     val remote: RemoteHostStatus = RemoteHostStatus(),
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),
     /** 最近一次失败的统一展示模型；原始异常仍在 error 字段，恢复后清空。 */
-    val failure: AppFailure? = null
+    val failure: AppFailure? = null,
+    /** 仅当前操作持有；失败时复制到错误模型，结束后不污染下一次失败。 */
+    val operationRetry: FailureRetry? = null
 )
 class Paths(context: Context) {
     val base = context.filesDir

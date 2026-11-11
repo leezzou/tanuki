@@ -452,6 +452,7 @@ class MainActivity : ComponentActivity() {
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
                 var confirmation by remember { mutableStateOf<String?>(null) }
+                var pendingFailureRetry by remember { mutableStateOf<FailureRetry?>(null) }
                 var chatNotifyDialog by remember { mutableStateOf(false) }
                 var selected by remember { mutableStateOf<Release?>(null) }
                 val deviceInfo = remember { manager.deviceInfo() }
@@ -522,12 +523,19 @@ class MainActivity : ComponentActivity() {
                         onboarding=onboardingPresentation),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
+                            pendingFailureRetry = null
                             when (command) {
-                                "START", "HEALTH", "BACKGROUND" -> action(command)
+                                "START", "HEALTH", "BACKGROUND", "TOOLS" -> action(command)
                                 "CANCEL" -> { manager.cancel(); updates.cancel() }
                                 "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL",
                                 "INIT", "BASE", "STOP", "RESTART", "SLIM", "WEBVIEW_CHECK", "RECONNECT", "EXPORT", "BACKUP", "RESTORE", "RESUME_UPDATE", "CACHE",
                                 "RECOVERY_TRIAL", "RECOVERY_SAFE" -> confirmation = command
+                            }
+                        },
+                        retryFailure = { retry ->
+                            when (retry.command) {
+                                "START", "HEALTH", "BACKGROUND", "TOOLS" -> action(retry.command, retry.version)
+                                else -> { pendingFailureRetry = retry; confirmation = retry.command }
                             }
                         },
                         install = { release -> selected = release; confirmation = "UPDATE" },
@@ -810,13 +818,14 @@ class MainActivity : ComponentActivity() {
                         confirmButton = { TextButton(onClick = { notices = null }) { Text("关闭") } })
                 }
                 confirmation?.let { command ->
-                    AlertDialog(onDismissRequest = { confirmation = null }, title = { Text(confirmationTitle(command)) },
-                        text = { Text(confirmationMessage(command, selected)) },
+                    AlertDialog(onDismissRequest = { confirmation = null; pendingFailureRetry = null }, title = { Text(confirmationTitle(command)) },
+                        text = { Text(confirmationMessage(command, selected, pendingFailureRetry?.takeIf { it.command == command }?.version)) },
                         confirmButton = {
                             TextButton(onClick = {
                                 when (command) {
-                                    "INIT", "BASE", "STOP", "SLIM", "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL" -> action(command)
-                                    "DSH_UNINSTALL" -> action(command,selected?.version)
+                                    "INIT", "BASE", "STOP", "SLIM", "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version)
+                                    "DSH_UNINSTALL" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version ?: selected?.version)
+                                    "DSH_SWITCH" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version)
                                     "DSH_REINSTALL" -> selected?.let { updates.install(it,true) }
                                     "DSH_STAGE" -> selected?.let(updates::stage)
                                     "RESTART" -> lifecycleScope.launch {
@@ -855,9 +864,10 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 confirmation = null
+                                pendingFailureRetry = null
                             }) { Text(if (command in setOf("INIT", "BASE")) "确认来源并下载" else "确认") }
                         },
-                        dismissButton = { TextButton(onClick = { confirmation = null }) { Text("取消") } })
+                        dismissButton = { TextButton(onClick = { confirmation = null; pendingFailureRetry = null }) { Text("取消") } })
                 }
             }
         }
@@ -882,6 +892,7 @@ class MainActivity : ComponentActivity() {
         "RECOVERY_SAFE" -> "退出试用并回到安全模式"
         "UPDATE" -> "安装所选 DSH 版本"
         "DSH_UNINSTALL" -> "卸载 DSH 程序"
+        "DSH_SWITCH" -> "切换已安装 DSH 版本"
         "DSH_REINSTALL" -> "重新安装当前 DSH"
         "DSH_STAGE" -> "安装 DSH 备用程序"
         "UBUNTU_INSTALL" -> "安装精简 Ubuntu"
@@ -901,13 +912,14 @@ class MainActivity : ComponentActivity() {
         else -> "确认操作"
     }
 
-    private fun confirmationMessage(command: String, release: Release?): String = when (command) {
+    private fun confirmationMessage(command: String, release: Release?, targetVersion: String? = null): String = when (command) {
         "INIT", "BASE" -> "下载所选 Ubuntu Base ${manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64 精简镜像，不含桌面。${if(command=="INIT") "随后安装所选 Node.js ${manager.components.selected(RuntimeComponent.NODE).version} 与官方 DSH ${RuntimeManager.DSH}，仅添加必要工具。" else "本次只验证 App 内 Linux 启动。"}\n\nUbuntu 下载源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}；Node.js 下载源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。每个版本使用对应官方 SHA-256 校验。建议预留 4 GB 空间；模型上下文会发送至你选择的服务商。"
-        "UBUNTU_INSTALL", "UBUNTU_REINSTALL" -> "下载 Ubuntu Base ${manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}。验证该镜像对应的官方 SHA-256 后安装基础工具。${if(command=="UBUNTU_REINSTALL") "Ubuntu 内自行安装的软件与系统修改会被替换。" else ""}\n\n独立 Node.js、DSH 引擎、配置、会话与项目保留；失败时恢复原 Ubuntu。请先停止 DSH。"
+        "UBUNTU_INSTALL", "UBUNTU_REINSTALL" -> "下载 Ubuntu Base ${targetVersion ?: manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}。验证该镜像对应的官方 SHA-256 后安装基础工具。${if(command=="UBUNTU_REINSTALL") "Ubuntu 内自行安装的软件与系统修改会被替换。" else ""}\n\n独立 Node.js、DSH 引擎、配置、会话与项目保留；失败时恢复原 Ubuntu。请先停止 DSH。"
         "UBUNTU_UNINSTALL" -> "移除 Ubuntu 镜像及其中安装的软件。Node.js 将迁移并保留在独立目录；DSH 程序、配置、会话、快照和项目保留。重新安装 Ubuntu 后才能再次运行 DSH。请先停止服务。"
-        "NODE_INSTALL", "NODE_REINSTALL" -> "下载 Node.js ${manager.components.selected(RuntimeComponent.NODE).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。验证该版本压缩包、pnpm 和 DSH 的兼容性后再替换；失败时保留当前 Node。Ubuntu、DSH 程序、配置、会话与项目保留。请先停止服务。"
+        "NODE_INSTALL", "NODE_REINSTALL" -> "下载 Node.js ${targetVersion ?: manager.components.selected(RuntimeComponent.NODE).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。验证该版本压缩包、pnpm 和 DSH 的兼容性后再替换；失败时保留当前 Node。Ubuntu、DSH 程序、配置、会话与项目保留。请先停止服务。"
         "NODE_UNINSTALL" -> "只移除 Node.js 与 pnpm 工具层，保留 Ubuntu、DSH 程序、配置、会话与项目。重新安装 Node.js 后才能再次运行 DSH。请先停止服务。"
-        "DSH_UNINSTALL" -> "卸载 DSH ${release?.version ?: ""} 的备用程序目录，保留配置、会话、插件、Skill、项目、数据快照和其他已安装版本。当前使用版本不能卸载；卸载失败会回滚并保留原程序。请先停止服务。"
+        "DSH_UNINSTALL" -> "卸载 DSH ${targetVersion ?: release?.version ?: ""} 的备用程序目录，保留配置、会话、插件、Skill、项目、数据快照和其他已安装版本。当前使用版本不能卸载；卸载失败会回滚并保留原程序。请先停止服务。"
+        "DSH_SWITCH" -> "切换到已安装 DSH ${targetVersion ?: "所选版本"}；执行兼容性检查并保留切换前快照。请先停止服务。"
         "DSH_STAGE" -> "下载并安装官方 DSH ${release?.version ?: "所选版本"} 程序，使用隔离目录检查启动；不打开正式会话，不更改当前版本或数据。较旧版本可先安装为备用，再恢复匹配的数据快照。请先停止服务。"
         "DSH_REINSTALL" -> "移除并重新安装当前 DSH ${release?.version ?: ""} 的官方程序与依赖。配置、会话、插件和项目保留；若下载失败，引擎会保持待安装，可重试。请先停止服务。"
         "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。运行中可以导出；发现文件在读取期间变化时会提示重试。整个工作区不是同一时刻的快照，仍需检查源文件中的敏感内容。"
