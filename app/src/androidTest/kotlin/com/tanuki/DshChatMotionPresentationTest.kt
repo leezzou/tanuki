@@ -148,6 +148,14 @@ class DshChatMotionPresentationTest {
         } finally { ui { activity.finish() } }
     }
 
+    @Test fun staticMarkdownNeverShowsStreamingCursor() {
+        val activity = mount(reduced = true) { DshMarkdown("合成静态消息") }
+        try {
+            find("合成静态消息")
+            assertFalse(nodes().any { it.contentDescription?.toString() == "正在输出" })
+        } finally { ui { activity.finish() } }
+    }
+
     @Test fun reducedStreamingCursorRemainsBrightAtDifferentPulsePhases() {
         val activity = mount(reduced = true) { DshMarkdown("合成流式文本", streaming = true) }
         try {
