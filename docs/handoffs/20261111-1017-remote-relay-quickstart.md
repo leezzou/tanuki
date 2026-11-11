@@ -44,6 +44,7 @@
 | `bash scripts/remote-relay/quickstart.sh --print-only --state-dir <临时目录> --port 18443` | 退出 0；输出证书路径、钉扎状态、relay/agent 命令、配对文件状态；临时目录无新增文件 | 确认 `--print-only` 不建目录、不启动进程 |
 | 回环启动后发送 SIGINT（`Popen` + `send_signal`） | 退出码 130；relay/agent PID 均消失；端口释放；`quickstart.pids` 删除；stderr 含“已停止” | 使用 `--listen 127.0.0.1 --public-host 127.0.0.1 --no-clipboard`，不依赖真实网络 |
 | 回环启动后读取横幅 | stdout 含完整配对链接、6 位核对码、手机端三步、Ctrl+C 提示；链接中的 `pin` 与证书钉扎一致 | 临时状态目录；未验证真实手机粘贴/扫码 |
+| GitHub Actions 首轮 Host job（run 42948018982） | 失败：`test_port_detection_and_wait` 在 Linux 上对 backlog=1 的监听端口做第三次连接探测时超时 | 已改为直接断言 `probe_host` 的通配地址映射并增大 backlog；本地复跑 19 项通过，等待新 head CI |
 | `python3 scripts/check-publication.py --git` | 通过：0 findings（检查时新增文件尚未 `git add`，提交前需重跑） | 发布检查不打印匹配到的敏感值 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本表全部为本次新验证；未引用前一轮产品测试数字。

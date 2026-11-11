@@ -213,13 +213,15 @@ class QuickstartUnitTest(unittest.TestCase):
     def test_port_detection_and_wait(self) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
+        # backlog 不能是 1：探测连接不会被 accept，Linux 上后续连接可能超时。
+        listener.listen(8)
         port = listener.getsockname()[1]
         try:
+            # 通配监听地址应被映射为回环探测地址（只断言映射，避免依赖内核 backlog 行为）。
+            self.assertEqual("127.0.0.1", q.probe_host("0.0.0.0"))
+            self.assertEqual("::1", q.probe_host("::"))
             self.assertTrue(q.port_in_use("127.0.0.1", port))
             self.assertTrue(q.wait_port("127.0.0.1", port, timeout=1.0))
-            # 通配监听地址应被映射为回环探测地址。
-            self.assertTrue(q.port_in_use("0.0.0.0", port))
         finally:
             listener.close()
         self.assertTrue(wait_until(lambda: not q.port_in_use("127.0.0.1", port, timeout=0.1), 2.0))
