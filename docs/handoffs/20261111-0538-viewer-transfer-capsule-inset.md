@@ -17,7 +17,7 @@
 ## 当前状态
 
 - 已实现：新增 `FileViewerLayout` 纯布局常量与避让函数；查看器底部操作栏复用 48dp 常量；阅读页两个早返回分支把“操作栏可见”传给传输浮层，胶囊底距改为 `导航 inset + 48dp 操作栏 + 12dp`；列表页与全屏阅读保持 `导航 inset + 12dp`。补 3 项 JVM 几何回归。
-- 当前分支：`ao/viewer-capsule-inset/root`，基线 `origin/main=f338bdb4194ab697647122de164b0a502b219c6c`（已 fetch 核对）；无运行中设备/安装任务。
+- 当前分支：`ao/viewer-capsule-inset/root`，基线 `origin/main=f338bdb4194ab697647122de164b0a502b219c6c`（已 fetch 核对）；PR [#60](https://github.com/leezzou/tanuki/pull/60)，实现提交 `a8e9667`；无运行中设备/安装任务。
 - 关键源码：`app/src/main/kotlin/com/tanuki/ui/FileViewerLayout.kt`（新增）、`WorkspaceFilesPage.kt`、`WorkspaceFileViewer.kt`、`app/src/test/kotlin/com/tanuki/FileViewerLayoutTest.kt`（新增）。
 
 ## 本次改动
@@ -57,7 +57,7 @@
 
 ## 下一步
 
-1. 以 leezzou 身份提交并推送 `ao/viewer-capsule-inset/root`，创建 PR（标题 `fix(files): 查看器传输胶囊避让底部操作栏`），回报 PR 号与 head；不合并、不发布。
+1. PR [#60](https://github.com/leezzou/tanuki/pull/60) 已创建；等待 GitHub CI 与独立审查，不合并、不发布。
 2. 等待 GitHub CI 与独立审查；由独立 QA 按上方手工步骤在模拟器/真机验证 PDF/文本/图片、全屏视频、360dp、大字体和深色模式。
 3. 处理 review comment 后推送新提交；最新 SHA 重新验证，旧审查结论不沿用。
 
@@ -70,6 +70,7 @@
 ## 产物与校验
 
 - 本轮未生成 APK、源码 ZIP 或发布附件；不覆盖安装、不发布、不合并。
+- PR [#60](https://github.com/leezzou/tanuki/pull/60)，目标 `main`；实现提交 `a8e9667`，后续仅补本记录的 PR 号。
 - 已运行 `python3 scripts/check-publication.py --git`：734 public files / 731 index entries / 0 findings。
 - `git diff --check` 通过；提交前再跑 `check-handoff.py --pr --record docs/handoffs/20261111-0538-viewer-transfer-capsule-inset.md`。
 - 普通 PR 不刷新 `AGENT-STATE.md`/`CURRENT.json`/`TEST-REPORT.md`；只新增本记录。
