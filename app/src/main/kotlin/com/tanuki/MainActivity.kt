@@ -754,6 +754,7 @@ class MainActivity : ComponentActivity() {
                             onFullscreen = { fileViewerFullscreen = it },
                             phoneStorageGranted = phoneStorageGranted,
                             onRequestStoragePermission = ::requestPhoneStoragePermission,
+                            onOpenFreeSpace = ::openStorageSpaceSettings,
                             phoneWriteAllowed = phoneWriteAllowed,
                             phoneWritingAvailable = phoneStorageGranted && s.service == ServiceState.RUNNING,
                             onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
@@ -1185,6 +1186,17 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
     private fun openAppSettings() { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+
+    /** 空间不足时优先打开系统存储管理；没有对应页面再退回应用信息，用户仍可清理缓存。 */
+    private fun openStorageSpaceSettings() {
+        val candidates = listOf(
+            Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS),
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+        )
+        for (intent in candidates) {
+            try { startActivity(intent); return } catch (_: Exception) { continue }
+        }
+    }
 
     /** 只在 Activity 前台且 DSH 标签实际显示时抑制对应会话的通知。 */
     private fun applyChatForeground() {
