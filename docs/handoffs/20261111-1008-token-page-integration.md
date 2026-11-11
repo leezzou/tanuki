@@ -52,6 +52,7 @@
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime` | 通过：0 errors / 103 warnings / 1 hint | 改动文件没有新增告警；`ModifierParameter` 等来自既有 `TanukiIcon` 等位置 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | 通过（重跑） | 首次全量运行时该用例出现一次 `expected:<8> but was:<9>` 时序失败；未改该模块，单类重跑通过，记录为既有 flaky |
 | 静态自查：深色/浅色/大字体/窄屏 | 仅源码与令牌层面核对，逐页矩阵见 `docs/DESIGN-TOKENS.md` 8.2 | 未在设备/模拟器渲染；不能计为设备通过 |
+| GitHub Actions PR #70 | `Host scripts and handoff checks`、`Android build, JVM tests and lint` 在推送 head 上通过 | 以 PR 页面当前 head 的检查为准；docs 提交后需复跑 |
 
 - 哪些是前一轮结果，哪些是本次新验证：PR #59 的 19 项设计令牌测试与 952 tests 为历史；本轮新增 12 项页面映射测试，并重跑完整 JVM 与 lint。
 - 未测试、超时、失败和暂未复现的情况：见下节；设备未授权。
