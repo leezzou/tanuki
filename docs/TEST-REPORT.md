@@ -1,6 +1,16 @@
 # 测试现状
 
-## 0.1.14 / code19 最终 REBUILD
+## 0.1.14 / code19 最终 REBUILD（16c07591b）
+
+- 收到新的RBEBUILD后，实际fetch最终main `16c07591b7ba170a77fdc0720b201a77e5477db3`，在原发布分支上git merge --no-commit origin/main；唯一冲突为OperationProgressLayoutTest，完整保留main的加强版本，并按字节确认一致。旧0910cc1候选由本轮替代，PR #105继续更新；默认版本0.1.14/code19。
+- 本轮完整命令：source scripts/ao-worktree-env.sh后，`./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`，无过滤，BUILD SUCCESSFUL（59s）、退出0。完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 JUnit/lint XML独立汇总，布局类新增全局失败详情验证后为7项；不继承前轮1407项。
+- 核对真实绝对路径属于当前worktree后删除旧artifacts/releases/0.1.14；最后加载环境后，按固定PRoot提交恢复CLAUDE.md到AGENTS.md链接。通过worktree私有Gradle缓存内的init，仅在developmentReleaseSigning=true时引用仓库外既有开发证书，密码经环境提供，未复制密钥至源码或附件。
+- 按原普通入口执行 `python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck`，BUILD SUCCESSFUL（15s，52个任务UP-TO-DATE，package任务实际执行），六附件一次封装完成；不是复用旧APK封装。应用产品代码未变，原生输入未变所以native任务增量复用，不冒称重新编译全部native。
+- 独立aapt2/apksigner/ZIP与更新JSON核验：com.tanuki.modern.workspacecheck、0.1.14/code19、minSdk26/target34、仅ARM64、non-debuggable、必需原生库齐全。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 RELEASE-SHA256SUMS、native-source-SHA256SUMS和SOURCE-SHA256SUMS通过shasum -a 256 -c；文档收尾后刷新源码ZIP及外部散列，保持本轮已核APK字节。
+- 前轮发布交接及#104交接共2份，在完整正文规范化比对归入DEVELOPMENT-HISTORY后删除，修复引用；当前保留7文件。#104独有的61项定向/1408项全套、离线缺依赖失败、未跑lint/设备等原事实全部保留。前轮失败与签名修正不改记为本轮发生。
+- 未执行：Android仪器、设备安装/升级、实际sheet挂载/退出帧、真实DSH/模型/提问/审批/远程/SAF或真机。VQ-01/C批P2及历史QA新包复验继续保留；API Key、真实模型/账号、真机暂停。不合并/tag/创建或上传Release。
+
+## 0.1.14 / code19 前轮候选（efc1d9ae，历史）
 
 - 最终集成基线：`efc1d9ae4e5d62e6492807d965697a1b863a7511`，分支 `ao/release/0.1.14`。收到REBUILD后实际fetch并通过autostash合入最终main、无冲突恢复准备改动；版本仍0.1.14/code19，包含#98/#103。
 - 命令：source scripts/ao-worktree-env.sh 后运行 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`，无测试过滤。

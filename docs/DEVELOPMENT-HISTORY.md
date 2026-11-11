@@ -1,6 +1,6 @@
-# 已合并研发与发布的历史事实
+# 研发与发布历史事实
 
-本专题由 0.1.14 发布维护迁移，基线 `3ba8ef1fc2ee4aa45347b50677b0c395aa6a88b6`。下文按原记录编号保留实现、验证命令、失败、关键决策、产物身份及待验事项；各节中的“当前”、待推送/待合并和授权描述只属于记录当时。这些实现/文档 PR 已进入上述基线；产品现状以源码、专题及 [当前状态](AGENT-STATE.md) 为准。历史 JVM 数字与 QA 不等于 0.1.14 已测；原命令中的旧 handoff 路径仅用于保存当时的验证证据，不作为现在的执行入口。
+本专题首批70份记录由 0.1.14 发布维护迁移，基线 `3ba8ef1fc2ee4aa45347b50677b0c395aa6a88b6`。下文按原记录编号保留实现、验证命令、失败、关键决策、产物身份及待验事项；各节中的“当前”、待推送/待合并和授权描述只属于记录当时。这些实现/文档 PR 已进入上述基线；产品现状以源码、专题及 [当前状态](AGENT-STATE.md) 为准。历史 JVM 数字与 QA 不等于 0.1.14 已测；原命令中的旧 handoff 路径仅用于保存当时的验证证据，不作为现在的执行入口。
 
 0.1.10/code12 是未发布历史候选；旧记录中的发布计划不代表已发布。0.1.11/code13 的已发布事实保留；0.1.12/code14、0.1.13/code18 的包与测试分别保留原基线，不能用来替代本次 rebuild。
 
@@ -5995,3 +5995,132 @@ source scripts/ao-worktree-env.sh
 交付为 PR 源码与本记录，无 APK、源码 ZIP、Release 或设备数据变动，不覆盖安装。临时测试日志与 PR 描述不提交。普通 PR 不刷新 AGENT-STATE/CURRENT 印章。
 
 提交前检查相关旧记录：动效 F 批记录仍有独有验证、设备未验证事项和实现决策，动效审计仍供其他批次使用，均保留；本次没有确认可删除且属于本任务范围的过期记录，不开展跨任务清理。
+
+## 最终16c07591b rebuild的补充迁移
+
+以下两份为前轮未合并发布候选（PR #105的0910cc1）及已合入16c07591b的#104测试修复。前轮候选已由本次rebuild替代，不将历史包/测试/待提交描述当当前事实；完整原步骤和未验边界保留。原prepare普通构建、续封装及签名修正的失败分别保留于TEST-REPORT。
+
+<a id="20261111-2213-release-0.1.14"></a>
+
+## 20261111-2213-release-0.1.14
+
+## 交接：0.1.14 最终发布候选
+
+- Agent/会话标识：android_agent-98
+- 时间：2026-11-11，准备阶段22:13 CST开始，收到REBUILD后完成最终候选
+- 状态：最终main候选已构建实核，统一一次commit/push与PR收尾；实际PR/head以provider回执为准
+- 前一记录：[测试现状](TEST-REPORT.md)
+
+### 用户目标与范围
+
+0.1.14/code19/workspacecheck。先准备、同步六份版本文档和迁移清理交接；收到编排REBUILD后fetch并merge最终main、核对版本、清理经确认的旧本版目录、执行指定准备脚本、实核APK/六附件，更新最终事实，一次commit/push并创建标题release: 0.1.14的PR。不要合并、打tag或上传，最后三步由编排者处理。
+
+### 当前状态
+
+最终基线`efc1d9ae4e5d62e6492807d965697a1b863a7511`，包含视觉P2 #103和动效C批 #98。原准备基线为3ba8ef1f；通过git merge --autostash快进合入final main，无冲突恢复准备改动。默认版本保持0.1.14/code19。完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。
+
+APK路径`artifacts/releases/0.1.14/Tanuki-0.1.14-workspacecheck-arm64-release.apk`；实核com.tanuki.modern.workspacecheck、0.1.14/code19、minSdk26/target34、ARM64、non-debuggable。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 六附件已生成并通过清单校验；最终文档后刷新源码ZIP和外部校验，APK字节保持不变。未安装、未合并/tag/上传。
+
+### 本次改动
+
+- app/build.gradle.kts：默认版本0.1.14/code19，保留final main的测试依赖。
+- OperationProgressLayoutTest.kt：仅同步一条因C批重构过时的源码契约至TransferSheet常驻宿主visible互斥；其余断言不变，产品逻辑未改。
+- README、AGENT-STATE、TEST-REPORT、RELEASE、ARTIFACTS、APP-UPDATES：同步最终main、APK实际身份/字节/SHA、1407项与lint及未验范围。
+- DEVELOPMENT-HISTORY和5份专题迁入75份中间交接，修复相关Markdown引用。70份历史正文规范化比对保留；两份设备QA、C批/P2独有记录、本次/模板/印章共7文件。CURRENT.json由--integrate生成，不能手写合并。
+
+### 验证记录
+
+1. 实际git fetch origin，远端为最终完整SHA；git merge --autostash origin/main快进并自动恢复，diff无冲突。版本行实核19/0.1.14。
+2. 最终源码运行：source scripts/ao-worktree-env.sh后`./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`，无过滤。
+3. 首轮退出1（2m08s），1407项仅布局类第84行失败，旧if语法已由C批常驻TransferSheet visible替代。人工核对入口/退出缓存/交互禁用保留，只同步该断言；定向6项通过（30s），最终同命令全套退出0（2m17s）：完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 XML独立汇总，未把首轮失败算通过。
+4. 原准备阶段1393项通过只属3ba8ef1f；曾有官方idle等待5000ms超时和NPM退休计数8→9失败，各自单类及最终全套复跑通过，细节保留TEST-REPORT；不能推断时序问题不存在。
+5. 核对本版目录真实绝对路径属于当前worktree后，确认旧目录不存在。普通命令`python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck`的release构建成功（2m56s，含native）；原生封装因环境加载清理CLAUDE.md链接退出64。在最后加载环境后核对固定commit及链接目标并恢复，再以verified-apk模式续封装。独立核验随后发现worktree新debug证书1141466e不符，未交付该包；核对既有开发证书371dc301并用apksigner重新签名同一构建载荷（v2/v3通过），以修正APK完整SHA再次封装六附件，最终全部通过。失败与原因详见TEST-REPORT；不重编产品。
+6. 独立aapt2 dump badging和apksigner verify核验APK；ZIP检查仅ARM64并含libproot/libproot-loader/libsupervisor；app-update.json全部字段与APK实值一致。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。
+7. RELEASE-SHA256SUMS、native-source-SHA256SUMS、SOURCE-SHA256SUMS通过shasum -a 256 -c；六附件（含RELEASE清单自身）的实际SHA在最终回执列出，不写源码ZIP自身SHA进入包内文档形成循环。文档收尾后重新生成并扫描源码归档、刷新严格印章及外部清单。
+8. 准备阶段check-native-parity.py为166行/14域；70份历史正文与原Git内容规范化比对通过；--pr/--integrate/--release、公开工作树/索引与源码归档检查执行并按最终内容复核。没有把历史检查当Android通过。
+
+### 未完成与暂停项
+
+- 当前完整PR SHA的独立审查/CI由编排者安排；不自行触发review。本地候选已完成，统一一次commit/push和指定标题PR交付，实际编号/head由provider回执记录，不为回填再拆提交。
+- 未执行：Android仪器、设备安装/升级覆盖、真实DSH/模型/审批/附件/提问/sshd/中继/弱网、真机/低API、视觉与帧率，本版未验证。
+- 两份设备QA继续保留原SHA/APK；QA-04/07/09/10/12的修复需新包复验。视觉P2代码已合并但未新包复验；VQ-01真实提问入口/RPC不在范围。C批记录中的键盘焦点/回调校验及文件页外层进度宿主P2仍保留。
+- API Key保存、真实模型/账号、真机验收继续暂停。不合并/tag/创建或上传Release。
+
+### 下一步
+
+1. 完成最终文档、严格印章和源码ZIP/外部散列刷新；核对暂存明确路径含75份删除、6份迁移专题、最终记录和两项app文件，不提交生成物/本机日志。
+2. author/committer均用leezzou <115924933+leezzou@users.noreply.github.com>，统一一次commit/push，创建release: 0.1.14 PR，不force push、不直推main。
+3. 回报PR号、完整head、APK路径/字节/SHA、六附件SHA及JVM/lint；编排者自行完成最后合并/tag/上传。上传全部六附件，workspacecheck为Pre-release。
+4. 如需后续产品修复，重新验证并重建，不能沿用旧SHA的批准或设备结果；APK已核字节无变化时只刷新源码副本与校验。
+
+### 约束与风险
+
+不访问设备/真实用户数据或凭据；不关闭审批/TLS/哈希校验。Git共享元数据位于worktree外，fetch/merge的原命令因权限被拒后一次性更广权限重试成功；没有修改全局配置或重写共享历史。原生缓存遗漏CLAUDE.md链接，按固定commit b27d81a68d765f3462e807f4a14e01a03f8e89ea核对120000模式和AGENTS.md目标后恢复，仅修复构建缓存，不改第三方源码。
+
+删除旧交接前逐个核对真实目标与迁移正文；迁移脚本首轮路径键断言失败时没有删除文件，修正后完成迁移。打包前后文档变化必须重打源码并刷新外部清单；不把ZIP自身散列写回归档，不重签已核验APK。
+
+### 产物与校验
+
+`artifacts/releases/0.1.14/`共六附件：APK、app-update.json、Tanuki-0.1.14-source.zip、Tanuki-native-corresponding-sources.tar.gz、native-source-SHA256SUMS、RELEASE-SHA256SUMS。APK路径/大小/SHA与证书见上文。生成物被Git忽略，交付完整目录，不从sources/builds临时区挑旧包。
+
+旧版附件保持原样；没有覆盖安装、清数据、tag或Release。清理75份记录的理由为任务已合并/专题接管；独有实现/验证/失败/决策/设备待验步骤先归入6份专题，保留两份原始QA和C批/P2证据，不依赖Git历史或.build才能接手。最终handoffs为7文件，满足不超过10。
+
+
+<a id="20261111-2250-sheet-host-assert"></a>
+
+## 20261111-2250-sheet-host-assert
+
+## 交接：常驻 sheet 宿主断言同步
+
+- Agent/会话标识：android_agent-99（AO Worker）
+- 时间：2026-11-11 22:50 CST
+- 状态：实现与本地验证完成，提交推送及 PR 交付中
+- 前一记录：[C 批弹层动效](handoffs/20261111-1900-motion-batch-c.md)
+
+### 用户目标与范围
+
+修复 main 上 OperationProgressLayoutTest 对旧外层 if 挂载写法的断言。仅修改该测试类及本次唯一交接；不修改产品代码，不合并、不发布。基于 origin/main=efc1d9ae 建分支，编译和相关测试通过后 push 开 PR。
+
+### 当前状态
+
+远端 git ls-remote 与起始 HEAD 均为 efc1d9ae4e5d62e6492807d965697a1b863a7511，起始工作区干净。分支 ao/sheet-assertions/sheet-host。目标为 Host 源码契约回归，不操作 Android 设备或安装包。
+
+### 本次改动
+
+| 文件 | 改动与目的 |
+|---|---|
+| app/src/test/kotlin/com/tanuki/OperationProgressLayoutTest.kt | 传输抽屉单一常驻宿主、visible 互斥、函数直属层级禁止提前卸载；全局失败详情单一宿主及可空模型接线 |
+| docs/handoffs/20261111-2250-sheet-host-assert.md | 唯一交接与验证边界 |
+
+产品事实见 WorkspaceFilesPage.kt 的 FileTransferOverlay：TransferSheet 常驻，visible = sheet && runtimeOverlay == null；运行时浮层出现后关闭 sheet。TanukiUi.kt 的 FailureDetailSheet 常驻并接收 shownFailure 可空模型。旧外层条件不再是正确契约。
+
+### 验证记录
+
+- 已执行 git status、git rev-parse HEAD、git ls-remote origin refs/heads/main：基线一致，初始无改动。
+- git switch 首次因共享 Git 元数据写入被沙箱拒绝；核对分支、HEAD 与状态未变化后，按用户明确授权原命令 danger-full-access 一次性重试成功。
+- git diff --check：通过。
+- `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-2250-sheet-host-assert.md`：通过；`python3 scripts/check-publication.py --git`：921 public files / 920 index entries / 0 findings。
+- 首轮带 `--offline` 的编译/定向 JVM 命令在 checkModernDebugAarMetadata 失败（34s，退出1）：缓存缺少 androidx.compose.ui:ui-test-manifest:1.10.3；尚未运行测试，不记为测试通过。去掉 --offline 补齐相同版本依赖并重跑，未修改构建配置。
+- 联网重跑 **BUILD SUCCESSFUL（3m19s），退出0**；产品、Android 测试与 JVM 测试源码编译通过。XML 实核 **8类61项，0 failures / 0 errors / 0 skipped**：OperationProgressLayout 7、OperationProgressPresentation 15、OperationProgress 7、FileTransferProgress 5、FileViewerLayout 11、FileViewerMotion 5、TanukiOverlayMotion 6、TanukiMotionSpecs 5。
+- 实际定向命令：`source scripts/ao-worktree-env.sh` 后，`./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.OperationProgressLayoutTest' --tests 'com.tanuki.OperationProgressPresentationTest' --tests 'com.tanuki.OperationProgressTest' --tests 'com.tanuki.FileTransferProgressTest' --tests 'com.tanuki.FileViewerLayoutTest' --tests 'com.tanuki.FileViewerMotionTest' --tests 'com.tanuki.ui.design.TanukiOverlayMotionTest' --tests 'com.tanuki.ui.design.TanukiMotionSpecsTest'`。
+- 为确认 main 单点失败消除，完整 JVM 命令：同环境下 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline :app:testModernDebugUnitTest`，**BUILD SUCCESSFUL（30s），退出0**。XML 实核 **144类1408项，0 failures / 0 errors / 0 skipped**；OperationProgressLayoutTest 7项全通过（新增1项全局失败详情宿主回归）。本段及61项均为本轮实测，不引用历史数字。
+- `git diff --exit-code -- app/src/main docs/AGENT-STATE.md docs/handoffs/CURRENT.json`：通过，无产品源码或共享状态改动。
+- 未执行 lint、Android 仪器、设备/UI、真实运行时及模型。本轮仅宿主编译和 JVM，不生成可安装验收包；SDK XML、analytics 不可写及既有弃用警告没有变更或抑制。
+
+### 未完成与暂停项
+
+- Host 验证已完成；待提交推送和创建 PR，PR 号与最终 head 在提供方及 AO 完成回报记录，不为回填再推送。CI 与独立审查以最终 head 为准，独立审查待编排批准启动。
+- 不执行设备、仪器、真实模型/账号验收；API Key 保存和真机暂停项保留。
+
+### 下一步
+
+1. 本地编译与 JVM 已完成；完成普通 PR 交接与公开候选检查后统一提交推送并开 PR。
+2. 核对最终 head CI，交编排者安排独立审查与适用门禁；不合并、不发布。
+
+### 约束与风险
+
+仅更新测试契约，不修改产品代码；大括号层级检查针对现有源码布局，不替代 Compose 实际挂载和退出动画设备验收。不读取用户数据、凭据，不启动或安装设备。宿主结果不作为 Android 执行证据。
+
+### 产物与校验
+
+无 APK、ZIP、发布附件交付；产物为测试修复 PR。普通 PR 不刷新 AGENT-STATE.md/CURRENT.json。过期记录检查限本次范围，没有确认可删除的独有旧记录，保留既有验证和未完成项，不作跨任务清理。

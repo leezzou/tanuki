@@ -1,14 +1,14 @@
 # Tanuki 当前状态
 
-当前交接：[0.1.14 发布候选](handoffs/20261111-2213-release-0.1.14.md)（android_agent-98，分支 `ao/release/0.1.14`，最终集成基线 `main=efc1d9ae4e5d62e6492807d965697a1b863a7511`）。**0.1.14/code19/workspacecheck** 已构建并实核，六附件在 `artifacts/releases/0.1.14/`。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 统一一次commit/push并以`release: 0.1.14` PR交付，实际PR/head以provider回执为准；不合并/tag/上传。
+当前交接：[0.1.14最终rebuild](handoffs/20261111-2313-rebuild-0.1.14.md)（android_agent-98，分支ao/release/0.1.14，最终main=`16c07591b7ba170a77fdc0720b201a77e5477db3`）。0.1.14/code19/workspacecheck普通release入口已重新构建并生成六附件，位于artifacts/releases/0.1.14。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 本轮统一一次新commit/push更新OPEN的PR #105；实际最新head以provider回执为准。未合并/tag/上传。
 
-0.1.14 基于最终 main，已包含视觉 P2 #103、弹层/抽屉动效 C 批 #98，以及原生聊天/分页/停靠条、首启、文件传输、失败恢复、局域网发现、阅读恢复、主题/文案和动效 A/B/D/E/F。本发布分支只改版本、必要文档及一条过时的传输抽屉源码契约断言；产品逻辑与最终 main 相同。 完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 已执行普通release准备入口，独立核验APK及六附件；设备与真实链路未验证。
+0.1.14 已合入最终 main 的 #104 常驻 sheet 宿主完整断言，覆盖单一宿主、visible互斥、直属层级和失败详情可空模型；传输与失败详情的产品代码不变。已包含此前 #98/#103 及主题/文案、聊天/分页、动效 A/B/C/D/E/F 等实现。本轮测试类与最终main按字节相等，不保留上一轮发布分支的最小替代断言。 完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 本轮无过滤完整复验与独立APK/六附件核验通过；设备/真实链路未验。前轮0910cc1/efc1d9ae的1407项与旧APK事实已归档，不作为本轮结果。
 
 ## 最近5条交接
 
 | 日期 | 记录 | 状态 | 已验证 | 未验证/暂停 |
 |---|---|---|---|---|
-| 2026-11-11 | [0.1.14发布候选](handoffs/20261111-2213-release-0.1.14.md) | 最终main候选已生成 | 1407项/144 XML全过；lint0错/117警告/2提示；APK/六附件核验 | 设备/真实链路、最终PR审查/CI |
+| 2026-11-11 | [0.1.14发布候选](handoffs/20261111-2313-rebuild-0.1.14.md) | 16c07591b候选已生成 | 1408项/144 XML全过；lint0错/117警告/2提示；APK/六附件核验 | 设备/真实链路、最终PR审查/CI |
 | 2026-11-11 | [视觉P2](handoffs/20261111-2200-visual-p2-copy.md) | 已合并#103 | 原基线224项定向及lint；本次集成全套另计 | 新包设备复验、VQ-01不在范围 |
 | 2026-11-11 | [视觉QA](handoffs/20261111-2108-visual-qa-0.1.14.md) | 已合并#101；独立原始证据 | 原37358849的debug包与限定手工检查 | 1P1/4P2原记录保留，新包未复验 |
 | 2026-11-11 | [C批浮层](handoffs/20261111-1900-motion-batch-c.md) | 已合并#98 | 原基线119项定向、compile/lint；集成轮只compile | 系统sheet两项仪器未执行；遗留P2 |
@@ -24,7 +24,7 @@
 
 ## 交接清理与长期入口
 
-75份中间交接已先迁事实再删除；70份研发记录保留在[历史事实](DEVELOPMENT-HISTORY.md)，5份审计/规格移入专题；当前handoffs目录7文件，设备证据和未完成事项保留。来源/历史数字按原基线标注。
+前轮75份、本轮2份中间交接均先迁事实再删除；72份记录保留在[历史事实](DEVELOPMENT-HISTORY.md)，5份审计/规格移入专题；当前handoffs目录7文件，设备证据和未完成事项保留。来源/历史数字按原基线标注。
 
 - [交接机制](HANDOFFS.md) / [上手指南](AGENT-QUICKSTART.md) / [测试现状](TEST-REPORT.md)
 - [界面规格](NATIVE-UI-BEHAVIOR-SPEC.md) / [UX审计](UX-AUDIT.md) / [第一波计划](UX-WAVE1-PLAN.md) / [动效审计](MOTION-AUDIT.md) / [文案审计](COPY-AUDIT.md)

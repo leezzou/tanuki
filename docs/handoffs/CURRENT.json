@@ -1,8 +1,8 @@
 {
   "schema": 2,
-  "record": "docs/handoffs/20261111-2213-release-0.1.14.md",
-  "recordSha256": "4db27fa599ae5703f5a4bfed2127235af091a2390e7a04eb0b17ccc5d1df8b17",
-  "sourceFingerprint": "9b2bffed7de90318f3d32f660e91ea5a764beab6e40df5651b60807744196e84",
-  "evidenceFingerprint": "246d70f9cc08e4469527442e578874d64af4adf48e04fb66fd39b4917932d40a",
+  "record": "docs/handoffs/20261111-2313-rebuild-0.1.14.md",
+  "recordSha256": "3a4c51affa60eb14c1716211f2123d12236bd18f9438c71e772b48ac5baba26a",
+  "sourceFingerprint": "3bc445579da0e4a5ae73ed032ebdef9dc8d81aea286d8a8425dd70156ed9e6ad",
+  "evidenceFingerprint": "e630129cf5386170ab39e945d32de4346657c810152f86c04ee1dfb6d85135ea",
   "fileCount": 851
 }

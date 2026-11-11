@@ -1,12 +1,12 @@
 # Tanuki 构建产物：从哪里取包
 
-**当前候选：0.1.14/code19，workspacecheck，最终基线 `main=efc1d9ae4e5d62e6492807d965697a1b863a7511`。** 实核包名 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。六附件已生成并核验于 `artifacts/releases/0.1.14/`。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 以 `release: 0.1.14` PR交付；未合并、未打tag、未创建或上传Release。
+**当前候选：0.1.14/code19，workspacecheck，最终基线 `main=16c07591b7ba170a77fdc0720b201a77e5477db3`。** 实核 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34；普通准备入口重新生成 `artifacts/releases/0.1.14/` 六附件。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 本轮更新既有 `release: 0.1.14` PR #105，未合并、未打tag、未创建或上传Release。
 
-0.1.14 基于最终 main，已包含视觉 P2 #103、弹层/抽屉动效 C 批 #98，以及原生聊天/分页/停靠条、首启、文件传输、失败恢复、局域网发现、阅读恢复、主题/文案和动效 A/B/D/E/F。本发布分支只改版本、必要文档及一条过时的传输抽屉源码契约断言；产品逻辑与最终 main 相同。
+0.1.14 已合入最终 main 的 #104 常驻 sheet 宿主完整断言，覆盖单一宿主、visible互斥、直属层级和失败详情可空模型；传输与失败详情的产品代码不变。已包含此前 #98/#103 及主题/文案、聊天/分页、动效 A/B/C/D/E/F 等实现。本轮测试类与最终main按字节相等，不保留上一轮发布分支的最小替代断言。
 
-**最终集成验证：** 完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 最终集成首轮仅过时源码断言失败，定向6项及全量复跑后通过；中间失败保留于TEST-REPORT。APK实际身份/签名/字节/散列和六附件清单均已核验；未执行设备、Android仪器或真实链路。API Key、真实模型/账号、真机验收继续暂停。
+**最终集成验证：** 完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 本轮在合并工作树无过滤执行JVM/lint，BUILD SUCCESSFUL（59s）。普通release构建成功（15s，增量；package任务实际执行），既有开发证书由私有缓存init显式引用；APK身份/签名与六附件清单已独立核验。设备、Android仪器、真实链路未执行，API Key/真实模型/账号/真机仍暂停。
 
-- **0.1.14/code19 workspacecheck 候选**：`artifacts/releases/0.1.14/Tanuki-0.1.14-workspacecheck-arm64-release.apk`；13,093,605字节，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；同目录六附件已核验，设备QA未执行。
+- **0.1.14/code19 workspacecheck 候选**：`artifacts/releases/0.1.14/Tanuki-0.1.14-workspacecheck-arm64-release.apk`；13,073,258字节，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；同目录六附件已核验，设备QA未执行。
 - **0.1.11/code13 已发布（Pre-release，tag `v0.1.11`）**：`artifacts/releases/0.1.11/Tanuki-0.1.11-workspacecheck-arm64-release.apk`，SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节、证书 `371dc301...`；同目录含 `app-update.json`、完整源码 ZIP、原生对应源码 TAR 与校验。
 - **0.1.10/code12 历史本地候选（未发布）**：`artifacts/releases/0.1.10/Tanuki-0.1.10-workspacecheck-arm64-release.apk`，SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`、`11,485,978` 字节；仅作历史核对，不是当前发布附件。
 - GitHub 发布：`v0.1.11` **Pre-release** 已发布，含 `artifacts/releases/0.1.11/` 全部 **6 个附件**（`app-update.json`、完整源码、原生对应源码及散列）；0.1.14 尚未上传，未覆盖 0.1.11/更早附件。
@@ -71,4 +71,4 @@ artifacts/
 - 只改文档/脚本时不重编 APK；下一次交付前重打源码并刷新散列，已发布的 0.1.11 及更早附件不回写。
 - `artifacts/` 全部是被Git忽略的生成产物；本说明的源码为 `docs/ARTIFACTS.md`。既有历史包和校验保持原样，不因本次版本入口更新而删除或改写。
 
-0.1.14 基于 `main=efc1d9ae` 准备，未合并/未发布；旧版附件保持原样。
+0.1.14 基于 `main=16c07591b` 准备，未合并/未发布；旧版附件保持原样。
