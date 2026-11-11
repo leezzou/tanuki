@@ -22,7 +22,7 @@
 
 ## 当前状态
 
-- 基线：`origin/main=62e4c30b4a61636867cfc94736e44fa159f50b9f`（已 fetch 核对）；分支 `ao/chat-anchoring/anchored-list`，从会话根分支 `ao/chat-anchoring/root` 创建的兄弟分支。
+- 基线：`origin/main=62e4c30b4a61636867cfc94736e44fa159f50b9f`（已 fetch 核对）；分支 `ao/chat-anchoring/anchored-list`，从会话根分支 `ao/chat-anchoring/root` 创建的兄弟分支；PR [#62](https://github.com/leezzou/tanuki/pull/62)，实现提交 `adffdb2`。
 - 已实现：
   - `DshChatWindow.kt` 纯策略：锚点分段（历史段含锚点、新消息段在锚点下方）、用户手势脱离判定、头部插页后的索引恢复、每页 50 条的游标、只释放视口上方的内存窗口、按 seq 去重的消息账本与快照区间对账。
   - 控制器：`loadOlder()`、`onViewportTop()`、`historyRevision`/`releasedOlder` 状态；快照不再清空已加载的更早分页；同 seq 实时事件只保留一份；重连后第二次 `Connected` 主动对账历史。
@@ -106,6 +106,6 @@
 ## 产物与校验
 
 - 本轮不生成 APK、源码 ZIP 或发布附件；不覆盖安装、不发布、不合并。
-- PR：`<待创建后补全>`；目标 `main`；分支 `ao/chat-anchoring/anchored-list`。
+- PR [#62](https://github.com/leezzou/tanuki/pull/62)，目标 `main`；实现提交 `adffdb2`。
 - 提交前已运行 `check-handoff.py --pr`、`check-publication.py --git`、`git diff --check`。
 - 普通 PR 不刷新 `AGENT-STATE.md`/`CURRENT.json`/`TEST-REPORT.md`；只新增本记录。
