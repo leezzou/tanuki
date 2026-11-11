@@ -2,6 +2,10 @@ package com.tanuki
 
 import androidx.compose.ui.unit.dp
 import com.tanuki.ui.FileViewerLayout
+import com.tanuki.ui.FileProgressHost
+import com.tanuki.ui.fileProgressHost
+import com.tanuki.runtime.FailedOperation
+import com.tanuki.runtime.Snapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -23,6 +27,25 @@ class FileViewerLayoutTest {
         assertEquals(84.dp, pillBottom) // 24dp 导航 inset + 48dp 操作栏 + 12dp 间距
         assertTrue("胶囊底边必须不低于操作栏顶边", pillBottom >= actionBarTop)
         assertEquals("胶囊与操作栏之间保留 12dp", FileViewerLayout.FloatingGap, pillBottom - actionBarTop)
+    }
+
+    @Test fun runtimeAndFailureWithTransfersUseOneHost() {
+        for (snapshot in listOf(Snapshot(operation = "init", stage = "下载组件"),
+            Snapshot(failedOperation = FailedOperation(7, "解压组件", "测试失败", 1_000)))) {
+            assertEquals(FileProgressHost.RUNTIME, fileProgressHost(snapshot, true))
+            assertEquals(FileProgressHost.RUNTIME, fileProgressHost(snapshot, false))
+        }
+        assertEquals(FileProgressHost.FILE_TRANSFER, fileProgressHost(Snapshot(), true))
+        assertEquals(FileProgressHost.NONE, fileProgressHost(Snapshot(), false))
+    }
+
+    @Test fun measuredViewerBarKeepsFullGapForBothProgressKinds() {
+        for (navigation in listOf(0.dp, 24.dp, 104.dp)) for (height in listOf(48.dp, 73.dp, 96.dp)) {
+            assertEquals(navigation + height + FileViewerLayout.FloatingGap,
+                FileViewerLayout.transferPillBottomPadding(navigation, true, height))
+            assertEquals(navigation + FileViewerLayout.FloatingGap,
+                FileViewerLayout.transferPillBottomPadding(navigation, false, height))
+        }
     }
 
     @Test fun legacyPlacementOverlapsActionBarByThirtySixDp() {

@@ -8,6 +8,12 @@
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
+## 更新页信息层级
+
+主体说明为“只会安装同一来源的更高版本，下载后会校验完整性”，包名、签名、哈希与数据保留说明默认收进“了解详情”。检查更新使用主按钮，当前版本旁通过状态点区分有新版本、已是最新、尚未检查、检查中与失败；后台周期和上次时间为次要说明。既有错误分类、缓存清理/空间设置/重试入口，以及下载、校验和系统安装规则保留。
+
+页面与其他主页面共用 Scaffold 导航/系统栏避让；大字体、深色和末项滚动仍需独立设备 QA，Host 编译不能替代。
+
 ## 来源与检查
 
 - 固定读取 `https://github.com/leezzou/tanuki` 的公开 Release 信息，**不调用 GitHub REST API，不需要 GitHub token**。避免匿名 API 额度导致「请求受限」。
@@ -29,7 +35,7 @@
 - `files/state/apk-update-check.json`：`lastCheckedAt`、`latestVersion/Code`、`available`、`lastError/At`、`notifiedVersion`。
 - `files/state/dsh-update-check.json`：`lastCheckedAt`、`latestVersion`、`available`、`source`、`lastError/At`、`notifiedVersion`。
 
-前台入口：APK 更新卡片和 DSH 版本卡片显示“有更新：`<version>`”徽标；手动“检查更新”仍可用，只在检查完成事件同步独立后台快照而不重复联网；开始时间早于后台结果的旧结果不会覆盖较新快照。后台发现新版本且通知权限允许时，分别通过 `updates` 通知渠道提示一次；同一版本由持久化 `notifiedVersion` 去重，不重复骚扰，不自动下载/安装。Android 13+ 未授予 `POST_NOTIFICATIONS` 时静默跳过，手动检查入口会顺带申请权限。DSH 安装/切换/卸载后只按当前安装身份重算 `installedVersion/available`，保留已知 latest 与通知去重，不重新联网。检查失败只记录时间和简短原因，不弹错误、不影响应用使用；最小查询间隔 60 秒避免重复请求。
+前台入口：APK 当前版本旁显示真实状态点和短文案，DSH 版本卡片保留“有更新：`<version>`”徽标；手动“检查更新”仍可用，只在检查完成事件同步独立后台快照而不重复联网；开始时间早于后台结果的旧结果不会覆盖较新快照。后台发现新版本且通知权限允许时，分别通过 `updates` 通知渠道提示一次；同一版本由持久化 `notifiedVersion` 去重，不重复骚扰，不自动下载/安装。Android 13+ 未授予 `POST_NOTIFICATIONS` 时静默跳过，手动检查入口会顺带申请权限。DSH 安装/切换/卸载后只按当前安装身份重算 `installedVersion/available`，保留已知 latest 与通知去重，不重新联网。检查失败只记录时间和简短原因，不弹错误、不影响应用使用；最小查询间隔 60 秒避免重复请求。
 
 实现：[`BackgroundUpdateChecks.kt`](../app/src/main/kotlin/com/tanuki/update/BackgroundUpdateChecks.kt)、[`BackgroundUpdateRepositories.kt`](../app/src/main/kotlin/com/tanuki/update/BackgroundUpdateRepositories.kt)、[`UpdateCheckWorkers.kt`](../app/src/main/kotlin/com/tanuki/update/UpdateCheckWorkers.kt)、[`UpdateNotifier.kt`](../app/src/main/kotlin/com/tanuki/update/UpdateNotifier.kt)。
 

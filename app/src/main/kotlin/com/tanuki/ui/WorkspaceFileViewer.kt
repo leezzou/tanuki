@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -67,6 +69,7 @@ internal fun WorkspaceFileViewer(
     onReselect: (() -> Unit)? = null,
     fullscreen: Boolean = false,
     onFullscreen: (Boolean) -> Unit = {},
+    onActionBarHeightChanged: (Dp) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
     /** 首次组合（含进程重建）使用的阅读位置；Activity 重建优先由 rememberSaveable 覆盖。 */
@@ -75,6 +78,7 @@ internal fun WorkspaceFileViewer(
     onReaderStateChange: (ReaderViewState) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var info by remember(document.key) { mutableStateOf<WorkspaceFileManager.FileInfo?>(null) }
@@ -201,6 +205,10 @@ internal fun WorkspaceFileViewer(
                 }
             }
             val textMode = forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT
+            LaunchedEffect(compact, textMode, fullscreen) {
+                // 横屏文本工具条固定高度；其他操作栏按实际测量值避让。
+                if (compact && textMode && !fullscreen) onActionBarHeightChanged(FileViewerLayout.CompactBottomBarHeight)
+            }
             if (textMode) {
                 TextViewerContent(
                     document,
@@ -283,7 +291,8 @@ internal fun WorkspaceFileViewer(
             if (showActionBar) Row(
                 Modifier.fillMaxWidth()
                     .then(if (compact) Modifier.height(FileViewerLayout.CompactBottomBarHeight) else Modifier)
-                    .horizontalScroll(rememberScrollState()),
+                    .horizontalScroll(rememberScrollState())
+                    .onSizeChanged { onActionBarHeightChanged(with(density) { it.height.toDp() } + 1.dp) },
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 TextButton(onClick = onExport, enabled = !opening && !loading && info != null,

@@ -38,11 +38,13 @@ class RuntimeComponents(private val manager: RuntimeManager) {
     private val epochs=RuntimeComponent.entries.associateWith { AtomicLong() }
     private fun versionPreferences()=runCatching { JSONObject(paths.read("component-versions.json") ?: "{}") }.getOrDefault(JSONObject())
     fun selected(component:RuntimeComponent):RuntimeArtifact = RuntimeCatalog.find(component,versionPreferences().optString(component.name)) ?: RuntimeCatalog.entries(component).first()
+    private val versionSelection = RuntimeVersionSelection(::selected, { component, version ->
+        paths.atomic("component-versions.json", versionPreferences().put(component.name, version).toString())
+    }, manager::invalidateOperationRetry)
     fun selectVersion(component:RuntimeComponent,version:String) {
         check(!manager.hasActiveOperation && !manager.hasLiveChild) { "请等待当前操作完成并停止 DSH" }
-        require(RuntimeCatalog.find(component,version)!=null) { "未知组件版本" }
-        paths.atomic("component-versions.json",versionPreferences().put(component.name,version).toString())
-        // A probe started for the previous version must not pick a source for the new one.
+        versionSelection.select(component, version)
+        // 旧版本开始的测速不能替新选择决定下载来源。
         bumpEpoch(component)
         sourceTests.getValue(component).clear()
         refresh(false)

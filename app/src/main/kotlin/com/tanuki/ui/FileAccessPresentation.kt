@@ -29,10 +29,16 @@ internal object FileAccessPresentation {
         phoneStorageGranted: Boolean,
         phoneWriteAllowed: Boolean,
         phoneWritingAvailable: Boolean,
+        environmentBusy: Boolean = false,
     ): FileAccessState = when (location) {
         FileLocation.WORKSPACE -> {
             // DSH 运行时工作区修改被暂停；chip 必须反映“当前不可写”，而不是永久能力。
-            if (runtimeRunning) FileAccessState(
+            if (environmentBusy) FileAccessState(
+                mode = FileAccessMode.READ_ONLY,
+                label = "只读",
+                summary = "环境操作中，修改已暂停",
+                detail = FILE_INSTALL_WRITE_NOTICE,
+            ) else if (runtimeRunning) FileAccessState(
                 mode = FileAccessMode.READ_ONLY,
                 label = "只读",
                 summary = "DSH 运行中，修改已暂停",

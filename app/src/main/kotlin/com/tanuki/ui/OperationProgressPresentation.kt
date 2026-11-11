@@ -102,8 +102,9 @@ internal fun operationFailure(snapshot: Snapshot): OperationFailure? = when {
         title = if (snapshot.failedOperation.cancelled) "操作已取消" else "操作失败",
         detail = snapshot.failedOperation.reason.ifBlank {
             if (snapshot.failedOperation.cancelled) "操作已停止，可以重试并复用已校验的下载。" else "操作没有完成，请检查当前阶段后重试。"
-        },
-        retryCommand = "RETRY_OPERATION/${snapshot.failedOperation.retryId}",
+        } + if (!snapshot.failedOperation.retryAvailable) " 组件版本已更改，请从组件入口重新发起安装。" else "",
+        retryCommand = if (snapshot.failedOperation.retryAvailable) "RETRY_OPERATION/${snapshot.failedOperation.retryId}"
+            else "OPEN_COMPONENTS",
     )
     snapshot.update == UpdateState.RECOVERY_REQUIRED -> OperationFailure(
         title = "更新失败",
@@ -153,7 +154,8 @@ internal fun operationProgress(
     val lastActivity = snapshot.timing.lastActivityAtMillis.takeIf { it > 0 } ?: start
     val elapsedSeconds = ((nowMillis - start).coerceAtLeast(0) / 1000)
     val quietSeconds = ((nowMillis - lastActivity).coerceAtLeast(0) / 1000)
-    val stage = operationStage(snapshot.stage, snapshot.environment, snapshot.update)
+    val stage = operationStage(if (active) snapshot.stage else snapshot.failedOperation?.stage ?: snapshot.stage,
+        snapshot.environment, snapshot.update)
     if (failure != null) {
         return OperationProgressText(
             active = false,
