@@ -3,10 +3,14 @@ package com.tanuki.runtime
 /** Monotonic timestamps. A ticking UI clock is not evidence that the worker made progress. */
 data class OperationTiming(val startedAtMillis: Long = 0, val lastActivityAtMillis: Long = 0)
 
-val Snapshot.operationActive: Boolean get() = operation != null ||
-    environment in setOf(EnvironmentState.CHECKING, EnvironmentState.DOWNLOADING, EnvironmentState.INSTALLING, EnvironmentState.VERIFYING) ||
-    service in setOf(ServiceState.STARTING, ServiceState.STOPPING) || health == HealthState.CHECKING ||
-    update in setOf(UpdateState.CHECKING, UpdateState.STAGING, UpdateState.TESTING, UpdateState.BACKUP, UpdateState.SWITCHING, UpdateState.RESTORING)
+val Snapshot.operationActive: Boolean get() {
+    // 失败后可能保留最后的安装阶段；互斥操作已结束时不能把它继续显示成运行中。
+    if (failedOperation != null && operation == null && service !in setOf(ServiceState.STARTING, ServiceState.STOPPING)) return false
+    return operation != null ||
+        environment in setOf(EnvironmentState.CHECKING, EnvironmentState.DOWNLOADING, EnvironmentState.INSTALLING, EnvironmentState.VERIFYING) ||
+        service in setOf(ServiceState.STARTING, ServiceState.STOPPING) || health == HealthState.CHECKING ||
+        update in setOf(UpdateState.CHECKING, UpdateState.STAGING, UpdateState.TESTING, UpdateState.BACKUP, UpdateState.SWITCHING, UpdateState.RESTORING)
+}
 
 internal data class OperationSignal(
     val active: Boolean, val operation: String?, val stage: String,

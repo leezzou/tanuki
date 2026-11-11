@@ -863,19 +863,52 @@ class SetupPresentationTest {
                 Snapshot(update=UpdateState.TESTING,stage="检查 DSH 候选启动"))
             for (stage in stages) {
                 instrumentation.runOnMainSync { state.value=state.value.copy(snapshot=stage.copy(timing=OperationTiming(now-20_000,now))) }
-                find(stage.stage)
                 val bounds=Rect().also(find("操作进度")::getBoundsInScreen)
-                assertTrue("progress must stay above the page's scroll region: ${stage.stage}", bounds.height()>0 && bounds.top<activity.resources.displayMetrics.heightPixels/2)
+                assertTrue("进度入口必须在屏幕内且至少 48dp 高：${stage.stage}",
+                    bounds.height() >= (48 * activity.resources.displayMetrics.density).toInt() &&
+                        bounds.top >= 0 && bounds.bottom <= activity.resources.displayMetrics.heightPixels)
+                // 细入口只显示短状态；原始阶段说明在抽屉里，点开才能确认文案没有丢。
+                click("操作进度")
+                find(stage.stage)
+                click("关闭进度详情")
             }
             click("浏览器"); find("操作进度")
             click("文件"); find("操作进度")
             click("设置"); find("操作进度")
-            click("查看进度"); click("取消当前操作")
+            click("操作进度"); click("取消当前操作")
             assertEquals(listOf("CANCEL"),rec.commands)
-            click("收起")
+            click("关闭进度详情")
             instrumentation.runOnMainSync { state.value=state.value.copy(snapshot=Snapshot(environment=EnvironmentState.READY)) }
             SystemClock.sleep(300)
-            assertFalse("completed operation must remove banner",nodes().any { matches(it,"操作进度") })
+            assertFalse("completed operation must remove entry",nodes().any { matches(it,"操作进度") })
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun progressEntryNeverResizesFileContent() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val browser = browserOf(activity); awaitProbe(browser)
+            val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.READY)))
+            val area = java.util.concurrent.atomic.AtomicReference<androidx.compose.ui.geometry.Rect>()
+            mount(activity, state, Recorder(), browser.view, false, 1f, filesPage = { modifier, _ ->
+                Box(modifier.onGloballyPositioned { area.set(it.boundsInWindow()) }) {
+                    Text("文件内容测试区域")
+                }
+            })
+            click("文件"); find("文件内容测试区域")
+            val idle = requireNotNull(area.get())
+            instrumentation.runOnMainSync {
+                state.value = state.value.copy(snapshot = Snapshot(environment = EnvironmentState.INSTALLING,
+                    stage = "离线安装 DSH 依赖"))
+            }
+            find("操作进度"); instrumentation.waitForIdleSync()
+            assertEquals("安装入口出现不能改变文件页边界", idle, area.get())
+            click("操作进度"); find("正在准备"); click("关闭进度详情")
+            instrumentation.runOnMainSync {
+                state.value = state.value.copy(snapshot = Snapshot(environment = EnvironmentState.READY))
+            }
+            instrumentation.waitForIdleSync()
+            assertEquals("安装结束也不能改变文件页边界", idle, area.get())
         } finally { cleanup(activity) }
     }
 
@@ -887,19 +920,21 @@ class SetupPresentationTest {
             val state=mutableStateOf(model(Snapshot(environment=EnvironmentState.DOWNLOADING,stage="下载 Node.js",
                 download=RuntimeDownloadProgress("node","本地测试源",256,1024,64),timing=OperationTiming(now-5000,now))))
             mount(activity,state,Recorder(),browser.view,false,1f)
-            assertEquals("当前阶段 25%",find("操作进度").stateDescription?.toString())
+            assertEquals("下载，25%",find("操作进度").stateDescription?.toString())
+            click("操作进度")
             val before=nodes().first { it.text?.startsWith("已用 ")==true }.text.toString()
             screenshot("progress-known-bytes.png").recycle()
             SystemClock.sleep(1400)
             val after=nodes().first { it.text?.startsWith("已用 ")==true }.text.toString()
             assertNotEquals("clock must keep responding while bytes are unchanged",before,after)
+            click("关闭进度详情")
             instrumentation.runOnMainSync { state.value=state.value.copy(snapshot=Snapshot(environment=EnvironmentState.READY),
                 transfers=MutableStateFlow(listOf(FileTransferProgress(1,"下载网页文件",2048,-1,OperationTiming(now,now)),
                     FileTransferProgress(2,"准备网页 Blob 下载",0,-1,OperationTiming(now,now))))) }
-            find("下载网页文件");assertEquals("进行中，无法估算百分比",find("操作进度").stateDescription?.toString())
-            click("进度 · 2");find("准备网页 Blob 下载");find("已传输 2.0 KB · 总大小未知")
+            find("操作进度");assertEquals("传输中",find("操作进度").stateDescription?.toString())
+            click("操作进度");find("准备网页 Blob 下载");find("已传输 2.0 KB · 总大小未知")
             screenshot("progress-unknown-transfers.png").recycle()
-            click("收起")
+            click("关闭进度详情")
             instrumentation.runOnMainSync { state.value=state.value.copy(transfers=MutableStateFlow(emptyList())) }
             SystemClock.sleep(200);assertFalse(nodes().any { matches(it,"操作进度") })
         } finally { cleanup(activity) }
@@ -913,12 +948,12 @@ class SetupPresentationTest {
             val state=mutableStateOf(model(Snapshot(environment=EnvironmentState.INSTALLING,update=UpdateState.STAGING,
                 stage="解析 DSH 依赖",timing=OperationTiming(now-180_000,now-90_000))))
             mount(activity,state,Recorder(),browser.view,true,2f)
-            find("操作进度");find("查看进度")
+            find("操作进度")
+            click("操作进度")
             assertTrue(nodes().any { it.text?.contains("没有新进展")==true })
             screenshot("progress-quiet-dark-font200.png").recycle()
-            click("查看进度")
-            assertTrue(nodes().any { it.text?.contains("计时和动效不代表后台一定正常")==true })
-            click("收起")
+            assertTrue(nodes().any { it.text?.contains("百分比只代表当前阶段")==true })
+            click("关闭进度详情")
         } finally { cleanup(activity) }
     }
 

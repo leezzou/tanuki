@@ -67,6 +67,7 @@ import java.util.Date
 
 /** 页面单独预览时可用的空传输流；真实页面由宿主注入。 */
 private val EMPTY_FILE_TRANSFERS: StateFlow<List<FileTransferProgress>> = MutableStateFlow(emptyList())
+private val EMPTY_IMPORT_REVISION: StateFlow<Long> = MutableStateFlow(0L)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -85,6 +86,7 @@ internal fun WorkspaceFilesPage(
     phoneWriteAllowed: Boolean = false, phoneWritingAvailable: Boolean = false,
     onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {},
     transfers: StateFlow<List<FileTransferProgress>> = EMPTY_FILE_TRANSFERS,
+    importRevision: StateFlow<Long> = EMPTY_IMPORT_REVISION,
     onCancelTransfer: (Long) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
@@ -165,14 +167,23 @@ internal fun WorkspaceFilesPage(
     }
     fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机工具路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
-    LaunchedEffect(files, runtimeRunning, phoneStorageGranted) {
+    val currentDirectory by rememberUpdatedState(directory)
+    LaunchedEffect(files, runtimeRunning, phoneStorageGranted, importRevision) {
         error = null; selected = emptySet()
         if (!canBrowse) { entries = emptyList(); busy = false; return@LaunchedEffect }
-        busy = true
-        try { entries = files.list(directory) }
-        catch (e: CancellationException) { throw e }
-        catch (e: Exception) { report(e) }
-        finally { busy = false }
+        val revisions = if (location == FileLocation.WORKSPACE) importRevision else EMPTY_IMPORT_REVISION
+        // 首次加载和导入结束共用持久序号；不订阅字节流，小文件瞬间完成也能刷新。
+        revisions.collect {
+            val requestedDirectory = currentDirectory
+            busy = true
+            try {
+                val loaded = files.list(requestedDirectory)
+                if (currentDirectory == requestedDirectory) entries = loaded
+            }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { report(e) }
+            finally { busy = false }
+        }
     }
     BackHandler(enabled = action == null && openedEntry == null && (selected.isNotEmpty() || searching || directory.isNotEmpty())) {
         when { selected.isNotEmpty() -> selected = emptySet(); searching -> { searching = false; query = "" }
@@ -429,26 +440,33 @@ internal fun WorkspaceFilesPage(
                 }
                 Box(Modifier.weight(1f).fillMaxWidth().tanukiEnter()) {
                     if (!canBrowse) {
-                        // 未授权页保留原有说明与动作，只换成令牌字号和胶囊主操作。
-                        Column(
+                        // 未授权页与其他空态共用 TanukiStateView，避免图标、说明和按钮风格分叉。
+                        Box(
                             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                                 .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset),
-                            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            TanukiIcon(TanukiGlyph.Folder, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text("浏览手机文件", style = MaterialTheme.typography.titleLarge)
-                            Text("授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。", style = MaterialTheme.typography.bodyMedium)
-                            TanukiPillButton(
-                                text = "授权访问手机文件",
-                                onClick = onRequestStoragePermission,
-                                tone = TanukiPillButtonTone.Filled,
-                            )
-                            Text("不授权也可通过文件操作菜单，从系统文件选择器导入文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TanukiStateView(
+                                kind = TanukiStateKind.EMPTY,
+                                subject = "手机文件",
+                                title = "浏览手机文件",
+                                detail = "授权后可查看手机共享存储和可用存储卡中的文件，并打开音频、视频和文档。其他应用的私有目录与系统限制目录仍由 Android 保护。",
+                                icon = Icons.Default.FolderOpen,
+                                actionLabel = "授权访问手机文件",
+                                actionFilled = true,
+                                onAction = onRequestStoragePermission,
+                            ) {
+                                Text(
+                                    "不授权也可通过文件操作菜单，从系统文件选择器导入文件。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     } else {
                         // 三态占位只在没有可显示内容时接管页面；列表上的操作失败仍走 Snackbar。
                         val stateKind = when {
-                            busy && shown.isEmpty() && error == null -> TanukiStateKind.LOADING
+                            (busy || sorting) && shown.isEmpty() && error == null -> TanukiStateKind.LOADING
                             error != null && entries.isEmpty() && !busy -> TanukiStateKind.ERROR
                             shown.isEmpty() && !busy && !sorting -> TanukiStateKind.EMPTY
                             else -> null
@@ -460,7 +478,7 @@ internal fun WorkspaceFilesPage(
                                 animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
                                 label = "fileState",
                             ) { kind ->
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
                                     FileListState(
                                         kind = kind,
                                         query = query,
@@ -471,6 +489,11 @@ internal fun WorkspaceFilesPage(
                                         onReload = { navigate(directory) },
                                         onShowHidden = { hidden = true },
                                         onClearQuery = { query = "" },
+                                        onImport = onImport,
+                                        onCreateFolder = { begin("新建文件夹") },
+                                        createFolderEnabled = location.writable && !runtimeRunning,
+                                        transfers = transfers,
+                                        onCancelTransfer = onCancelTransfer,
                                     )
                                 }
                             }
@@ -589,6 +612,11 @@ private fun FileListState(
     onReload: () -> Unit,
     onShowHidden: () -> Unit,
     onClearQuery: () -> Unit,
+    onImport: () -> Unit,
+    onCreateFolder: () -> Unit,
+    createFolderEnabled: Boolean,
+    transfers: StateFlow<List<FileTransferProgress>>,
+    onCancelTransfer: (Long) -> Unit,
 ) {
     val modifier = Modifier.fillMaxWidth()
         .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset)
@@ -609,19 +637,57 @@ private fun FileListState(
             actionLabel = "重试",
             onAction = onReload,
         )
-        TanukiStateKind.EMPTY -> TanukiStateView(
-            kind = kind,
-            modifier = modifier,
-            subject = "文件",
-            title = copy.title,
-            detail = copy.detail,
-            actionLabel = copy.actionLabel,
-            onAction = when {
-                query.isNotEmpty() -> onClearQuery
-                hasEntries -> onShowHidden
-                else -> onReload
-            },
-        )
+        TanukiStateKind.EMPTY -> {
+            // 导入进行中时，空白区域必须显示真实进度行，而不是继续显示“暂无文件”。
+            val transferItems by transfers.collectAsState()
+            val importItems = FileTransferPresentation.imports(transferItems)
+            var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+            LaunchedEffect(importItems.isNotEmpty()) {
+                while (importItems.isNotEmpty()) {
+                    delay(1000)
+                    now = SystemClock.elapsedRealtime()
+                }
+            }
+            if (importItems.isNotEmpty()) {
+                TanukiStateView(
+                    kind = TanukiStateKind.LOADING,
+                    modifier = modifier,
+                    title = "正在导入文件",
+                    detail = "文件正在复制到 /workspaces，完成后会刷新文件列表。",
+                ) {
+                    importItems.forEach { item ->
+                        key(item.id) {
+                            TransferRow(item = item, now = now, onCancel = { onCancelTransfer(item.id) })
+                        }
+                    }
+                }
+            } else {
+                val actions = TanukiFileVisuals.emptyActions(query, hasEntries, writable)
+                TanukiStateView(
+                    kind = kind,
+                    modifier = modifier,
+                    subject = "文件",
+                    title = copy.title,
+                    detail = copy.detail,
+                    icon = Icons.Default.FolderOpen,
+                    actionLabel = actions.primaryLabel,
+                    actionFilled = actions.primary == FileEmptyCommand.IMPORT,
+                    onAction = {
+                        dispatchFileEmptyCommand(actions.primary, onImport, onCreateFolder,
+                            onClearQuery, onShowHidden, onReload)
+                    },
+                    secondaryActionLabel = actions.secondaryLabel,
+                    secondaryAsButton = actions.secondary != null,
+                    secondaryActionEnabled = createFolderEnabled,
+                    onSecondaryAction = actions.secondary?.let { secondary ->
+                        {
+                            dispatchFileEmptyCommand(secondary, onImport, onCreateFolder,
+                                onClearQuery, onShowHidden, onReload)
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -879,7 +945,7 @@ private fun TransferSheet(
 }
 
 @Composable
-private fun TransferRow(
+internal fun TransferRow(
     item: FileTransferProgress,
     now: Long,
     onCancel: () -> Unit,
@@ -897,14 +963,8 @@ private fun TransferRow(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (percent != null) LinearProgressIndicator(
-            progress = { percent / 100f },
-            modifier = progressModifier,
-            trackColor = MaterialTheme.colorScheme.primaryContainer,
-        ) else LinearProgressIndicator(
-            modifier = progressModifier,
-            trackColor = MaterialTheme.colorScheme.primaryContainer,
-        )
+        // 与安装入口共用连续进度条，避免默认分段样式造成“进度坏了”的错觉。
+        OperationProgressBar(fraction = percent?.let { it / 100f }, modifier = progressModifier)
         Text(FileTransferPresentation.sizeText(item.received, item.total),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -2,6 +2,17 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 全局安装进度与文件页空态验证（2026-11-11，android_agent-73，非设备）
+
+- 范围：以 fetch 后确认的 `origin/main=8ba7b4b3ecdc82c17a200dca77ef9420924d76b1` 为起点，在 `ao/install-progress/global-progress` 移除顶部常驻安装卡，改为不参与页面测量的细进度浮层与详情抽屉；修正阶段/百分比/估时与原操作重试；补文件空态双按钮、导入进度与完成序号刷新；未改远程页源码，不合并、不发布。
+- 本轮 Host 验证环境：macOS ARM64、JDK17、Gradle8.13、Android SDK36，`source scripts/ao-worktree-env.sh` 使用独立 worktree 缓存与 Android 构建状态。
+- 最终组合命令：`./gradlew --no-daemon --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:assembleModernDebug :app:assembleModernDebugAndroidTest :app:testModernDebugUnitTest :app:lintModernDebug`。
+- 最终组合调用 **BUILD SUCCESSFUL**：app/test debug APK 构建和仪器测试源码编译通过；全量 JVM **1182 tests / 122 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 109 warnings / 1 hint**。
+- 定向 JVM 结果：`OperationProgressPresentationTest` 12、`OperationProgressLayoutTest` 2、`OperationRetryTest` 3、`FileEmptyStateTest` 5、`TanukiPageVisualsTest` 12，共 **34 项通过**。覆盖有/无总量、真实阶段百分比、人话阶段、估时边界、失败耗时冻结/取消、原任务重试仅一次且旧编号失效、空态按钮回调、导入类型隔离与瞬间结束刷新序号、topBar/bottomBar 不出现常驻进度卡。
+- 开发 debug APK 身份：`com.tanuki.modern.workspacecheck`，minSdk26/targetSdk34，SHA-256 `0c4125b9e5eaae687f218466e31a6c663808c1ac47025c29cb7800ce5b756a34`；test 包 `com.tanuki.modern.workspacecheck.test`，instrumentation target 为该 app 包名。没有安装、没有生成正式签名发布包。
+- 中途检查与失败：初版定向 26 项通过、主代码及仪器源码编译通过；首次图标导入缺失、一次空态文案断言和一次 padding 参数重载错误均修正。两次中途候选构建为补取消/恢复边界与瞬间导入竞态而主动停止，未计通过；以上 JVM 数字来自最终代码执行。
+- Android 未执行：`SetupPresentationTest` 新增任务前后文件页内容区域边界不变的回归，并更新抽屉/取消/已知与未知总量断言；本轮只编译。独立 Android QA、模拟器/真机截图、SAF 导入/实际安装重试、深色/大字体、TalkBack、全屏/平板布局与手势均未验证，Host 结果不替代设备验收；API Key、真实模型/账号继续暂停。
+
 ## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
 
 - 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。

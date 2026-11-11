@@ -8,9 +8,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.InputStream
 import java.io.OutputStream
 
-/** Independent of installation state: a web download must not overwrite a runtime operation. */
+/** 导入单独标记，文件页不能靠中文标题猜测网页下载是否正在导入项目。 */
+enum class FileTransferKind { GENERAL, IMPORT }
+
+/** 文件传输与环境安装状态独立，网页下载不会覆盖安装阶段。 */
 data class FileTransferProgress(val id: Long, val label: String, val received: Long, val total: Long,
-    val timing: OperationTiming)
+    val timing: OperationTiming, val kind: FileTransferKind = FileTransferKind.GENERAL)
 
 /**
  * 文件传输进度的唯一发布点。
@@ -24,6 +27,8 @@ class FileTransfers(
     private val clock: () -> Long,
 ) {
     val state = MutableStateFlow<List<FileTransferProgress>>(emptyList())
+    /** 结束信号保留最新序号，瞬间完成的小文件导入也不会因任务列表合并而漏刷新。 */
+    val importRevision = MutableStateFlow(0L)
     private var sequence = 0L
     private class Published(val received: Long, val total: Long, val at: Long)
     private val published = HashMap<Long, Published>()
@@ -31,11 +36,11 @@ class FileTransfers(
     private val cancelActions = HashMap<Long, () -> Unit>()
     private val cancelled = HashSet<Long>()
 
-    @Synchronized fun begin(label: String, total: Long = -1): Long {
+    @Synchronized fun begin(label: String, total: Long = -1, kind: FileTransferKind = FileTransferKind.GENERAL): Long {
         val id = ++sequence
         val now = clock()
         published[id] = Published(0, total, now)
-        state.value = state.value + FileTransferProgress(id, label, 0, total, OperationTiming(now, now))
+        state.value = state.value + FileTransferProgress(id, label, 0, total, OperationTiming(now, now), kind)
         return id
     }
 
@@ -68,11 +73,13 @@ class FileTransfers(
     }
 
     @Synchronized fun finish(id: Long) {
+        val imported = state.value.any { it.id == id && it.kind == FileTransferKind.IMPORT }
         published.remove(id)
         running.remove(id)
         cancelActions.remove(id)
         cancelled.remove(id)
         state.value = state.value.filterNot { it.id == id }
+        if (imported) importRevision.value += 1
     }
 
     /**
@@ -103,8 +110,9 @@ class FileTransfers(
         action?.invoke()
     }
 
-    suspend fun <T> track(label: String, total: Long = -1, block: suspend (Long) -> T): T = coroutineScope {
-        val id = begin(label, total)
+    suspend fun <T> track(label: String, total: Long = -1, kind: FileTransferKind = FileTransferKind.GENERAL,
+        block: suspend (Long) -> T): T = coroutineScope {
+        val id = begin(label, total, kind)
         val job = checkNotNull(currentCoroutineContext()[Job]) { "文件传输必须在协程中启动" }
         synchronized(this@FileTransfers) {
             if (id in cancelled) job.cancel()

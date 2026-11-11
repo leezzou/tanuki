@@ -1,17 +1,22 @@
 package com.tanuki.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -74,6 +79,10 @@ object TanukiStateText {
  * [title] 用于页面已经有明确标题的场景（例如“DSH 未运行”“读取官方会话失败”），
  * 传空时仍按 [TanukiStateText] 生成“暂无 X / 正在加载 X”。[secondaryActionLabel]
  * 提供第二种离开方式（例如“刷新列表”），不提供时不会出现空按钮。
+ *
+ * [icon] 用于空态建立视觉锚点；[actionFilled] 让主操作在空态也能成为实心按钮；
+ * [secondaryAsButton] 把第二动作渲染成并排的次级按钮；[content] 承载进度行等
+ * 需要与三态保持同一容器风格的补充内容。
  */
 @Composable
 fun TanukiStateView(
@@ -86,12 +95,17 @@ fun TanukiStateView(
     title: String? = null,
     secondaryActionLabel: String? = null,
     onSecondaryAction: (() -> Unit)? = null,
+    icon: ImageVector? = null,
+    actionFilled: Boolean = false,
+    secondaryAsButton: Boolean = false,
+    secondaryActionEnabled: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit = {},
 ) {
     val copy = TanukiStateText.of(kind, subject, detail, actionLabel)
         .let { if (title.isNullOrBlank()) it else it.copy(title = title) }
     val background = if (kind == TanukiStateKind.ERROR) MaterialTheme.colorScheme.errorContainer
     else MaterialTheme.colorScheme.surfaceContainerLow
-    val content = if (kind == TanukiStateKind.ERROR) MaterialTheme.colorScheme.onErrorContainer
+    val contentColor = if (kind == TanukiStateKind.ERROR) MaterialTheme.colorScheme.onErrorContainer
     else MaterialTheme.colorScheme.onSurface
     Surface(
         modifier = modifier
@@ -99,7 +113,7 @@ fun TanukiStateView(
             // 只播报状态变化；标题与说明由 Text 自行朗读，避免重复。
             .semantics { liveRegion = LiveRegionMode.Polite },
         color = background,
-        contentColor = content,
+        contentColor = contentColor,
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
@@ -114,6 +128,12 @@ fun TanukiStateView(
                         .semantics { contentDescription = copy.title },
                     strokeWidth = 3.dp,
                 )
+            } else if (icon != null) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                        Icon(icon, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
             }
             Text(
                 text = copy.title,
@@ -125,17 +145,39 @@ fun TanukiStateView(
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )
-            if (kind != TanukiStateKind.LOADING && onAction != null) {
-                TanukiActionButton(
-                    label = copy.actionLabel ?: "重试",
-                    onClick = onAction,
-                    outlined = kind == TanukiStateKind.EMPTY,
-                    contentDescription = copy.actionLabel ?: "重试",
-                )
+            if (secondaryAsButton && secondaryActionLabel != null && onSecondaryAction != null) {
+                // 两个动作可能都是真实主路径（例如导入 / 新建文件夹），窄屏或大字体时自动换行。
+                TanukiResponsiveActionRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                    if (kind != TanukiStateKind.LOADING && onAction != null) {
+                        TanukiActionButton(
+                            label = copy.actionLabel ?: "重试",
+                            onClick = onAction,
+                            outlined = !actionFilled,
+                            contentDescription = copy.actionLabel ?: "重试",
+                        )
+                    }
+                    TanukiActionButton(
+                        label = secondaryActionLabel,
+                        onClick = onSecondaryAction,
+                        outlined = true,
+                        enabled = secondaryActionEnabled,
+                        contentDescription = secondaryActionLabel,
+                    )
+                }
+            } else {
+                if (kind != TanukiStateKind.LOADING && onAction != null) {
+                    TanukiActionButton(
+                        label = copy.actionLabel ?: "重试",
+                        onClick = onAction,
+                        outlined = kind == TanukiStateKind.EMPTY && !actionFilled,
+                        contentDescription = copy.actionLabel ?: "重试",
+                    )
+                }
+                if (secondaryActionLabel != null && onSecondaryAction != null) {
+                    TanukiTextAction(label = secondaryActionLabel, onClick = onSecondaryAction)
+                }
             }
-            if (secondaryActionLabel != null && onSecondaryAction != null) {
-                TanukiTextAction(label = secondaryActionLabel, onClick = onSecondaryAction)
-            }
+            content()
         }
     }
 }

@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
         // 取消系统选择器（空结果）不启动任务、不报错、不跳页。
         if (uris.isEmpty()) return@registerForActivityResult
         lifecycleScope.launch(Dispatchers.IO) {
-            try { manager.fileTransfers.track("导入项目文件") { id -> importProjectFiles(uris, id) } }
+            try { manager.fileTransfers.track("导入项目文件", kind = com.tanuki.runtime.FileTransferKind.IMPORT) { id -> importProjectFiles(uris, id) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { manager.fail(error) }
         }
@@ -528,6 +528,8 @@ class MainActivity : ComponentActivity() {
                                 "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL",
                                 "INIT", "BASE", "STOP", "RESTART", "SLIM", "WEBVIEW_CHECK", "RECONNECT", "EXPORT", "BACKUP", "RESTORE", "RESUME_UPDATE", "CACHE",
                                 "RECOVERY_TRIAL", "RECOVERY_SAFE" -> confirmation = command
+                                else -> command.removePrefix("RETRY_OPERATION/").takeIf { command.startsWith("RETRY_OPERATION/") }
+                                    ?.toLongOrNull()?.let(manager::retryOperation)
                             }
                         },
                         install = { release -> selected = release; confirmation = "UPDATE" },
@@ -716,6 +718,7 @@ class MainActivity : ComponentActivity() {
                             onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
                             transfers = manager.fileTransfers.state,
+                            importRevision = manager.fileTransfers.importRevision,
                             onCancelTransfer = { manager.fileTransfers.cancel(it) },
                             previewMaxDimension = deviceCondition.previewMaxDimension,
                             previewMaxPixels = deviceCondition.previewMaxPixels,
@@ -1069,7 +1072,7 @@ class MainActivity : ComponentActivity() {
         val uri = Uri.parse(descriptor.uri)
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                manager.fileTransfers.track("复制到工作区", descriptor.bytes) { id ->
+                manager.fileTransfers.track("复制到工作区", descriptor.bytes, kind = com.tanuki.runtime.FileTransferKind.IMPORT) { id ->
                     val name = ExternalDocumentPolicy.sanitizeDisplayName(descriptor.displayName)
                     val destination = manager.workspaceStorage.importFiles(
                         names = listOf(name),
