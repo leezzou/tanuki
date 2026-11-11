@@ -112,8 +112,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | ID | 功能 | 官方网页版 | 原生现状 | 缺口 / 归属 / 验收 |
 |---|---|---|---|---|
 | SESS-01 | 会话列表 | 侧栏按工作区分组显示标题、更新时间、运行/待处理/未读状态 | `原生部分`：`DshNativePage` 顶部横向会话条，仅标题、运行中/已结束、时间 | P1 · `DshNativePage.kt`/`DshNativeApi.kt` · 现状 android_agent-33/PR #26；会话管理实现 44 · A-SESS-01、A-SESS-03 |
-| SESS-02 | 选择会话并读历史 | 打开会话即加载 follow 快照与历史页，支持向前分页 | `原生部分`：选中后读 `session/projections` + `session/page`，最多 120 条，只有“更早历史请在官方界面查看” | P0/P1 · `DshNativeController.kt` · 42 聊天链路（follow 进行中） · A-SESS-01、A-CHAT-01 |
-| SESS-03 | 历史向前分页 | `loadOlder()`/轮次跳转，保持实时事件可见 | `仅官方`：原生无 load older/跳转 | P1 · `DshNativeApi.kt` · 42 聊天链路（分页/轮次跳转） · A-SESS-01 |
+| SESS-02 | 选择会话并读历史 | 打开会话即加载 follow 快照与历史页，支持向前分页 | `原生部分`：选中后读 `session/projections` + `session/page`（首屏 120 条）；滚到顶部按 50 条向前分页，两段锚定与内存窗口见 [原生界面](NATIVE-UI.md)。2026-11-11 android_agent-62 实现，设备未验证 | —（当前缺口为真实设备历史/手势验收） · `DshNativeController.kt`/`DshNativePage.kt` · A-SESS-01、A-CHAT-01 |
+| SESS-03 | 历史向前分页 | `loadOlder()`/轮次跳转，保持实时事件可见 | `原生部分`：`loadOlder()` 已实现（每页 50 条、保持可见位置、按 seq 去重排序、无更多时明确提示）；轮次跳转未实现 | P1 · 轮次跳转 · `DshNativeApi.kt`/`DshNativeController.kt` · A-SESS-01 |
 | SESS-04 | 新建会话/空白会话复用 | New Session 优先当前/最近工作区，复用空白会话与草稿 | `仅官方`：原生页不创建会话 | P0 · 44 会话管理（创建）+ 46 输入（composer） · A-SESS-02、A-INPUT-02 |
 | SESS-05 | 重命名会话 | 行菜单/双击标题，预填当前标题，可固定自动标题 | `仅官方` | P1 · `session/rename` · 44 会话管理 · A-SESS-02 |
 | SESS-06 | 分叉会话 | 从最近已完成轮次或指定 `atSeq` 创建子会话，不自动导航 | `仅官方` | P1 · `session/fork` · 44 会话管理 · A-SESS-02 |
@@ -360,6 +360,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 1. 启动本地合成 DSH HTTP 服务，按官方信封返回 `session/list`、`session/projections`、`session/page`。
 2. 断言：列表标题取 `projections.values.title`；`asOfSeq` 作为 `throughSeq`；只提取 append-origin 文本；`maxMessages=120`；空/损坏记录跳过。
 3. 增加“向前分页”用例：第二页 `throughSeq` 正确、重复页去重、失败保留已加载页。
+   - 落地（2026-11-11 android_agent-62）：协议 `messagesBefore` 与控制器分页/去重/失败保留、锚点分段、窗口释放边界由 `DshNativePagingTest`、`DshChatWindowTest` 覆盖；设备/真实 DSH 历史未验证。
 4. 现有覆盖：`DshNativeApiTest`、`DshNativeControllerTest`；新增分页用例应放在同目录。
 
 **A-SESS-02（JVM）会话生命周期方法**

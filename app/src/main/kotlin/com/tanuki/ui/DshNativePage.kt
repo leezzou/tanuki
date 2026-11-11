@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,15 +37,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -58,8 +62,10 @@ import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshTimelineItem
+import com.tanuki.web.DshToolItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -182,7 +188,9 @@ fun DshNativePage(
                         composer.send()
                     }
                 },
-                onFillComposer = { text -> composer.updateText(text) }
+                onFillComposer = { text -> composer.updateText(text) },
+                onLoadOlder = controller::loadOlder,
+                onViewportTop = controller::onViewportTop
             )
             if (state.loading && state.messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -259,57 +267,138 @@ private fun MessageList(
     composerRetryEnabled: Boolean,
     composerRetryHint: String?,
     onRetryComposer: () -> Unit,
-    onFillComposer: (String) -> Unit
+    onFillComposer: (String) -> Unit,
+    onLoadOlder: () -> Unit,
+    onViewportTop: (Int?) -> Unit
 ) {
-    // 只有消息或工具列表变化时才重排时间线；流式文本更新不会重建整段历史。
+    // 只在消息或工具列表变化时重排时间线；流式文本更新不会重建整段历史。
     val timeline = remember(state.messages, state.tools) {
-        (state.messages.map { DshTimelineItem.Text(it) } + state.tools.map { DshTimelineItem.Tool(it) })
-            .sortedWith(
-                compareBy<DshTimelineItem> {
-                    if (it is DshTimelineItem.Text && it.message.pending) 1 else 0
-                }.thenBy { it.seq }
-            )
+        buildTimeline(state.messages, state.tools)
     }
-    var extraWindow by remember(state.selectedId) { mutableIntStateOf(0) }
-    val window = remember(timeline, extraWindow) {
-        DshChatRenderPolicy.window(timeline, DshChatRenderPolicy.WINDOW_SIZE + extraWindow)
-    }
+    val byKey = remember(timeline) { timeline.associateBy { it.stableKey() } }
     val activeFailure = composerFailure ?: state.failedPrompt
     val failureFromComposer = composerFailure != null
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var following by remember(state.selectedId) { mutableStateOf(true) }
-    val dragging by listState.interactionSource.collectIsDraggedAsState()
-    val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
 
-    LaunchedEffect(dragging, state.selectedId) {
-        following = DshChatRenderPolicy.followAfterDrag(dragging, listState.isAtBottom(), following)
+    var following by remember(state.selectedId) { mutableStateOf(true) }
+    var anchor by remember(state.selectedId) { mutableStateOf<DshChatAnchor?>(null) }
+    // 头部插页/释放前的视口行；revision 变化后按该行恢复，索引变化不会带动内容跳动。
+    var restore by remember(state.selectedId) { mutableStateOf<DshViewportRestore?>(null) }
+    var restoring by remember(state.selectedId) { mutableStateOf(false) }
+    val currentTimeline by rememberUpdatedState(timeline)
+    val currentByKey by rememberUpdatedState(byKey)
+    val currentAnchor by rememberUpdatedState(anchor)
+
+    // 两段结构：历史段（含锚点行）向上增长，新消息段从锚点下方向下增长。
+    val split = remember(timeline, anchor) {
+        anchor?.let { frozen -> DshChatAnchorPolicy.split(timeline, frozen.key) { it.stableKey() } }
     }
-    // 用户松手/惯性结束后若已回到底部，恢复跟随；上滑过程中不会自动拉回。
+    val history = split?.history ?: timeline
+    val live = split?.live ?: emptyList()
+    val unseen = remember(split) { split?.let { DshChatAnchorPolicy.unseenMessages(it.live) } ?: 0 }
+    val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
+    val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
+
+    // 用户一动手就脱离跟随：拖动/惯性都会经过 nested scroll，程序滚动不会误触发。
+    val detachOnUserScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val detach = DshChatAnchorPolicy.shouldDetachOnUserScroll(
+                    userInput = source == NestedScrollSource.UserInput,
+                    delta = available.y,
+                    atBottom = listState.isAtBottom(),
+                    following = following
+                )
+                if (detach) {
+                    // 冻结当前最后一行作为锚点；之后的新内容只进入下方段。
+                    anchor = currentTimeline.lastOrNull()?.let { DshChatAnchor(it.stableKey(), it.seq) }
+                    following = false
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    // 回到底部才恢复跟随；上翻过程中不会自动拉回。
     LaunchedEffect(listState, state.selectedId) {
-        snapshotFlow { listState.isScrollInProgress to listState.isAtBottom() }
-            .collect { (scrolling, bottom) ->
-                if (!scrolling && bottom) following = true
+        snapshotFlow { listState.isAtBottom() }
+            .collect { bottom ->
+                if (bottom && !following && !restoring) {
+                    following = true
+                    anchor = null
+                }
             }
     }
-    LaunchedEffect(following, totalItems, state.streamingText.length, timeline.size) {
-        // 用户手势进行中不抢滚动；手势结束后由 followAfterDrag 决定是否恢复。
-        if (following && totalItems > 0 && !listState.isScrollInProgress) listState.scrollToBottom()
+    // 跟随只负责贴底；用户手势进行中且已离开底部时让出手势，避免一帧抢滚动。
+    LaunchedEffect(following, totalItems, timeline.size, state.streamingText.length, state.historyRevision) {
+        if (!following || totalItems <= 0) return@LaunchedEffect
+        if (listState.isScrollInProgress && !listState.isAtBottom()) return@LaunchedEffect
+        listState.scrollToBottom()
+    }
+    // 持续报告视口顶部行：窗口释放只用它判断“哪些行在视口上方”。
+    LaunchedEffect(listState, state.selectedId) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val row = info.visibleItemsInfo.firstOrNull { item ->
+                val key = item.key as? String
+                key == ANCHOR_ITEM_KEY || currentByKey.containsKey(key)
+            }
+            if (row == null) {
+                DshViewportProbe(null, 0, currentTimeline.firstOrNull()?.seq)
+            } else {
+                val key = row.key as String
+                val seq = if (key == ANCHOR_ITEM_KEY) currentAnchor?.seq else currentByKey[key]?.seq
+                // 只有“目标行就是当前首行”时才能沿用 firstVisibleItemScrollOffset；
+                // 顶部提示行之上的内容只把目标行对齐到视口顶部，避免负偏移被内容内边距截断。
+                val offset = if (row.index == listState.firstVisibleItemIndex) {
+                    listState.firstVisibleItemScrollOffset
+                } else {
+                    0
+                }
+                DshViewportProbe(key, offset, seq)
+            }
+        }.distinctUntilChanged().collect { probe ->
+            if (restoring) return@collect
+            probe.key?.let { restore = DshViewportRestore(it, probe.offset) }
+            onViewportTop(probe.seq)
+        }
+    }
+    // 头部插入更早页或释放窗口后，按行 key 回到同一内容；跟随时由贴底逻辑接管。
+    LaunchedEffect(state.historyRevision, state.selectedId) {
+        val request = restore ?: return@LaunchedEffect
+        if (following) return@LaunchedEffect
+        val target = when (request.key) {
+            ANCHOR_ITEM_KEY -> 1 + history.size
+            else -> DshChatAnchorPolicy.restoreIndex(timeline.map { it.stableKey() }, request.key)
+        } ?: return@LaunchedEffect
+        restore = null
+        restoring = true
+        try {
+            listState.scrollToItem(target, request.offset)
+        } finally {
+            restoring = false
+        }
+    }
+    // 用户上翻触顶才自动续页；首屏贴底时不会一次性把全部历史拉进内存。
+    LaunchedEffect(
+        atTop, following, state.loading, state.hasMore, state.loadingOlder, state.olderError, state.selectedId
+    ) {
+        if (!atTop || following || state.loading || !state.hasMore ||
+            state.loadingOlder || state.olderError != null
+        ) return@LaunchedEffect
+        onLoadOlder()
     }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().nestedScroll(detachOnUserScroll),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (window.hasEarlier) {
-                item(key = "earlier", contentType = "earlier") {
-                    EarlierMessagesButton(
-                        hidden = window.hiddenBefore,
-                        onClick = { extraWindow = DshChatRenderPolicy.nextWindow(extraWindow) }
-                    )
+            if (timeline.isNotEmpty()) {
+                item(key = HISTORY_TOP_KEY, contentType = "history-top") {
+                    HistoryTopRow(state = state, onLoadOlder = onLoadOlder)
                 }
             }
             if (timeline.isEmpty() && activeFailure == null && !composerSending && !state.loading &&
@@ -323,14 +412,29 @@ private fun MessageList(
                 }
             }
             items(
-                items = window.items,
-                key = { item ->
+                items = history,
+                key = { item -> item.stableKey() },
+                contentType = { item ->
                     when (item) {
-                        is DshTimelineItem.Text ->
-                            if (item.message.pending) "pending-${item.message.seq}" else "message-${item.message.seq}"
-                        is DshTimelineItem.Tool -> item.tool.key
+                        is DshTimelineItem.Text -> "message"
+                        is DshTimelineItem.Tool -> "tool"
                     }
-                },
+                }
+            ) { item ->
+                when (item) {
+                    is DshTimelineItem.Text -> MessageCard(item.message)
+                    is DshTimelineItem.Tool -> DshToolCard(item.tool)
+                }
+            }
+            if (split != null) {
+                // 锚点固定在历史段与新消息段之间；新消息只从它下方增长。
+                item(key = ANCHOR_ITEM_KEY, contentType = "anchor") {
+                    ReadAnchorDivider(hasLive = live.isNotEmpty())
+                }
+            }
+            items(
+                items = live,
+                key = { item -> item.stableKey() },
                 contentType = { item ->
                     when (item) {
                         is DshTimelineItem.Text -> "message"
@@ -369,20 +473,84 @@ private fun MessageList(
                     NativeCaption("DSH 正在处理；回复出现后会实时显示。", Modifier.padding(vertical = 4.dp))
                 }
             }
-            if (state.hasMore) {
-                item(key = "has-more", contentType = "has-more") {
-                    NativeCaption("官方仅返回最近一页消息；更早历史请在官方界面查看。")
-                }
-            }
         }
-        if (!following && totalItems > 0) {
+        if (!following) {
             FilledTonalButton(
                 onClick = {
                     following = true
+                    anchor = null
                     scope.launch { listState.scrollToBottom() }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-            ) { Text("↓ 最新") }
+            ) {
+                Text(if (unseen > 0) "$unseen 条新消息" else "↓ 最新")
+            }
+        }
+    }
+}
+
+/** 视口探针：一条可定位的行及其相对视口顶部的偏移。 */
+private data class DshViewportProbe(val key: String?, val offset: Int, val seq: Int?)
+
+/** 头部变化后要恢复到的行；只在用户脱离跟随且历史被插页/释放时使用。 */
+private data class DshViewportRestore(val key: String, val offset: Int)
+
+private const val ANCHOR_ITEM_KEY = "chat-anchor"
+private const val HISTORY_TOP_KEY = "history-top"
+
+/** 时间线条目的稳定 key：LazyColumn 与滚动恢复共用同一身份。 */
+private fun DshTimelineItem.stableKey(): String = when (this) {
+    is DshTimelineItem.Text ->
+        if (message.pending) "pending-${message.seq}" else "message-${message.seq}"
+    is DshTimelineItem.Tool -> tool.key
+}
+
+/** 文本与工具按官方 seq 交错；本地发送占位始终排在最后。 */
+private fun buildTimeline(messages: List<DshMessage>, tools: List<DshToolItem>): List<DshTimelineItem> =
+    (messages.map { DshTimelineItem.Text(it) } + tools.map { DshTimelineItem.Tool(it) })
+        .sortedWith(
+            compareBy<DshTimelineItem> {
+                if (it is DshTimelineItem.Text && it.message.pending) 1 else 0
+            }.thenBy { it.seq }
+        )
+
+/** 区分历史段与新消息段的分界；没有新内容时只占位、不显示多余装饰。 */
+@Composable
+private fun ReadAnchorDivider(hasLive: Boolean) {
+    if (!hasLive) {
+        Spacer(Modifier.fillMaxWidth())
+        return
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        HorizontalDivider(Modifier.weight(1f))
+        Text(
+            "以下为新消息",
+            Modifier.padding(horizontal = 8.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        HorizontalDivider(Modifier.weight(1f))
+    }
+}
+
+/** 列表顶部：更早历史的加载入口与边界提示；没有更多时明确说明。 */
+@Composable
+private fun HistoryTopRow(state: DshNativeState, onLoadOlder: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (state.loadingOlder) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.size(8.dp))
+                NativeCaption("正在加载更早历史…")
+            } else if (state.hasMore) {
+                TextButton(onClick = onLoadOlder) { Text("加载更早历史") }
+            } else {
+                NativeCaption("已到会话最早一条")
+            }
+        }
+        state.olderError?.let { NativeCaption("更早历史加载失败：$it") }
+        if (state.releasedOlder > 0 && state.hasMore) {
+            NativeCaption("已释放 ${state.releasedOlder} 条更早消息，向上滚动会重新读取")
         }
     }
 }
@@ -407,21 +575,6 @@ private fun ComposerPendingCard(text: String) {
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis
             )
-        }
-    }
-}
-
-@Composable
-private fun EarlierMessagesButton(hidden: Int, onClick: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            NativeCaption("更早的 $hidden 条未渲染")
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onClick) { Text("显示更早") }
         }
     }
 }
