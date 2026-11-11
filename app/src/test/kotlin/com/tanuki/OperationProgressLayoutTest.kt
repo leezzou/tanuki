@@ -29,6 +29,29 @@ class OperationProgressLayoutTest {
         assertFalse("进度详情不应再用旧 AlertDialog 卡片", progress.contains("AlertDialog"))
     }
 
+    @Test fun `底部导航由外层统一避让且文件页只有一个进度宿主`() {
+        val page = ui("TanukiUi.kt")
+        assertTrue(page.contains("bottom = padding.calculateBottomPadding()"))
+        assertFalse(page.contains("bottom = if (floatingNavigation) 0.dp"))
+        assertTrue(page.contains("val bottomInset = 0.dp"))
+        assertTrue(page.contains("if (tab != 2) progressEntry("))
+        assertTrue(page.contains("LocalFileOperationOverlay provides"))
+        assertFalse(page.contains("showFileTransfers = tab != 2"))
+        val files = ui("WorkspaceFilesPage.kt")
+        assertTrue(files.contains("if (runtimeOverlay != null)"))
+        assertTrue(files.contains("else summary?.let"))
+        assertTrue(files.contains("viewerActionBarHeight"))
+    }
+
+    @Test fun `更新页工程说明收起且检查按钮为主操作`() {
+        val card = ui("ApplicationUpdateCard.kt")
+        assertTrue(card.contains("TanukiPillButton(text = \"检查更新\""))
+        assertTrue(card.contains("TanukiPillButtonTone.Filled"))
+        assertTrue(card.contains("if (details)"))
+        assertTrue(card.contains("ApplicationUpdatePresentation.summary"))
+        assertTrue(card.contains("TanukiStatusDot(versionStatus.tone"))
+    }
+
     @Test fun `文件页空态复用通用三态并显示导入进度`() {
         val files = ui("WorkspaceFilesPage.kt")
         assertTrue("空态应复用 TanukiStateView", files.contains("TanukiStateView("))

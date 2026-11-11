@@ -7,6 +7,7 @@ data class FailedOperation(
     val reason: String,
     val elapsedMillis: Long,
     val cancelled: Boolean = false,
+    val retryAvailable: Boolean = true,
 )
 
 /**
@@ -42,6 +43,12 @@ internal class OperationRetry(private val clock: () -> Long = { System.nanoTime(
             failed = false
             action = null
         }
+    }
+
+    @Synchronized fun invalidate() {
+        current = ++sequence
+        failed = false
+        action = null
     }
 
     fun retry(id: Long): Boolean {

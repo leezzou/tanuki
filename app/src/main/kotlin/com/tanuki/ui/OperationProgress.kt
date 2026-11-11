@@ -197,7 +197,7 @@ private fun OperationProgressDrawer(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (runtime?.mode == OperationProgressMode.FAILED) "操作失败" else "操作进度",
+                    runtime?.failureTitle ?: "操作进度",
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                 )

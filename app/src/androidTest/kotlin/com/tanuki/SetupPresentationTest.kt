@@ -27,6 +27,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -56,6 +59,7 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.tanuki.runtime.*
 import com.tanuki.storage.WorkspaceStorageState
 import com.tanuki.ui.GlassNavigationBar
+import com.tanuki.ui.FileTransferOverlay
 import com.tanuki.ui.BrowserControlButton
 import com.tanuki.ui.BrowserControlUiState
 import com.tanuki.ui.TanukiGlyph
@@ -182,7 +186,9 @@ class SetupPresentationTest {
 
     private fun mount(activity: MainActivity, state: MutableState<TanukiUiModel>, rec: Recorder,
                       browser: WebView, night: Boolean, fontScale: Float,
-                      filesPage: @Composable (Modifier, Dp) -> Unit = { _, _ -> }) {
+                      filesPage: @Composable (Modifier, Dp) -> Unit = { modifier, bottomInset ->
+                           Box(modifier) { FileTransferOverlay(state.value.transfers, bottomInset, { rec.cancelledTransfers += it }) }
+                       }) {
         val config = Configuration(activity.resources.configuration).apply {
             uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
                 (if (night) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO)
@@ -205,6 +211,7 @@ class SetupPresentationTest {
     private fun callbacks(state: MutableState<TanukiUiModel>, rec: Recorder, activity: MainActivity,
                           windowMode: com.tanuki.ui.DshWindowMode = com.tanuki.ui.DshWindowMode(activity.window)) = TanukiUiCallbacks(
         command = { rec.commands += it }, install = { rec.installs += it }, checkUpdates = {}, importFiles = {},
+        cancelTransfer = { rec.cancelledTransfers += it },
         measureStorage = {}, toggleLegacy = {}, toggleBlob = {}, showNotices = {}, updateWebView = {},
         webViewSettings = {}, appSettings = {}, notifications = {}, connectDsh = {},
         selectSource = { component, id ->
@@ -884,6 +891,77 @@ class SetupPresentationTest {
         } finally { cleanup(activity) }
     }
 
+    @Test fun runtimeAndFailureShareFileProgressHostAndKeepViewerActionsClickable() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val browser = browserOf(activity); awaitProbe(browser)
+            val transfers = MutableStateFlow(listOf(FileTransferProgress(42, "测试导入", 25, 100,
+                OperationTiming(1, 1), FileTransferKind.IMPORT)))
+            val state = mutableStateOf(model(Snapshot(operation = "init", stage = "下载组件")).copy(transfers = transfers))
+            val rec = Recorder()
+            mount(activity, state, rec, browser.view, true, 2f, filesPage = { modifier, bottomInset ->
+                Box(modifier) {
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(72.dp)
+                        .semantics { contentDescription = "查看器操作栏测试区域" }) {
+                        TextButton(onClick = { rec.fileActionClicks++ }) { Text("测试文件操作") }
+                    }
+                    FileTransferOverlay(transfers, bottomInset, { rec.cancelledTransfers += it },
+                        viewerActionBarVisible = true, viewerActionBarHeight = 72.dp)
+                }
+            })
+            click("文件")
+            fun touch(label: String) {
+                val area = Rect().also(find(label)::getBoundsInScreen)
+                val down = SystemClock.uptimeMillis()
+                for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                    val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action,
+                        area.exactCenterX(), area.exactCenterY(), 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+                    try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+                }
+                instrumentation.waitForIdleSync(); SystemClock.sleep(200)
+            }
+            val snapshots = listOf(Snapshot(operation = "init", stage = "下载组件"),
+                Snapshot(failedOperation = FailedOperation(17, "下载组件", "合成失败原因", 2_000)))
+            snapshots.forEachIndexed { index, snapshot ->
+                instrumentation.runOnMainSync { state.value = state.value.copy(snapshot = snapshot) }
+                val actionBar = Rect().also(find("查看器操作栏测试区域")::getBoundsInScreen)
+                val progress = Rect().also(find("操作进度")::getBoundsInScreen)
+                assertTrue("运行或失败入口都不能压住查看器操作栏", progress.bottom <= actionBar.top)
+                assertFalse("不得同时绘制第二个文件传输胶囊", nodes().any {
+                    it.isVisibleToUser && it.contentDescription?.toString()?.startsWith("文件传输") == true
+                })
+                touch("测试文件操作")
+                assertEquals(index + 1, rec.fileActionClicks)
+                touch("操作进度")
+                find("测试导入"); click("取消此文件")
+                assertEquals(List(index + 1) { 42L }, rec.cancelledTransfers)
+                assertTrue("文件取消不能误触运行时取消或重试", rec.commands.isEmpty())
+                click("关闭进度详情")
+            }
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun lastSettingsRowIsFullyVisibleAboveNavigationInDarkLargeFonts() {
+        val activity = launch(); cancelSourceTests()
+        try {
+            val browser = browserOf(activity); awaitProbe(browser)
+            val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.READY)))
+            mount(activity, state, Recorder(), browser.view, true, 2f)
+            click("设置")
+            fun aboutRow(): AccessibilityNodeInfo {
+                var row = find("关于与诊断")
+                while (!row.isClickable) row = requireNotNull(row.parent)
+                return row
+            }
+            aboutRow().performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            instrumentation.waitForIdleSync(); SystemClock.sleep(250)
+            val row = Rect().also(aboutRow()::getBoundsInScreen)
+            val navigation = Rect().also(find("主导航栏")::getBoundsInScreen)
+            assertTrue("关于与诊断整行必须可滚到导航上方", row.top >= 0 && row.bottom <= navigation.top)
+            click("关于与诊断"); find("诊断与高级")
+        } finally { cleanup(activity) }
+    }
+
     @Test fun progressEntryNeverResizesFileContent() {
         val activity = launch(); cancelSourceTests()
         try {
@@ -893,6 +971,7 @@ class SetupPresentationTest {
             mount(activity, state, Recorder(), browser.view, false, 1f, filesPage = { modifier, _ ->
                 Box(modifier.onGloballyPositioned { area.set(it.boundsInWindow()) }) {
                     Text("文件内容测试区域")
+                    FileTransferOverlay(state.value.transfers, 0.dp, {})
                 }
             })
             click("文件"); find("文件内容测试区域")
@@ -1164,6 +1243,8 @@ class SetupPresentationTest {
         val sourceSelections = ArrayList<Pair<RuntimeComponent, String>>()
         val versionSelections = ArrayList<Pair<RuntimeComponent, String>>()
         val fullscreen = ArrayList<Boolean>()
+        val cancelledTransfers = ArrayList<Long>()
+        var fileActionClicks = 0
     }
     companion object {
         private const val BASE_URL = "https://setup-presentation.tanuki.invalid/"

@@ -199,8 +199,14 @@ class RuntimeManager(val context: Context) {
 
     internal fun completeOperationRetry(id: Long) = operationRetry.complete(id)
 
+    @Synchronized internal fun invalidateOperationRetry() {
+        operationRetry.invalidate()
+        state.update { it.copy(failedOperation = it.failedOperation?.copy(retryAvailable = false)) }
+    }
+
     fun retryOperation(id: Long) {
-        if (hasActiveOperation || externalBusy() || state.value.operationActive || state.value.failedOperation?.retryId != id) return
+        if (hasActiveOperation || externalBusy() || state.value.operationActive ||
+            state.value.failedOperation?.retryId != id || state.value.failedOperation?.retryAvailable != true) return
         // 与第一次执行共用前台服务入口；应用退到后台后，重试仍保持安装通知。
         context.startForegroundService(android.content.Intent(context, RuntimeService::class.java).setAction("KEEPALIVE"))
         operationRetry.retry(id)

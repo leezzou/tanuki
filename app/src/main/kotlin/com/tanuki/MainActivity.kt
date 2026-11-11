@@ -115,6 +115,9 @@ class MainActivity : ComponentActivity() {
     }
     private val workspaceFiles by lazy {
         WorkspaceFileManager(manager.paths, manager.mutation, {
+            check(!manager.hasActiveOperation && !updates.hasActiveOperation) {
+                "环境操作正在进行，文件可继续浏览；请等待操作完成后再写入。"
+            }
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
                 "请先停止 DSH，再管理文件；避免与 Agent 同时修改文件。"
             }
@@ -708,6 +711,7 @@ class MainActivity : ComponentActivity() {
                             onReselectExternal = { openExternalDocument.launch(arrayOf("*/*")) },
                             onExport = { confirmation = "EXPORT" }, modifier = modifier, bottomInset = bottomInset,
                             runtimeRunning = s.service in setOf(ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING),
+                            environmentBusy = manager.hasActiveOperation || updates.hasActiveOperation,
                             onStop = { confirmation = "STOP" },
                             fullscreen = fileViewerFullscreen,
                             onFullscreen = { fileViewerFullscreen = it },

@@ -23,6 +23,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -61,10 +63,12 @@ internal fun WorkspaceFileViewer(
     onReselect: (() -> Unit)? = null,
     fullscreen: Boolean = false,
     onFullscreen: (Boolean) -> Unit = {},
+    onActionBarHeightChanged: (Dp) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var info by remember(document.key) { mutableStateOf<WorkspaceFileManager.FileInfo?>(null) }
@@ -237,9 +241,11 @@ internal fun WorkspaceFileViewer(
                     }
                 }
             }
-            // 操作栏固定 48dp；传输胶囊通过 FileViewerLayout 叠加同一高度避让，改动时需同步。
+            // 大字体可能撑高操作栏；把实际高度（含分隔线）交给唯一进度浮层避让。
             if (!fullscreen) HorizontalDivider()
-            if (!fullscreen) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
+            if (!fullscreen) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .onSizeChanged { onActionBarHeightChanged(with(density) { it.height.toDp() } + 1.dp) },
+                horizontalArrangement = Arrangement.SpaceEvenly) {
                 TextButton(onClick = onExport, enabled = !opening && !loading && info != null,
                     modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
                     TanukiIcon(TanukiGlyph.Download); Spacer(Modifier.width(8.dp)); Text("导出此文件")

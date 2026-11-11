@@ -295,6 +295,13 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     val destinations = TanukiDestination.entries.take(4)
     val navigationBackdrop = rememberLayerBackdrop()
     val layoutDirection = LocalLayoutDirection.current
+    val hasRuntimeProgress = fileProgressHost(s, false) == FileProgressHost.RUNTIME
+    val progressEntry: @Composable (Modifier) -> Unit = { modifier ->
+        OperationProgressEntry(snapshot = s, transfers = model.transfers,
+            onCancel = { callbacks.command("CANCEL") }, onCancelTransfer = callbacks.cancelTransfer,
+            onRetry = { command -> if (command == "OPEN_COMPONENTS") tab = 0 else callbacks.command(command) },
+            modifier = modifier.widthIn(max = 360.dp))
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp
         val floatingNavigation = !wide && !activeFullscreen && WindowInsets.ime.getBottom(LocalDensity.current) == 0
@@ -344,6 +351,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 }, bottomBar = {
                     if (floatingNavigation) Column(
                         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
+                            .semantics { contentDescription = "主导航栏" }
                     ) {
                         GlassNavigationBar(
                             selectedIndex = tab,
@@ -357,12 +365,14 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         }
                     }
                 }) { padding ->
-                val bottomInset = if (floatingNavigation) padding.calculateBottomPadding() else 0.dp
-                // 录制位于inset之前，和导航使用同一坐标原点；尾部避让交由各页的可滚动内容处理。
+                // 所有主页面统一在内容视口外预留导航和系统栏；子页不再重复叠加导航 inset。
+                val bottomInset = 0.dp
+                // 录制仍与导航共用坐标原点，任务浮层不改变内容视口。
                 val pageModifier = Modifier.fillMaxSize()
                     .then(if (nativeGlass) Modifier.layerBackdrop(navigationBackdrop) else Modifier)
+                    .background(MaterialTheme.colorScheme.background)
                     .padding(start = padding.calculateStartPadding(layoutDirection), top = padding.calculateTopPadding(),
-                        end = padding.calculateEndPadding(layoutDirection), bottom = if (floatingNavigation) 0.dp else padding.calculateBottomPadding())
+                        end = padding.calculateEndPadding(layoutDirection), bottom = padding.calculateBottomPadding())
                     .consumeWindowInsets(padding)
                 Box(Modifier.fillMaxSize()) {
                 when (tab) {
@@ -373,7 +383,11 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             if (callbacks.openBrowserOverlay != null) callbacks.openBrowserOverlay.invoke()
                             else { if (!floatingBrowser) callbacks.openBrowser(); floatingBrowser = !floatingBrowser }
                         })
-                    2 -> pageStates.SaveableStateProvider("files") { filesPage(pageModifier, bottomInset) }
+                    2 -> pageStates.SaveableStateProvider("files") {
+                        CompositionLocalProvider(LocalFileOperationOverlay provides if (hasRuntimeProgress) progressEntry else null) {
+                            filesPage(pageModifier, bottomInset)
+                        }
+                    }
                     3 -> pageStates.SaveableStateProvider("browser") {
                         agentBrowserPage(pageModifier, browserFullscreen, { browserFullscreen = it }, ::openSettings, bottomInset)
                     }
@@ -399,21 +413,10 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         }
                     }
                 }
-                    // 浮层不参与 topBar/bottomBar 测量，任务开始或结束均不改变页面高度。
-                    OperationProgressEntry(
-                        snapshot = s,
-                        transfers = model.transfers,
-                        onCancel = { callbacks.command("CANCEL") },
-                        onCancelTransfer = callbacks.cancelTransfer,
-                        onRetry = { command ->
-                            if (command == "OPEN_COMPONENTS") tab = 0 else callbacks.command(command)
-                        },
-                        showFileTransfers = tab != 2,
-                        modifier = Modifier.align(Alignment.BottomCenter).imePadding()
-                            .navigationBarsPadding().padding(horizontal = 24.dp)
-                            .padding(bottom = if (floatingNavigation) bottomInset + 4.dp else 16.dp)
-                            .widthIn(max = 360.dp),
-                    )
+                    // 文件页在自己的唯一浮层宿主内避让查看器；其他页面仍由外壳定位。
+                    if (tab != 2) progressEntry(Modifier.align(Alignment.BottomCenter).imePadding()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = padding.calculateBottomPadding() + FileViewerLayout.FloatingGap))
                 }
             }
         }

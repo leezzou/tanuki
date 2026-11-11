@@ -27,6 +27,14 @@ class FileAccessPresentationTest {
         assertTrue("运行中应说明修改暂停而不是永久只读", busy.detail.contains("暂停"))
     }
 
+    @Test fun installationPausesOnlyWritingAndExplainsThatBrowsingRemainsAvailable() {
+        val state = FileAccessPresentation.state(FileLocation.WORKSPACE, false, true, false, false, environmentBusy = true)
+        assertEquals(FileAccessMode.READ_ONLY, state.mode)
+        assertTrue(state.detail.contains("可继续浏览"))
+        assertTrue(state.detail.contains("完成后再写入"))
+        assertFalse("环境安装不能诱导用户去停止未运行的DSH", state.canStopRuntime)
+    }
+
     @Test fun phoneWithoutStorageGrantOffersPermissionInsteadOfWrite() {
         val state = FileAccessPresentation.state(FileLocation.PHONE, false, false, false, false)
         assertEquals(FileAccessMode.READ_ONLY, state.mode)

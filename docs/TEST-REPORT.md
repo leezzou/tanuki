@@ -13,6 +13,15 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 中途检查与失败：初版定向 26 项通过、主代码及仪器源码编译通过；首次图标导入缺失、一次空态文案断言和一次 padding 参数重载错误均修正。两次中途候选构建为补取消/恢复边界与瞬间导入竞态而主动停止，未计通过；以上 JVM 数字来自最终代码执行。
 - Android 未执行：`SetupPresentationTest` 新增任务前后文件页内容区域边界不变的回归，并更新抽屉/取消/已知与未知总量断言；本轮只编译。独立 Android QA、模拟器/真机截图、SAF 导入/实际安装重试、深色/大字体、TalkBack、全屏/平板布局与手势均未验证，Host 结果不替代设备验收；API Key、真实模型/账号继续暂停。
 
+### 同 PR 追加范围与审查修复（基于 PR #77 首提交 4474f6a，非设备）
+
+- 追加实现：应用更新页短文案、默认折叠工程详情、`TanukiPillButton` 主操作与可信版本状态点；Scaffold 统一预留导航和系统栏；文件页唯一任务浮层共用运行时/文件抽屉并按实际查看器操作栏高度避让；组件版本变化在保存前失效旧重试；只读浏览不等待安装事务，写入前后复核并明确提示。
+- 新一轮实际命令：`./gradlew --no-daemon --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:assembleModernDebug :app:assembleModernDebugAndroidTest :app:testModernDebugUnitTest :app:lintModernDebug`；**BUILD SUCCESSFUL（11m39s）**，app/test debug APK 和仪器源码编译通过；JVM **1197 tests / 125 个结果文件 / 0 failures / 0 errors / 0 skipped**；相关 **57 项回归通过**；lint **0 errors / 109 warnings / 1 hint**。
+- 新回归包括：真实 Ubuntu/Node 版本目录的 A 失败 → 改选 B → 点旧重装（不得执行），保存新版本前旧回调已失效；安装锁持有时目录/预览访问不挂起，写入立即拒绝及执行前再次复核；更新页未检查不能冒充最新；运行/失败与传输并存只选一个宿主，大字体查看器操作栏及导航边界计算。
+- 本轮 APK：19,387,409 字节，SHA-256 `c35ba8aaa239bc76edf6535cd7abe2d7692bfb13935ed4d86404800d1b3cd089`；只作为开发 debug 构建检查，未安装、未分发。
+- 新仪器源码：`runtimeAndFailureShareFileProgressHostAndKeepViewerActionsClickable` 使用真实坐标点击和文件取消回调验证并存入口；`lastSettingsRowIsFullyVisibleAboveNavigationInDarkLargeFonts` 验证设置末项整行位置及可点击。**只编译，未在 Android 执行。** 设备由独立 QA 使用，本会话未启动/操作设备或运行 adb；具体待设备复验清单见本次交接，独立复审由编排者触发。
+- 上一小节 1182 项及 `0c4125b9…` APK 是首提交 `4474f6a` 的历史结果；追加修复以本小节为准。当前 head 的 provider CI 和线程回报见会话交付报告，不沿用旧审查批准。
+
 ## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
 
 - 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。
