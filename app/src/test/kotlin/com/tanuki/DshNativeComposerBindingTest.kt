@@ -121,7 +121,26 @@ class DshNativeComposerBindingTest {
         }
     }
 
-    private class Fixture(initiallyRunning: Boolean) {
+    @Test fun streamUpdatesRefreshWatchdogAndSilenceKeepsSendAndStopAvailable() = runBlocking {
+        val fixture = Fixture(initiallyRunning = true, staleTimeoutMillis = 100)
+        try {
+            fixture.start()
+            fixture.awaitComposer { it.runStateStale }
+            fixture.source.emit("A", DshLiveEvent.Streaming("真实流式片段"))
+            val refreshed = fixture.awaitComposer { !it.runStateStale && it.generationRunning }
+            assertTrue(refreshed.generationRunning)
+            fixture.awaitComposer { it.runStateStale }
+            fixture.composer.updateText("可继续发送")
+            assertTrue(fixture.composer.state.value.canSend)
+            fixture.composer.requestStop()
+            fixture.awaitComposer { it.stopOutcome == DshStopOutcome.REQUESTED }
+            assertEquals(listOf("A"), fixture.cancelled)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    private class Fixture(initiallyRunning: Boolean, staleTimeoutMillis: Long = 30_000) {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val source = Source(initiallyRunning)
         val native = DshNativeController(source, scope)
@@ -141,7 +160,8 @@ class DshNativeComposerBindingTest {
             }),
             drafts = MemoryDshDraftStore(),
             scope = scope,
-            onSent = { native.select(it, force = true) }
+            onSent = { native.select(it, force = true) },
+            runningStaleTimeoutMillis = staleTimeoutMillis
         )
 
         fun start() {

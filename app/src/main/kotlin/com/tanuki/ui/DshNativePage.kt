@@ -64,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -257,6 +258,13 @@ fun DshNativePage(
                         onClick = { scope.launch { controller.retryLastPrompt() } },
                         enabled = !state.running && !state.sending
                     ) { Text("重发上一条") }
+                }
+            }
+            if (DshChatRenderPolicy.needsStopFallback(state, composerState)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+                    OutlinedButton(onClick = { scope.launch { controller.stop() } }, enabled = !state.stopping) {
+                        Text(if (state.stopping) "停止中…" else "停止生成")
+                    }
                 }
             }
             // 失败原文已用卡片展示；这里的 sendError 只处理没有失败原文的校验/前置错误。
@@ -454,8 +462,12 @@ private fun MessageList(
     }
     val history = split?.history ?: timeline
     val live = split?.live ?: emptyList()
-    val historyRows = remember(history) { DshChatRenderPolicy.rows(history) }
-    val liveRows = remember(live) { DshChatRenderPolicy.rows(live) }
+    val grouping = rememberSaveable(state.selectedId, saver = listSaver<DshChatGroupState, String>(
+        save = { it.savedStarts }, restore = { DshChatGroupState(it.toSet()) }
+    )) { DshChatGroupState() }
+    val grouped = remember(grouping, history, live) { grouping.project(history, live) }
+    val historyRows = grouped.history
+    val liveRows = grouped.live
     val unseen = remember(split) { split?.let { DshChatAnchorPolicy.unseenMessages(it.live) } ?: 0 }
     // 与 LazyColumn 完全一致的渲染 key 顺序：顶部提示、历史段、锚点分隔行、新消息段。
     val renderKeys = remember(historyRows, liveRows, split) {

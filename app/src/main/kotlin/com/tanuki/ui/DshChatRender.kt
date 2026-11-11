@@ -28,6 +28,10 @@ object DshChatRenderPolicy {
         else -> "就绪"
     }
 
+    /** 接线首帧或状态暂不同步时，页面仍提供官方停止入口。 */
+    fun needsStopFallback(native: DshNativeState, composer: DshComposerState): Boolean =
+        native.running && (native.selectedId != composer.sessionId || (!composer.generationRunning && !composer.stopping))
+
     fun composerPlaceholder(running: Boolean): String =
         if (running) "生成中 · 可直接插话" else "发消息，@ 引用，/ 命令"
 
@@ -39,11 +43,16 @@ object DshChatRenderPolicy {
     }
 
     /** 相邻工具才聚合；调用方先按阅读锚点拆段，不跨锚点吞并新调用。 */
-    fun rows(timeline: List<com.tanuki.web.DshTimelineItem>): List<DshChatRow> {
+    fun rows(
+        timeline: List<com.tanuki.web.DshTimelineItem>,
+        groupStarts: Set<String> = emptySet()
+    ): List<DshChatRow> {
         val rows = mutableListOf<DshChatRow>()
         timeline.forEach { item ->
             val previous = rows.lastOrNull()
-            if (item is com.tanuki.web.DshTimelineItem.Tool && previous?.tools?.isNotEmpty() == true) {
+            if (item is com.tanuki.web.DshTimelineItem.Tool && previous?.tools?.isNotEmpty() == true &&
+                item.stableKey() !in groupStarts
+            ) {
                 rows[rows.lastIndex] = previous.copy(tools = previous.tools + item.tool)
             } else {
                 rows += DshChatRow(item, if (item is com.tanuki.web.DshTimelineItem.Tool) listOf(item.tool) else emptyList())
@@ -87,14 +96,37 @@ object DshChatRenderPolicy {
 }
 
 /**
+ * 会话内保留已展示的工具组起点。前插只能新增前方组，不能把旧组并入新起点，
+ * 因而旧 key、首 callId 和成员相对布局都不变；已释放窗口的边界及时移除。
+ */
+internal class DshChatGroupState(initialStarts: Set<String> = emptySet()) {
+    private val starts = initialStarts.toMutableSet()
+    val savedStarts: List<String> get() = starts.toList()
+
+    fun project(
+        history: List<com.tanuki.web.DshTimelineItem>,
+        live: List<com.tanuki.web.DshTimelineItem> = emptyList()
+    ): DshChatGroupedRows {
+        starts.retainAll((history + live).map { it.stableKey() }.toSet())
+        val historyRows = DshChatRenderPolicy.rows(history, starts)
+        val liveRows = DshChatRenderPolicy.rows(live, starts)
+        (historyRows + liveRows).filter { it.tools.isNotEmpty() }.forEach { starts += it.key }
+        return DshChatGroupedRows(historyRows, liveRows)
+    }
+}
+
+internal data class DshChatGroupedRows(val history: List<DshChatRow>, val live: List<DshChatRow>)
+
+/**
  * 页面唯一的运行态接线：先切会话再写官方状态，沿用输入栏已有停止确认与代次保护。
- * 只收集会话/运行态变化，避免无关页面更新用旧 idle 干扰尚在途的发送回执。
+ * 收集会话/运行态变化及运行中的流式正文，刷新静默兜底；无关更新不能用旧 idle 干扰发送回执。
  */
 internal suspend fun bindDshComposerRunState(
     nativeState: StateFlow<DshNativeState>,
     composer: DshComposerController
 ) {
-    nativeState.map { it.selectedId to it.running }.distinctUntilChanged().collect { (sessionId, running) ->
+    nativeState.map { Triple(it.selectedId, it.running, if (it.running) it.streamingText else "") }
+        .distinctUntilChanged().collect { (sessionId, running, _) ->
         composer.setSession(sessionId)
         composer.setGenerationRunning(running)
     }
