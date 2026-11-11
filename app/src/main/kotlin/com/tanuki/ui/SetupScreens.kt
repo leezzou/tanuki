@@ -17,6 +17,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.*
+import com.tanuki.ui.design.TanukiPillButton
+import com.tanuki.ui.design.TanukiPillButtonTone
 
 @Composable
 internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onOpenStorage:()->Unit={}) {
@@ -138,17 +140,21 @@ internal fun RuntimeRecoveryCard(
                 SetupCaption("上次发生在 ${recoveryTime(recovery.lastFailureAtMillis)}" +
                     if (recovery.restartAttempts > 0) " · 已自动重试 ${recovery.restartAttempts} 次" else "")
             }
-            Button(
+            TanukiPillButton(
+                text = failure.primaryAction.label,
                 onClick = { runAction(failure.primaryAction.kind) },
                 enabled = !s.setupBusy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            ) { Text(failure.primaryAction.label) }
+                tone = TanukiPillButtonTone.Filled,
+                modifier = Modifier.fillMaxWidth()
+            )
             failure.secondaryAction?.let { secondary ->
-                OutlinedButton(
+                TanukiPillButton(
+                    text = secondary.label,
                     onClick = { runAction(secondary.kind) },
                     enabled = !s.setupBusy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) { Text(secondary.label) }
+                    tone = TanukiPillButtonTone.Outline,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 
@@ -157,22 +163,26 @@ internal fun RuntimeRecoveryCard(
                 SetupCaption("安全模式只加载最小配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
                 if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
                 if (failure == null || failure.primaryAction.kind != FailureActionKind.TRY_NORMAL) {
-                    Button(
+                    TanukiPillButton(
+                        text = "试用正常模式（进入 2 分钟观察）",
                         onClick = { c.command("RECOVERY_TRIAL") },
                         enabled = !s.setupBusy,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) { Text("试用正常模式（进入 2 分钟观察）") }
+                        tone = TanukiPillButtonTone.Filled,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
                 SetupCaption("试用后 2 分钟内再次失败会自动回到安全模式；已中断的任务不会自动重放。")
             }
             RecoveryMode.PROBATION -> {
                 SetupCaption(if (s.service == ServiceState.RUNNING) "正在加载正常模式的插件与配置。2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。" else "上次正常模式试用未在运行。可退出试用回到安全模式，或手动启动继续试用；已中断任务不会自动重放。")
                 if (failure == null || failure.primaryAction.kind != FailureActionKind.SAFE_MODE) {
-                    OutlinedButton(
+                    TanukiPillButton(
+                        text = "退出试用，回到安全模式",
                         onClick = { c.command("RECOVERY_SAFE") },
                         enabled = !s.setupBusy,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) { Text("退出试用，回到安全模式") }
+                        tone = TanukiPillButtonTone.Outline,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
             RecoveryMode.NORMAL -> {
@@ -185,17 +195,21 @@ internal fun RuntimeRecoveryCard(
             if (failure?.primaryAction?.kind != FailureActionKind.CLEAN_CACHE &&
                 failure?.secondaryAction?.kind != FailureActionKind.CLEAN_CACHE
             ) {
-                OutlinedButton(
+                TanukiPillButton(
+                    text = "清理下载缓存",
                     onClick = { c.command("CACHE") },
                     enabled = !s.setupBusy,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
-                ) { Text("清理下载缓存") }
+                    tone = TanukiPillButtonTone.Outline,
+                    modifier = Modifier.weight(1f)
+                )
             }
-            OutlinedButton(
+            TanukiPillButton(
+                text = "切换已安装版本",
                 onClick = { showVersions = true },
                 enabled = !s.setupBusy,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp)
-            ) { Text("切换已安装版本") }
+                tone = TanukiPillButtonTone.Outline,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 

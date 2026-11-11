@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tanuki.runtime.AppFailure
 import com.tanuki.runtime.FailureActionKind
+import com.tanuki.ui.design.TanukiSpace
 
 data class ComponentSourceOption(val id: String, val title: String, val detail: String)
 
@@ -174,10 +175,10 @@ fun RuntimeComponentCard(
                 failure = failure,
                 onAction = onFailureAction,
                 modifier = Modifier.padding(
-                    start = if (model.guided) 0.dp else 20.dp,
+                    start = if (model.guided) 0.dp else TanukiSpace.XL_DP.dp,
                     top = 0.dp,
-                    end = if (model.guided) 0.dp else 20.dp,
-                    bottom = 12.dp
+                    end = if (model.guided) 0.dp else TanukiSpace.XL_DP.dp,
+                    bottom = TanukiSpace.MD_DP.dp
                 )
             )
         }

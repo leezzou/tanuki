@@ -476,14 +476,13 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 if (enabled) { floatingBrowser = false; browserFullscreen = true; tab = 3 }
             }, null, 0.dp) })
     }
-    failureDetail?.let { failure ->
-        FailureDetailDialog(
-            failure = failure,
-            versionName = model.versionName,
-            onAction = { kind -> runFailureAction(failure, kind) },
-            onDismiss = { failureDetail = null }
-        )
-    }
+    val shownFailure = failureDetail
+    FailureDetailSheet(
+        failure = shownFailure,
+        versionName = model.versionName,
+        onAction = { kind -> shownFailure?.let { runFailureAction(it, kind) } },
+        onDismiss = { failureDetail = null }
+    )
 }
 
 @Composable

@@ -8,28 +8,31 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.AppFailure
 import com.tanuki.runtime.FailureActionKind
+import com.tanuki.ui.design.TanukiBottomSheet
+import com.tanuki.ui.design.TanukiDesign
+import com.tanuki.ui.design.TanukiPillButton
+import com.tanuki.ui.design.TanukiPillButtonTone
+import com.tanuki.ui.design.TanukiShapeTokens
+import com.tanuki.ui.design.TanukiSpace
 
 /**
  * 组件卡内嵌错误块：失败后就地显示原因与主行动，不依赖 toast 或顶部进度条。
+ * 颜色、圆角、字体和按钮都读取 main 的设计令牌，避免错误卡与迁移后的页面风格分叉。
  */
 @Composable
 internal fun InlineFailureBlock(
@@ -37,34 +40,38 @@ internal fun InlineFailureBlock(
     onAction: (FailureActionKind) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = MaterialTheme.colorScheme
+    val tokens = TanukiDesign.tokens
     Surface(
-        shape = MaterialTheme.shapes.large,
-        color = colors.errorContainer,
-        contentColor = colors.onErrorContainer,
+        shape = TanukiShapeTokens.card,
+        color = Color(tokens.colors.dangerContainer),
+        contentColor = Color(tokens.colors.onDangerContainer),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            Modifier.padding(TanukiSpace.MD_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
         ) {
-            Text(failure.title, style = MaterialTheme.typography.titleSmall)
-            Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
-            Button(
+            Text(failure.title, style = tokens.type.titleSmall)
+            Text(failure.reason, style = tokens.type.bodyMedium)
+            TanukiPillButton(
+                text = failure.primaryAction.label,
                 onClick = { onAction(failure.primaryAction.kind) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            ) { Text(failure.primaryAction.label) }
+                tone = TanukiPillButtonTone.Filled,
+                modifier = Modifier.fillMaxWidth()
+            )
             failure.secondaryAction?.let { secondary ->
-                OutlinedButton(
+                TanukiPillButton(
+                    text = secondary.label,
                     onClick = { onAction(secondary.kind) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) { Text(secondary.label) }
+                    tone = TanukiPillButtonTone.Outline,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
             // 技术原文默认折叠；用户需要反馈问题时再展开复制。
             TanukiDetails("详情") {
                 SelectableCopy(failure.detail, error = true)
                 if (failure.attempt > 0) {
-                    Text("已尝试 ${failure.attempt} 次", style = MaterialTheme.typography.bodySmall)
+                    Text("已尝试 ${failure.attempt} 次", style = tokens.type.captionSmall)
                 }
             }
         }
@@ -82,77 +89,103 @@ internal fun GlobalFailureBar(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = MaterialTheme.colorScheme
+    val tokens = TanukiDesign.tokens
     Surface(
         onClick = onOpen,
-        shape = MaterialTheme.shapes.large,
-        color = colors.errorContainer,
-        contentColor = colors.onErrorContainer,
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+        shape = TanukiShapeTokens.chrome,
+        color = Color(tokens.colors.dangerContainer),
+        contentColor = Color(tokens.colors.onDangerContainer),
+        modifier = modifier.fillMaxWidth().padding(horizontal = TanukiSpace.MD_DP.dp, vertical = TanukiSpace.XS_DP.dp)
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Modifier.fillMaxWidth().padding(
+                start = TanukiSpace.MD_DP.dp,
+                end = TanukiSpace.XS_DP.dp,
+                top = TanukiSpace.SM_DP.dp,
+                bottom = TanukiSpace.SM_DP.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     "${failure.title}：${failure.reason}",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = tokens.type.captionLarge,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            TextButton(onClick = onOpen) { Text("处理") }
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TanukiPillButton(
+                text = "处理",
+                onClick = onOpen,
+                tone = TanukiPillButtonTone.Tonal,
+            )
+            TanukiPillButton(
+                text = "关闭",
+                onClick = onDismiss,
+                tone = TanukiPillButtonTone.Ghost,
+            )
         }
     }
 }
 
 /**
- * 错误详情：展开原因、技术原文与主/次行动；复制内容带时间，便于反馈。
- * 行动执行前先关闭对话框，避免和确认弹窗叠在一起。
+ * 错误详情：用 main 的底部弹层展示原因、技术原文与主/次行动；复制内容带时间。
+ * 行动执行前先关闭弹层，避免和确认弹窗叠在一起。
  */
 @Composable
-internal fun FailureDetailDialog(
-    failure: AppFailure,
+internal fun FailureDetailSheet(
+    failure: AppFailure?,
     versionName: String,
     onAction: (FailureActionKind) -> Unit,
     onDismiss: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember(failure.stableKey) { mutableStateOf(false) }
-    AlertDialog(
+    var copied by remember(failure?.stableKey) { mutableStateOf(false) }
+    TanukiBottomSheet(
+        visible = failure != null,
         onDismissRequest = onDismiss,
-        title = { Text(failure.title) },
-        text = {
+        title = failure?.title.orEmpty(),
+        subtitle = failure?.reason,
+    ) {
+        failure?.let { shown ->
             Column(
                 Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
             ) {
-                Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
-                failure.secondaryAction?.let { secondary ->
-                    OutlinedButton(
-                        onClick = { onAction(secondary.kind); onDismiss() },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    ) { Text(secondary.label) }
-                }
                 TanukiDetails("技术详情") {
-                    SelectableCopy(failure.detail, error = true)
+                    SelectableCopy(shown.detail, error = true)
                 }
-                TextButton(
+                TanukiPillButton(
+                    text = if (copied) "已复制" else "复制错误信息",
                     onClick = {
-                        clipboard.setText(AnnotatedString(failure.copyText(versionName)))
+                        clipboard.setText(AnnotatedString(shown.copyText(versionName)))
                         copied = true
                     },
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) { Text(if (copied) "已复制" else "复制错误信息") }
+                    tone = TanukiPillButtonTone.Tonal,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                shown.secondaryAction?.let { secondary ->
+                    TanukiPillButton(
+                        text = secondary.label,
+                        onClick = { onAction(secondary.kind); onDismiss() },
+                        tone = TanukiPillButtonTone.Outline,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                TanukiPillButton(
+                    text = shown.primaryAction.label,
+                    onClick = { onAction(shown.primaryAction.kind); onDismiss() },
+                    tone = TanukiPillButtonTone.Filled,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TanukiPillButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    tone = TanukiPillButtonTone.Ghost,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onAction(failure.primaryAction.kind); onDismiss() }) {
-                Text(failure.primaryAction.label)
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-    )
+        }
+    }
 }
