@@ -46,6 +46,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tanuki.runtime.AppFailure
+import com.tanuki.runtime.FailureActionKind
 
 data class ComponentSourceOption(val id: String, val title: String, val detail: String)
 
@@ -74,7 +76,9 @@ data class RuntimeComponentCardModel(
     val versions: List<ComponentVersionOption> = emptyList(),
     val selectedVersion: String = "",
     val selectionNotice: String = "",
-    val guided: Boolean = false
+    val guided: Boolean = false,
+    /** 与当前组件匹配的统一错误；为空表示最近一次失败不属于这里。 */
+    val failure: AppFailure? = null
 )
 
 @Composable
@@ -86,15 +90,16 @@ fun RuntimeComponentCard(
     onUninstall: () -> Unit,
     onCancel: () -> Unit,
     onVersion: (String) -> Unit = {},
-    sourceControls: @Composable () -> Unit = {}
+    sourceControls: @Composable () -> Unit = {},
+    onFailureAction: (FailureActionKind) -> Unit = {}
 ) {
     val cs = MaterialTheme.colorScheme
     var isExpanded by rememberSaveable(model.id) { mutableStateOf(false) }
     val p = model.progress
 
-    // 下载出现时自动展开：活动进度不允许被隐藏。
-    LaunchedEffect(model.progress) {
-        if (model.progress != null) isExpanded = true
+    // 下载或失败出现时自动展开：活动进度与恢复动作都不允许被折叠隐藏。
+    LaunchedEffect(model.progress, model.failure?.stableKey) {
+        if (model.progress != null || model.failure != null) isExpanded = true
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -140,9 +145,13 @@ fun RuntimeComponentCard(
                     .background(if (model.installed) cs.primary else cs.outline)
             )
             Text(
-                if (model.installed) "已安装" else "未安装",
+                when {
+                    model.failure != null -> "安装没有完成"
+                    model.installed -> "已安装"
+                    else -> "未安装"
+                },
                 style = MaterialTheme.typography.labelLarge,
-                color = cs.onSurfaceVariant
+                color = if (model.failure != null) cs.error else cs.onSurfaceVariant
             )
             Box(
                 Modifier.size(48.dp),
@@ -157,6 +166,20 @@ fun RuntimeComponentCard(
                         .rotate(chevronRotation)
                 )
             }
+        }
+
+        // 错误块放在折叠区外：即使卡片被收起，失败原因和主行动仍然一键可达。
+        model.failure?.let { failure ->
+            InlineFailureBlock(
+                failure = failure,
+                onAction = onFailureAction,
+                modifier = Modifier.padding(
+                    start = if (model.guided) 0.dp else 20.dp,
+                    top = 0.dp,
+                    end = if (model.guided) 0.dp else 20.dp,
+                    bottom = 12.dp
+                )
+            )
         }
 
         AnimatedVisibility(visible = isExpanded || model.guided) {

@@ -439,7 +439,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
                 }
             }
             refresh()
-            manager.state.update { it.copy(stage="${if(component==RuntimeComponent.UBUNTU)"Ubuntu" else "Node.js"} 安装完成",error="",bytes=0,total=-1,download=null) }
+            manager.state.update { it.copy(stage="${if(component==RuntimeComponent.UBUNTU)"Ubuntu" else "Node.js"} 安装完成",error="",failure=null,bytes=0,total=-1,download=null) }
         } finally { refresh();manager.state.update { it.copy(download=null) } }
     }
     fun uninstall(component: RuntimeComponent) = manager.launchExclusive("component-uninstall-${component.name.lowercase()}") {
@@ -451,7 +451,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         paths.atomic("component-transaction",journal.toString())
         withContext(NonCancellable) { recover();refresh() }
         com.tanuki.storage.L2sStore.collectUnreferenced(paths)
-        manager.state.update { it.copy(stage="组件已卸载，项目、会话与其他组件保留",error="",download=null) }
+        manager.state.update { it.copy(stage="组件已卸载，项目、会话与其他组件保留",error="",failure=null,download=null) }
     }
     /** 更新检查/安装等会写版本元数据的流程；切换或卸载期间必须拒绝。 */
     private fun updateBusy():Boolean = manager.state.value.update in setOf(
@@ -487,7 +487,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
             runCatching { com.tanuki.storage.L2sStore.collectUnreferenced(paths) }
                 .onFailure { cleanupWarning="；共享缓存回收未完成（用户数据未删除）：${it.message ?: "请稍后重试"}" }
             refresh()
-            manager.state.update { it.copy(stage="DSH $selected 已卸载；配置、会话、扩展、项目与其他版本保留$cleanupWarning",error="",download=null) }
+            manager.state.update { it.copy(stage="DSH $selected 已卸载；配置、会话、扩展、项目与其他版本保留$cleanupWarning",error="",failure=null,download=null) }
             manager.event("DSH $selected 程序已卸载；用户数据、快照与其他已安装版本保留")
         } finally { manager.versionGate.exit() }
     }
@@ -522,7 +522,7 @@ class RuntimeComponents(private val manager: RuntimeManager) {
                 },
                 write={paths.atomic("installed.json",it.toString())})
             refresh()
-            manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",download=null) }
+            manager.state.update { it.copy(stage="已切换到 DSH $target；旧版本程序与切换前快照保留",error="",failure=null,download=null) }
             manager.event("DSH 已切换到 $target；未重新下载或删除版本，切换前快照 $snapshot 保留")
         } finally { manager.versionGate.exit() }
     }

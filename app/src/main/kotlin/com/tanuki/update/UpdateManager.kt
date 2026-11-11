@@ -32,7 +32,7 @@ class UpdateManager(
             // 锁顺序固定为先环境 mutation、后 versionGate；本检查只取 versionGate，不与启动/安装抢占。
             manager.versionGate.withLock {
                 val startedAt = System.currentTimeMillis()
-                manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", download = null, bytes = 0, total = -1, phasePercent = null) }
+                manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", failure = null, download = null, bytes = 0, total = -1, phasePercent = null) }
                 try {
                     val connection = URL("https://registry.npmjs.org/@deepseek-ai%2Fdsh").openConnection() as HttpURLConnection
                     connection.connectTimeout = 20000; connection.readTimeout = 20000; connection.instanceFollowRedirects = false
@@ -91,7 +91,7 @@ class UpdateManager(
                     } else check(manager.paths.dshData.listFiles().orEmpty().isEmpty()) { "现有会话缺少版本信息，已保留数据；请恢复匹配元数据" }
                     check(!reinstall || previous==release.version) { "重新安装仅用于当前版本；其他版本请使用版本安装入口" }
                     manager.paths.atomic("update-transaction", JSONObject().put("candidate", release.version).put("phase", "staging").toString())
-                    manager.state.update { it.copy(update = UpdateState.STAGING,stage="准备 DSH ${release.version}",error="",download=null,bytes=0,total=-1) }
+                    manager.state.update { it.copy(update = UpdateState.STAGING,stage="准备 DSH ${release.version}",error="",failure=null,download=null,bytes=0,total=-1) }
                     manager.ensurePnpm()
                     // Keep the exact old program available to the data snapshot's restore path.
                     if(hasMetadata && previous!=release.version && !manager.components.state.value.dshInstalled) {
@@ -118,7 +118,7 @@ class UpdateManager(
                 withTimeout(200000) { while (manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.FAILED, ServiceState.INTERRUPTED)) delay(250) }
                 check(manager.state.value.service == ServiceState.RUNNING) { "新版本使用正式数据启动失败；请恢复匹配快照" }
                 File(manager.paths.state, "update-transaction").delete()
-                manager.state.update { it.copy(update = UpdateState.SUCCESS,stage="DSH ${release.version} 安装与本机启动检查完成") }
+                manager.state.update { it.copy(update = UpdateState.SUCCESS,stage="DSH ${release.version} 安装与本机启动检查完成",error="",failure=null) }
                 manager.event("DSH 安装与本机 Web 健康检查通过；官方网页需重新认证。模型和数据迁移兼容性仍需人工验收")
             } catch (t: Throwable) {
                 manager.fail(t)
@@ -141,14 +141,14 @@ class UpdateManager(
                     manager.components.refresh(false)
                     check(manager.components.baseReady()) { "请先安装 Ubuntu 和 Node.js" }
                     manager.components.checkNodeRange(release.node)
-                    manager.state.update { it.copy(update=UpdateState.STAGING,stage="安装 DSH ${release.version} 备用程序",error="",download=null,bytes=0,total=-1) }
+                    manager.state.update { it.copy(update=UpdateState.STAGING,stage="安装 DSH ${release.version} 备用程序",error="",failure=null,download=null,bytes=0,total=-1) }
                     manager.ensurePnpm()
                     manager.installEngine(release.version,release.integrity)
                     manager.state.update { it.copy(update=UpdateState.TESTING,stage="检查备用 DSH ${release.version}") }
                     test(release.version)
                     manager.components.refresh()
                 }
-                manager.state.update { it.copy(update=if(previousUpdate==UpdateState.RECOVERY_REQUIRED)previousUpdate else UpdateState.AVAILABLE,stage="DSH ${release.version} 备用程序已安装，未切换数据版本") }
+                manager.state.update { it.copy(update=if(previousUpdate==UpdateState.RECOVERY_REQUIRED)previousUpdate else UpdateState.AVAILABLE,stage="DSH ${release.version} 备用程序已安装，未切换数据版本",error="",failure=null) }
                 manager.event("备用 DSH ${release.version} 安装与隔离启动检查完成；正式数据未切换")
             } catch(t:Throwable) {
                 manager.fail(t);manager.components.refresh()
@@ -198,7 +198,7 @@ class UpdateManager(
                 withTimeout(200000){while(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.FAILED,ServiceState.INTERRUPTED))delay(200)}
                 check(manager.state.value.service==ServiceState.RUNNING && manager.state.value.webHealthy) { "当前版本未通过 Web 启动检查，恢复入口已保留" }
                 File(manager.paths.state,"update-transaction").delete()
-                manager.state.update { it.copy(update=UpdateState.SUCCESS) }
+                manager.state.update { it.copy(update=UpdateState.SUCCESS,error="",failure=null) }
                 manager.event("中断更新已通过本机启动检查，保留当前版本与数据；未回滚项目")
             }catch(t:Throwable){manager.fail(t);manager.state.update { it.copy(update=UpdateState.RECOVERY_REQUIRED) }}
         }
@@ -211,7 +211,7 @@ class UpdateManager(
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING)) { "请先停止服务" }
                 manager.mutation.withLock {
                     DataSnapshots.restore(manager.paths)
-                    manager.state.update { it.copy(dsh = manager.paths.metadata().getString("dsh"), update = UpdateState.RESTORED_PENDING_CHECK) }
+                    manager.state.update { it.copy(dsh = manager.paths.metadata().getString("dsh"), update = UpdateState.RESTORED_PENDING_CHECK, error = "", failure = null) }
                     manager.event("已恢复匹配程序和数据快照，项目目录未回滚；请启动服务验收")
                 }
             } catch (t: Throwable) { manager.fail(t); manager.state.update { it.copy(update = UpdateState.RECOVERY_REQUIRED) } }

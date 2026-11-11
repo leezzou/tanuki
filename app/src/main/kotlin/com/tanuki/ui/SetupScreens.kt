@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.*
 
 @Composable
-internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit) {
+internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onOpenStorage:()->Unit={}) {
     val s=model.snapshot
     val comp=model.components
     val toolsPassed=model.tools.passed && model.tools.ubuntuMarker.startsWith("${comp.ubuntuVersion} ") && comp.nodeInstalled
@@ -28,7 +28,7 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
     var showSteps by rememberSaveable { mutableStateOf(false) }
     val ready=complete.all { it } && s.environment==EnvironmentState.READY
     if(ready && !showSteps) {
-        ReadyWorkspace(model,c,openDsh,onShowSteps={showSteps=true})
+        ReadyWorkspace(model,c,openDsh,onShowSteps={showSteps=true},onOpenStorage=onOpenStorage)
         return
     }
     BackHandler(enabled=step>0 || (ready && showSteps)) {
@@ -78,7 +78,8 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         if(step==3 && comp.dshInstalled)SandboxGuidance(s)
     }
     DeviceConditionBanner(model.deviceCondition)
-    OperationCard(s,c)
+    OperationCard(s,c,onOpenStorage)
+    RuntimeRecoveryCard(s,c,model.components,onOpenStorage)
     RecoveryGuidance(s,c)
 }
 
@@ -93,49 +94,127 @@ private fun RecoveryGuidance(s:Snapshot,c:TanukiUiCallbacks) {
 
 
 @Composable
-internal fun RuntimeRecoveryCard(s: Snapshot, c: TanukiUiCallbacks) {
+internal fun RuntimeRecoveryCard(
+    s: Snapshot,
+    c: TanukiUiCallbacks,
+    components: ComponentInventory = ComponentInventory(),
+    onOpenStorage: () -> Unit = {}
+) {
     val recovery = s.recovery
-    if (recovery.mode == RecoveryMode.NORMAL && (recovery.lastFailure == null || (s.service == ServiceState.RUNNING && s.error.isBlank()))) return
+    val activeRuntimeFailure = s.failure?.takeIf { it.domain == FailureDomain.RUNTIME }
+    // 正常模式且服务已恢复时，旧失败不再占用页面；重启后仍保留上次失败供排查。
+    if (recovery.mode == RecoveryMode.NORMAL && s.service == ServiceState.RUNNING) return
+    if (recovery.mode == RecoveryMode.NORMAL && recovery.lastFailure == null && activeRuntimeFailure == null) return
+    val fallback = recovery.lastFailure?.let {
+        FailureCatalog.fromRuntimeFailure(it, recovery, s.error, recovery.lastFailureAtMillis, recovery.restartAttempts)
+    }
+    val failure = activeRuntimeFailure ?: fallback
+    var showVersions by rememberSaveable { mutableStateOf(false) }
+
+    fun runAction(kind: FailureActionKind) {
+        when (kind) {
+            FailureActionKind.RETRY, FailureActionKind.RESTART -> c.command("START")
+            FailureActionKind.TRY_NORMAL -> c.command("RECOVERY_TRIAL")
+            FailureActionKind.SAFE_MODE -> c.command("RECOVERY_SAFE")
+            FailureActionKind.CLEAN_CACHE -> c.command("CACHE")
+            FailureActionKind.OPEN_STORAGE -> onOpenStorage()
+            FailureActionKind.OPEN_SETTINGS -> c.appSettings()
+            else -> Unit
+        }
+    }
+
     SetupPanel {
         Text(
             when (recovery.mode) {
-                RecoveryMode.SAFE -> "安全模式"
+                RecoveryMode.SAFE -> "当前正在使用安全模式"
                 RecoveryMode.PROBATION -> "正在试用正常模式"
-                RecoveryMode.NORMAL -> "最近一次启动失败"
+                RecoveryMode.NORMAL -> failure?.title ?: "服务恢复"
             },
             style = MaterialTheme.typography.titleMedium
         )
-        recovery.lastFailure?.let {
-            SetupCaption("失败类型：${it.label}" + if (recovery.restartAttempts > 0) " · 自动重启计数 ${recovery.restartAttempts}" else "")
-        }
-        when (recovery.mode) {
-            RecoveryMode.SAFE -> {
-                SetupCaption("当前使用独立的最小救援配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
-                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
-                Button(
-                    onClick = { c.command("RECOVERY_TRIAL") },
+        if (failure != null) {
+            Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
+            if (recovery.lastFailureAtMillis > 0L) {
+                SetupCaption("上次发生在 ${recoveryTime(recovery.lastFailureAtMillis)}" +
+                    if (recovery.restartAttempts > 0) " · 已自动重试 ${recovery.restartAttempts} 次" else "")
+            }
+            Button(
+                onClick = { runAction(failure.primaryAction.kind) },
+                enabled = !s.setupBusy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            ) { Text(failure.primaryAction.label) }
+            failure.secondaryAction?.let { secondary ->
+                OutlinedButton(
+                    onClick = { runAction(secondary.kind) },
                     enabled = !s.setupBusy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) { Text("尝试恢复正常模式（进入 2 分钟试用）") }
-                SetupCaption("试用后 2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。")
+                ) { Text(secondary.label) }
+            }
+        }
+
+        when (recovery.mode) {
+            RecoveryMode.SAFE -> {
+                SetupCaption("安全模式只加载最小配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
+                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
+                if (failure == null || failure.primaryAction.kind != FailureActionKind.TRY_NORMAL) {
+                    Button(
+                        onClick = { c.command("RECOVERY_TRIAL") },
+                        enabled = !s.setupBusy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    ) { Text("试用正常模式（进入 2 分钟观察）") }
+                }
+                SetupCaption("试用后 2 分钟内再次失败会自动回到安全模式；已中断的任务不会自动重放。")
             }
             RecoveryMode.PROBATION -> {
                 SetupCaption(if (s.service == ServiceState.RUNNING) "正在加载正常模式的插件与配置。2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。" else "上次正常模式试用未在运行。可退出试用回到安全模式，或手动启动继续试用；已中断任务不会自动重放。")
-                OutlinedButton(
-                    onClick = { c.command("RECOVERY_SAFE") },
-                    enabled = !s.setupBusy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) { Text("退出试用，回到安全模式") }
+                if (failure == null || failure.primaryAction.kind != FailureActionKind.SAFE_MODE) {
+                    OutlinedButton(
+                        onClick = { c.command("RECOVERY_SAFE") },
+                        enabled = !s.setupBusy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    ) { Text("退出试用，回到安全模式") }
+                }
             }
             RecoveryMode.NORMAL -> {
-                SetupCaption(if (s.service == ServiceState.RUNNING) "服务已按正常模式运行。自动重启不会重放已中断的任务；若反复失败，可在环境维护入口重新检查组件。" else "当前服务未运行，可能正在等待有限次自动重启或已停止自动重启；已中断任务不会自动重放。")
+                SetupCaption(if (s.service == ServiceState.RUNNING) "服务已按正常模式运行。自动重启不会重放已中断的任务；若反复失败，可清理下载缓存或切换已安装版本。" else "当前服务未运行，可能正在等待有限次自动重启或已停止自动重启；已中断任务不会自动重放。")
             }
         }
+
+        // 恢复卡始终保留清理与换版本入口，用户不用回工作台找组件维护。
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (failure?.primaryAction?.kind != FailureActionKind.CLEAN_CACHE &&
+                failure?.secondaryAction?.kind != FailureActionKind.CLEAN_CACHE
+            ) {
+                OutlinedButton(
+                    onClick = { c.command("CACHE") },
+                    enabled = !s.setupBusy,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                ) { Text("清理下载缓存") }
+            }
+            OutlinedButton(
+                onClick = { showVersions = true },
+                enabled = !s.setupBusy,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+            ) { Text("切换已安装版本") }
+        }
     }
+
+    if (showVersions) DshVersionManagerDialog(
+        activeVersion = s.dsh,
+        idle = s.setupIdle,
+        inventoryKey = components.installedDshVersions,
+        load = c.loadInstalledDsh,
+        onSwitch = c.switchInstalledDsh,
+        onUninstall = c.uninstallInstalledDsh,
+        onDismiss = { showVersions = false })
 }
 
+private fun recoveryTime(millis: Long): String = runCatching {
+    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(millis))
+}.getOrDefault("较早时间")
+
 @Composable
-private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onShowSteps:()->Unit) {
+private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onShowSteps:()->Unit,onOpenStorage:()->Unit={}) {
     val s=model.snapshot
     var showPermissions by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -143,7 +222,7 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         SetupCaption("管理本机项目，在 DeepSeek Harness 中开始工作。")
     }
     RecoveryGuidance(s,c)
-    RuntimeRecoveryCard(s,c)
+    RuntimeRecoveryCard(s,c,model.components,onOpenStorage)
     if(model.support.state==com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED)WebViewCard(model.support,s.setupIdle,c)
     Box(
         Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(tanukiHeroBrush()),
@@ -191,7 +270,7 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         AnimatedVisibility(visible=showPermissions) { SandboxGuidance(s) }
     }
     DeviceConditionBanner(model.deviceCondition)
-    OperationCard(s,c)
+    OperationCard(s,c,onOpenStorage)
 }
 
 /**

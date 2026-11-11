@@ -176,7 +176,22 @@ class RuntimeManager(val context: Context) {
         val message = Redact.text(detail)
         log.append("ERROR ${t.javaClass.simpleName}: $message")
         runCatching { paths.atomic("last-error",message) }
-        state.update { it.copy(error = message) }
+        state.update { current ->
+            // 分类只在这里做一次，各页面读取同一份标题、原因和动作。
+            val failure = FailureCatalog.describe(
+                FailureInput(
+                    message = message,
+                    operation = current.operation,
+                    stage = current.stage,
+                    environment = current.environment,
+                    update = current.update,
+                    service = current.service,
+                    recovery = current.recovery,
+                    occurredAtMillis = System.currentTimeMillis()
+                )
+            )
+            current.copy(error = message, failure = failure)
+        }
     }
     internal fun phase(label: String, env: EnvironmentState) { state.update { it.copy(stage = label, environment = env, bytes = 0, total = -1, download = null, phasePercent = null) }; event(label) }
     fun cancel() { job?.cancel() }
@@ -191,7 +206,7 @@ class RuntimeManager(val context: Context) {
                     return@launch
                 }
                 val before=state.value
-                state.update { it.copy(operation=label,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="") }
+                state.update { it.copy(operation=label,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
                     check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
                     paths.atomic("transaction", label)
@@ -240,7 +255,7 @@ class RuntimeManager(val context: Context) {
         val ubuntuVersion=components.installedUbuntuVersion() ?: error("Ubuntu 镜像版本信息缺失")
         val nodeVersion=components.installedNodeVersion() ?: error("Node.js 版本信息缺失")
         paths.atomic("installed.json", JSONObject().put("ready", true).put("ubuntu", ubuntuVersion).put("node", nodeVersion).put("dsh", DSH).toString())
-        state.update { it.copy(environment = EnvironmentState.READY, health = HealthState.HEALTHY, ubuntu = ubuntuVersion, node = nodeVersion, dsh = DSH, stage = "初始化完成，启动后可在官方设置中配置 API Key", error = "") }
+        state.update { it.copy(environment = EnvironmentState.READY, health = HealthState.HEALTHY, ubuntu = ubuntuVersion, node = nodeVersion, dsh = DSH, stage = "初始化完成，启动后可在官方设置中配置 API Key", error = "", failure = null) }
         start()
     }
     internal fun publishRequiredTools(missing: List<String>) {
@@ -651,17 +666,20 @@ class RuntimeManager(val context: Context) {
 
     /** 记录一次失败并按策略决定是否自动重启；不删除用户数据、不重放任务。 */
     private fun applyFailure(kind: FailureKind, result: CommandResult?) {
-        val decision = failurePolicy.onFailure(recoveryState.value, kind, System.currentTimeMillis(), result?.exitCode)
+        val nowMillis = System.currentTimeMillis()
+        val decision = failurePolicy.onFailure(recoveryState.value, kind, nowMillis, result?.exitCode)
         publishRecovery(decision.state)
         val message = Redact.text(decision.summary)
         runCatching { paths.atomic("last-error", message) }
         runCatching { paths.atomic("service", if (kind == FailureKind.LAUNCH_FAILED || kind == FailureKind.STARTUP_FAILED) "failed" else "interrupted") }
+        val failure = FailureCatalog.fromRuntimeFailure(kind, decision.state, message, nowMillis)
         state.update {
             it.copy(
                 service = if (kind == FailureKind.LAUNCH_FAILED || kind == FailureKind.STARTUP_FAILED) ServiceState.FAILED else ServiceState.INTERRUPTED,
                 webHealthy = false,
                 web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
-                error = message
+                error = message,
+                failure = failure
             )
         }
         event(message)
@@ -800,7 +818,7 @@ class RuntimeManager(val context: Context) {
                         val preparedReady = failurePolicy.onReady(recoveryState.value, readyNow)
                         publishRecovery(preparedReady)
                         File(paths.engines, "$v/.web-verified").writeText("${Build.MODEL}; API ${Build.VERSION.SDK_INT}; target ${context.applicationInfo.targetSdkVersion}; debug ${BuildConfig.DEBUG}")
-                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true, recovery = preparedReady) }; paths.atomic("service", "running"); paths.atomic("last-error","")
+                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true, recovery = preparedReady, error = "", failure = null) }; paths.atomic("service", "running"); paths.atomic("last-error","")
                         event(if (preparedReady.mode == RecoveryMode.SAFE) "DSH 已用安全模式启动：独立最小配置，未加载用户插件与配置" else "DSH 本机服务已就绪")
                         scheduleStability(c)
                         if(state.value.update==UpdateState.RESTORED_PENDING_CHECK) {
@@ -973,7 +991,30 @@ class RuntimeManager(val context: Context) {
                 }
                 runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
                 val interrupted = reason?.let { "$it；DSH 已停止，任务可能中断，不会自动重放。请调整预算或清理空间后手动启动" }
-                state.update { it.copy(service = final, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, error = interrupted ?: it.error) }
+                val stopFailure = interrupted?.let { text ->
+                    FailureCatalog.describe(
+                        FailureInput(
+                            message = text,
+                            operation = "runtime-stop",
+                            stage = state.value.stage,
+                            service = final,
+                            recovery = recoveryState.value,
+                            domainHint = FailureDomain.RUNTIME,
+                            componentId = "dsh",
+                            occurredAtMillis = System.currentTimeMillis()
+                        )
+                    )
+                }
+                state.update {
+                    it.copy(
+                        service = final,
+                        webHealthy = false,
+                        web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
+                        error = interrupted ?: it.error,
+                        // 用户主动停止时清掉旧失败；资源原因自动停止时给出可操作的错误。
+                        failure = if (stopWasRequested) null else stopFailure ?: it.failure
+                    )
+                }
                 if (interrupted != null) {
                     paths.atomic("last-error", interrupted)
                     event(interrupted)

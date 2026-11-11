@@ -38,7 +38,9 @@ data class Snapshot(
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
     val remote: RemoteHostStatus = RemoteHostStatus(),
-    val recovery: RuntimeRecoveryState = RuntimeRecoveryState()
+    val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),
+    /** 最近一次失败的统一展示模型；原始异常仍在 error 字段，恢复后清空。 */
+    val failure: AppFailure? = null
 )
 class Paths(context: Context) {
     val base = context.filesDir
