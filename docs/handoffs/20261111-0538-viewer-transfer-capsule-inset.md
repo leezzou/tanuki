@@ -39,6 +39,7 @@
 | `./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest --tests 'com.tanuki.FileViewerLayoutTest'` | 通过（BUILD SUCCESSFUL，3 tests / 0 failed） | 首次失败为测试断言把 24+48+12 写成 72dp，修正为 84dp 后通过；实现未改 |
 | `./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（BUILD SUCCESSFUL in 30m 01s） | 完整 JVM 1047 tests / 108 个结果文件 / 0 failures / 0 errors / 0 skipped；lint 0 errors / 104 warnings / 1 hint；未跑设备 |
 | 手工验收（未执行，需设备） | 未执行 | 设备由独立 QA 独占；步骤见下 |
+| GitHub Actions（head `b64a27f`） | 通过 | run 42928990235 / 42928997485：Android 5m23s、Host 37s/41s，4 个 check 全 pass；本记录补充 CI 后的 docs-only 提交按 PR 最新 head 复核 |
 
 ### 手工验收步骤（设备）
 
@@ -51,13 +52,13 @@
 
 ## 未完成与暂停项
 
-- 未完成：Android 仪器测试、设备/模拟器视觉与触控验收、独立高能力模型审查、GitHub CI 结果核对、PR 审查意见处理（若有）。
+- 未完成：Android 仪器测试、设备/模拟器视觉与触控验收、独立高能力模型审查、PR 审查意见处理（若有）。
 - 外部阻塞：设备由独立 QA 独占，本会话未申请也未运行模拟器/真机。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收、合并与发布；本记录不触碰这些暂停项。
 
 ## 下一步
 
-1. PR [#60](https://github.com/leezzou/tanuki/pull/60) 已创建；等待 GitHub CI 与独立审查，不合并、不发布。
+1. PR [#60](https://github.com/leezzou/tanuki/pull/60) 已创建；`b64a27f` 的 GitHub CI 已通过，等待独立审查，不合并、不发布。
 2. 等待 GitHub CI 与独立审查；由独立 QA 按上方手工步骤在模拟器/真机验证 PDF/文本/图片、全屏视频、360dp、大字体和深色模式。
 3. 处理 review comment 后推送新提交；最新 SHA 重新验证，旧审查结论不沿用。
 
