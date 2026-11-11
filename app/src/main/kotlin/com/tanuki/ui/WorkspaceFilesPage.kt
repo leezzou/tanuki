@@ -434,6 +434,9 @@ internal fun WorkspaceFilesPage(
     val sorting = FileListPresentation.isStale(display, displayRequest)
     // 同目录刷新先保留旧列表，换目录才清空；避免排序期间闪空并重置滚动位置。
     val shown = FileListPresentation.visible(display, displayRequest)
+    val listDataset = fileListMotionDataset(display, displayRequest)
+    val listMotion = listDataset.motion(com.tanuki.ui.design.TanukiDesign.motion,
+        filtering = query.isNotEmpty() || listDataset.query.isNotEmpty())
     // 滚动状态随目录保存，排序、筛选和进度更新不会把列表拉回顶部；旋转后仍可恢复。
     val listState = rememberSaveable(files, directory, saver = LazyListState.Saver) { LazyListState() }
     val gridState = rememberSaveable(files, directory, saver = LazyGridState.Saver) { LazyGridState() }
@@ -688,7 +691,7 @@ internal fun WorkspaceFilesPage(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                val row: @Composable (WorkspaceFileManager.Entry, Boolean) -> Unit = { entry, tile ->
+                val row: @Composable (WorkspaceFileManager.Entry, Boolean, Modifier) -> Unit = { entry, tile, itemModifier ->
                     var expanded by remember(entry.path) { mutableStateOf(false) }
                     // 选中态切换属于反馈类动效：走 toggle 令牌，系统移除动画时立即变色。
                     val rowColor by animateColorAsState(
@@ -698,6 +701,7 @@ internal fun WorkspaceFilesPage(
                         label = "fileSelection",
                     )
                     Surface(
+                        modifier = itemModifier,
                         color = rowColor,
                         shape = if (tile) TanukiShapeTokens.card else TanukiShapeTokens.control,
                     ) {
@@ -790,22 +794,37 @@ internal fun WorkspaceFilesPage(
                                     )
                                 }
                             }
-                        } else if (grid) LazyVerticalGrid(
-                            GridCells.Adaptive(160.dp),
-                            Modifier.fillMaxSize(),
-                            state = gridState,
-                            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 72.dp + bottomInset),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            gridItems(shown, key = { it.path }) { entry -> row(entry, true) }
-                        } else LazyColumn(
-                            Modifier.fillMaxSize(),
-                            state = listState,
-                            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 72.dp + bottomInset),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            items(shown, key = { it.path }) { entry -> row(entry, false) }
+                        } else key(files, listDataset) {
+                            // 换目录/筛选重建行动画宿主；列表与网格的滚动状态仍按目录保存在外层。
+                            if (grid) LazyVerticalGrid(
+                                GridCells.Adaptive(160.dp),
+                                Modifier.fillMaxSize(),
+                                state = gridState,
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 72.dp + bottomInset),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                gridItems(shown, key = { it.path }) { entry ->
+                                    row(entry, true, Modifier.animateItem(
+                                        placementSpec = listMotion.placement,
+                                        fadeInSpec = listMotion.fadeIn,
+                                        fadeOutSpec = listMotion.fadeOut,
+                                    ))
+                                }
+                            } else LazyColumn(
+                                Modifier.fillMaxSize(),
+                                state = listState,
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 72.dp + bottomInset),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                items(shown, key = { it.path }) { entry ->
+                                    row(entry, false, Modifier.animateItem(
+                                        placementSpec = listMotion.placement,
+                                        fadeInSpec = listMotion.fadeIn,
+                                        fadeOutSpec = listMotion.fadeOut,
+                                    ))
+                                }
+                            }
                         }
                     }
                     // 列表加载/排序只叠加 2dp 指示线，不占布局高度，也不会推动列表。
