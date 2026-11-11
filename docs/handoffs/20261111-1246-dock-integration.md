@@ -20,7 +20,7 @@
 
 ## 当前状态
 
-- 基线：`origin/main=7780fbf3ec23d207263e210c6911c338a062d7cd`（#68 合并后、#72 文档提交）；分支 `ao/chat-anchoring/dock-integration`，从会话根分支命名空间 `ao/chat-anchoring` 创建的兄弟分支。
+- 基线：`origin/main=7780fbf3ec23d207263e210c6911c338a062d7cd`（#68 合并后、#72 文档提交）；分支 `ao/chat-anchoring/dock-integration`，从会话根分支命名空间 `ao/chat-anchoring` 创建的兄弟分支；PR [#74](https://github.com/leezzou/tanuki/pull/74)，实现提交 `cc9c530`。
 - 已实现：
   - 页面纵向顺序改为“消息区 `weight(1f)` → `DshDockColumn` → `DshComposerBar`”；删除 `SessionStrip` 后的独立审批条，把同一个 `DshApprovalEntryBar` 作为 `approvalBar` 插槽传入，避免两条审批条。
   - `approvalVisible = DshApprovalEntry.of(approvalState, selectedId).visible`；目标/待办来自控制器状态，缺失时 `null`，对应条不占高度。
@@ -90,6 +90,6 @@
 ## 产物与校验
 
 - 本轮不生成 APK、源码 ZIP 或发布附件；不覆盖安装、不发布、不合并。
-- PR：待创建后补全；目标 `main`；分支 `ao/chat-anchoring/dock-integration`。
+- PR [#74](https://github.com/leezzou/tanuki/pull/74)，目标 `main`；分支 `ao/chat-anchoring/dock-integration`；实现提交 `cc9c530`。
 - 提交前运行 `check-handoff.py --pr`、`check-publication.py --git`、`git diff --check`。
 - 普通 PR 不刷新 `AGENT-STATE.md`/`CURRENT.json`/`TEST-REPORT.md`；只新增本记录。
