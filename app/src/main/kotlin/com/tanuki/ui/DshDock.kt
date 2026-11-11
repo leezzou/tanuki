@@ -1,12 +1,8 @@
 package com.tanuki.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import com.tanuki.ui.design.TanukiDesign
+import androidx.compose.ui.graphics.Color
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +26,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import com.tanuki.ui.design.rememberTanukiReducedMotion
 
 /** 停靠条种类；声明顺序即叠放优先级（审批 > 目标 > 待办）。 */
 enum class DshDockKind(val priority: Int, val label: String) {
@@ -147,7 +142,7 @@ object DshDockMotion {
  * 内容上下推走。
  *
  * 审批条不在这里重写：调用方把已有 `DshApprovalEntryBar` 作为 [approvalBar]
- * 插槽传入，本容器只负责顺序、折叠和高度动画。审批是否可显示必须由调用方
+ * 插槽传入，本容器只负责顺序与折叠。审批是否可显示必须由调用方
  * 通过 [approvalVisible] 明确告知（可用 `DshApprovalEntry.of(...).visible`）。
  */
 @Composable
@@ -168,8 +163,6 @@ fun DshDockColumn(
         todoVisible = todo?.isVisible == true,
         overflowExpanded = overflowExpanded
     )
-    val reducedMotion = rememberTanukiReducedMotion()
-    val durationMs = DshDockMotion.heightDurationMs(reducedMotion)
 
     // 折叠项全部消失后自动复位，避免下次出现时仍停留在展开态。
     LaunchedEffect(layout.overflowCount) {
@@ -181,19 +174,16 @@ fun DshDockColumn(
     Column(
         modifier
             .fillMaxWidth()
-            // 兜底动画：任一条整条出现/消失时，容器高度仍按同一时长过渡。
-            // 先裁剪再动画，收起过程中内容不会画到消息区或输入栏上。
+            // 容器和槽位都立即布局；目标/待办内部展开时不会叠加父级高度补间。
             .clipToBounds()
-            .animateContentSize(animationSpec = tween(durationMs))
     ) {
         // 每个种类只在这里遍历一次；展开态已把折叠项并入 plan.bars。
-        // 隐藏的槽位保留在组合中，以便“+N”展开时仍能播放高度动画。
+        // 槽位直接切换，不在外层追加高度动画。
         DshDockKind.entries.forEach { kind ->
             val barIndex = plan.bars.indexOf(kind)
             key(kind) {
-                DshDockAnimatedSlot(
+                DshDockSlot(
                     visible = barIndex >= 0,
-                    durationMs = durationMs,
                     // 间距放在可见条内部；隐藏槽位保持 0 高度，不额外占用版面。
                     hasTopGap = barIndex > 0
                 ) {
@@ -234,25 +224,14 @@ private fun DshDockBarContent(
     }
 }
 
-/** 单条停靠条的高度入场/退场；内容始终裁剪在容器内，不盖住消息或输入栏。 */
+/** 槽位直接切换；内部展开由各条自身承担，避免父子高度动画叠加。 */
 @Composable
-private fun DshDockAnimatedSlot(
+private fun DshDockSlot(
     visible: Boolean,
-    durationMs: Int,
     hasTopGap: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = expandVertically(
-            animationSpec = tween(durationMs),
-            expandFrom = Alignment.Top
-        ) + fadeIn(tween(durationMs)),
-        exit = shrinkVertically(
-            animationSpec = tween(durationMs),
-            shrinkTowards = Alignment.Top
-        ) + fadeOut(tween(durationMs))
-    ) {
+    if (visible) {
         Box(Modifier.fillMaxWidth().padding(top = if (hasTopGap) 4.dp else 0.dp)) { content() }
     }
 }
@@ -282,8 +261,8 @@ private fun DshDockOverflowButton(
         contentAlignment = Alignment.CenterEnd
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = Color(TanukiDesign.tokens.colors.primaryContainer),
+            contentColor = Color(TanukiDesign.tokens.colors.textPrimary),
             shape = RoundedCornerShape(50)
         ) {
             Text(

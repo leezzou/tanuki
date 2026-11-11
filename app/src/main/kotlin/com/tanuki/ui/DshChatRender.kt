@@ -6,6 +6,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.Locale
@@ -18,6 +20,52 @@ import java.util.Locale
  * 列表锚定、向前分页与内存窗口见 [DshChatAnchorPolicy] 与 [DshChatWindowPolicy]。
  */
 object DshChatRenderPolicy {
+    /** 仅表示页面可观察状态；断线时不把旧运行标记解释为实时思考。 */
+    fun activity(running: Boolean, live: Boolean, waiting: Boolean = false): String = when {
+        waiting -> "等你回答"
+        !live -> "连接未实时"
+        running -> "思考中"
+        else -> "就绪"
+    }
+
+    /** 接线首帧或状态暂不同步时，页面仍提供官方停止入口。 */
+    fun needsStopFallback(native: DshNativeState, composer: DshComposerState): Boolean =
+        native.running && (native.selectedId != composer.sessionId || (!composer.generationRunning && !composer.stopping))
+
+    fun composerPlaceholder(running: Boolean): String =
+        if (running) "生成中 · 可直接插话" else "发消息，@ 引用，/ 命令"
+
+    /** 用量只能由已确认的分子/分母产生；缺值不能当成 0%。 */
+    fun contextPercent(used: Long?, limit: Long?): String {
+        if (used == null || limit == null || used < 0 || limit <= 0) return "—"
+        val percent = (used.toDouble() / limit * 100).coerceIn(0.0, 100.0)
+        return if (percent > 0 && percent < 1) "<1%" else "${percent.toInt()}%"
+    }
+
+    /** 相邻工具才聚合；调用方先按阅读锚点拆段，不跨锚点吞并新调用。 */
+    fun rows(
+        timeline: List<com.tanuki.web.DshTimelineItem>,
+        groupStarts: Set<String> = emptySet()
+    ): List<DshChatRow> {
+        val rows = mutableListOf<DshChatRow>()
+        timeline.forEach { item ->
+            val previous = rows.lastOrNull()
+            if (item is com.tanuki.web.DshTimelineItem.Tool && previous?.tools?.isNotEmpty() == true &&
+                item.stableKey() !in groupStarts
+            ) {
+                rows[rows.lastIndex] = previous.copy(tools = previous.tools + item.tool)
+            } else {
+                rows += DshChatRow(item, if (item is com.tanuki.web.DshTimelineItem.Tool) listOf(item.tool) else emptyList())
+            }
+        }
+        return rows
+    }
+
+    /** 分页插入后，原工具 key 可能已进入同组；仍能恢复到包含它的那一行。 */
+    fun rowKey(rows: List<DshChatRow>, memberKey: String): String? = rows.firstOrNull {
+        it.key == memberKey || it.tools.any { tool -> tool.key == memberKey }
+    }?.key
+
     /** 单个代码块最多显示行数；完整内容仍可复制。 */
     const val MAX_CODE_LINES = 400
 
@@ -45,6 +93,61 @@ object DshChatRenderPolicy {
         if (lastVisibleIndex < totalItems - 1) return false
         return lastItemEndOffset <= viewportEndOffset + tolerance
     }
+}
+
+/**
+ * 会话内保留已展示的工具组起点。前插只能新增前方组，不能把旧组并入新起点，
+ * 因而旧 key、首 callId 和成员相对布局都不变；已释放窗口的边界及时移除。
+ */
+internal class DshChatGroupState(initialStarts: Set<String> = emptySet()) {
+    private val starts = initialStarts.toMutableSet()
+    val savedStarts: List<String> get() = starts.toList()
+
+    fun project(
+        history: List<com.tanuki.web.DshTimelineItem>,
+        live: List<com.tanuki.web.DshTimelineItem> = emptyList()
+    ): DshChatGroupedRows {
+        starts.retainAll((history + live).map { it.stableKey() }.toSet())
+        val historyRows = DshChatRenderPolicy.rows(history, starts)
+        val liveRows = DshChatRenderPolicy.rows(live, starts)
+        (historyRows + liveRows).filter { it.tools.isNotEmpty() }.forEach { starts += it.key }
+        return DshChatGroupedRows(historyRows, liveRows)
+    }
+}
+
+internal data class DshChatGroupedRows(val history: List<DshChatRow>, val live: List<DshChatRow>)
+
+/**
+ * 页面唯一的运行态接线：先切会话再写官方状态，沿用输入栏已有停止确认与代次保护。
+ * 收集会话/运行态变化及运行中的流式正文，刷新静默兜底；无关更新不能用旧 idle 干扰发送回执。
+ */
+internal suspend fun bindDshComposerRunState(
+    nativeState: StateFlow<DshNativeState>,
+    composer: DshComposerController
+) {
+    nativeState.map {
+        DshComposerRunSignal(it.selectedId, it.running, it.runningConfirmationVersion,
+            if (it.running) it.streamingText else "")
+    }.distinctUntilChanged().collect { signal ->
+        composer.setSession(signal.sessionId)
+        composer.setGenerationRunning(signal.running)
+    }
+}
+
+/** 只保留会影响运行确认与活跃窗口的投影，不让普通重组重放旧 idle。 */
+private data class DshComposerRunSignal(
+    val sessionId: String?,
+    val running: Boolean,
+    val confirmationVersion: Long,
+    val streamingText: String
+)
+
+/** 展示行保留首事件的稳定身份，工具聚合不改变协议时间线。 */
+data class DshChatRow(
+    val item: com.tanuki.web.DshTimelineItem,
+    val tools: List<com.tanuki.web.DshToolItem> = emptyList()
+) {
+    val key: String get() = item.stableKey()
 }
 
 /**

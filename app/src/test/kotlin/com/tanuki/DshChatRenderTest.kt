@@ -35,6 +35,117 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DshChatRenderTest {
+    @Test fun missingUsageNeverPretendsToBeZero() {
+        assertEquals("—", DshChatRenderPolicy.contextPercent(null, 100))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(1, null))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(1, 0))
+        assertEquals("—", DshChatRenderPolicy.contextPercent(-1, 100))
+        assertEquals("<1%", DshChatRenderPolicy.contextPercent(1, 1000))
+        assertEquals("0%", DshChatRenderPolicy.contextPercent(0, 1000))
+        assertEquals("25%", DshChatRenderPolicy.contextPercent(250, 1000))
+        assertEquals("100%", DshChatRenderPolicy.contextPercent(Long.MAX_VALUE, 1))
+    }
+
+    @Test fun activityNeverClaimsLiveThinkingAfterDisconnect() {
+        assertEquals("连接未实时", DshChatRenderPolicy.activity(true, false))
+        assertEquals("思考中", DshChatRenderPolicy.activity(true, true))
+        assertEquals("等你回答", DshChatRenderPolicy.activity(true, true, true))
+        assertEquals("就绪", DshChatRenderPolicy.activity(false, true))
+        assertEquals("生成中 · 可直接插话", DshChatRenderPolicy.composerPlaceholder(true))
+    }
+
+    @Test fun toolGroupsKeepMessageBoundariesAndRestorePrependedMember() {
+        val one = renderTool(1)
+        val two = renderTool(2)
+        val message = com.tanuki.web.DshTimelineItem.Text(com.tanuki.web.DshMessage(
+            3, com.tanuki.web.DshMessageRole.ASSISTANT, "步骤说明", 1000L))
+        val three = renderTool(4)
+        val rows = DshChatRenderPolicy.rows(listOf(one, two, message, three))
+        assertEquals(3, rows.size)
+        assertEquals(listOf("call-1", "call-2"), rows[0].tools.map { it.callId })
+        assertTrue(rows[1].tools.isEmpty())
+        assertEquals("tool:call-1", DshChatRenderPolicy.rowKey(rows, "tool:call-2"))
+        assertEquals(null, DshChatRenderPolicy.rowKey(rows, "tool:missing"))
+        // 先拆锚点再聚合，锚点后的工具保持独立；不会被历史组吞并。
+        val before = DshChatRenderPolicy.rows(listOf(one))
+        val after = DshChatRenderPolicy.rows(listOf(two))
+        assertEquals("tool:call-1", before.single().key)
+        assertEquals("tool:call-2", after.single().key)
+    }
+
+    @Test fun prependAdjacentToolPreservesExpandedGroupAndMemberViewportPosition() {
+        val groups = com.tanuki.ui.DshChatGroupState()
+        val b = renderTool(2)
+        val c = renderTool(3)
+        val original = groups.project(listOf(b, c)).history.single()
+        val expandedByKey = mapOf(original.key to true)
+        val earlierMessage = com.tanuki.web.DshTimelineItem.Text(com.tanuki.web.DshMessage(
+            0, com.tanuki.web.DshMessageRole.USER, "更早消息", 500L))
+        val after = groups.project(listOf(earlierMessage, renderTool(1), b, c)).history
+        val retained = after.last()
+        // 同一 SaveableState 槽及首 callId，成员完整不变，不会因前插而重建/收起。
+        assertEquals(original, retained)
+        assertEquals("call-2", retained.tools.first().callId)
+        assertTrue(expandedByKey.getValue(retained.key))
+        assertEquals(listOf("call-2", "call-3"), retained.tools.map { it.callId })
+        assertEquals(listOf(1, 2), after.filter { it.tools.isNotEmpty() }.map { it.tools.size })
+
+        // 使用页面相同的 renderKeys/restoreIndex 恢复：模拟正在阅读展开组内 C 的像素。
+        val oldKeys = com.tanuki.ui.DshChatAnchorPolicy.renderKeys(listOf(original.key), emptyList(), "top", null)
+        val newKeys = com.tanuki.ui.DshChatAnchorPolicy.renderKeys(after.map { it.key }, emptyList(), "top", null)
+        val target = com.tanuki.ui.DshChatAnchorPolicy.restoreIndex(newKeys, original.key, leadingRows = 0)!!
+        assertEquals(3, target)
+        val offsetWithinExpandedGroup = 360
+        val cOutputOffsetWithinGroup = 520
+        val oldHeights = listOf(48, 800)
+        val newHeights = listOf(48, 96, 52, 800)
+        val oldIndex = oldKeys.indexOf(original.key)
+        val oldViewportTop = oldHeights.take(oldIndex).sum() + offsetWithinExpandedGroup
+        val newViewportTop = newHeights.take(target).sum() + offsetWithinExpandedGroup
+        val oldOutputPixel = oldHeights.take(oldIndex).sum() + cOutputOffsetWithinGroup - oldViewportTop
+        val newOutputPixel = newHeights.take(target).sum() + cOutputOffsetWithinGroup - newViewportTop
+        assertEquals(oldOutputPixel, newOutputPixel)
+    }
+
+    @Test fun savedGroupBoundariesSurviveRestoreAndReleaseOldWindow() {
+        val original = com.tanuki.ui.DshChatGroupState()
+        original.project(listOf(renderTool(2), renderTool(3)))
+        val restored = com.tanuki.ui.DshChatGroupState(original.savedStarts.toSet())
+        val rows = restored.project(listOf(renderTool(1), renderTool(2), renderTool(3))).history
+        assertEquals(listOf("tool:call-1", "tool:call-2"), rows.map { it.key })
+        restored.project(listOf(renderTool(8)))
+        assertEquals(listOf("tool:call-8"), restored.savedStarts)
+        val otherSession = com.tanuki.ui.DshChatGroupState()
+        assertEquals(1, otherSession.project(listOf(renderTool(1), renderTool(2))).history.size)
+    }
+
+    @Test fun anchorSplitBoundaryIsRetainedAfterReturningToLiveTail() {
+        val groups = com.tanuki.ui.DshChatGroupState()
+        val b = renderTool(2)
+        val c = renderTool(3)
+        val split = groups.project(listOf(b), listOf(c))
+        assertEquals("tool:call-2", split.history.single().key)
+        assertEquals("tool:call-3", split.live.single().key)
+        assertEquals(2, groups.project(listOf(b, c)).history.size)
+    }
+
+    @Test fun unboundOrWrongSessionComposerKeepsPageStopFallback() {
+        val native = com.tanuki.ui.DshNativeState(selectedId = "A", running = true)
+        assertTrue(DshChatRenderPolicy.needsStopFallback(native, com.tanuki.ui.DshComposerState(sessionId = "A")))
+        assertTrue(DshChatRenderPolicy.needsStopFallback(native,
+            com.tanuki.ui.DshComposerState(sessionId = "B", generationRunning = true)))
+        assertFalse(DshChatRenderPolicy.needsStopFallback(native,
+            com.tanuki.ui.DshComposerState(sessionId = "A", generationRunning = true)))
+        assertFalse(DshChatRenderPolicy.needsStopFallback(native.copy(running = false), com.tanuki.ui.DshComposerState()))
+    }
+
+    private fun renderTool(seq: Int) = com.tanuki.web.DshTimelineItem.Tool(com.tanuki.web.DshToolItem(
+        seq = seq, time = 1000L, callId = "call-$seq", name = "bash", arguments = null,
+        status = com.tanuki.web.DshToolStatus.RUNNING, output = null, error = null,
+        command = "pwd", cwd = null, diffs = emptyList(), files = emptyList(), outputTruncated = false,
+        risk = com.tanuki.web.DshRiskAssessment(com.tanuki.web.DshRiskLevel.LOW, "只读")
+    ))
+
     @Test fun bottomDetectionNeedsLastItemAndOffset() {
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_000, 1_000))
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_010, 1_000))

@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import androidx.compose.foundation.BorderStroke
+import com.tanuki.ui.design.TanukiDesign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +46,40 @@ import com.tanuki.web.DshToolDuration
 import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolStatus
 
+/** 相邻调用的展示组；缺失结果保持未完成，不把历史截断算成成功。 */
+@Composable
+internal fun DshToolGroupCard(
+    tools: List<DshToolItem>,
+    pendingApprovalCalls: Set<String> = emptySet(),
+    onOpenApproval: () -> Unit = {}
+) {
+    if (tools.isEmpty()) return
+    val colors = TanukiDesign.tokens.colors
+    var expanded by rememberSaveable(tools.first().callId) { mutableStateOf(false) }
+    val completed = tools.all { it.status == DshToolStatus.SUCCESS }
+    val failed = tools.any { it.status == DshToolStatus.FAILED }
+    Surface(color = Color(colors.surface), contentColor = Color(colors.textPrimary),
+        shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Color(colors.outline)),
+        modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (expanded) "收起工具调用" else "展开工具调用") {
+                expanded = !expanded
+            }.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (completed) "✓" else if (failed) "!" else "◌", color = Color(colors.primary))
+                Text("${if (completed) "已完成" else if (failed) "调用失败" else "未完成"} · ${tools.size} 次工具调用 · ${tools.count { it.finishedAt != null }} 条结果消息",
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+                TanukiIconSwap(expanded, Modifier.size(24.dp)) { Text(if (it) "⌃" else "⌄") }
+            }
+            // 不补间高度，避免与停靠条或输入换行同时播放高度动画。
+            if (expanded) tools.forEach { item ->
+                DshToolCard(item, embedded = true, awaitingApproval = item.callId in pendingApprovalCalls,
+                    onOpenApproval = onOpenApproval)
+            }
+        }
+    }
+}
+
 /**
  * 工具调用卡片：状态、耗时、命令、工作目录、文件变更、diff、参数与可折叠输出。
  *
@@ -50,19 +87,25 @@ import com.tanuki.web.DshToolStatus
  * 不把历史截断伪装成成功。输出默认折叠，失败时默认展开错误与输出；输出和错误都可复制。
  */
 @Composable
-fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
+fun DshToolCard(
+    item: DshToolItem,
+    modifier: Modifier = Modifier,
+    embedded: Boolean = false,
+    awaitingApproval: Boolean = false,
+    onOpenApproval: () -> Unit = {}
+) {
     val clipboard = LocalClipboardManager.current
     var expanded by rememberSaveable(item.callId) { mutableStateOf(item.status == DshToolStatus.FAILED) }
     var diffExpanded by rememberSaveable(item.callId) { mutableStateOf(false) }
-    val errorColor = MaterialTheme.colorScheme.error
+    val errorColor = Color(TanukiDesign.tokens.colors.danger)
     val duration = DshToolDuration.label(item.durationMs)
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(16.dp),
+        color = Color(TanukiDesign.tokens.colors.surface),
+        contentColor = Color(TanukiDesign.tokens.colors.textPrimary),
+        shape = RoundedCornerShape(if (embedded) 0.dp else 16.dp),
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 Modifier.fillMaxWidth().clickable(enabled = item.hasDetails) { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
@@ -93,7 +136,7 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                             }
                         },
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color(TanukiDesign.tokens.colors.textSecondary)
                     )
                 }
                 DshRiskPill(item.risk.level, item.risk.summary)
@@ -101,7 +144,7 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                     Text(
                         if (expanded) "收起" else "展开",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = Color(TanukiDesign.tokens.colors.primary)
                     )
                 }
             }
@@ -109,8 +152,13 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                 Text(
                     "未读取到官方结果：可能仍在运行，或历史页被截断。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
+            }
+            if (awaitingApproval) {
+                TextButton(onClick = onOpenApproval) {
+                    Text("🔒 运行 · 需要授权后才能执行", style = MaterialTheme.typography.labelSmall)
+                }
             }
             item.command?.let { CommandBlock(it, item.cwd) }
             if (item.files.isNotEmpty()) {
@@ -133,8 +181,8 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                 }
                 item.error?.let { error ->
                     Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        color = Color(TanukiDesign.tokens.colors.dangerContainer),
+                        contentColor = Color(TanukiDesign.tokens.colors.onDangerContainer),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -165,7 +213,7 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                             })
                         }
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            color = Color(TanukiDesign.tokens.colors.canvas),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -182,7 +230,7 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                             Text(
                                 "输出已截断，仅显示前 12,000 字符。",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = Color(TanukiDesign.tokens.colors.textSecondary)
                             )
                         }
                     }
@@ -191,7 +239,7 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                 Text(
                     "输出已折叠 · 点击卡片展开",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
             }
             if (item.error != null && !expanded) {
@@ -211,8 +259,8 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
 private fun ToolStatusMark(status: DshToolStatus) {
     when (status) {
         DshToolStatus.RUNNING -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-        DshToolStatus.SUCCESS -> StatusDot(MaterialTheme.colorScheme.primary)
-        DshToolStatus.FAILED -> StatusDot(MaterialTheme.colorScheme.error)
+        DshToolStatus.SUCCESS -> StatusDot(Color(TanukiDesign.tokens.colors.primary))
+        DshToolStatus.FAILED -> StatusDot(Color(TanukiDesign.tokens.colors.danger))
     }
 }
 
@@ -224,16 +272,16 @@ private fun StatusDot(color: Color) {
 @Composable
 internal fun DshRiskPill(level: DshRiskLevel, summary: String) {
     val color = when (level) {
-        DshRiskLevel.HIGH -> MaterialTheme.colorScheme.errorContainer
-        DshRiskLevel.MEDIUM -> MaterialTheme.colorScheme.secondaryContainer
-        DshRiskLevel.LOW -> MaterialTheme.colorScheme.primaryContainer
-        DshRiskLevel.UNKNOWN -> MaterialTheme.colorScheme.surfaceContainerHighest
+        DshRiskLevel.HIGH -> Color(TanukiDesign.tokens.colors.dangerContainer)
+        DshRiskLevel.MEDIUM -> Color(TanukiDesign.tokens.colors.primaryContainer)
+        DshRiskLevel.LOW -> Color(TanukiDesign.tokens.colors.primaryContainer)
+        DshRiskLevel.UNKNOWN -> Color(TanukiDesign.tokens.colors.canvas)
     }
     val content = when (level) {
-        DshRiskLevel.HIGH -> MaterialTheme.colorScheme.onErrorContainer
-        DshRiskLevel.MEDIUM -> MaterialTheme.colorScheme.onSecondaryContainer
-        DshRiskLevel.LOW -> MaterialTheme.colorScheme.onPrimaryContainer
-        DshRiskLevel.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+        DshRiskLevel.HIGH -> Color(TanukiDesign.tokens.colors.onDangerContainer)
+        DshRiskLevel.MEDIUM -> Color(TanukiDesign.tokens.colors.textPrimary)
+        DshRiskLevel.LOW -> Color(TanukiDesign.tokens.colors.textPrimary)
+        DshRiskLevel.UNKNOWN -> Color(TanukiDesign.tokens.colors.textSecondary)
     }
     Surface(
         color = color,
@@ -252,15 +300,15 @@ internal fun DshRiskPill(level: DshRiskLevel, summary: String) {
 @Composable
 private fun CommandBlock(command: String, cwd: String?) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(10.dp),
+        color = Color(TanukiDesign.tokens.colors.canvas),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "命令",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color(TanukiDesign.tokens.colors.textSecondary)
             )
             SelectionContainer {
                 Text(
@@ -273,7 +321,7 @@ private fun CommandBlock(command: String, cwd: String?) {
                 Text(
                     "工作目录：$cwd",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
             }
         }
@@ -298,19 +346,19 @@ private fun DiffsBlock(diffs: List<DshFileDiff>, expanded: Boolean, onToggle: ()
                     Text(
                         "+$added",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = Color(TanukiDesign.tokens.colors.primary)
                     )
                     Spacer(Modifier.size(6.dp))
                     Text(
                         "-$removed",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = Color(TanukiDesign.tokens.colors.danger)
                     )
                 }
                 val lines = DshDiffPresentation.lines(diff)
                 val shown = if (expanded) lines else lines.take(24)
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    color = Color(TanukiDesign.tokens.colors.canvas),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -344,18 +392,18 @@ private fun DiffLineRow(line: DshDiffLine) {
     val (prefix, background, foreground) = when (line.kind) {
         DshDiffLineKind.ADDED -> Triple(
             "+",
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-            MaterialTheme.colorScheme.primary
+            Color(TanukiDesign.tokens.colors.primary).copy(alpha = 0.12f),
+            Color(TanukiDesign.tokens.colors.primary)
         )
         DshDiffLineKind.REMOVED -> Triple(
             "-",
-            MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
-            MaterialTheme.colorScheme.error
+            Color(TanukiDesign.tokens.colors.danger).copy(alpha = 0.14f),
+            Color(TanukiDesign.tokens.colors.danger)
         )
         DshDiffLineKind.CONTEXT -> Triple(
             " ",
             Color.Transparent,
-            MaterialTheme.colorScheme.onSurfaceVariant
+            Color(TanukiDesign.tokens.colors.textSecondary)
         )
     }
     Text(
@@ -388,7 +436,7 @@ private fun LabeledBlock(label: String, content: @Composable () -> Unit) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = Color(TanukiDesign.tokens.colors.textSecondary)
         )
         content()
     }

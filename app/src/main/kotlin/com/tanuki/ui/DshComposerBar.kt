@@ -1,14 +1,19 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiDesign
+import androidx.compose.ui.graphics.Color
+
 import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.compose.material.icons.Icons
+import androidx.compose.material3.Icon
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -63,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -124,6 +128,7 @@ fun DshComposerBar(
     var preview by remember { mutableStateOf<DshDraftAttachment?>(null) }
     var imagePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
     var filePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
+    var speechToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
     var mentionIndex by remember { mutableIntStateOf(0) }
     var commandIndex by remember { mutableIntStateOf(0) }
     // 选择器/粘贴/拖入读取期间显示不定进度；官方读取没有可用的字节级回调。
@@ -211,6 +216,30 @@ fun DshComposerBar(
         controller.send()
         // 点击发送按钮或快捷键后把焦点还给输入框，连续输入/失败重发不需要再点一次。
         focusInput()
+    }
+
+    val speechInput = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val token = speechToken
+        speechToken = null
+        if (result.resultCode == Activity.RESULT_OK) {
+            if (token != null && controller.isCurrentSession(token)) {
+                result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                    ?.takeIf { it.isNotBlank() }?.let(::insertToken)
+            } else controller.showNotice("会话已切换，已丢弃上次语音输入")
+        }
+    }
+
+    fun startSpeech() {
+        speechToken = controller.captureSessionToken()
+        runCatching {
+            speechInput.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "说出要发送的消息")
+            })
+        }.onFailure {
+            speechToken = null
+            controller.showNotice("系统语音输入不可用，请使用键盘输入")
+        }
     }
 
     fun budgetFor(kind: DshAttachmentKind): DshAttachmentReadBudget {
@@ -388,31 +417,32 @@ fun DshComposerBar(
 
     val capsuleCorner by animateDpAsState(
         targetValue = if (lineCount > 1) 18.dp else 28.dp,
-        animationSpec = tween(durationMillis = 160),
+        animationSpec = TanukiDesign.motion.toggle(),
         label = "composer-corner"
     )
     val showStop = state.generationRunning || state.stopping
-    val sendStopEnabled = if (showStop) !state.stopping else state.canSend
+    val showMic = !showStop && state.text.isBlank() && state.attachments.isEmpty()
+    val sendStopEnabled = if (showStop) !state.stopping else if (showMic) state.sessionId != null && !state.sending else state.canSend
     val sendStopContainer = if (sendStopEnabled) {
         Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.primaryFill)
-    } else MaterialTheme.colorScheme.surfaceVariant
+    } else Color(TanukiDesign.tokens.colors.surface)
     val sendStopContent = if (sendStopEnabled) {
         Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.onPrimary)
-    } else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    } else Color(TanukiDesign.tokens.colors.textSecondary).copy(alpha = 0.55f)
 
     Surface(
         color = Color.Transparent,
         shape = RoundedCornerShape(0.dp),
         tonalElevation = 0.dp,
-        border = if (dragActive) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+        border = if (dragActive) BorderStroke(1.5.dp, Color(TanukiDesign.tokens.colors.primary)) else null,
         // 作为独立组件也保证软键盘不遮住输入框；父级已消费的 IME inset 不会重复叠加。
         modifier = modifier.fillMaxWidth().imePadding().then(dragModifier)
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             state.error?.let { message ->
                 Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    color = Color(TanukiDesign.tokens.colors.dangerContainer),
+                    contentColor = Color(TanukiDesign.tokens.colors.onDangerContainer),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -423,7 +453,7 @@ fun DshComposerBar(
                 }
             }
             state.notice?.let { message ->
-                Text(message, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(message, style = MaterialTheme.typography.labelSmall, color = Color(TanukiDesign.tokens.colors.textSecondary))
             }
             // 停止结果独立显示，避免底部操作行在窄屏把状态文案挤掉。
             state.stopOutcome?.takeIf { state.notice == null }?.let { outcome ->
@@ -435,9 +465,9 @@ fun DshComposerBar(
                 }
                 val color = when {
                     state.stopping || outcome == DshStopOutcome.REQUESTED ->
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    outcome == DshStopOutcome.STOPPED -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.error
+                        Color(TanukiDesign.tokens.colors.textSecondary)
+                    outcome == DshStopOutcome.STOPPED -> Color(TanukiDesign.tokens.colors.primary)
+                    else -> Color(TanukiDesign.tokens.colors.danger)
                 }
                 Text(text, style = MaterialTheme.typography.labelMedium, color = color)
             }
@@ -465,33 +495,35 @@ fun DshComposerBar(
                     onPick = ::pickCommand
                 )
             }
-            // 胶囊输入条：单行 48dp、圆角 28；多行随文本布局增高，圆角收紧并让两侧圆键贴底。
+            // 胶囊单行 56dp；换行立即布局，仅圆角走 S-toggle，避免与停靠条叠加高度动画。
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = Color(TanukiDesign.tokens.colors.surface),
                 shape = RoundedCornerShape(capsuleCorner),
                 tonalElevation = 2.dp,
                 border = BorderStroke(
                     1.dp,
-                    if (dragActive) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                    if (dragActive) Color(TanukiDesign.tokens.colors.primary)
+                    else Color(TanukiDesign.tokens.colors.outline).copy(alpha = 0.55f)
                 ),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).animateContentSize()
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
             ) {
                 Row(
-                    Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.Bottom,
+                    Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box {
                         ComposerCircleButton(
                             description = "添加附件",
                             onClick = { attachMenu = true },
-                            container = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            container = Color(TanukiDesign.tokens.colors.surface),
+                            contentColor = Color(TanukiDesign.tokens.colors.textSecondary)
                         ) {
                             Text("+", fontSize = 20.sp, fontWeight = FontWeight.Medium)
                         }
                         DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                            DropdownMenuItem(text = { Text("@ 引用会话或文件") }, onClick = { attachMenu = false; insertToken("@") })
+                            DropdownMenuItem(text = { Text("/ 查看命令") }, onClick = { attachMenu = false; insertToken("/") })
                             DropdownMenuItem(
                                 text = { Text("选择图片") },
                                 onClick = {
@@ -524,7 +556,7 @@ fun DshComposerBar(
                             // 有选区时以选区末端作为 @ 查询终点，插入时整段替换。
                             controller.updateText(next.text, next.selection.max)
                         },
-                        modifier = Modifier.weight(1f).heightIn(min = 36.dp)
+                        modifier = Modifier.weight(1f).heightIn(min = 40.dp)
                             .focusRequester(focusRequester).onPreviewKeyEvent { event ->
                                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                 // Ctrl/⌘ + Enter 发送；普通 Enter 保留换行，避免移动端多行输入误发。
@@ -585,9 +617,9 @@ fun DshComposerBar(
                                 false
                             },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color(TanukiDesign.tokens.colors.textPrimary)
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(Color(TanukiDesign.tokens.colors.primary)),
                         // 随内容自动增高到 6 行，超过后在输入框内部滚动。
                         minLines = 1,
                         maxLines = 6,
@@ -601,9 +633,9 @@ fun DshComposerBar(
                             ) {
                                 if (value.text.isEmpty()) {
                                     Text(
-                                        "输入消息，@ 引用会话或文件，/ 查看命令",
+                                        DshChatRenderPolicy.composerPlaceholder(state.generationRunning),
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = Color(TanukiDesign.tokens.colors.textSecondary),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -612,29 +644,26 @@ fun DshComposerBar(
                             }
                         }
                     )
+                    ComposerContextUsage()
                     ComposerCircleButton(
-                        description = if (showStop) "停止生成" else "发送",
+                        description = if (showStop) "停止生成" else if (showMic) "语音输入" else "发送",
                         enabled = sendStopEnabled,
                         onClick = {
-                            if (showStop) controller.requestStop() else submit()
+                            if (showStop) controller.requestStop() else if (showMic) startSpeech() else submit()
                         },
                         container = sendStopContainer,
                         contentColor = sendStopContent
                     ) {
                         // 只让图标形变，避免整条输入框闪烁。
-                        TanukiIconSwap(showStop, Modifier.size(24.dp)) { stopping ->
-                            Text(
-                                if (stopping) "■" else "↑",
-                                fontSize = if (stopping) 13.sp else 20.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                        TanukiIconSwap(if (showStop) "stop" else if (showMic) "mic" else "send", Modifier.size(24.dp)) { action ->
+                            if (action == "mic") ComposerMicIcon(sendStopContent)
+                            else Text(if (action == "stop") "■" else "↑", fontSize = if (action == "stop") 13.sp else 20.sp,
+                                fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                OutlinedButton(onClick = { insertToken("@") }, shape = RoundedCornerShape(50)) { Text("@ 引用") }
-                OutlinedButton(onClick = { insertToken("/") }, shape = RoundedCornerShape(50)) { Text("/ 命令") }
                 // 运行态静默降级：只额外开放发送，不夺走主键上的停止能力。
                 if (state.runStateStale && state.generationRunning && !state.stopping) {
                     TextButton(onClick = ::submit, enabled = state.canSend) { Text("继续发送") }
@@ -653,14 +682,15 @@ fun DshComposerBar(
                     state.sendFailed -> "发送失败，内容已保留，可重发"
                     state.sending -> "发送中…"
                     state.runStateStale -> "长时间无运行事件；可继续发送，停止仍可用"
+                    state.generationRunning -> "可边生成边编辑；流式插话未确认，主键用于停止"
                     else -> "Ctrl/⌘+Enter 发送"
                 }
                 val statusFailed = state.sendFailed || state.stopOutcome == DshStopOutcome.FAILED
                 Text(
                     statusText,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (statusFailed) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (statusFailed) Color(TanukiDesign.tokens.colors.danger)
+                    else Color(TanukiDesign.tokens.colors.textSecondary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
@@ -672,6 +702,43 @@ fun DshComposerBar(
     preview?.let { attachment ->
         AttachmentPreviewDialog(attachment = attachment, onDismiss = { preview = null })
     }
+}
+
+/** 使用当前内容色绘制麦克风轮廓，不为单个图标增加依赖。 */
+@Composable
+private fun ComposerMicIcon(color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(20.dp)) {
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.7.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawRoundRect(color, topLeft = androidx.compose.ui.geometry.Offset(size.width * .35f, size.height * .05f),
+            size = androidx.compose.ui.geometry.Size(size.width * .3f, size.height * .5f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * .15f), style = stroke)
+        drawArc(color, startAngle = 0f, sweepAngle = 180f, useCenter = false,
+            topLeft = androidx.compose.ui.geometry.Offset(size.width * .2f, size.height * .2f),
+            size = androidx.compose.ui.geometry.Size(size.width * .6f, size.height * .55f), style = stroke)
+        drawLine(color, androidx.compose.ui.geometry.Offset(size.width * .5f, size.height * .75f),
+            androidx.compose.ui.geometry.Offset(size.width * .5f, size.height * .95f), strokeWidth = stroke.width)
+    }
+}
+
+/** 没有协议用量时只画静态轮廓，不展示虚构百分比或不定进度。 */
+@Composable
+private fun ComposerContextUsage() {
+    val colors = TanukiDesign.tokens.colors
+    var details by remember { mutableStateOf(false) }
+    Column(Modifier.widthIn(min = 32.dp).heightIn(min = 48.dp).clickable(onClickLabel = "上下文用量说明") {
+        details = true
+    }.semantics { contentDescription = "上下文用量未提供" },
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+            drawCircle(Color(colors.outline), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+        }
+        Text(DshChatRenderPolicy.contextPercent(null, null), fontSize = 11.sp, color = Color(colors.textSecondary))
+    }
+    if (details) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { details = false }, title = { Text("上下文用量") },
+        text = { Text("当前原生协议投影未提供 token 用量与上下文上限，因此不能计算百分比。") },
+        confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } }
+    )
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -691,7 +758,7 @@ private fun insertAtCursor(
     apply(next, start + text.length)
 }
 
-/** 胶囊输入条两侧的 36dp 圆键；禁用时保留低对比底色但不再响应点击。 */
+/** 圆键保持 48dp 触控区域；禁用时保留状态但不响应点击。 */
 @Composable
 private fun ComposerCircleButton(
     description: String,
@@ -702,7 +769,7 @@ private fun ComposerCircleButton(
     content: @Composable () -> Unit
 ) {
     Box(
-        Modifier.size(36.dp)
+        Modifier.size(48.dp)
             .clip(CircleShape)
             .background(if (enabled) container else container.copy(alpha = 0.7f))
             .clickable(enabled = enabled, onClick = onClick)
@@ -738,7 +805,7 @@ private fun AttachmentCard(
     onPreview: (DshDraftAttachment) -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = Color(TanukiDesign.tokens.colors.surface),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.widthIn(min = 190.dp, max = 250.dp)
     ) {
@@ -750,8 +817,8 @@ private fun AttachmentCard(
                 )
             } else {
                 Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = Color(TanukiDesign.tokens.colors.primaryContainer),
+                    contentColor = Color(TanukiDesign.tokens.colors.textPrimary),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.size(52.dp)
                 ) {
@@ -785,8 +852,8 @@ private fun AttachmentCard(
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (attachment.status == DshAttachmentStatus.FAILED) {
-                        MaterialTheme.colorScheme.error
-                    } else MaterialTheme.colorScheme.onSurfaceVariant,
+                        Color(TanukiDesign.tokens.colors.danger)
+                    } else Color(TanukiDesign.tokens.colors.textSecondary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -813,7 +880,7 @@ private fun AttachmentThumbnail(attachment: DshDraftAttachment, modifier: Modifi
         }
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = Color(TanukiDesign.tokens.colors.canvas),
         shape = RoundedCornerShape(10.dp),
         modifier = modifier
     ) {
@@ -834,7 +901,7 @@ private fun MentionMenu(
     onPick: (DshMentionCandidate) -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = Color(TanukiDesign.tokens.colors.canvas),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -846,7 +913,7 @@ private fun MentionMenu(
                     state.mentionError ?: "没有匹配的文件或会话，继续输入可搜索",
                     Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
             } else {
                 LazyColumn(Modifier.heightIn(max = 220.dp), state = listState) {
@@ -854,7 +921,7 @@ private fun MentionMenu(
                         val selected = index == selectedIndex
                         Row(
                             Modifier.fillMaxWidth()
-                                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                .background(if (selected) Color(TanukiDesign.tokens.colors.primaryContainer) else Color.Transparent)
                                 .clickable { onPick(candidate) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -862,10 +929,10 @@ private fun MentionMenu(
                             Column(Modifier.weight(1f)) {
                                 Text(candidate.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 candidate.subtitle?.let {
-                                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(it, style = MaterialTheme.typography.labelSmall, color = Color(TanukiDesign.tokens.colors.textSecondary))
                                 }
                             }
-                            Text("引用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("引用", style = MaterialTheme.typography.labelSmall, color = Color(TanukiDesign.tokens.colors.primary))
                         }
                     }
                 }
@@ -882,7 +949,7 @@ private fun CommandMenu(
     onPick: (DshCommand) -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = Color(TanukiDesign.tokens.colors.canvas),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -891,7 +958,7 @@ private fun CommandMenu(
                 val selected = index == selectedIndex
                 Row(
                     Modifier.fillMaxWidth()
-                        .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .background(if (selected) Color(TanukiDesign.tokens.colors.primaryContainer) else Color.Transparent)
                         .clickable { onPick(command) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -901,13 +968,13 @@ private fun CommandMenu(
                         Text(
                             command.description.ifBlank { command.inputHint.orEmpty() },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color(TanukiDesign.tokens.colors.textSecondary),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     if (command.acceptsAttachments) {
-                        Text("可带附件", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text("可带附件", style = MaterialTheme.typography.labelSmall, color = Color(TanukiDesign.tokens.colors.primary))
                     }
                 }
             }
@@ -919,7 +986,7 @@ private fun CommandMenu(
 private fun AttachmentPreviewDialog(attachment: DshDraftAttachment, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = Color(TanukiDesign.tokens.colors.surface),
             shape = RoundedCornerShape(20.dp),
             modifier = Modifier.widthIn(max = 520.dp)
         ) {
@@ -946,7 +1013,7 @@ private fun AttachmentPreviewDialog(attachment: DshDraftAttachment, onDismiss: (
                 Text(
                     "${attachment.mediaType} · ${attachment.sizeLabel}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color(TanukiDesign.tokens.colors.textSecondary)
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("关闭") }
