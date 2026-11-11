@@ -14,7 +14,11 @@ import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolStatus
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshChatSource
+import com.tanuki.web.DshCoordination
+import com.tanuki.web.DshGoalProjection
 import com.tanuki.web.DshLiveEvent
+import com.tanuki.web.DshTodoItemProjection
+import com.tanuki.web.DshTodoProjection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
@@ -418,7 +422,8 @@ class DshNativeControllerTest {
         private var sendFailure: Throwable? = null,
         private val sendGate: CompletableDeferred<Unit>? = null,
         private val pageGate: CompletableDeferred<Unit>? = null,
-        private val timelines: Map<String, List<DshTimelineItem>> = emptyMap()
+        private val timelines: Map<String, List<DshTimelineItem>> = emptyMap(),
+        private val coordinations: Map<String, DshCoordination> = emptyMap()
     ) : DshChatSource {
         private val current = messages.toMutableMap()
 
@@ -446,7 +451,8 @@ class DshNativeControllerTest {
                         )
                     ),
                     hasMore = false,
-                    timeline = timelines[sessionId].orEmpty()
+                    timeline = timelines[sessionId].orEmpty(),
+                    coordination = coordinations[sessionId] ?: DshCoordination()
                 )
             )
         }
@@ -467,6 +473,95 @@ class DshNativeControllerTest {
 
         override fun live(sessionId: String): Flow<DshLiveEvent> =
             if (liveEvents.isEmpty()) emptyFlow() else flowOf(*liveEvents.toTypedArray())
+    }
+
+    @Test fun historyPageCoordinationDrivesGoalAndTodoDocks() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            coordinations = mapOf(
+                "A" to DshCoordination(
+                    goal = DshGoalProjection(1, "补齐停靠条", "running", "剩余回归"),
+                    todos = DshTodoProjection(
+                        2,
+                        listOf(
+                            DshTodoItemProjection("t1", "接线", "completed"),
+                            DshTodoItemProjection("t2", "跑测试", "in_progress")
+                        )
+                    )
+                )
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitSelection(controller, "A")
+        assertEquals("补齐停靠条", state.goal!!.summary)
+        assertEquals(com.tanuki.ui.GoalDockStatus.RUNNING, state.goal!!.status)
+        assertEquals(2, state.todos!!.total)
+        assertEquals(1, state.todos!!.completed)
+    }
+
+    @Test fun liveCoordinationEventsUpdateGoalAndTodoDocks() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Coordination(
+                    DshCoordination(goal = DshGoalProjection(3, "实时目标", "paused"))
+                ),
+                DshLiveEvent.Coordination(
+                    DshCoordination(
+                        todos = DshTodoProjection(
+                            4,
+                            listOf(DshTodoItemProjection("t1", "实时待办", "pending"))
+                        )
+                    )
+                )
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.goal != null && it.todos != null }
+        assertEquals("实时目标", state.goal!!.summary)
+        assertEquals(com.tanuki.ui.GoalDockStatus.PAUSED, state.goal!!.status)
+        assertEquals("实时待办", state.todos!!.items.single().text)
+    }
+
+    @Test fun sessionWithoutCoordinationKeepsDocksHidden() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A"), session("B")),
+            coordinations = mapOf(
+                "A" to DshCoordination(goal = DshGoalProjection(1, "仅 A 的目标", "running"))
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        assertEquals("仅 A 的目标", awaitSelection(controller, "A").goal!!.summary)
+
+        controller.select("B")
+        val state = awaitSelection(controller, "B")
+        assertNull(state.goal)
+        assertNull(state.todos)
+    }
+
+    @Test fun unknownGoalStatusDoesNotClearExistingDock() = runBlocking {
+        val source = FakeSource(
+            listOf(session("A")),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Coordination(
+                    DshCoordination(goal = DshGoalProjection(2, "有效目标", "running"))
+                ),
+                DshLiveEvent.Coordination(
+                    DshCoordination(goal = DshGoalProjection(3, "已完成目标", "completed"))
+                )
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { it.goal != null }
+        // 未知/已完成状态不猜成进行中，也不能清掉已知目标。
+        assertEquals("有效目标", state.goal!!.summary)
+        assertEquals(com.tanuki.ui.GoalDockStatus.RUNNING, state.goal!!.status)
     }
 
     @Test fun lateHistoryPageCannotRegressCompletedTool() = runBlocking {

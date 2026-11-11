@@ -59,7 +59,9 @@ data class DshMessage(
 data class DshSessionPage(
     val messages: List<DshMessage>,
     val hasMore: Boolean,
-    val timeline: List<DshTimelineItem> = messages.map { DshTimelineItem.Text(it) }
+    val timeline: List<DshTimelineItem> = messages.map { DshTimelineItem.Text(it) },
+    /** 真实目标/待办事件投影；没有事件时为空，不生成占位数据。 */
+    val coordination: DshCoordination = DshCoordination()
 )
 
 /** 官方 Remote 返回的业务错误；只保留短错误码，避免把响应细节带入界面或日志。 */
@@ -183,7 +185,8 @@ object DshApiProtocol {
         return DshSessionPage(
             messages = parseRecords(records),
             hasMore = value.optBoolean("hasMore", false),
-            timeline = DshToolTimeline.parse(records)
+            timeline = DshToolTimeline.parse(records),
+            coordination = DshCoordinationParser.parse(records)
         )
     }
 
@@ -447,11 +450,19 @@ class DshNativeClient(
                                 }
                                 followParser.accept(downlink.value).forEach { frame ->
                                 when (frame) {
-                                    is DshFollowFrame.Snapshot ->
-                                        emit(DshLiveEvent.Snapshot(frame.messages, frame.hasMore, frame.liveText, frame.tools))
+                                    is DshFollowFrame.Snapshot -> emit(
+                                        DshLiveEvent.Snapshot(
+                                            frame.messages,
+                                            frame.hasMore,
+                                            frame.liveText,
+                                            frame.tools,
+                                            frame.coordination
+                                        )
+                                    )
                                     is DshFollowFrame.Message -> emit(DshLiveEvent.Message(frame.message))
                                     is DshFollowFrame.Streaming -> emit(DshLiveEvent.Streaming(frame.text))
                                     is DshFollowFrame.Finished -> emit(DshLiveEvent.Finished(frame.committed))
+                                    is DshFollowFrame.Coordination -> emit(DshLiveEvent.Coordination(frame.update))
                                 }
                                 }
                             }

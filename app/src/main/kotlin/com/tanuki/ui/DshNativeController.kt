@@ -3,6 +3,7 @@ package com.tanuki.ui
 import com.tanuki.runtime.Redact
 import com.tanuki.web.DshApiException
 import com.tanuki.web.DshChatSource
+import com.tanuki.web.DshCoordination
 import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
@@ -55,7 +56,11 @@ data class DshNativeState(
     /** 与文本消息按 seq 交错渲染的工具调用卡片；来自同一官方 session/page 或 follow 事件。 */
     val tools: List<DshToolItem> = emptyList(),
     /** 最近一次发送失败的原文与原因；保留在页面上供复制、重试或回填输入框。 */
-    val failedPrompt: DshFailedPrompt? = null
+    val failedPrompt: DshFailedPrompt? = null,
+    /** 真实目标事件投影出的目标条状态；没有真实数据时为 null（整条隐藏）。 */
+    val goal: GoalDockState? = null,
+    /** 真实待办事件/待办工具调用投影出的待办条状态；没有真实数据时为 null（整条隐藏）。 */
+    val todos: TodoDockState? = null
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
 }
@@ -183,6 +188,8 @@ class DshNativeController(
                 olderError = null,
                 historyRevision = 0,
                 releasedOlder = 0,
+                goal = null,
+                todos = null,
                 loading = true,
                 running = session?.running ?: it.running,
                 stopping = false,
@@ -369,7 +376,7 @@ class DshNativeController(
                         tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null),
                         hasMore = state.hasMore || event.hasMore,
                         streamingText = event.liveText
-                    )
+                    ).withCoordination(event.coordination)
                 }
             }
             is DshLiveEvent.Message -> {
@@ -404,6 +411,7 @@ class DshNativeController(
                 }
             }
             is DshLiveEvent.Failure -> _state.update { it.copy(liveError = event.message) }
+            is DshLiveEvent.Coordination -> _state.update { it.withCoordination(event.update) }
         }
     }
 
@@ -495,7 +503,7 @@ class DshNativeController(
                             maxTools = null
                         ),
                         hasMore = if (pageReachesLoadedStart) page.hasMore else state.hasMore
-                    )
+                    ).withCoordination(page.coordination)
                 } else {
                     state.copy(loading = false)
                 }
@@ -592,6 +600,18 @@ class DshNativeController(
                 historyRevision = state.historyRevision + 1
             )
         }
+    }
+
+    /**
+     * 合并真实目标/待办投影：只更新本次事件里实际出现的字段；
+     * 解析失败或未知状态不会清空已知内容，也不会生成占位数据。
+     */
+    private fun DshNativeState.withCoordination(update: DshCoordination): DshNativeState {
+        if (update.isEmpty) return this
+        return copy(
+            goal = update.goal?.let(DshDockStateMapper::goal) ?: goal,
+            todos = update.todos?.let(DshDockStateMapper::todo) ?: todos
+        )
     }
 
     /**

@@ -160,12 +160,6 @@ fun DshNativePage(
             return@Column
         }
         SessionStrip(state.sessions, state.selectedId, controller::select)
-        DshApprovalEntryBar(
-            state = approvalState,
-            sessionId = state.selectedId,
-            onClick = { showApprovalSheet = true },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-        )
         Box(Modifier.weight(1f)) {
             MessageList(
                 state = state,
@@ -215,6 +209,23 @@ fun DshNativePage(
         state.sendError?.takeIf { state.failedPrompt == null }?.let { message ->
             ErrorBanner("发送未完成", message)
         }
+        // 三条停靠条：审批 > 目标 > 待办，同屏最多两条，其余折叠为 +N。
+        // 目标/待办只来自真实事件，缺失时对应条不占高度；高度动画由组件内部吸收到消息区，
+        // 输入栏始终是页面纵向栈的最后一项（见 DshDockPlacement）。
+        DshDockColumn(
+            approvalVisible = DshApprovalEntry.of(approvalState, state.selectedId).visible,
+            goal = state.goal,
+            todo = state.todos,
+            approvalBar = {
+                DshApprovalEntryBar(
+                    state = approvalState,
+                    sessionId = state.selectedId,
+                    onClick = { showApprovalSheet = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+        )
         DshComposerBar(composer, Modifier.fillMaxWidth())
     }
     DshApprovalSheet(

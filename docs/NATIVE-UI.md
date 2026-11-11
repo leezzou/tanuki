@@ -140,6 +140,14 @@
 - 幂等与对账：`DshMessageLedger` 以官方 `seq` 为唯一键去重、排序；同一事件重复投递或重连重放不会插入第二条。follow 快照只覆盖自己的 `seq` 区间，保留已加载的更早分页与更新的实时行；重连后第二次 `Connected` 会主动触发一次历史对账（首连仍交给历史页/快照）。
 - 纯策略与回归：`DshChatWindow.kt` 提供 `DshChatAnchorPolicy`、`DshChatWindowPolicy`、`DshMessageLedger`；`DshChatFollowState.kt` 提供会话级跟随状态。JVM 覆盖锚点分段与渲染 key 顺序、上翻不跟随、A→B 会话隔离、消息/工具预算边界、只释放视口上方、工具合并不截断、seq 去重、快照对账与重连对账。设备手势、帧率、深色/大字体与真实 DSH 历史未验证。
 
+### 输入栏上方三条停靠条（2026-11-11，android_agent-62 接线）
+
+- 位置：页面纵向顺序为“消息区 `weight(1f)` → `DshDockColumn` → `DshComposerBar`”。原 `SessionStrip` 下方的审批条已移入停靠容器插槽，不再单独渲染，避免出现两条审批条。
+- 顺序与折叠：审批 > 目标 > 待办；同屏最多两条（三条齐全时显示审批+目标，待办折叠为“+1”），点“+N”临时铺开、按钮变“收起”；组件按唯一渲染计划遍历，展开时每条只出现一次。
+- 数据：目标/待办只来自真实事件投影（`goal/update`/`goal`/`goals/update`/`session/goal`、`todo/update`/`todos/update` 与待办工具调用），经 `DshDockStateMapper` 映射；缺失、空文本或未知状态时保持 `null`，对应停靠条不占高度。目标操作能力在 `goals/*` RPC 接线前保持默认全 false，只展示禁用原因，不伪造成功。
+- 输入栏稳定：停靠条高度动画只压缩消息区，输入栏始终是纵向栈最后一项；页面不要在外层再包 `animateContentSize`/`AnimatedVisibility`（布局契约见 `DshDockPlacement`）。纯策略回归覆盖三档折叠/展开不重复、缺失隐藏，以及停靠条高度变化时输入栏顶部不变。
+- 兼容：锚定滚动、审批抽屉、发送/停止逻辑未改；审批入口点击仍打开 `DshApprovalSheet`。设备上的高度动画、展开滚动、深色/大字体与 TalkBack 未验证。
+
 ### 53 本轮组件与接线 hook（DshNativePage/MainActivity 由集成方接线）
 
 本轮只改审批/工具/计划组件，不修改 `DshNativePage.kt` 与 `MainActivity.kt`。以下 hook 保持源兼容：既有命名参数调用无需改动即可编译；集成方补传新增可选参数即可启用增强。

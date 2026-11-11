@@ -48,11 +48,13 @@ sealed interface DshFollowFrame {
         val messages: List<DshMessage>,
         val hasMore: Boolean,
         val liveText: String,
-        val tools: List<DshToolItem> = emptyList()
+        val tools: List<DshToolItem> = emptyList(),
+        val coordination: DshCoordination = DshCoordination()
     ) : DshFollowFrame
     data class Message(val message: DshMessage) : DshFollowFrame
     data class Streaming(val text: String) : DshFollowFrame
     data class Finished(val committed: Boolean, val seq: Int?) : DshFollowFrame
+    data class Coordination(val update: DshCoordination) : DshFollowFrame
 }
 
 /**
@@ -235,20 +237,23 @@ class DshFollowParser {
                     liveText = liveText(),
                     tools = DshToolTimeline.parse(records)
                         .filterIsInstance<DshTimelineItem.Tool>()
-                        .map { it.tool }
+                        .map { it.tool },
+                    coordination = DshCoordinationParser.parse(records)
                 )
             )
         }
         "event" -> {
             val event = value.optJSONObject("event") ?: return emptyList()
-            val message = DshApiProtocol.parseMessage(event)
-            if (message != null) {
+            val frames = ArrayList<DshFollowFrame>(2)
+            DshCoordinationParser.parseEvent(event)?.let { update ->
+                if (!update.isEmpty) frames += DshFollowFrame.Coordination(update)
+            }
+            DshApiProtocol.parseMessage(event)?.let { message ->
                 // 已落盘的 assistant 消息取代同一段临时回复，避免重复气泡。
                 if (message.role == DshMessageRole.ASSISTANT) resetStream()
-                listOf(DshFollowFrame.Message(message))
-            } else {
-                emptyList()
+                frames += DshFollowFrame.Message(message)
             }
+            frames
         }
         "assistant-stream" -> acceptAssistantStream(value.optJSONObject("frame"))
         else -> emptyList()
