@@ -3,6 +3,10 @@ package com.tanuki
 import com.tanuki.runtime.AesGcmSecretVault
 import com.tanuki.runtime.HostKeyProbe
 import com.tanuki.runtime.KeyValueStore
+import com.tanuki.runtime.PairingClipboardStatus
+import com.tanuki.runtime.RelayErrors
+import com.tanuki.runtime.RelayFailureKind
+import com.tanuki.runtime.RelayTlsPin
 import com.tanuki.runtime.RemoteAttemptResult
 import com.tanuki.runtime.RemoteAuthType
 import com.tanuki.runtime.RemoteConnectionErrors
@@ -18,8 +22,10 @@ import com.tanuki.runtime.RemoteHostStorage
 import com.tanuki.runtime.RemoteHostStatus
 import com.tanuki.ui.RemoteHostSwitchPresentation
 import com.tanuki.runtime.RemoteHostWizard
-import com.tanuki.runtime.RemotePhase
 import com.tanuki.runtime.RemotePairingCode
+import com.tanuki.runtime.RemotePairingGuidance
+import com.tanuki.runtime.RemotePhase
+import com.tanuki.runtime.RemoteRelayException
 import com.tanuki.runtime.RemoteRelayPairing
 import com.tanuki.runtime.RemoteStageStatus
 import com.tanuki.runtime.RemoteWizardField
@@ -67,6 +73,15 @@ class RemoteWizardTest {
         remoteDshPort: Int = 3080,
         token: String = ""
     ) = RemoteHostConfig(host, sshPort, user, auth, password, privateKey, passphrase, remoteDshPort, token)
+
+    private fun pairingForWizard(pin: String = "") = RemoteRelayPairing(
+        relayHost = "relay.example.test",
+        relayPort = 8443,
+        roomId = "ICEiIyQlJicoKSorLC0uLw",
+        token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        hostId = "303132333435363738393a3b3c3d3e3f",
+        certPin = pin
+    )
 
     // ---------- 向导状态机 ----------
 
@@ -318,6 +333,212 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun clipboardPairingAutoFillsLinkComputesCodeAndBuildsPreview() {
+        val pin = RelayTlsPin.fingerprint("synthetic-relay-cert".toByteArray())
+        val pairing = pairingForWizard(pin)
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        assertTrue(wizard.next())
+        val visit = wizard.state.value.clipboardVisit
+
+        // 剪贴板常带首尾空白；自动填入必须使用 trim 后的规范链接，码也必须按同一文本计算。
+        assertTrue(wizard.applyClipboardPairing("\n  ${pairing.toUri()}  \n", visit))
+        val state = wizard.state.value
+        val expected = RemotePairingCode.of(pairing)
+        assertEquals(pairing.toUri(), state.draft.relayUri)
+        assertEquals(expected, state.draft.pairingCode)
+        assertEquals(expected, RemotePairingCode.ofLink(state.draft.relayUri))
+        assertTrue(RemotePairingCode.matches(pairing, state.draft.pairingCode))
+        assertEquals(PairingClipboardStatus.AUTO_FILLED, state.clipboardStatus)
+        assertTrue(state.clipboardMessage.contains("自动算出"))
+
+        val preview = requireNotNull(state.pairingPreview)
+        assertEquals(expected, preview.code)
+        assertEquals("tls://relay.example.test:8443", preview.relayLabel)
+        assertEquals(pin, preview.pin)
+        assertTrue(preview.pinned)
+        assertTrue(preview.pinSummary.contains("…"))
+        assertTrue(preview.pinSummary.length < pin.length)
+        assertTrue(preview.computerName.contains("未命名电脑"))
+        assertTrue(preview.sshHint.contains("127.0.0.1:22"))
+
+        wizard.updateDraft { it.copy(user = "tanuki", host = "家里电脑") }
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.PAIRING_CONFIRM, wizard.state.value.step)
+        assertEquals("家里电脑", requireNotNull(wizard.state.value.pairingPreview).computerName)
+        assertTrue(wizard.state.value.canConfirmPairing)
+        assertTrue(wizard.confirmPairing())
+        assertEquals(RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
+        assertTrue(wizard.state.value.pairingAcknowledged)
+    }
+
+    @Test
+    fun clipboardDoesNotOverwriteManualPairingLinkAndFallbackStillWorks() {
+        val first = pairingForWizard()
+        val second = first.copy(roomId = "MDEyMzQ1Njc4OWFiY2RlZg")
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        assertTrue(wizard.next())
+        val visit = wizard.state.value.clipboardVisit
+
+        // 手动粘贴回退：链接变化后自动算码，仍不要求用户手输。
+        wizard.updateRelayLink(first.toUri())
+        assertEquals(RemotePairingCode.of(first), wizard.state.value.draft.pairingCode)
+
+        assertFalse(wizard.applyClipboardPairing(second.toUri(), visit))
+        assertEquals(first.toUri(), wizard.state.value.draft.relayUri)
+        assertEquals(PairingClipboardStatus.KEPT_EXISTING, wizard.state.value.clipboardStatus)
+        assertEquals(second.toUri(), wizard.state.value.pendingClipboardLink)
+
+        // 用户显式选择后才替换，并重新计算码。
+        assertTrue(wizard.usePendingClipboardLink())
+        assertEquals(second.toUri(), wizard.state.value.draft.relayUri)
+        assertEquals(RemotePairingCode.of(second), wizard.state.value.draft.pairingCode)
+        assertEquals("", wizard.state.value.pendingClipboardLink)
+    }
+
+    @Test
+    fun clipboardNonLinkContentAndInvalidLinkKeepPasteFallback() {
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        assertTrue(wizard.next())
+        val visit = wizard.state.value.clipboardVisit
+
+        assertFalse(wizard.applyClipboardPairing(null, visit))
+        assertEquals(PairingClipboardStatus.EMPTY, wizard.state.value.clipboardStatus)
+        assertEquals("", wizard.state.value.draft.relayUri)
+
+        assertFalse(wizard.applyClipboardPairing("https://example.test/not-a-pairing", visit))
+        assertEquals(PairingClipboardStatus.NOT_A_LINK, wizard.state.value.clipboardStatus)
+        assertEquals("", wizard.state.value.draft.relayUri)
+        assertTrue(wizard.state.value.clipboardMessage.contains("手动粘贴"))
+
+        // 确实是 tanuki-relay:// 但字段缺失：填入原文、给出字段错误，并保留修改入口。
+        val malformed = "tanuki-relay://v1?relay=relay.example.test%3A8443"
+        assertFalse(wizard.applyClipboardPairing(malformed, visit))
+        assertEquals(PairingClipboardStatus.INVALID_LINK, wizard.state.value.clipboardStatus)
+        assertEquals(malformed, wizard.state.value.draft.relayUri)
+        assertNull(wizard.state.value.pairingPreview)
+        assertNotNull(wizard.state.value.fieldErrors[RemoteWizardField.RELAY_LINK])
+        assertFalse(wizard.next())
+    }
+
+    @Test
+    fun pairingCodeIsOptionalButMismatchedManualCodeExplainsAutoValue() {
+        val pairing = pairingForWizard()
+        val wizard = RemoteHostWizard()
+        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        assertTrue(wizard.next())
+        wizard.updateRelayLink(pairing.toUri())
+        wizard.updateDraft { it.copy(user = "tanuki") }
+
+        // 自动算出的码已足够推进；确认页在认证之前。
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.PAIRING_CONFIRM, wizard.state.value.step)
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
+
+        // 回退：用户从别处拿到码时可在校对框比对；不一致时给出自动值和修正入口。
+        wizard.back()
+        assertEquals(RemoteWizardStep.PAIRING_CONFIRM, wizard.state.value.step)
+        assertTrue(wizard.back())
+        assertEquals(RemoteWizardStep.HOST_ACCOUNT, wizard.state.value.step)
+        val expected = RemotePairingCode.of(pairing)
+        val wrong = if (expected == "999999") "000000" else "999999"
+        wizard.updateDraft { it.copy(pairingCode = wrong) }
+        assertFalse(wizard.next())
+        val error = wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE].orEmpty()
+        assertTrue(error.contains(expected))
+        assertTrue(error.contains("填入自动码"))
+
+        assertTrue(wizard.fillAutoPairingCode())
+        assertEquals(expected, wizard.state.value.draft.pairingCode)
+        assertTrue(wizard.next())
+        assertEquals(RemoteWizardStep.PAIRING_CONFIRM, wizard.state.value.step)
+    }
+
+    @Test
+    fun pairingStepsIncludeConfirmationOnlyForRelayMethod() {
+        val pairingWizard = RemoteHostWizard()
+        pairingWizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+        assertEquals(7, pairingWizard.state.value.stepTotal)
+        assertTrue(pairingWizard.state.value.steps.contains(RemoteWizardStep.PAIRING_CONFIRM))
+        assertEquals(
+            listOf(
+                RemoteWizardStep.METHOD,
+                RemoteWizardStep.HOST_ACCOUNT,
+                RemoteWizardStep.PAIRING_CONFIRM,
+                RemoteWizardStep.AUTHENTICATION,
+                RemoteWizardStep.FINGERPRINT,
+                RemoteWizardStep.TEST,
+                RemoteWizardStep.DONE
+            ),
+            pairingWizard.state.value.steps
+        )
+        assertEquals("读取配对链接", RemoteWizardStep.HOST_ACCOUNT.titleFor(RemoteConnectionMethod.PAIRING_LINK))
+        assertEquals("填写主机与账号", RemoteWizardStep.HOST_ACCOUNT.titleFor(RemoteConnectionMethod.DIRECT_SSH))
+
+        val directWizard = RemoteHostWizard()
+        directWizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
+        assertFalse(directWizard.state.value.steps.contains(RemoteWizardStep.PAIRING_CONFIRM))
+        assertEquals(6, directWizard.state.value.stepTotal)
+    }
+
+    @Test
+    fun relayFailureGuidanceCoversExpiryPinMismatchOfflineAndUnreachablePort() {
+        val expired = RemoteConnectionErrors.from(
+            RemoteRelayException(RelayFailureKind.EXPIRED, "synthetic"),
+            RemoteConnectionStage.TCP
+        )
+        assertEquals(RemoteFailureKind.RELAY, expired.kind)
+        assertTrue(expired.reason.contains("过期"))
+        assertTrue(expired.suggestion.contains("重新生成"))
+        assertFalse(expired.retryable)
+        assertEquals(RelayFailureKind.EXPIRED, RelayErrors.fromCode("expired").kind)
+
+        val missing = RemoteConnectionErrors.from(RelayErrors.fromCode("room_not_found"), RemoteConnectionStage.TCP)
+        assertTrue(missing.reason.contains("找不到"))
+        assertTrue(missing.suggestion.contains("重新生成"))
+
+        val offline = RemoteConnectionErrors.from(RelayErrors.fromCode("host_offline"), RemoteConnectionStage.TCP)
+        assertTrue(offline.reason.contains("电脑端"))
+        assertTrue(offline.suggestion.contains("电脑"))
+        assertTrue(offline.retryable)
+
+        val pin = RemoteConnectionErrors.from(
+            RemoteRelayException(RelayFailureKind.PIN_MISMATCH, "中继证书指纹不匹配，已拒绝连接"),
+            RemoteConnectionStage.TCP
+        )
+        assertTrue(pin.reason.contains("证书"))
+        assertTrue(pin.reason.contains("不一致"))
+        assertTrue(pin.suggestion.contains("重新"))
+        assertTrue(pin.suggestion.contains("中继"))
+        assertFalse(pin.retryable)
+        assertFalse(pin.message.contains("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"))
+
+        val unreachable = RemoteConnectionErrors.from(
+            RemoteRelayException(RelayFailureKind.NETWORK, "无法连接中继"),
+            RemoteConnectionStage.TCP
+        )
+        assertTrue(unreachable.reason.contains("端口"))
+        assertTrue(unreachable.suggestion.contains("网络"))
+        assertTrue(unreachable.retryable)
+
+        // 五类失败都要有中文原因和可执行下一步，不能只有一句“连接失败”。
+        listOf(
+            RelayFailureKind.EXPIRED,
+            RelayFailureKind.ROOM_NOT_FOUND,
+            RelayFailureKind.HOST_OFFLINE,
+            RelayFailureKind.PIN_MISMATCH,
+            RelayFailureKind.NETWORK
+        ).forEach { kind ->
+            val advice = RemotePairingGuidance.of(kind)
+            assertTrue(advice.reason.isNotBlank())
+            assertTrue(advice.suggestion.contains("重") || advice.suggestion.contains("确认"))
+        }
+    }
+
+    @Test
     fun relayLinkValidationAcceptsGeneratedLinkAndRejectsMalformed() {
         val pairing = RemoteRelayPairing(
             relayHost = "relay.example.test",
@@ -332,7 +553,7 @@ class RemoteWizardTest {
     }
 
     @Test
-    fun pairingCodeMatchesSharedPythonVector() {
+    fun pairingCodeMatchesSharedVector() {
         val uri = "tanuki-relay://v1?relay=relay.example.test%3A8443" +
             "&room=ICEiIyQlJicoKSorLC0uLw" +
             "&token=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" +
@@ -341,33 +562,6 @@ class RemoteWizardTest {
         assertNull(RemotePairingCode.validate("308002"))
         assertNotNull(RemotePairingCode.validate("12345"))
         assertNotNull(RemotePairingCode.validate("12345a"))
-    }
-
-    @Test
-    fun pairingRequiresMatchingSixDigitCode() {
-        val pairing = RemoteRelayPairing(
-            relayHost = "relay.example.test",
-            relayPort = 8443,
-            roomId = "ICEiIyQlJicoKSorLC0uLw",
-            token = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-            hostId = "303132333435363738393a3b3c3d3e3f"
-        )
-        val wizard = RemoteHostWizard()
-        wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
-        wizard.next()
-        wizard.updateDraft { it.copy(relayUri = pairing.toUri(), user = "tanuki") }
-        assertFalse(wizard.next())
-        assertNotNull(wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE])
-
-        wizard.updateDraft { it.copy(pairingCode = "000000") }
-        assertFalse(wizard.next())
-        assertTrue(
-            wizard.state.value.fieldErrors[RemoteWizardField.PAIRING_CODE].orEmpty().contains("不一致")
-        )
-
-        wizard.updateDraft { it.copy(pairingCode = RemotePairingCode.of(pairing)) }
-        assertTrue(wizard.next())
-        assertEquals(RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
     }
 
     @Test

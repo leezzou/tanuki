@@ -326,6 +326,17 @@ object RelayTlsPin {
         val actual = MessageDigest.getInstance("SHA-256").digest(certificateDer)
         return MessageDigest.isEqual(expected, actual)
     }
+
+    /**
+     * 确认页用的缩略指纹：保留前缀和末尾各一段，中间用省略号。
+     *
+     * 缩略只用于界面排版；展开后仍展示完整值，复制/核对时不能依赖缩略文本。
+     */
+    fun abbreviate(pin: String, head: Int = 16, tail: Int = 8): String {
+        val text = pin.trim()
+        if (text.length <= head + tail + 1) return text
+        return text.take(head) + "…" + text.takeLast(tail)
+    }
 }
 
 enum class RelayFailureKind {
@@ -334,6 +345,8 @@ enum class RelayFailureKind {
     PIN_MISMATCH,
     AUTH,
     ROOM_NOT_FOUND,
+    /** 房间曾经存在但已超过中继 TTL；与“从未存在”分开，方便给出重新生成链接的建议。 */
+    EXPIRED,
     ROOM_BUSY,
     HOST_OFFLINE,
     PROTOCOL,
@@ -385,11 +398,11 @@ object RelayErrors {
     fun fromCode(code: String): RemoteRelayException = when (code) {
         "room_not_found" -> RemoteRelayException(
             RelayFailureKind.ROOM_NOT_FOUND,
-            "配对房间不存在或已过期；请在主机端重新生成配对链接"
+            "中继上找不到这个配对房间；请确认链接来自电脑上正在运行的那次配对"
         )
         "bad_token" -> RemoteRelayException(
             RelayFailureKind.AUTH,
-            "配对密钥不正确；请重新扫描主机端配对链接"
+            "配对密钥不正确；请重新复制电脑上的配对链接"
         )
         "room_busy" -> RemoteRelayException(
             RelayFailureKind.ROOM_BUSY,
@@ -397,15 +410,15 @@ object RelayErrors {
         )
         "host_offline" -> RemoteRelayException(
             RelayFailureKind.HOST_OFFLINE,
-            "主机端当前未连接到中继；请确认主机端 agent 仍在运行"
+            "电脑端当前未连接到中继；请确认电脑上的远程连接服务仍在运行"
         )
         "host_timeout" -> RemoteRelayException(
             RelayFailureKind.HOST_OFFLINE,
-            "主机端连接本地 SSH 超时；请确认远程主机 sshd 已启动"
+            "电脑连接本机 SSH 超时；请确认远程电脑的 sshd 已启动"
         )
         "expired" -> RemoteRelayException(
-            RelayFailureKind.ROOM_NOT_FOUND,
-            "配对房间已过期；请在主机端重新生成配对链接"
+            RelayFailureKind.EXPIRED,
+            "配对链接已过期；请在电脑上重新生成后再复制"
         )
         "too_large" -> RemoteRelayException(RelayFailureKind.PROTOCOL, "中继控制帧过大")
         "protocol" -> RemoteRelayException(RelayFailureKind.PROTOCOL, "中继协议错误")
