@@ -186,7 +186,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 |---|---|---|---|
 | `TanukiDesign.kt` 根主题 | `TanukiTheme` 直接委托 `TanukiDesignTheme`，只保留一套颜色来源；`tanukiColorScheme(dark)` 也读同一调色板，供浏览器悬浮层等原生 View 使用 | `TanukiDesignTheme`、`TanukiColorTokens`、`TanukiShapeTokens` | 深浅色跟随系统；不嵌套两套主题；`TanukiSpacing` 仅保留为兼容入口 |
 | `WorkspaceFilesPage.kt` | 位置选择器/行/权限 chip/传输胶囊/三态/弹层按钮 | `TanukiPillButton`、`TanukiStatusChip`、`TanukiStatusDot`、`TanukiGlassPill`、`TanukiPathText`、`TanukiStateView`、`TanukiShapeTokens` | 文件行长按多选、菜单项文案、传输取消/无障碍描述不变；未授权页主操作仍调用原回调 |
-| `DshSessionManagerPage.kt` | 列表行、分组头、筛选条、选择条、批量进度、消息搜索、横幅、三态、新建/重命名/归档/批量/完全权限弹层、详情内容 | `TanukiPressable`、`TanukiStatusChip`、`TanukiPillButton`、`TanukiBottomSheet`、`TanukiStateView`、`TanukiShapeTokens` | 筛选/搜索/分页/归档/权限协议不变；会话详情仍用系统 `ModalBottomSheet` 以保留拖拽、返回键和输入法行为 |
+| `DshSessionManagerPage.kt` | 列表行、分组头、筛选条、选择条、批量进度、消息搜索、横幅、三态、新建/批量弹层、详情内容 | `TanukiPressable`、`TanukiStatusChip`、`TanukiPillButton`、`TanukiBottomSheet`、`TanukiStateView`、`TanukiShapeTokens` | 筛选/搜索/分页/归档/权限协议不变；详情仍用系统 `ModalBottomSheet`（保留拖拽/返回键/输入法）；从详情发起的重命名/归档/完全权限必须用窗口级 `AlertDialog`，见下 |
 | `TanukiUi.kt` 设置段 | 分区标题与卡片、动作行、只读行、开关、折叠面板、分类入口 | `TanukiShapeTokens`、`TanukiSpace`、`TanukiExpandVisibility`、`tanukiDisabledContentColor`、`TanukiMotion` | 回调、禁用条件和文案不变；概览/组件页共用的 `Caption`/`StatusPill` 未改 |
 | `TanukiMotion.kt` | 入场、折叠面板、状态切换、按压反馈统一读令牌 | `tanukiMotionMs`、`tanukiEnter`、`TanukiExpandVisibility`、`TanukiPressable` | 系统“移除动画”时时长为 0；循环动画保持静态 |
 
@@ -211,6 +211,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 动效·面板 | `AnimatedVisibility` 默认弹簧 | `TanukiExpandVisibility` + `TanukiMotion.expand` | 300ms；移除动画时 0 |
 | 动效·状态切换 | 无/默认 | `Crossfade` + `TanukiMotion.toggle` | 160ms；移除动画时 0 |
 | 动效·按压 | Material 默认 | `TanukiPressable` + `TanukiMotion.pressIn` | 100ms |
+| 详情内二级确认 | 页面内 `TanukiBottomSheet` | 窗口级 `AlertDialog`（重命名/归档/完全权限） | 详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `Box` 会被遮住（PR #70 评审 P1） |
 
 ### 8.2 截图自查清单（静态核对，设备未验证）
 
@@ -219,7 +220,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 页面 | 深色 | 浅色 | 1.3x/2x 大字体 | 360dp 窄屏 | 说明 |
 |---|---|---|---|---|---|
 | 文件页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 权限 chip 宽度上限 76dp，360dp 下头部按 48×4 图标 + 76dp chip 计算仍可容纳；320dp 可能只剩图标 |
-| 会话管理页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 筛选条与行内标签横向滚动；弹层动作 1.3x 起改整行按钮 |
+| 会话管理页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 筛选条与行内标签横向滚动；列表层弹层动作 1.3x 起改整行按钮；详情内二级确认使用窗口级 Dialog |
 | 设置页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 行高 ≥56dp，说明文字换行；只读行的长值在 2x 字体下会换行而非截断；开关触控区由 Material 组件保证 |
 | 根主题/原生悬浮层 | 静态通过，设备未验证 | 静态通过，设备未验证 | 不适用 | 不适用 | `tanukiColorScheme(dark)` 与 Compose 主题同源；对比度由 JVM 审计 |
 

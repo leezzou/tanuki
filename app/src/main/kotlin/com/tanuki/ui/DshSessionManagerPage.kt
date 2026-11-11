@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -429,8 +430,10 @@ fun DshSessionManagerPage(
         )
     }
 
-    // 六个确认/编辑弹层统一使用设计令牌的底部弹层；可见性由 visible 驱动，
-    // 这样展开和收起都走 240-340ms 的结构动效，系统移除动画时立即完成。
+    // 列表层发起的弹层（新建、批量归档、批量上限）使用页面内 TanukiBottomSheet，
+    // 展开/收起走 240-340ms 结构动效；从详情窗口发起的三条二级确认（重命名、
+    // 归档、完全权限）必须用窗口级 AlertDialog：详情是 Material3 ModalBottomSheet
+    // 的独立窗口，页面内 Box 会被它盖住（PR #70 评审 P1）。
     TanukiBottomSheet(
         visible = createDialog,
         onDismissRequest = { if (!state.busy) createDialog = false },
@@ -461,63 +464,80 @@ fun DshSessionManagerPage(
         )
     }
 
-    TanukiBottomSheet(
-        visible = renameTarget != null,
-        onDismissRequest = { if (!state.busy) renameTarget = null },
-        title = "重命名会话",
-        subtitle = "最多 200 字；保存后以官方返回的标题为准。",
-        modifier = Modifier.imePadding(),
-    ) {
-        OutlinedTextField(
-            value = renameTitle,
-            onValueChange = { renameTitle = it.take(200) },
-            label = { Text("新标题") },
-            singleLine = true,
-            shape = TanukiShapeTokens.control,
-            modifier = Modifier.fillMaxWidth()
-        )
-        SheetActions(
-            secondary = "取消",
-            onSecondary = { renameTarget = null },
-            secondaryEnabled = !state.busy,
-            primary = "保存",
-            onPrimary = {
-                val title = renameTitle.trim()
-                val target = renameTarget
-                renameTarget = null
-                if (target != null) controller.renameSession(target.id, title)
+    renameTarget?.let { target ->
+        // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
+        AlertDialog(
+            onDismissRequest = { if (!state.busy) renameTarget = null },
+            title = { Text("重命名会话") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
+                    OutlinedTextField(
+                        value = renameTitle,
+                        onValueChange = { renameTitle = it.take(200) },
+                        label = { Text("新标题") },
+                        singleLine = true,
+                        shape = TanukiShapeTokens.control,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("最多 200 字；保存后以官方返回的标题为准。", style = MaterialTheme.typography.bodySmall)
+                }
             },
-            primaryEnabled = !state.busy && renameTitle.isNotBlank(),
+            dismissButton = {
+                TanukiPillButton(
+                    text = "取消",
+                    onClick = { renameTarget = null },
+                    enabled = !state.busy,
+                    tone = TanukiPillButtonTone.Ghost,
+                )
+            },
+            confirmButton = {
+                TanukiPillButton(
+                    text = "保存",
+                    onClick = {
+                        val title = renameTitle.trim()
+                        renameTarget = null
+                        controller.renameSession(target.id, title)
+                    },
+                    enabled = !state.busy && renameTitle.isNotBlank(),
+                    tone = TanukiPillButtonTone.Filled,
+                )
+            },
         )
     }
 
-    val archiveShown = rememberLastNonNull(archiveTarget)
-    TanukiBottomSheet(
-        visible = archiveTarget != null,
-        onDismissRequest = { archiveTarget = null },
-        title = "归档会话",
-    ) {
-        archiveShown?.let { target ->
-            Text(
-                if (target.running) {
-                    "该会话正在运行。归档会请求官方停止当前回合、子代理、后台任务与提醒，然后提交归档；会话会从原生列表移除，项目文件不会删除。本页不提供撤销按钮，请确认后继续。"
-                } else {
-                    "归档后该会话会从原生列表移除，项目文件不会删除。官方接口当前没有会话硬删除端点，本页不提供删除，也不提供撤销按钮；请确认后继续。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-            SheetActions(
-                secondary = "取消",
-                onSecondary = { archiveTarget = null },
-                primary = if (target.running) "停止并归档" else "归档",
-                primaryTone = TanukiPillButtonTone.Danger,
-                onPrimary = {
-                    val stop = target.running
-                    archiveTarget = null
-                    controller.archiveSession(target.id, stopActivity = stop)
-                },
-            )
-        }
+    archiveTarget?.let { target ->
+        // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
+        AlertDialog(
+            onDismissRequest = { archiveTarget = null },
+            title = { Text("归档会话") },
+            text = {
+                Text(
+                    if (target.running) {
+                        "该会话正在运行。归档会请求官方停止当前回合、子代理、后台任务与提醒，然后提交归档；会话会从原生列表移除，项目文件不会删除。本页不提供撤销按钮，请确认后继续。"
+                    } else {
+                        "归档后该会话会从原生列表移除，项目文件不会删除。官方接口当前没有会话硬删除端点，本页不提供删除，也不提供撤销按钮；请确认后继续。"
+                    }
+                )
+            },
+            dismissButton = {
+                TanukiPillButton(
+                    text = "取消",
+                    onClick = { archiveTarget = null },
+                    tone = TanukiPillButtonTone.Ghost,
+                )
+            },
+            confirmButton = {
+                TanukiPillButton(
+                    text = if (target.running) "停止并归档" else "归档",
+                    onClick = {
+                        val stop = target.running
+                        archiveTarget = null
+                        controller.archiveSession(target.id, stopActivity = stop)
+                    },
+                    tone = TanukiPillButtonTone.Danger,
+                )
+            },
+        )
     }
 
     val batchTargets = rememberLastNonNull(selectedIdSet.toList().ifEmpty { null })
@@ -573,58 +593,66 @@ fun DshSessionManagerPage(
         )
     }
 
-    val fullAccessShown = rememberLastNonNull(fullAccess)
-    TanukiBottomSheet(
-        visible = fullAccess != null,
-        onDismissRequest = { fullAccess = null },
-        title = "完全权限二次确认",
-    ) {
-        fullAccessShown?.let { (sessionId, preset) ->
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
-            ) {
-                Text(
-                    "你正在把会话切到完全权限。这是高于“工作区写入”的第二档风险，请逐条确认后果：",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                DshPermissionPresentation.fullAccessRisks().forEach { risk ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
-                        Text("•", style = MaterialTheme.typography.bodySmall)
-                        Text(risk, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp).clickable {
-                        fullAccessAcknowledged = !fullAccessAcknowledged
-                    },
-                    verticalAlignment = Alignment.CenterVertically
+    fullAccess?.let { (sessionId, preset) ->
+        // 从权限详情页发起，必须使用窗口级 Dialog，才能画在详情之上。
+        AlertDialog(
+            onDismissRequest = { fullAccess = null },
+            icon = { Icon(Icons.Default.Warning, null) },
+            title = { Text("完全权限二次确认") },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
                 ) {
-                    Checkbox(
-                        checked = fullAccessAcknowledged,
-                        onCheckedChange = null
+                    Text(
+                        "你正在把会话切到完全权限。这是高于“工作区写入”的第二档风险，请逐条确认后果：",
+                        style = MaterialTheme.typography.bodySmall,
                     )
-                    Text("我已阅读并理解上述风险，仍要切换", style = MaterialTheme.typography.bodySmall)
+                    DshPermissionPresentation.fullAccessRisks().forEach { risk ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
+                            Text("•", style = MaterialTheme.typography.bodySmall)
+                            Text(risk, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp).clickable {
+                            fullAccessAcknowledged = !fullAccessAcknowledged
+                        },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = fullAccessAcknowledged,
+                            onCheckedChange = null
+                        )
+                        Text("我已阅读并理解上述风险，仍要切换", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(
+                        "Tanuki 不会自动切换该模式；切换通过官方 /permission 命令提交。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                Text(
-                    "Tanuki 不会自动切换该模式；切换通过官方 /permission 命令提交。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            dismissButton = {
+                TanukiPillButton(
+                    text = "保持当前权限",
+                    onClick = { fullAccess = null },
+                    tone = TanukiPillButtonTone.Ghost,
                 )
-            }
-            SheetActions(
-                secondary = "保持当前权限",
-                onSecondary = { fullAccess = null },
-                primary = "仍要切换为完全权限",
-                primaryTone = TanukiPillButtonTone.Danger,
-                onPrimary = {
-                    val acknowledged = fullAccessAcknowledged
-                    fullAccess = null
-                    if (acknowledged) controller.selectPermission(sessionId, preset, allowFullAccess = true)
-                },
-                primaryEnabled = fullAccessAcknowledged && !state.busy,
-            )
-        }
+            },
+            confirmButton = {
+                TanukiPillButton(
+                    text = "仍要切换为完全权限",
+                    onClick = {
+                        val acknowledged = fullAccessAcknowledged
+                        fullAccess = null
+                        if (acknowledged) controller.selectPermission(sessionId, preset, allowFullAccess = true)
+                    },
+                    enabled = fullAccessAcknowledged && !state.busy,
+                    tone = TanukiPillButtonTone.Danger,
+                )
+            },
+        )
     }
 
     if (session != null) {

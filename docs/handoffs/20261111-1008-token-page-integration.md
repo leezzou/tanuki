@@ -31,12 +31,13 @@
 | `app/src/main/kotlin/com/tanuki/ui/TanukiStateViews.kt` | `TanukiStateView` 增加可选 `title`、`secondaryActionLabel`/`onSecondaryAction`，供页面复用三态并保留“刷新列表”等次操作 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiPageVisuals.kt` | 新增纯映射：文件空态文案、权限语气、大小/传输文案、会话状态标签语气与呼吸 |
 | `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt` | 位置选择器/行高/权限 chip/传输胶囊/三态/弹层主按钮改用令牌与基础组件；空态按搜索/隐藏文件/空目录给不同动作 |
-| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 列表行改 `TanukiPressable` + 56dp；分组头、筛选条、选择条、批量进度、消息搜索、横幅、三态改用令牌；六个 `AlertDialog` 改为 `TanukiBottomSheet`；状态切换用 `Crossfade` 令牌；大字体时弹层按钮改为整行 |
+| `app/src/main/kotlin/com/tanuki/ui/DshSessionManagerPage.kt` | 列表行改 `TanukiPressable` + 56dp；分组头、筛选条、选择条、批量进度、消息搜索、横幅、三态改用令牌；列表层的新建/批量归档/批量上限改用 `TanukiBottomSheet`，详情层发起的重命名/归档/完全权限保留窗口级 `AlertDialog`；状态切换用 `Crossfade` 令牌；大字体时弹层按钮改为整行 |
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置分区标题/卡片、动作行、只读行、开关、折叠面板、分类入口改用令牌；折叠箭头与内容动效走令牌 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt` | 通用 `Shapes.large` 从“只有上圆角”改为 28dp 全圆角（弹层继续用 `TanukiSheetShape`）；新增 `tanukiDesignColorScheme(dark)` 供原生 View 使用 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiComponents.kt` | `TanukiStatusChip` 增加可选 `contentDescription`，保留“权限：…，点击管理”朗读 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 增加可选 `heightFraction`，短确认框仍按内容包裹 |
 | `app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt` | 新增 12 项 JVM 回归：行高/间距/动效/字体令牌、状态 chip 与卡片文字对比度、大小与空态文案、权限/会话语气映射 |
+| `app/src/androidTest/kotlin/com/tanuki/SessionManagerDetailDialogTest.kt` | 新增设备回归（仅编译，未运行）：从详情进入重命名/归档/完全权限，验证确认层出现在详情之上、取消与返回只关闭确认层 |
 | `docs/DESIGN-TOKENS.md` | 更新为“令牌 + 接入结果”：接入表、令牌映射表、未接入清单、本轮验证与未验证 |
 | `docs/handoffs/20261111-1008-token-page-integration.md` | 本次唯一交接记录 |
 
@@ -52,19 +53,21 @@
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime` | 通过：0 errors / 103 warnings / 1 hint | 改动文件没有新增告警；`ModifierParameter` 等来自既有 `TanukiIcon` 等位置 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | 通过（重跑） | 首次全量运行时该用例出现一次 `expected:<8> but was:<9>` 时序失败；未改该模块，单类重跑通过，记录为既有 flaky |
 | 静态自查：深色/浅色/大字体/窄屏 | 仅源码与令牌层面核对，逐页矩阵见 `docs/DESIGN-TOKENS.md` 8.2 | 未在设备/模拟器渲染；不能计为设备通过 |
-| GitHub Actions PR #70 | `Host scripts and handoff checks`、`Android build, JVM tests and lint` 在推送 head 上通过 | 以 PR 页面当前 head 的检查为准；docs 提交后需复跑 |
+| `./gradlew -PtestBuildType=debug :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` | 通过 | 新增仪器用例仅编译；无设备未运行 |
+| GitHub Actions PR #70 | `Host scripts and handoff checks`、`Android build, JVM tests and lint` 在推送 head 上通过 | 以 PR 页面当前 head 的检查为准；新提交后需复跑 |
 
 - 哪些是前一轮结果，哪些是本次新验证：PR #59 的 19 项设计令牌测试与 952 tests 为历史；本轮新增 12 项页面映射测试，并重跑完整 JVM 与 lint。
 - 未测试、超时、失败和暂未复现的情况：见下节；设备未授权。
 
 ## 未完成与暂停项
 
-- 未完成：设备/模拟器逐页截图对照（深色、浅色、1.3x/2x 大字体、360dp 窄屏）与 TalkBack/输入法实测；Android 仪器测试未执行。
+- 未完成：设备/模拟器逐页截图对照（深色、浅色、1.3x/2x 大字体、360dp 窄屏）与 TalkBack/输入法实测；新增的 `SessionManagerDetailDialogTest` 只编译未运行。
 - 外部阻塞：设备由独立 QA 独占，本 worker 不安装、不操作设备。
 - 用户暂停：合并、发布、tag/Release；API Key 保存；真实模型/账号验收。
 - 已知风险：
   - 聊天页与浏览器页通过根主题继承新调色板（未改其源码），其视觉会随主题变化，需要各自的 owner 在设备上确认。
   - 会话详情仍使用系统 `ModalBottomSheet`：拖拽/返回键/输入法行为保留，动画时长由平台决定（300ms，落在令牌 240–340ms 区间），不能由令牌置零。
+  - 因此从详情发起的三条二级确认必须用窗口级 `AlertDialog`；不能用页面内 `TanukiBottomSheet`，否则会被详情窗口遮住（PR #70 评审 P1 已修复）。
   - 文件页头部在 320dp 极窄屏下位置选择器可能只剩图标宽度；360dp 下按静态计算可容纳。
   - 大字体下会话行会变高；弹层动作按钮在 1.3x 起改为整行，避免省略号截断。
 
