@@ -57,6 +57,11 @@ import com.tanuki.ui.TanukiUiCallbacks
 import com.tanuki.ui.TanukiUiModel
 import com.tanuki.notify.ChatNotificationPreferences
 import com.tanuki.notify.ChatNotifier
+import com.tanuki.onboarding.OnboardingController
+import com.tanuki.onboarding.OnboardingFinish
+import com.tanuki.onboarding.OnboardingPermissionAction
+import com.tanuki.onboarding.OnboardingPermissionNeed
+import com.tanuki.onboarding.OnboardingPermissions
 import com.tanuki.update.Release
 import com.tanuki.web.ChatNotificationDecision
 import com.tanuki.web.ChatNotificationRoute
@@ -97,6 +102,7 @@ class MainActivity : ComponentActivity() {
     private var overlayPermissionPrompt by mutableStateOf(false)
     private var browserOpenRequest by mutableIntStateOf(0)
     private var dshOpenRequest by mutableIntStateOf(0)
+    private var remoteOpenRequest by mutableIntStateOf(0)
     private var pendingChatSession by mutableStateOf<String?>(null)
     private var activityResumed = false
     private var dshTabVisible = false
@@ -285,8 +291,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun action(name: String, version: String? = null) {
-        if ((name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM", "RECOVERY_TRIAL", "RECOVERY_SAFE") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+    fun action(name: String, version: String? = null, requestNotifications: Boolean = true) {
+        if (requestNotifications && (name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM", "RECOVERY_TRIAL", "RECOVERY_SAFE") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         startForegroundService(Intent(this, RuntimeService::class.java).setAction(name).apply { version?.let { putExtra("version",it) } })
@@ -367,6 +373,19 @@ class MainActivity : ComponentActivity() {
                         )
                     )
                 }
+                // 首次启动引导：升级安装不算新用户，避免更新后被整套引导拦住。
+                val upgradedInstall = remember {
+                    runCatching {
+                        val info = packageManager.getPackageInfo(packageName, 0)
+                        info.lastUpdateTime - info.firstInstallTime > 60_000L
+                    }.getOrDefault(false)
+                }
+                // 首次启动引导：在首帧前读取本地记录，只有首次启动或未完成首次流程会自动展开；
+                // 跳过和版本提示只留在首页提示条，不重复整套引导。
+                val onboarding = remember {
+                    OnboardingController(applicationContext, BuildConfig.VERSION_NAME, upgradedInstall)
+                }
+                val onboardingPresentation = onboarding.presentation(nativeUiMode.isNative)
                 var nativeFallback by remember { mutableStateOf<String?>(null) }
                 var nativeChatRequest by remember { mutableStateOf<String?>(null) }
                 val nativeEndpointProvider: () -> DshEndpoint? = {
@@ -499,7 +518,8 @@ class MainActivity : ComponentActivity() {
                         cookieReady=manager.cookieReady(),
                         chatNotifications=chatStatus,
                         nativeDshPreferred=nativeUiMode.isNative,nativeDshFallback=nativeFallback,
-                        deviceCondition=deviceCondition),
+                        deviceCondition=deviceCondition,
+                        onboarding=onboardingPresentation),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
                             when (command) {
@@ -607,7 +627,38 @@ class MainActivity : ComponentActivity() {
                         retryNativeDsh = {
                             nativeFallback = null
                             if (nativeUiMode.isNative && s.service == ServiceState.RUNNING) nativeController.refresh()
-                        }
+                        },
+                        onboardingContinue = onboarding::advance,
+                        onboardingBack = onboarding::back,
+                        onboardingSkip = onboarding::skip,
+                        onboardingPrepare = {
+                            // 只有真正开始准备时才申请通知权限，用于前台安装进度；拒绝不阻止安装。
+                            val need = OnboardingPermissions.needed(
+                                action = OnboardingPermissionAction.PREPARE_ENVIRONMENT,
+                                sdkInt = android.os.Build.VERSION.SDK_INT,
+                                notificationsGranted = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                                    android.content.pm.PackageManager.PERMISSION_GRANTED,
+                                storageGranted = PhoneStorageAccess.isGranted(this@MainActivity),
+                            )
+                            if (need == OnboardingPermissionNeed.NOTIFICATIONS) {
+                                notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                            action("INIT", requestNotifications = false)
+                        },
+                        onboardingCancelPrepare = { manager.cancel(); updates.cancel() },
+                        onboardingRefreshDevice = onboarding::refreshDevice,
+                        onboardingSelectInterface = ::setNativePreference,
+                        onboardingComplete = { finish ->
+                            onboarding.complete()
+                            when (finish) {
+                                OnboardingFinish.FIRST_MESSAGE -> dshOpenRequest += 1
+                                OnboardingFinish.REMOTE -> remoteOpenRequest += 1
+                                OnboardingFinish.HOME -> Unit
+                            }
+                        },
+                        onboardingOpen = { onboarding.open() },
+                        onboardingDismissBanner = onboarding::dismissBanner,
+                        onboardingDismissUpgrade = onboarding::dismissUpgradeNotice
                     ),
                     browserView = browser.view,
                     nativeDshPage = { modifier ->
@@ -631,6 +682,7 @@ class MainActivity : ComponentActivity() {
                     browserOpenRequest = browserOpenRequest,
                     dshOpenRequest = dshOpenRequest,
                     filesOpenRequest = filesOpenRequest,
+                    remoteOpenRequest = remoteOpenRequest,
                     browserControl = browserControl,
                     filesPage = { modifier, bottomInset ->
                         val descriptor = externalDescriptor

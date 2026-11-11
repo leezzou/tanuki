@@ -6,4 +6,4 @@
 
 项目处于早期开发阶段。当前开发候选为 0.1.12（workspacecheck，versionCode 14），尚未发布。
 
-[使用与构建](docs/AGENT-QUICKSTART.md) · [GPL-3.0-or-later](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES)
+[使用与构建](docs/AGENT-QUICKSTART.md) · [首次启动引导](docs/ONBOARDING.md) · [GPL-3.0-or-later](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES)
