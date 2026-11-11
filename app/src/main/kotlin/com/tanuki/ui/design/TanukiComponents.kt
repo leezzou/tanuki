@@ -236,6 +236,7 @@ internal fun TanukiStatusChip(
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     pulse: Boolean = false,
+    contentDescription: String? = null,
 ) {
     val tokens = TanukiDesign.tokens
     val role = tokens.colors.statusColors(tone)
@@ -244,6 +245,15 @@ internal fun TanukiStatusChip(
         .heightIn(min = if (onClick != null) TanukiSpace.TOUCH_TARGET_MIN_DP.dp else 28.dp)
         .clip(TanukiShapeTokens.pill)
         .background(Color(role.container))
+        // 需要更完整说法（例如“权限：可写，点击管理”）时覆盖朗读内容；
+        // 不传时保留下面的可见标签，不产生额外语义节点。
+        .then(
+            if (contentDescription != null) {
+                Modifier.semantics { this.contentDescription = contentDescription }
+            } else {
+                Modifier
+            },
+        )
     val interactive = if (onClick != null) {
         base.clickable(
             enabled = enabled,

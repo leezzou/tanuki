@@ -1,6 +1,8 @@
 package com.tanuki.ui
 
 import android.widget.Toast
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -23,7 +25,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -41,12 +42,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,12 +73,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.Redact
+import com.tanuki.ui.design.TanukiBottomSheet
+import com.tanuki.ui.design.TanukiMotion as TanukiMotionTokens
+import com.tanuki.ui.design.TanukiPillButton
+import com.tanuki.ui.design.TanukiPillButtonTone
+import com.tanuki.ui.design.TanukiPressable
+import com.tanuki.ui.design.TanukiShapeTokens
+import com.tanuki.ui.design.TanukiSpace
+import com.tanuki.ui.design.TanukiStatusChip
+import com.tanuki.ui.design.TanukiStatusDot
+import com.tanuki.ui.design.TanukiStatusTone
 import com.tanuki.web.DshAdminSession
 import com.tanuki.web.DshCommand
 import com.tanuki.web.DshModelCatalog
@@ -94,6 +102,9 @@ import java.util.Locale
 
 /** 详情面板内部页面；同一时间只显示一层，返回键回到详情首页。 */
 private enum class DshDetailMode { DETAIL, MODELS, PERMISSIONS, CATALOG }
+
+/** 会话列表的顶层状态；用于在状态切换时使用统一的动效令牌。 */
+private enum class ManagerPhase { STOPPED, LOADING, ERROR, EMPTY, LIST }
 
 /** 会话详情内的分页；概览之外只展示已接入或明确不支持的能力。 */
 private enum class DshDetailTab(val label: String) {
@@ -213,14 +224,16 @@ fun DshSessionManagerPage(
         },
         floatingActionButton = {
             if (running && !state.readOnly) {
-                ExtendedFloatingActionButton(
+                // 主操作统一为胶囊按钮，不再混用 ExtendedFloatingActionButton。
+                TanukiPillButton(
+                    text = "新建会话",
                     onClick = {
                         createTitle = ""
                         controller.clearMessages()
                         createDialog = true
                     },
-                    icon = { Icon(Icons.Default.Add, null) },
-                    text = { Text("新建会话") }
+                    tone = TanukiPillButtonTone.Filled,
+                    leading = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) },
                 )
             }
         }
@@ -277,106 +290,125 @@ fun DshSessionManagerPage(
                 )
             }
             Box(Modifier.weight(1f)) {
-                when {
-                    !running -> ManagerEmpty(
-                        title = "DSH 未运行",
-                        detail = "会话管理复用当前 DSH 实例的 loopback 接口。请先在应用内启动 DSH，再回到这里读取官方会话。",
-                        action = null
-                    )
-                    state.loading && state.sessions.isEmpty() -> ManagerLoading()
-                    state.loadError != null && state.sessions.isEmpty() -> ManagerError(
-                        message = state.loadError.orEmpty(),
-                        onRetry = controller::refresh
-                    )
-                    state.sessions.isEmpty() -> ManagerEmpty(
-                        title = if (state.hasLoaded) "官方 DSH 尚无会话" else "尚未读取会话",
-                        detail = if (state.hasLoaded) {
-                            "原生页不另建会话库；新建会话会直接写入官方 DSH。"
-                        } else {
-                            "点击读取，从当前 DSH 实例拉取官方会话列表。"
-                        },
-                        action = when {
-                            !state.hasLoaded -> "读取会话"
-                            state.readOnly -> null
-                            else -> "新建会话"
-                        },
-                        onAction = {
-                            if (state.hasLoaded) createDialog = true else controller.refresh()
-                        },
-                        secondaryAction = if (state.hasLoaded) "刷新列表" else null,
-                        onSecondary = controller::refresh
-                    )
-                    else -> PullToRefreshBox(
-                        isRefreshing = state.refreshing,
-                        onRefresh = controller::refresh,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        LazyColumn(
-                            Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                // 状态切换（未运行/加载/错误/空/列表）走反馈令牌；移除动画时立即切换。
+                val phase = when {
+                    !running -> ManagerPhase.STOPPED
+                    state.loading && state.sessions.isEmpty() -> ManagerPhase.LOADING
+                    state.loadError != null && state.sessions.isEmpty() -> ManagerPhase.ERROR
+                    state.sessions.isEmpty() -> ManagerPhase.EMPTY
+                    else -> ManagerPhase.LIST
+                }
+                Crossfade(
+                    targetState = phase,
+                    animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
+                    label = "managerPhase",
+                ) { currentPhase ->
+                    when (currentPhase) {
+                        ManagerPhase.STOPPED -> ManagerEmpty(
+                            title = "DSH 未运行",
+                            detail = "会话管理复用当前 DSH 实例的 loopback 接口。请先在应用内启动 DSH，再回到这里读取官方会话。",
+                            action = null
+                        )
+                        ManagerPhase.LOADING -> ManagerLoading()
+                        ManagerPhase.ERROR -> ManagerError(
+                            message = state.loadError.orEmpty(),
+                            onRetry = controller::refresh
+                        )
+                        ManagerPhase.EMPTY -> ManagerEmpty(
+                            title = if (state.hasLoaded) "官方 DSH 尚无会话" else "尚未读取会话",
+                            detail = if (state.hasLoaded) {
+                                "原生页不另建会话库；新建会话会直接写入官方 DSH。"
+                            } else {
+                                "点击读取，从当前 DSH 实例拉取官方会话列表。"
+                            },
+                            action = when {
+                                !state.hasLoaded -> "读取会话"
+                                state.readOnly -> null
+                                else -> "新建会话"
+                            },
+                            onAction = {
+                                if (state.hasLoaded) createDialog = true else controller.refresh()
+                            },
+                            secondaryAction = if (state.hasLoaded) "刷新列表" else null,
+                            onSecondary = controller::refresh
+                        )
+                        ManagerPhase.LIST -> PullToRefreshBox(
+                            isRefreshing = state.refreshing,
+                            onRefresh = controller::refresh,
+                            modifier = Modifier.fillMaxSize()
                         ) {
-                            if (state.contentSearching || state.contentSearched || state.contentHits.isNotEmpty()) {
-                                item(key = "content-search", contentType = "content-search") {
-                                    ContentSearchCard(
-                                        state = state,
-                                        onOpen = { hit ->
-                                            controller.clearMessages()
-                                            detailId = hit.sessionId
-                                            detailModeName = DshDetailMode.DETAIL.name
-                                            detailTabName = DshDetailTab.OVERVIEW.name
-                                            controller.openSession(hit.sessionId)
-                                        },
-                                        onClear = controller::clearContentSearch
-                                    )
+                            LazyColumn(
+                                Modifier.fillMaxSize().tanukiEnter(),
+                                contentPadding = PaddingValues(
+                                    start = TanukiSpace.LG_DP.dp,
+                                    end = TanukiSpace.LG_DP.dp,
+                                    top = TanukiSpace.XS_DP.dp,
+                                    bottom = 96.dp,
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+                            ) {
+                                if (state.contentSearching || state.contentSearched || state.contentHits.isNotEmpty()) {
+                                    item(key = "content-search", contentType = "content-search") {
+                                        ContentSearchCard(
+                                            state = state,
+                                            onOpen = { hit ->
+                                                controller.clearMessages()
+                                                detailId = hit.sessionId
+                                                detailModeName = DshDetailMode.DETAIL.name
+                                                detailTabName = DshDetailTab.OVERVIEW.name
+                                                controller.openSession(hit.sessionId)
+                                            },
+                                            onClear = controller::clearContentSearch
+                                        )
+                                    }
                                 }
-                            }
-                            if (visibleSessions.isEmpty()) {
-                                item(key = "empty-filter", contentType = "empty") {
-                                    ManagerInlineEmpty(
-                                        title = when {
-                                            state.query.isNotBlank() -> "没有匹配的会话"
-                                            state.filter == DshSessionFilter.UNREAD -> "没有未读会话"
-                                            state.filter == DshSessionFilter.RUNNING -> "没有运行中的会话"
-                                            else -> "没有可显示的会话"
-                                        },
-                                        detail = "标题、会话 ID 会随输入即时过滤；消息内容搜索需要单独点击搜索图标。",
-                                        action = "清除搜索与筛选",
-                                        onAction = {
-                                            controller.setQuery("")
-                                            controller.clearContentSearch()
-                                            controller.setFilter(DshSessionFilter.ALL)
-                                        }
-                                    )
-                                }
-                            }
-                            visibleGroups.forEach { group ->
-                                item(key = "group:${group.key}", contentType = "group") {
-                                    SessionGroupHeader(group)
-                                }
-                                items(group.sessions, key = { it.id }, contentType = { "session" }) { item ->
-                                    SessionRow(
-                                        session = item,
-                                        unread = item.id in state.unreadIds,
-                                        pinned = item.id in state.pinnedIds,
-                                        selectionMode = selectionMode,
-                                        selected = item.id in selectedIdSet,
-                                        onTogglePin = { controller.togglePinned(item.id) },
-                                        onToggleSelect = {
-                                            selectedIds = if (item.id in selectedIdSet) {
-                                                selectedIds - item.id
-                                            } else {
-                                                selectedIds + item.id
+                                if (visibleSessions.isEmpty()) {
+                                    item(key = "empty-filter", contentType = "empty") {
+                                        ManagerInlineEmpty(
+                                            title = when {
+                                                state.query.isNotBlank() -> "没有匹配的会话"
+                                                state.filter == DshSessionFilter.UNREAD -> "没有未读会话"
+                                                state.filter == DshSessionFilter.RUNNING -> "没有运行中的会话"
+                                                else -> "没有可显示的会话"
+                                            },
+                                            detail = "标题、会话 ID 会随输入即时过滤；消息内容搜索需要单独点击搜索图标。",
+                                            action = "清除搜索与筛选",
+                                            onAction = {
+                                                controller.setQuery("")
+                                                controller.clearContentSearch()
+                                                controller.setFilter(DshSessionFilter.ALL)
                                             }
-                                        },
-                                        onClick = {
-                                            controller.clearMessages()
-                                            detailId = item.id
-                                            detailModeName = DshDetailMode.DETAIL.name
-                                            detailTabName = DshDetailTab.OVERVIEW.name
-                                            controller.openSession(item.id)
-                                        }
-                                    )
+                                        )
+                                    }
+                                }
+                                visibleGroups.forEach { group ->
+                                    item(key = "group:${group.key}", contentType = "group") {
+                                        SessionGroupHeader(group)
+                                    }
+                                    items(group.sessions, key = { it.id }, contentType = { "session" }) { item ->
+                                        SessionRow(
+                                            session = item,
+                                            unread = item.id in state.unreadIds,
+                                            pinned = item.id in state.pinnedIds,
+                                            selectionMode = selectionMode,
+                                            selected = item.id in selectedIdSet,
+                                            onTogglePin = { controller.togglePinned(item.id) },
+                                            onToggleSelect = {
+                                                selectedIds = if (item.id in selectedIdSet) {
+                                                    selectedIds - item.id
+                                                } else {
+                                                    selectedIds + item.id
+                                                }
+                                            },
+                                            onClick = {
+                                                controller.clearMessages()
+                                                detailId = item.id
+                                                detailModeName = DshDetailMode.DETAIL.name
+                                                detailTabName = DshDetailTab.OVERVIEW.name
+                                                controller.openSession(item.id)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -398,67 +430,83 @@ fun DshSessionManagerPage(
         )
     }
 
-    if (createDialog) {
-        AlertDialog(
-            onDismissRequest = { if (!state.busy) createDialog = false },
-            title = { Text("新建会话") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = createTitle,
-                        onValueChange = { createTitle = it.take(200) },
-                        label = { Text("标题（可留空）") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text("标题可留空；创建立即调用官方 session/create，非空标题随后调用官方重命名。", style = MaterialTheme.typography.bodySmall)
-                }
+    // 列表层发起的弹层（新建、批量归档、批量上限）使用页面内 TanukiBottomSheet，
+    // 展开/收起走 240-340ms 结构动效；从详情窗口发起的三条二级确认（重命名、
+    // 归档、完全权限）必须用窗口级 AlertDialog：详情是 Material3 ModalBottomSheet
+    // 的独立窗口，页面内 Box 会被它盖住（PR #70 评审 P1）。
+    TanukiBottomSheet(
+        visible = createDialog,
+        onDismissRequest = { if (!state.busy) createDialog = false },
+        title = "新建会话",
+        subtitle = "标题可留空；创建立即调用官方 session/create，非空标题随后调用官方重命名。",
+        // 输入法弹出时整体上移弹层，避免按钮被键盘挡住。
+        modifier = Modifier.imePadding(),
+    ) {
+        OutlinedTextField(
+            value = createTitle,
+            onValueChange = { createTitle = it.take(200) },
+            label = { Text("标题（可留空）") },
+            singleLine = true,
+            shape = TanukiShapeTokens.control,
+            modifier = Modifier.fillMaxWidth()
+        )
+        SheetActions(
+            secondary = "取消",
+            onSecondary = { createDialog = false },
+            secondaryEnabled = !state.busy,
+            primary = if (state.busy) "创建中…" else "创建",
+            onPrimary = {
+                val title = createTitle
+                createDialog = false
+                controller.createSession(title)
             },
-            dismissButton = { TextButton(onClick = { createDialog = false }, enabled = !state.busy) { Text("取消") } },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val title = createTitle
-                        createDialog = false
-                        controller.createSession(title)
-                    },
-                    enabled = !state.busy
-                ) { Text(if (state.busy) "创建中…" else "创建") }
-            }
+            primaryEnabled = !state.busy,
         )
     }
 
     renameTarget?.let { target ->
+        // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
         AlertDialog(
             onDismissRequest = { if (!state.busy) renameTarget = null },
             title = { Text("重命名会话") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
                     OutlinedTextField(
                         value = renameTitle,
                         onValueChange = { renameTitle = it.take(200) },
                         label = { Text("新标题") },
                         singleLine = true,
+                        shape = TanukiShapeTokens.control,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text("最多 200 字；保存后以官方返回的标题为准。", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            dismissButton = { TextButton(onClick = { renameTarget = null }, enabled = !state.busy) { Text("取消") } },
+            dismissButton = {
+                TanukiPillButton(
+                    text = "取消",
+                    onClick = { renameTarget = null },
+                    enabled = !state.busy,
+                    tone = TanukiPillButtonTone.Ghost,
+                )
+            },
             confirmButton = {
-                TextButton(
+                TanukiPillButton(
+                    text = "保存",
                     onClick = {
                         val title = renameTitle.trim()
                         renameTarget = null
                         controller.renameSession(target.id, title)
                     },
-                    enabled = !state.busy && renameTitle.isNotBlank()
-                ) { Text("保存") }
-            }
+                    enabled = !state.busy && renameTitle.isNotBlank(),
+                    tone = TanukiPillButtonTone.Filled,
+                )
+            },
         )
     }
 
     archiveTarget?.let { target ->
+        // 从详情窗口发起，必须使用窗口级 Dialog，才能画在详情之上。
         AlertDialog(
             onDismissRequest = { archiveTarget = null },
             title = { Text("归档会话") },
@@ -471,85 +519,103 @@ fun DshSessionManagerPage(
                     }
                 )
             },
-            dismissButton = { TextButton(onClick = { archiveTarget = null }) { Text("取消") } },
-            confirmButton = {
-                TextButton(onClick = {
-                    val stop = target.running
-                    archiveTarget = null
-                    controller.archiveSession(target.id, stopActivity = stop)
-                }) { Text(if (target.running) "停止并归档" else "归档") }
-            }
-        )
-    }
-
-    if (batchArchiveConfirm) {
-        val ids = selectedIdSet.toList()
-        val running = selectedSessions.count { it.running }
-        AlertDialog(
-            onDismissRequest = { batchArchiveConfirm = false },
-            title = { Text("批量归档 ${ids.size} 个会话") },
-            text = {
-                Text(
-                    buildString {
-                        append("已选择 ${ids.size} 个会话")
-                        if (running > 0) append("，其中 $running 个正在运行")
-                        append("。归档会逐个调用官方归档接口")
-                        if (running > 0) append("，并先请求停止运行中的会话")
-                        append("；会话会从列表移除，项目文件不会删除。")
-                        append("官方没有会话硬删除端点，本页不提供批量删除，也不提供撤销按钮。")
-                    }
-                )
-            },
             dismissButton = {
-                TextButton(onClick = { batchArchiveConfirm = false }) { Text("取消") }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        batchArchiveConfirm = false
-                        // 只有控制器接受请求才清空选择；超限/只读等拒绝时保留选择。
-                        if (controller.archiveSessions(ids, stopRunning = true)) {
-                            selectionMode = false
-                            selectedIds = emptyList()
-                        }
-                    },
-                    enabled = ids.isNotEmpty() && ids.size <= DshSessionManagerController.MAX_BATCH_ARCHIVE && !state.busy
-                ) { Text(if (running > 0) "停止并归档" else "归档") }
-            }
-        )
-    }
-
-    if (batchLimitWarning) {
-        AlertDialog(
-            onDismissRequest = { batchLimitWarning = false },
-            title = { Text("一次最多归档 ${DshSessionManagerController.MAX_BATCH_ARCHIVE} 个会话") },
-            text = {
-                Text(
-                    "当前已选择 ${selectedIdSet.size} 个会话，超过单次上限。请取消部分选择后再归档；当前选择会保留，不会静默截断。"
+                TanukiPillButton(
+                    text = "取消",
+                    onClick = { archiveTarget = null },
+                    tone = TanukiPillButtonTone.Ghost,
                 )
             },
             confirmButton = {
-                TextButton(onClick = { batchLimitWarning = false }) { Text("知道了") }
-            }
+                TanukiPillButton(
+                    text = if (target.running) "停止并归档" else "归档",
+                    onClick = {
+                        val stop = target.running
+                        archiveTarget = null
+                        controller.archiveSession(target.id, stopActivity = stop)
+                    },
+                    tone = TanukiPillButtonTone.Danger,
+                )
+            },
+        )
+    }
+
+    val batchTargets = rememberLastNonNull(selectedIdSet.toList().ifEmpty { null })
+    val batchRunning = rememberLastNonNull(selectedSessions.count { it.running }.takeIf { batchTargets != null })
+    TanukiBottomSheet(
+        visible = batchArchiveConfirm,
+        onDismissRequest = { batchArchiveConfirm = false },
+        title = "批量归档 ${batchTargets?.size ?: 0} 个会话",
+    ) {
+        val ids = batchTargets.orEmpty()
+        val running = batchRunning ?: 0
+        Text(
+            buildString {
+                append("已选择 ${ids.size} 个会话")
+                if (running > 0) append("，其中 $running 个正在运行")
+                append("。归档会逐个调用官方归档接口")
+                if (running > 0) append("，并先请求停止运行中的会话")
+                append("；会话会从列表移除，项目文件不会删除。")
+                append("官方没有会话硬删除端点，本页不提供批量删除，也不提供撤销按钮。")
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        SheetActions(
+            secondary = "取消",
+            onSecondary = { batchArchiveConfirm = false },
+            primary = if (running > 0) "停止并归档" else "归档",
+            primaryTone = TanukiPillButtonTone.Danger,
+            onPrimary = {
+                batchArchiveConfirm = false
+                // 只有控制器接受请求才清空选择；超限/只读等拒绝时保留选择。
+                if (controller.archiveSessions(ids, stopRunning = true)) {
+                    selectionMode = false
+                    selectedIds = emptyList()
+                }
+            },
+            primaryEnabled = ids.isNotEmpty() &&
+                ids.size <= DshSessionManagerController.MAX_BATCH_ARCHIVE && !state.busy,
+        )
+    }
+
+    TanukiBottomSheet(
+        visible = batchLimitWarning,
+        onDismissRequest = { batchLimitWarning = false },
+        title = "一次最多归档 ${DshSessionManagerController.MAX_BATCH_ARCHIVE} 个会话",
+    ) {
+        Text(
+            "当前已选择 ${selectedIdSet.size} 个会话，超过单次上限。请取消部分选择后再归档；当前选择会保留，不会静默截断。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        SheetActions(
+            primary = "知道了",
+            onPrimary = { batchLimitWarning = false },
         )
     }
 
     fullAccess?.let { (sessionId, preset) ->
+        // 从权限详情页发起，必须使用窗口级 Dialog，才能画在详情之上。
         AlertDialog(
             onDismissRequest = { fullAccess = null },
             icon = { Icon(Icons.Default.Warning, null) },
             title = { Text("完全权限二次确认") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("你正在把会话切到完全权限。这是高于“工作区写入”的第二档风险，请逐条确认后果：")
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
+                ) {
+                    Text(
+                        "你正在把会话切到完全权限。这是高于“工作区写入”的第二档风险，请逐条确认后果：",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     DshPermissionPresentation.fullAccessRisks().forEach { risk ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
                             Text("•", style = MaterialTheme.typography.bodySmall)
                             Text(risk, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     Row(
-                        Modifier.fillMaxWidth().clickable {
+                        Modifier.fillMaxWidth().heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp).clickable {
                             fullAccessAcknowledged = !fullAccessAcknowledged
                         },
                         verticalAlignment = Alignment.CenterVertically
@@ -567,21 +633,31 @@ fun DshSessionManagerPage(
                     )
                 }
             },
-            dismissButton = { TextButton(onClick = { fullAccess = null }) { Text("保持当前权限") } },
+            dismissButton = {
+                TanukiPillButton(
+                    text = "保持当前权限",
+                    onClick = { fullAccess = null },
+                    tone = TanukiPillButtonTone.Ghost,
+                )
+            },
             confirmButton = {
-                TextButton(
+                TanukiPillButton(
+                    text = "仍要切换为完全权限",
                     onClick = {
                         val acknowledged = fullAccessAcknowledged
                         fullAccess = null
                         if (acknowledged) controller.selectPermission(sessionId, preset, allowFullAccess = true)
                     },
-                    enabled = fullAccessAcknowledged && !state.busy
-                ) { Text("仍要切换为完全权限") }
-            }
+                    enabled = fullAccessAcknowledged && !state.busy,
+                    tone = TanukiPillButtonTone.Danger,
+                )
+            },
         )
     }
 
     if (session != null) {
+        // 详情沿用系统 ModalBottomSheet：拖拽、返回键和输入法行为由平台处理，
+        // 其 300ms 结构动画本身落在令牌 240-340ms 区间；内容仍使用令牌间距与组件。
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = {
@@ -595,10 +671,10 @@ fun DshSessionManagerPage(
             Column(
                 Modifier.fillMaxWidth().heightIn(max = 620.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 28.dp)
+                    .padding(horizontal = TanukiSpace.XL_DP.dp)
+                    .padding(bottom = TanukiSpace.XXL_DP.dp)
                     .navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (detailMode != DshDetailMode.DETAIL) {
@@ -724,11 +800,12 @@ private fun ManagerHeader(
 ) {
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
-            Modifier.statusBarsPadding().fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.statusBarsPadding().fillMaxWidth().heightIn(min = 60.dp)
+                .padding(horizontal = TanukiSpace.SM_DP.dp, vertical = TanukiSpace.XS_DP.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-            Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+            Column(Modifier.weight(1f).padding(horizontal = TanukiSpace.XS_DP.dp)) {
                 Text("原生会话", style = MaterialTheme.typography.titleLarge)
                 if (host != null) {
                     HostChip(host = host, onClick = onHostClick)
@@ -760,21 +837,21 @@ private fun ManagerHeader(
 
 @Composable
 private fun HostChip(host: DshSessionHost, onClick: () -> Unit) {
+    // 主机胶囊用状态点表达“当前连接”，整行 32dp 视觉高度但保留胶囊形状。
     Surface(
-        shape = RoundedCornerShape(50),
+        shape = TanukiShapeTokens.pill,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            Modifier.heightIn(min = 32.dp).padding(horizontal = TanukiSpace.SM_DP.dp, vertical = TanukiSpace.XS_DP.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
         ) {
-            Box(
-                Modifier.size(7.dp).background(
-                    if (host.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    CircleShape
-                )
+            TanukiStatusDot(
+                tone = if (host.active) TanukiStatusTone.Success else TanukiStatusTone.Neutral,
+                diameter = 7.dp,
+                decorative = true,
             )
             Text("${host.label} · ${host.detail}", style = MaterialTheme.typography.labelSmall, maxLines = 1)
             Icon(Icons.Default.KeyboardArrowDown, "切换主机", Modifier.size(14.dp))
@@ -804,7 +881,7 @@ private fun HostPickerSheet(
             )
             hosts.forEach { host ->
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = TanukiShapeTokens.control,
                     color = if (host.active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth().clickable(
                         enabled = !busy && host.available && !host.active
@@ -814,14 +891,13 @@ private fun HostPickerSheet(
                         RadioButton(selected = host.active, onClick = null, enabled = host.available && !busy)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Box(
-                                    Modifier.size(7.dp).background(
-                                        if (host.active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        CircleShape
-                                    )
+                                TanukiStatusDot(
+                                    tone = if (host.active) TanukiStatusTone.Success else TanukiStatusTone.Neutral,
+                                    diameter = 7.dp,
+                                    decorative = true,
                                 )
                                 Text(host.label, style = MaterialTheme.typography.labelLarge)
-                                if (host.active) Pill("当前", strong = true)
+                                if (host.active) SessionBadge(TanukiSessionBadgeKind.CURRENT)
                             }
                             Text(
                                 host.detail,
@@ -860,13 +936,16 @@ private fun ManagerSearchHeader(
     onContentSearch: () -> Unit,
     onFilter: (DshSessionFilter) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.SM_DP.dp),
+        verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+    ) {
         OutlinedTextField(
             value = state.query,
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = TanukiShapeTokens.control,
             leadingIcon = { Icon(Icons.Default.Search, null) },
             label = { Text("搜索标题或会话 ID") },
             trailingIcon = {
@@ -883,14 +962,16 @@ private fun ManagerSearchHeader(
         )
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 筛选条用胶囊按钮表达选中态：选中 Filled，未选中 Outline，触控区仍为 48dp。
             DshSessionFilter.entries.forEach { filter ->
-                FilterChip(
-                    selected = state.filter == filter,
+                val selected = state.filter == filter
+                TanukiPillButton(
+                    text = filter.label,
                     onClick = { onFilter(filter) },
-                    label = { Text(filter.label) }
+                    tone = if (selected) TanukiPillButtonTone.Filled else TanukiPillButtonTone.Outline,
                 )
             }
             Text(
@@ -904,7 +985,7 @@ private fun ManagerSearchHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)) {
             Text(
                 "输入即过滤标题与 ID，不阻断列表；消息内容需点搜索图标。",
                 style = MaterialTheme.typography.labelSmall,
@@ -932,19 +1013,31 @@ private fun SessionRow(
     onToggleSelect: () -> Unit,
     onClick: () -> Unit
 ) {
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = when {
-            selected -> MaterialTheme.colorScheme.primaryContainer
-            pinned -> MaterialTheme.colorScheme.surfaceContainerHigh
-            else -> MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        modifier = Modifier.fillMaxWidth().clickable {
-            if (selectionMode) onToggleSelect() else onClick()
-        }
+    // 行容器统一走可按压卡片：0.98 缩放走反馈令牌，48dp 触控区由组件保证。
+    TanukiPressable(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { if (selectionMode) onToggleSelect() else onClick() },
+        shape = TanukiShapeTokens.card,
     ) {
-        Column(Modifier.padding(start = 6.dp, end = 14.dp, top = 10.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .heightIn(min = TanukiSessionVisuals.ROW_MIN_HEIGHT_DP.dp)
+                .background(
+                    when {
+                        selected -> MaterialTheme.colorScheme.primaryContainer
+                        pinned -> MaterialTheme.colorScheme.surfaceContainerHigh
+                        else -> MaterialTheme.colorScheme.surfaceContainerLow
+                    }
+                )
+                .padding(
+                    start = TanukiSpace.SM_DP.dp,
+                    end = TanukiSpace.LG_DP.dp,
+                    top = TanukiSpace.MD_DP.dp,
+                    bottom = TanukiSpace.MD_DP.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
                 if (selectionMode) {
                     Checkbox(
                         checked = selected,
@@ -960,9 +1053,6 @@ private fun SessionRow(
                         )
                     }
                 }
-                if (unread) {
-                    Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-                }
                 Text(
                     session.displayTitle,
                     Modifier.weight(1f),
@@ -971,38 +1061,71 @@ private fun SessionRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (session.running) Pill("运行中", strong = true)
+                if (session.running) SessionBadge(TanukiSessionBadgeKind.RUNNING)
             }
             Row(
-                Modifier.padding(start = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                // 时间与多个状态标签在窄屏/大字体下横向滚动，避免被压缩成省略号。
+                Modifier.padding(start = TanukiSpace.XS_DP.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(timeLabel(session.updatedAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (unread) Pill("未读")
-                if (pinned) Pill("置顶")
-                if (session.blank) Text("· 空白会话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (session.subagent) Text("· 子代理", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (unread) SessionBadge(TanukiSessionBadgeKind.UNREAD, label = "未读")
+                if (pinned) SessionBadge(TanukiSessionBadgeKind.PINNED, label = "置顶")
+                if (session.blank) SessionBadge(TanukiSessionBadgeKind.BLANK, label = "空白会话")
+                if (session.subagent) SessionBadge(TanukiSessionBadgeKind.SUBAGENT, label = "子代理")
                 if (session.formatStatus == "migration-required") {
-                    Text("· 需迁移", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    SessionBadge(TanukiSessionBadgeKind.MIGRATION_REQUIRED, label = "需迁移")
                 }
             }
             Row(
-                Modifier.fillMaxWidth().padding(start = 6.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.fillMaxWidth().padding(start = TanukiSpace.XS_DP.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
             ) {
-                session.currentPermission?.let { Pill(permissionLabel(it)) }
-                session.model?.let { Pill(it.label) }
-                if (session.agentAvailable && !session.running) Pill("Agent 在线")
+                session.currentPermission?.let {
+                    TanukiStatusChip(
+                        tone = TanukiSessionVisuals.permissionTone(it),
+                        label = permissionLabel(it),
+                    )
+                }
+                session.model?.let { TanukiStatusChip(tone = TanukiStatusTone.Neutral, label = it.label) }
+                if (session.agentAvailable && !session.running) {
+                    SessionBadge(TanukiSessionBadgeKind.AGENT_ONLINE, label = "Agent 在线")
+                }
             }
         }
     }
 }
 
+/** 会话状态标签；语气和呼吸由 [TanukiSessionVisuals] 统一决定。 */
+@Composable
+private fun SessionBadge(kind: TanukiSessionBadgeKind, label: String? = null) {
+    TanukiStatusChip(
+        tone = TanukiSessionVisuals.badgeTone(kind),
+        label = label ?: when (kind) {
+            TanukiSessionBadgeKind.RUNNING -> "运行中"
+            TanukiSessionBadgeKind.UNREAD -> "未读"
+            TanukiSessionBadgeKind.PINNED -> "置顶"
+            TanukiSessionBadgeKind.BLANK -> "空白会话"
+            TanukiSessionBadgeKind.SUBAGENT -> "子代理"
+            TanukiSessionBadgeKind.AGENT_ONLINE -> "Agent 在线"
+            TanukiSessionBadgeKind.MIGRATION_REQUIRED -> "需迁移"
+            TanukiSessionBadgeKind.CURRENT -> "当前"
+        },
+        pulse = TanukiSessionVisuals.badgePulse(kind),
+    )
+}
+
 @Composable
 private fun SessionGroupHeader(group: DshSessionGroup) {
+    // 分组头与列表行使用同一组间距和标题字号，靠上留白而不是重色块区分层级。
     Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp),
+        Modifier.fillMaxWidth().padding(
+            start = TanukiSpace.XS_DP.dp,
+            end = TanukiSpace.XS_DP.dp,
+            top = TanukiSpace.MD_DP.dp,
+            bottom = TanukiSpace.XS_DP.dp,
+        ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -1015,7 +1138,7 @@ private fun SessionGroupHeader(group: DshSessionGroup) {
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Pill(group.sessions.size.toString())
+        TanukiStatusChip(tone = TanukiStatusTone.Neutral, label = group.sessions.size.toString())
     }
 }
 
@@ -1028,12 +1151,15 @@ private fun SelectionBar(
     onCancel: () -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = TanukiShapeTokens.card,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.XS_DP.dp)
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            Modifier.padding(horizontal = TanukiSpace.MD_DP.dp, vertical = TanukiSpace.SM_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     buildString {
@@ -1043,15 +1169,24 @@ private fun SelectionBar(
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.labelLarge
                 )
-                TextButton(onClick = onArchive, enabled = selectedCount > 0 && !busy) {
-                    Text(if (runningCount > 0) "停止并归档" else "归档")
-                }
-                TextButton(onClick = onCancel, enabled = !busy) { Text("取消") }
+                TanukiPillButton(
+                    text = if (runningCount > 0) "停止并归档" else "归档",
+                    onClick = onArchive,
+                    enabled = selectedCount > 0 && !busy,
+                    tone = TanukiPillButtonTone.Tonal,
+                )
+                Spacer(Modifier.width(TanukiSpace.XS_DP.dp))
+                TanukiPillButton(
+                    text = "取消",
+                    onClick = onCancel,
+                    enabled = !busy,
+                    tone = TanukiPillButtonTone.Ghost,
+                )
             }
             Text(
                 "删除：官方无会话硬删除端点，暂不支持；归档只从列表移除，不删除项目文件。",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1061,12 +1196,15 @@ private fun SelectionBar(
 @Composable
 private fun BatchProgressBar(done: Int, total: Int) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = TanukiShapeTokens.card,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.XS_DP.dp)
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            Modifier.padding(horizontal = TanukiSpace.MD_DP.dp, vertical = TanukiSpace.SM_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+        ) {
             Text("正在批量归档", style = MaterialTheme.typography.labelLarge)
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(
@@ -1084,14 +1222,17 @@ private fun ContentSearchCard(
     onClear: () -> Unit
 ) {
     Surface(
-        shape = MaterialTheme.shapes.large,
+        shape = TanukiShapeTokens.card,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.padding(TanukiSpace.MD_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("消息内容搜索", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                TextButton(onClick = onClear) { Text("清除") }
+                TanukiPillButton(text = "清除", onClick = onClear, tone = TanukiPillButtonTone.Ghost)
             }
             if (state.contentSearching) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (!state.contentSearching && !state.contentSearched) {
@@ -1103,12 +1244,18 @@ private fun ContentSearchCard(
             state.contentHits.forEach { hit ->
                 val title = state.sessions.firstOrNull { it.id == hit.sessionId }?.displayTitle
                     ?: "会话 ${hit.sessionId.take(8)}"
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth().clickable { onOpen(hit) }
+                // 结果行同样是可按压卡片，点击进入会话详情。
+                TanukiPressable(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onOpen(hit) },
+                    shape = TanukiShapeTokens.control,
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .padding(TanukiSpace.MD_DP.dp),
+                        verticalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
+                    ) {
                         Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(hit.snippet, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
@@ -1123,21 +1270,27 @@ private fun ContentSearchCard(
 
 @Composable
 private fun ManagerBanner(message: String, error: Boolean, onClose: () -> Unit) {
+    val role = if (error) MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
     Surface(
-        color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+        color = role.first,
+        contentColor = role.second,
+        shape = TanukiShapeTokens.card,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.XS_DP.dp)
     ) {
-        Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(start = TanukiSpace.MD_DP.dp, end = TanukiSpace.XS_DP.dp, top = TanukiSpace.SM_DP.dp, bottom = TanukiSpace.SM_DP.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Icon(if (error) Icons.Default.Warning else Icons.Default.Info, null, Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(TanukiSpace.SM_DP.dp))
             Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onClose) { Text("关闭") }
+            TanukiPillButton(text = "关闭", onClick = onClose, tone = TanukiPillButtonTone.Ghost)
         }
     }
 }
 
+/** 整页空态/前置状态：统一三态组件 + 页面自己的标题与动作，不伪造会话。 */
 @Composable
 private fun ManagerEmpty(
     title: String,
@@ -1147,16 +1300,19 @@ private fun ManagerEmpty(
     secondaryAction: String? = null,
     onSecondary: () -> Unit = {}
 ) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+    Box(
+        Modifier.fillMaxSize().padding(TanukiSpace.XXL_DP.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Default.Settings, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
-        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        if (action != null) Button(onClick = onAction) { Text(action) }
-        if (secondaryAction != null) TextButton(onClick = onSecondary) { Text(secondaryAction) }
+        TanukiStateView(
+            kind = TanukiStateKind.EMPTY,
+            title = title,
+            detail = detail,
+            actionLabel = action,
+            onAction = if (action != null) onAction else null,
+            secondaryActionLabel = secondaryAction,
+            onSecondaryAction = if (secondaryAction != null) onSecondary else null,
+        )
     }
 }
 
@@ -1167,51 +1323,40 @@ private fun ManagerInlineEmpty(
     action: String,
     onAction: () -> Unit
 ) {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Icon(Icons.Default.Search, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        TextButton(onClick = onAction) { Text(action) }
-    }
+    TanukiStateView(
+        kind = TanukiStateKind.EMPTY,
+        modifier = Modifier.padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.XXXL_DP.dp),
+        title = title,
+        detail = detail,
+        actionLabel = action,
+        onAction = onAction,
+    )
 }
 
 @Composable
 private fun ManagerLoading() {
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        Modifier.fillMaxSize().padding(horizontal = TanukiSpace.LG_DP.dp, vertical = TanukiSpace.XL_DP.dp),
+        verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.5.dp)
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("正在读取官方会话…", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "只读取当前 DSH 实例，不会新建或改写会话。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        repeat(4) { SkeletonSessionRow() }
+        // 只读取当前实例，不新建或改写会话；加载态不伪造进度。
+        TanukiStateView(
+            kind = TanukiStateKind.LOADING,
+            subject = "会话",
+            detail = "只读取当前 DSH 实例，不会新建或改写会话。",
+        )
+        repeat(3) { SkeletonSessionRow() }
     }
 }
 
 @Composable
 private fun SkeletonSessionRow() {
     Surface(
-        shape = MaterialTheme.shapes.large,
+        shape = TanukiShapeTokens.card,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(TanukiSpace.LG_DP.dp), verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)) {
             Box(
                 Modifier.fillMaxWidth(0.55f).height(16.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(6.dp))
@@ -1226,26 +1371,20 @@ private fun SkeletonSessionRow() {
 
 @Composable
 private fun ManagerError(message: String, onRetry: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+    Box(
+        Modifier.fillMaxSize().padding(TanukiSpace.XXL_DP.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Default.Warning, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.error)
-        Text("读取官方会话失败", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        Text(
-            message.ifBlank { "官方接口没有返回可用的会话列表。" },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center
+        TanukiStateView(
+            kind = TanukiStateKind.ERROR,
+            title = "读取官方会话失败",
+            detail = buildString {
+                append(message.ifBlank { "官方接口没有返回可用的会话列表。" })
+                append("\n请确认 DSH 正在运行、远程隧道已连接，或稍后重试。")
+            },
+            actionLabel = "重试",
+            onAction = onRetry,
         )
-        Text(
-            "请确认 DSH 正在运行、远程隧道已连接，或稍后重试。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Button(onClick = onRetry) { Text("重试") }
     }
 }
 
@@ -1264,12 +1403,15 @@ private fun DetailHome(
     onCopyId: () -> Unit
 ) {
     Text(session.displayTitle, style = MaterialTheme.typography.titleMedium)
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (session.running) Pill("运行中", strong = true)
-        if (session.blank) Pill("空白会话")
-        if (session.subagent) Pill("子代理")
-        if (session.agentAvailable) Pill("Agent 在线")
-        if (pinned) Pill("本机置顶", strong = true)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
+    ) {
+        if (session.running) SessionBadge(TanukiSessionBadgeKind.RUNNING)
+        if (session.blank) SessionBadge(TanukiSessionBadgeKind.BLANK)
+        if (session.subagent) SessionBadge(TanukiSessionBadgeKind.SUBAGENT)
+        if (session.agentAvailable) SessionBadge(TanukiSessionBadgeKind.AGENT_ONLINE)
+        if (pinned) SessionBadge(TanukiSessionBadgeKind.PINNED, label = "本机置顶")
     }
     Text("ID：${session.id}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text("更新时间：${timeLabel(session.updatedAt)}", style = MaterialTheme.typography.bodySmall)
@@ -1311,7 +1453,7 @@ private fun DetailHome(
 @Composable
 private fun DetailAction(title: String, detail: String, onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
@@ -1334,7 +1476,7 @@ private fun DetailInfo(
     icon: androidx.compose.ui.graphics.vector.ImageVector
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = if (warning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = if (warning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.fillMaxWidth()
@@ -1353,7 +1495,7 @@ private fun DetailInfo(
 @Composable
 private fun DetailProgressTab(session: DshAdminSession) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1385,7 +1527,7 @@ private fun DetailArtifactsTab() {
 private fun DetailFilesTab(session: DshAdminSession, onCopyPath: (String) -> Unit) {
     val cwd = session.cwd?.takeIf { it.isNotBlank() }
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1407,7 +1549,7 @@ private fun DetailFilesTab(session: DshAdminSession, onCopyPath: (String) -> Uni
 @Composable
 private fun DetailUnavailable(title: String, detail: String) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         modifier = Modifier.fillMaxWidth()
@@ -1433,7 +1575,7 @@ private fun ModelsPane(
     val catalog = state.models
     val currentLabel = DshModelPresentation.selectionLabel(catalog, session.model)
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1489,7 +1631,7 @@ private fun ModelsPane(
                 )
             }
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = TanukiShapeTokens.control,
                 color = if (current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1505,7 +1647,7 @@ private fun ModelsPane(
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(model.name, style = MaterialTheme.typography.labelLarge)
-                                if (current) Pill("当前", strong = true)
+                                if (current) SessionBadge(TanukiSessionBadgeKind.CURRENT)
                             }
                             model.description?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1514,13 +1656,18 @@ private fun ModelsPane(
                     }
                     if (model.efforts.size > 1) {
                         Text("推理强度", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
+                        ) {
+                            // 推理强度沿用筛选条的胶囊语义：选中 Filled，未选中 Outline。
                             model.efforts.forEach { option ->
-                                FilterChip(
-                                    selected = effort == option.id,
+                                TanukiPillButton(
+                                    text = option.name,
                                     onClick = { effort = option.id },
                                     enabled = state.canWrite,
-                                    label = { Text(option.name) }
+                                    tone = if (effort == option.id) TanukiPillButtonTone.Filled
+                                    else TanukiPillButtonTone.Outline,
                                 )
                             }
                         }
@@ -1528,18 +1675,16 @@ private fun ModelsPane(
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    TextButton(
+                    TanukiPillButton(
+                        text = when {
+                            !current -> "切换到此模型"
+                            effort != currentEffort -> "应用所选推理强度"
+                            else -> "重新应用当前选择"
+                        },
                         onClick = { onSelect(DshModelSelection(group.id, model.id, effort)) },
-                        enabled = state.canWrite
-                    ) {
-                        Text(
-                            when {
-                                !current -> "切换到此模型"
-                                effort != currentEffort -> "应用所选推理强度"
-                                else -> "重新应用当前选择"
-                            }
-                        )
-                    }
+                        enabled = state.canWrite,
+                        tone = TanukiPillButtonTone.Tonal,
+                    )
                 }
             }
         }
@@ -1569,7 +1714,7 @@ private fun ModelsPane(
 @Composable
 private fun SelectionErrorCard(title: String, message: String) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
         modifier = Modifier.fillMaxWidth()
@@ -1588,7 +1733,7 @@ private fun SelectionErrorCard(title: String, message: String) {
 @Composable
 private fun SelectionNoticeCard(message: String) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         modifier = Modifier.fillMaxWidth()
@@ -1610,7 +1755,7 @@ private fun PermissionsPane(
 ) {
     val catalog = state.permissions
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = TanukiShapeTokens.control,
         color = MaterialTheme.colorScheme.primaryContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1654,7 +1799,7 @@ private fun PermissionsPane(
         val selectable = DshPermissionPresentation.canSelect(option.value)
         val guidance = DshPermissionPresentation.guidance(option.value, option.name)
         Surface(
-            shape = RoundedCornerShape(14.dp),
+            shape = TanukiShapeTokens.control,
             color = if (current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1665,10 +1810,14 @@ private fun PermissionsPane(
                     enabled = state.canWrite && selectable
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)
+                    ) {
                         Text(option.name, style = MaterialTheme.typography.labelLarge)
-                        if (current) Pill("当前", strong = true)
-                        if (!selectable) Pill("仅展示")
+                        if (current) SessionBadge(TanukiSessionBadgeKind.CURRENT)
+                        if (!selectable) TanukiStatusChip(tone = TanukiStatusTone.Neutral, label = "仅展示")
                     }
                     Text(guidance, style = MaterialTheme.typography.bodySmall)
                     option.description?.takeIf { it.isNotBlank() }?.let {
@@ -1731,17 +1880,17 @@ private fun SectionTitle(title: String, count: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.width(8.dp))
-        Pill(count.toString())
+        TanukiStatusChip(tone = TanukiStatusTone.Neutral, label = count.toString())
     }
 }
 
 @Composable
 private fun SkillRow(skill: DshSkill) {
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = TanukiShapeTokens.control, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("/${skill.name}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                Pill(if (skill.modelInvocable) "模型可用" else "仅人工")
+                TanukiStatusChip(tone = if (skill.modelInvocable) TanukiStatusTone.Info else TanukiStatusTone.Neutral, label = if (skill.modelInvocable) "模型可用" else "仅人工")
             }
             if (skill.description.isNotBlank()) Text(skill.description, style = MaterialTheme.typography.bodySmall)
             skill.whenToUse?.let { Text("适用：$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1751,11 +1900,11 @@ private fun SkillRow(skill: DshSkill) {
 
 @Composable
 private fun CommandRow(command: DshCommand) {
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = TanukiShapeTokens.control, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("/${command.name}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                if (command.acceptsAttachments) Pill("支持附件")
+                if (command.acceptsAttachments) TanukiStatusChip(tone = TanukiStatusTone.Neutral, label = "支持附件")
             }
             if (command.description.isNotBlank()) Text(command.description, style = MaterialTheme.typography.bodySmall)
             command.inputHint?.let {
@@ -1765,19 +1914,75 @@ private fun CommandRow(command: DshCommand) {
     }
 }
 
+/**
+ * 弹层底部动作排：次操作在左、主操作在右，间距走令牌。
+ *
+ * 只传主操作时用于单按钮提示；危险动作由调用方指定 Danger 语气。
+ */
 @Composable
-private fun Pill(text: String, strong: Boolean = false) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = if (strong) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest
-    ) {
-        Text(
-            text,
-            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1
-        )
+private fun SheetActions(
+    primary: String,
+    onPrimary: () -> Unit,
+    primaryEnabled: Boolean = true,
+    primaryTone: TanukiPillButtonTone = TanukiPillButtonTone.Filled,
+    secondary: String? = null,
+    onSecondary: () -> Unit = {},
+    secondaryEnabled: Boolean = true,
+) {
+    val largeFont = LocalDensity.current.fontScale >= TanukiLayoutPolicy.LARGE_FONT_SCALE
+    if (largeFont) {
+        // 1.3x/2x 字体时改为整行按钮，避免“仍要切换为完全权限”被省略号截断。
+        Column(
+            Modifier.fillMaxWidth().padding(top = TanukiSpace.SM_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp),
+        ) {
+            if (secondary != null) {
+                TanukiPillButton(
+                    text = secondary,
+                    onClick = onSecondary,
+                    enabled = secondaryEnabled,
+                    tone = TanukiPillButtonTone.Ghost,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            TanukiPillButton(
+                text = primary,
+                onClick = onPrimary,
+                enabled = primaryEnabled,
+                tone = primaryTone,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        return
     }
+    Row(
+        Modifier.fillMaxWidth().padding(top = TanukiSpace.SM_DP.dp),
+        horizontalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (secondary != null) {
+            TanukiPillButton(
+                text = secondary,
+                onClick = onSecondary,
+                enabled = secondaryEnabled,
+                tone = TanukiPillButtonTone.Ghost,
+            )
+        }
+        TanukiPillButton(text = primary, onClick = onPrimary, enabled = primaryEnabled, tone = primaryTone)
+    }
+}
+
+/**
+ * 保留最后一次非空值。
+ *
+ * 弹层收起时业务值会先变空；用最后一次快照保证退场动画期间标题和正文
+ * 不会闪成空白。
+ */
+@Composable
+private fun <T : Any> rememberLastNonNull(value: T?): T? {
+    var last by remember { mutableStateOf(value) }
+    LaunchedEffect(value) { if (value != null) last = value }
+    return if (value != null) value else last
 }
 
 private fun permissionLabel(value: String): String = when (value) {

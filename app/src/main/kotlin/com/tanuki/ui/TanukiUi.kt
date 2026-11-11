@@ -4,8 +4,8 @@ import android.os.Build
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -56,6 +56,9 @@ import com.tanuki.storage.WorkspaceStorageState
 import com.tanuki.update.ApkUpdateCheckState
 import com.tanuki.update.DshUpdateCheckState
 import com.tanuki.update.Release
+import com.tanuki.ui.design.TanukiMotion as TanukiMotionTokens
+import com.tanuki.ui.design.TanukiShapeTokens
+import com.tanuki.ui.design.TanukiSpace
 import com.tanuki.web.DshUiMode
 import com.tanuki.web.DshUiSwitchPolicy
 import com.tanuki.web.WebViewSupport
@@ -711,12 +714,21 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         }
         Surface(
             Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = TanukiShapeTokens.card,
         ) {
             Column { categories.forEachIndexed { index, (title, detail) ->
-                ActionRow(title, detail, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) { select(title) }
-                if (index != categories.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                ActionRow(
+                    title,
+                    detail,
+                    contentPadding = PaddingValues(horizontal = TanukiSpace.XL_DP.dp, vertical = TanukiSpace.MD_DP.dp),
+                ) { select(title) }
+                if (index != categories.lastIndex) {
+                    HorizontalDivider(
+                        Modifier.padding(horizontal = TanukiSpace.XL_DP.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
             } }
         }
         return
@@ -874,15 +886,19 @@ private fun NotificationAndBackgroundSettings(model: TanukiUiModel, c: TanukiUiC
 
 @Composable
 private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.titleSmall,
+    // 分区标题使用说明字号 + 次级文字色；卡片统一为 20dp 圆角和抬升表面。
+    Column(verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)) {
+        Text(title, Modifier.padding(horizontal = TanukiSpace.XS_DP.dp), style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = TanukiShapeTokens.card,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), content = content)
+            Column(
+                Modifier.padding(horizontal = TanukiSpace.XL_DP.dp, vertical = TanukiSpace.XS_DP.dp),
+                content = content,
+            )
         }
     }
 }
@@ -1059,7 +1075,11 @@ private fun DshUpdateStatus(state: DshUpdateCheckState, onCheck: () -> Unit) {
 private fun ComponentDisclosure(title:String,version:String,installed:Boolean,forceExpanded:Boolean=false,guided:Boolean=false,content:@Composable ColumnScope.()->Unit) {
     var expanded by rememberSaveable(title) { mutableStateOf(false) }
     LaunchedEffect(forceExpanded) { if(forceExpanded)expanded=true }
-    val rotation by animateFloatAsState(targetValue=if(expanded)90f else 0f,label="componentChevron")
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
+        label = "componentChevron",
+    )
     Column(Modifier.fillMaxWidth()) {
         if(!guided)Row(Modifier.fillMaxWidth().clickable(role=Role.Button,onClickLabel=if(expanded)"收起$title" else "展开$title") { expanded=forceExpanded || !expanded }
             .semantics { stateDescription=if(expanded)"已展开" else "已收起" }.padding(horizontal=20.dp,vertical=16.dp),
@@ -1073,8 +1093,16 @@ private fun ComponentDisclosure(title:String,version:String,installed:Boolean,fo
                 TanukiIcon(TanukiGlyph.Chevron,modifier=Modifier.size(20.dp).rotate(rotation),tint=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        AnimatedVisibility(visible=expanded || guided) {
-            Column(Modifier.padding(start=if(guided)0.dp else 20.dp,end=if(guided)0.dp else 20.dp,bottom=if(guided)0.dp else 20.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)
+        TanukiExpandVisibility(visible = expanded || guided) {
+            Column(
+                Modifier.padding(
+                    start = if (guided) 0.dp else TanukiSpace.XL_DP.dp,
+                    end = if (guided) 0.dp else TanukiSpace.XL_DP.dp,
+                    bottom = if (guided) 0.dp else TanukiSpace.XL_DP.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp),
+                content = content,
+            )
         }
     }
 }
@@ -1082,11 +1110,15 @@ private fun ComponentDisclosure(title:String,version:String,installed:Boolean,fo
 @Composable
 private fun TanukiCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
-        shape=MaterialTheme.shapes.extraLarge,
-        color=MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier=Modifier.fillMaxWidth(),
+        shape = TanukiShapeTokens.card,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(22.dp),verticalArrangement=Arrangement.spacedBy(14.dp),content=content)
+        Column(
+            Modifier.padding(TanukiSpace.XL_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp),
+            content = content,
+        )
     }
 }
 
@@ -1119,7 +1151,10 @@ private fun StopButton(c: TanukiUiCallbacks, enabled: Boolean) {
 
 @Composable
 private fun ReadOnlyRow(title: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = TanukiSpace.MD_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -1127,38 +1162,64 @@ private fun ReadOnlyRow(title: String, value: String) {
 
 @Composable
 private fun ActionRow(title: String, detail: String? = null, enabled: Boolean = true,
-                      contentPadding: PaddingValues = PaddingValues(vertical = 12.dp), onClick: () -> Unit) {
+                      contentPadding: PaddingValues = PaddingValues(vertical = TanukiSpace.MD_DP.dp), onClick: () -> Unit) {
+    val contentColor = if (enabled) MaterialTheme.colorScheme.onSurface else tanukiDisabledContentColor()
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .padding(contentPadding), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.45f))
+        Column(Modifier.weight(1f).padding(end = TanukiSpace.MD_DP.dp), verticalArrangement = Arrangement.spacedBy(TanukiSpace.XS_DP.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = contentColor)
             if (detail != null) Caption(detail)
         }
-        TanukiIcon(TanukiGlyph.Chevron, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.45f), modifier = Modifier.size(18.dp))
+        TanukiIcon(TanukiGlyph.Chevron, tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else tanukiDisabledContentColor(), modifier = Modifier.size(18.dp))
     }
 }
 
 @Composable
 private fun TanukiDetails(title: String, content: @Composable ColumnScope.() -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val rotation by animateFloatAsState(targetValue=if(expanded)90f else 0f,label="detailsChevron")
+    // 折叠箭头走反馈令牌，展开内容走结构令牌；系统移除动画时都立即完成。
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
+        label = "detailsChevron",
+    )
     Column {
         Row(Modifier.fillMaxWidth().heightIn(min=48.dp).clickable(role=Role.Button,onClickLabel=if(expanded)"收起" else "展开") { expanded=!expanded }
             .semantics { stateDescription=if(expanded)"已展开" else "已收起" },verticalAlignment=Alignment.CenterVertically) {
             Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
             TanukiIcon(TanukiGlyph.Chevron,modifier=Modifier.size(20.dp).rotate(rotation),tint=MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        AnimatedVisibility(visible=expanded) {
-            Column(Modifier.padding(top=12.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)
+        TanukiExpandVisibility(visible = expanded) {
+            Column(
+                Modifier.padding(top = TanukiSpace.MD_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp),
+                content = content,
+            )
         }
     }
 }
 
 @Composable
 private fun ToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f).padding(end = 12.dp), style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = checked, onCheckedChange = onChange, modifier = Modifier.semantics { contentDescription = title })
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, Modifier.weight(1f).padding(end = TanukiSpace.MD_DP.dp), style = MaterialTheme.typography.bodyMedium)
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            // 开关的轨道/滑块取主操作与边框令牌，避免默认 Material 紫色。
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            ),
+            modifier = Modifier.semantics { contentDescription = title },
+        )
     }
 }
 

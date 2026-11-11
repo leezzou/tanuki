@@ -70,6 +70,10 @@ object TanukiStateText {
  *
  * [onAction] 为空时不显示假按钮；错误态使用 errorContainer 保证对比度，
  * 加载态带礼貌播报，屏幕阅读器不会静默等待。
+ *
+ * [title] 用于页面已经有明确标题的场景（例如“DSH 未运行”“读取官方会话失败”），
+ * 传空时仍按 [TanukiStateText] 生成“暂无 X / 正在加载 X”。[secondaryActionLabel]
+ * 提供第二种离开方式（例如“刷新列表”），不提供时不会出现空按钮。
  */
 @Composable
 fun TanukiStateView(
@@ -79,8 +83,12 @@ fun TanukiStateView(
     detail: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    title: String? = null,
+    secondaryActionLabel: String? = null,
+    onSecondaryAction: (() -> Unit)? = null,
 ) {
     val copy = TanukiStateText.of(kind, subject, detail, actionLabel)
+        .let { if (title.isNullOrBlank()) it else it.copy(title = title) }
     val background = if (kind == TanukiStateKind.ERROR) MaterialTheme.colorScheme.errorContainer
     else MaterialTheme.colorScheme.surfaceContainerLow
     val content = if (kind == TanukiStateKind.ERROR) MaterialTheme.colorScheme.onErrorContainer
@@ -124,6 +132,9 @@ fun TanukiStateView(
                     outlined = kind == TanukiStateKind.EMPTY,
                     contentDescription = copy.actionLabel ?: "重试",
                 )
+            }
+            if (secondaryActionLabel != null && onSecondaryAction != null) {
+                TanukiTextAction(label = secondaryActionLabel, onClick = onSecondaryAction)
             }
         }
     }

@@ -2,6 +2,19 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
+
+- 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。
+- 实际执行（本 worktree，JDK17、Android SDK、macOS ARM64）：
+  - `bash scripts/verify-workspace.sh` → BUILD SUCCESSFUL（最终代码 3m17s）；workspacecheck app/test APK 构建通过；**1059 tests / 109 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 103 warnings / 1 hint**，改动文件无新增告警。
+  - 定向 `TanukiPageVisualsTest` **12 tests**、`TanukiContrastTest` **4 tests** → 全部通过。
+  - `python3 scripts/check-handoff.py --pr`、`python3 scripts/check-publication.py --git` → 通过（0 findings）。
+  - GitHub Actions：PR #70 的 `Host scripts and handoff checks` 与 `Android build, JVM tests and lint` 在推送 head 上通过；新提交后以 PR 页面当前 head 的检查为准。
+- 新增 12 项 JVM 回归：行高/间距/动效/字体令牌取值；状态 chip 容器正文与状态点在浅/深色下的对比度；卡片说明与路径文字对比度；文件大小多单位与 locale 格式化；文件空态四类文案；权限语气（可写/只读/待授权/可授权）；会话状态标签语气与呼吸；会话权限语气覆盖未知值。
+- 评审 P1 修复（详情内二级确认被窗口遮挡）：详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `TanukiBottomSheet` 会被盖住。重命名/归档/完全权限三条从详情发起的确认改回窗口级 `AlertDialog`（仍用令牌按钮），列表层的新建/批量归档/批量上限保留页面内弹层。新增仪器回归 `SessionManagerDetailDialogTest`：从详情依次进入三条确认，验证确认层出现在详情之上、取消与返回只关闭确认层；`compileModernDebugAndroidTestKotlin` 通过，**无设备，未运行**。
+- 评审 P2 修复（弹层正文继承颜色）：`TanukiBottomSheet` 只画 sheet 背景、没有提供 `LocalContentColor`，深色下正文继承页面默认黑色。现由组件在内容根部提供 `textPrimary`，并在 `TanukiPageVisualsTest` 增加 `textPrimary/textSecondary × sheet` 对比度断言。
+- 未执行：模拟器/真机上的深色/浅色、1.3x/2x 大字体、360dp 窄屏逐页截图对照、TalkBack、输入法遮挡、滚动手感；Android 仪器测试未运行（含新增用例）；未合并、未发布。编译/JVM/lint 不能替代设备验收。
+
 ## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）
 
 - 范围：`WorkspaceFilesPage` 顶部 56dp 主操作行、可横滚面包屑/搜索/选择三态第二行、权限 chip 与底部 sheet、传输悬浮胶囊与详情 sheet、Snackbar 提示、列表满高和固定底部避让；同时让文件页隐藏全局传输 banner，新增权限/传输纯状态与格式化回归。起点 `origin/main=1122d3f`，已 rebase 到最新 `origin/main=811b5d2`；分支 `ao/files-layout/info-hierarchy`，PR [#58](https://github.com/leezzou/tanuki/pull/58)，不合并、不发布。
