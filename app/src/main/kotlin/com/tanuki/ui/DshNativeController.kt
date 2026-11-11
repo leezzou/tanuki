@@ -7,6 +7,7 @@ import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
 import com.tanuki.web.DshSession
+import com.tanuki.web.DshSessionPage
 import com.tanuki.web.DshTimelineItem
 import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolMerge
@@ -31,6 +32,14 @@ data class DshNativeState(
     val selectedId: String? = null,
     val messages: List<DshMessage> = emptyList(),
     val hasMore: Boolean = false,
+    /** 更早历史正在加载；页面顶部据此显示进度而不是按钮。 */
+    val loadingOlder: Boolean = false,
+    /** 向前分页失败原因；已加载页保持不动。 */
+    val olderError: String? = null,
+    /** 头部行发生变化（插入更早页或释放窗口）时递增；界面据此按行 key 恢复视口。 */
+    val historyRevision: Int = 0,
+    /** 已从内存释放的更早消息条数；再向上翻页时会重新读取。 */
+    val releasedOlder: Int = 0,
     val error: String? = null,
     /** 会话列表都读不到时置位；界面据此回退官方页面。 */
     val unavailableReason: String? = null,
@@ -80,6 +89,10 @@ class DshNativeController(
     private var pendingStreamText: String? = null
     private var pendingStreamReset = false
     private var streamFlushJob: Job? = null
+    /** 视口顶部行的 seq；只用于判断窗口可以释放哪些“视口上方”的行。 */
+    private var viewportTopSeq: Int? = null
+    /** 本次实时连接是否已经收到过 Connected；用于区分首连与断线重连。 */
+    private var liveConnected = false
 
     fun refresh() {
         val token = ++generation
@@ -87,6 +100,8 @@ class DshNativeController(
         pageJob?.cancel()
         liveJob?.cancel()
         resetStreaming()
+        viewportTopSeq = null
+        liveConnected = false
         _state.value = DshNativeState(loading = true)
         pageJob = scope.launch {
             val result = client.sessions()
@@ -154,6 +169,8 @@ class DshNativeController(
         pageJob?.cancel()
         liveJob?.cancel()
         resetStreaming()
+        viewportTopSeq = null
+        liveConnected = false
         val session = current.sessions.firstOrNull { it.id == sessionId }
         _state.update {
             it.copy(
@@ -162,6 +179,10 @@ class DshNativeController(
                 tools = emptyList(),
                 error = null,
                 hasMore = false,
+                loadingOlder = false,
+                olderError = null,
+                historyRevision = 0,
+                releasedOlder = 0,
                 loading = true,
                 running = session?.running ?: it.running,
                 stopping = false,
@@ -288,6 +309,8 @@ class DshNativeController(
         pageJob = null
         liveJob = null
         pendingSelection = null
+        viewportTopSeq = null
+        liveConnected = false
         _state.value = DshNativeState()
         // 同时中止仍在进行的 /connect 与 mux；切换界面不停止 DSH 服务。
         client.reset()
@@ -300,11 +323,12 @@ class DshNativeController(
 
     private fun startLive(sessionId: String, token: Int) {
         liveJob?.cancel()
+        liveConnected = false
         liveJob = scope.launch {
             try {
                 client.live(sessionId).collect { event ->
                     if (token != generation) return@collect
-                    applyLive(event)
+                    applyLive(event, sessionId, token)
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -321,11 +345,16 @@ class DshNativeController(
         }
     }
 
-    private fun applyLive(event: DshLiveEvent) {
+    private fun applyLive(event: DshLiveEvent, sessionId: String, token: Int) {
         when (event) {
-            // 新 mux 连接会重新收到仍待处理的审批；先清掉上一连接的旧卡片，避免幽灵按钮。
-            DshLiveEvent.Connected -> _state.update {
-                it.copy(live = true, liveError = null)
+            DshLiveEvent.Connected -> {
+                val reconnected = liveConnected
+                liveConnected = true
+                _state.update { it.copy(live = true, liveError = null) }
+                // 断线期间的历史事件可能已丢；重连后主动对账一次，首连仍交给历史页/快照。
+                if (reconnected && _state.value.messages.isNotEmpty()) {
+                    refreshMessages(sessionId, token)
+                }
             }
             is DshLiveEvent.Snapshot -> {
                 cancelStreamFlush()
@@ -334,9 +363,11 @@ class DshNativeController(
                         loading = false,
                         live = true,
                         liveError = null,
-                        messages = mergeMessages(state.messages, event.messages, replace = true),
-                        tools = DshToolMerge.merge(state.tools, event.tools),
-                        hasMore = event.hasMore,
+                        // 快照只覆盖自己的窗口：已加载的更早分页和更新的实时行都要保留。
+                        messages = DshMessageLedger.reconcile(state.messages, event.messages),
+                        // 合并阶段不截断工具，窗口与视口释放统一由 trimWindow 负责。
+                        tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null),
+                        hasMore = state.hasMore || event.hasMore,
                         streamingText = event.liveText
                     )
                 }
@@ -345,13 +376,14 @@ class DshNativeController(
                 if (event.message.role == DshMessageRole.ASSISTANT) cancelStreamFlush()
                 _state.update { state ->
                     state.copy(
-                        messages = mergeMessages(state.messages, listOf(event.message), replace = false),
+                        // 同 seq 重复投递只保留一份；重放/重连不会插入第二条气泡。
+                        messages = DshMessageLedger.merge(state.messages, listOf(event.message)),
                         streamingText = if (event.message.role == DshMessageRole.ASSISTANT) "" else state.streamingText
                     )
                 }
             }
             is DshLiveEvent.Timeline -> _state.update { state ->
-                state.copy(tools = DshToolMerge.merge(state.tools, event.tools))
+                state.copy(tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null))
             }
             is DshLiveEvent.Streaming -> scheduleStreaming(event.text)
             is DshLiveEvent.Finished -> {
@@ -443,14 +475,26 @@ class DshNativeController(
                 val pageMax = page.messages.maxOfOrNull { it.seq } ?: -1
                 // 实时快照可能比这次 HTTP 历史更新；旧页不能覆盖它。
                 if (state.messages.isEmpty() || pageMax >= currentMax) {
+                    val pageMin = page.messages.minOfOrNull { it.seq }
+                    val loadedOldest = DshChatWindowPolicy.oldestSeq(state.messages, state.tools)
+                    // 只有这一页真正接到已加载窗口的起点时，它的 hasMore 才代表“还有更早历史”；
+                    // 快照先到且更窄时不能被最近一页的 hasMore 覆盖。
+                    val pageReachesLoadedStart =
+                        pageMin != null && (loadedOldest == null || pageMin <= loadedOldest)
                     state.copy(
                         loading = false,
-                        messages = mergeMessages(state.messages, page.messages, replace = true),
+                        // 首次用页面铺底；刷新/重连只做对账，不删除已加载的更早分页。
+                        messages = if (state.messages.isEmpty()) {
+                            DshMessageLedger.merge(emptyList(), page.messages)
+                        } else {
+                            DshMessageLedger.reconcile(state.messages, page.messages)
+                        },
                         tools = DshToolMerge.merge(
                             state.tools,
-                            page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
+                            page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool },
+                            maxTools = null
                         ),
-                        hasMore = page.hasMore
+                        hasMore = if (pageReachesLoadedStart) page.hasMore else state.hasMore
                     )
                 } else {
                     state.copy(loading = false)
@@ -468,25 +512,86 @@ class DshNativeController(
     }
 
     /**
-     * 合并官方消息与本地发送中占位：按官方 seq 去重，快照替换时保留尚未落盘的
-     * 本地消息；一旦官方出现相同文本的用户消息，就移除占位。
+     * 向上翻页：按当前窗口最早行之前的 seq 读取一页；结果按 seq 合并排序，
+     * 重复页不会插入第二份，失败时保留已加载内容。
      */
-    private fun mergeMessages(
-        current: List<DshMessage>,
-        incoming: List<DshMessage>,
-        replace: Boolean
-    ): List<DshMessage> {
-        val durable = LinkedHashMap<Int, DshMessage>()
-        if (!replace) current.filterNot { it.pending }.forEach { durable[it.seq] = it }
-        incoming.filterNot { it.pending }.forEach { durable[it.seq] = it }
-        val pending = current.filter { it.pending }.filter { local ->
-            incoming.none { official ->
-                !official.pending && official.role == DshMessageRole.USER && official.text == local.text
+    fun loadOlder() {
+        val snapshot = _state.value
+        val sessionId = snapshot.selectedId ?: return
+        if (snapshot.loading || snapshot.loadingOlder || !snapshot.hasMore) return
+        val before = DshChatWindowPolicy.beforeSeq(
+            DshChatWindowPolicy.oldestSeq(snapshot.messages, snapshot.tools)
+        )
+        if (before == null) {
+            _state.update { it.copy(hasMore = false, olderError = null) }
+            return
+        }
+        val token = generation
+        _state.update { it.copy(loadingOlder = true, olderError = null) }
+        scope.launch {
+            val result = client.messagesBefore(sessionId, before, DshChatWindowPolicy.PAGE_SIZE)
+            if (token != generation || _state.value.selectedId != sessionId) return@launch
+            result.onSuccess { page -> applyOlderPage(page, before) }.onFailure { error ->
+                _state.update { state ->
+                    // 失败只提示，不清空已经读到的历史，也不改 hasMore。
+                    state.copy(loadingOlder = false, olderError = messageOf(error))
+                }
             }
         }
-        return (durable.values + pending).sortedWith(
-            compareBy<DshMessage> { it.pending }.thenBy { if (it.pending) it.time else it.seq.toLong() }
-        )
+    }
+
+    private fun applyOlderPage(page: DshSessionPage, beforeSeq: Int) {
+        // 双重防御：只接受早于游标的行；服务端忽略 throughSeq 时不会把当前页重复插到头部。
+        val older = page.messages.filter { !it.pending && it.seq <= beforeSeq }
+        val tools = page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
+        _state.update { state ->
+            val merged = if (older.isEmpty()) state.messages else DshMessageLedger.merge(state.messages, older)
+            val grew = merged.size > state.messages.size
+            state.copy(
+                messages = merged,
+                tools = if (grew) DshToolMerge.merge(state.tools, tools, maxTools = null) else state.tools,
+                loadingOlder = false,
+                // 没有新增行时不再续页，避免服务端重复返回同一页导致死循环。
+                hasMore = if (grew) page.hasMore else false,
+                olderError = null,
+                historyRevision = if (grew) state.historyRevision + 1 else state.historyRevision
+            )
+        }
+    }
+
+    /**
+     * 界面报告视口顶部行的 seq；只在窗口超出预算时释放该行上方的消息。
+     * 传入 null 表示没有可参考视口（列表尚未布局），此时只按预算保留最新行。
+     */
+    fun onViewportTop(seq: Int?) {
+        val normalized = seq?.takeIf { it > 0 }
+        val previous = viewportTopSeq
+        if (normalized == previous) return
+        viewportTopSeq = normalized
+        // 上翻（视口首行 seq 变小）不释放，避免刚加载的更早页立刻被裁掉；
+        // 首次布局或向下滚动时才按预算释放视口上方的行。
+        if (previous == null || (normalized != null && normalized > previous)) trimWindow()
+    }
+
+    /** 内存窗口：消息与工具按同一视口边界释放；界面按 historyRevision 恢复滚动位置。 */
+    private fun trimWindow() {
+        _state.update { state ->
+            if (state.loading) return@update state
+            val window = DshChatWindowPolicy.trim(
+                messages = state.messages,
+                tools = state.tools,
+                keepFromSeq = viewportTopSeq
+            )
+            if (!window.trimmed) return@update state
+            state.copy(
+                messages = window.messages,
+                tools = window.tools,
+                // 释放的行仍可从官方历史页重新读取，因此重新标记为“还有更早历史”。
+                hasMore = true,
+                releasedOlder = state.releasedOlder + window.releasedMessages,
+                historyRevision = state.historyRevision + 1
+            )
+        }
     }
 
     /**

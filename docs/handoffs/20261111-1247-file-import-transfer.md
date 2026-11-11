@@ -1,89 +1,84 @@
 # 交接：文件导入命名与手机存储复制/移动
 
 - Agent/会话标识：android_agent-70（AO Worker）
-- 时间：2026-11-11 12:47 CST
-- 状态：已完成实现与本地非设备验证；PR 待创建/独立审查，未合并、未发布
+- 时间：2026-11-11，CST
+- 状态：实现与本地验证完成；通过原 PR [#75](https://github.com/leezzou/tanuki/pull/75) 交付；独立审查/设备 QA 待安排；未合并、未发布
 - 前一记录：[用户旅程审计](20261111-1050-ux-audit.md)
 
 ## 用户目标与范围
 
-- 用户本次实际要求：修 P0 #4/#5（文件导入生成随机名、列表不刷新跳转；手机存储不能复制/移动到工作区），依据已合并审计 `docs/handoffs/20261111-1050-ux-audit.md` 第 4/5 条与 R4.1/R4.2/R4.3；基于 `origin/main` 最新 main 建分支（先 fetch）。
-- 本次包含：导入目标命名（源文件名/时间戳、重名 (2)/(3)、不覆盖）、导入完成 Snackbar + 打开 + 列表刷新；手机存储条目菜单与批量条新增复制/移动到工作区；目标目录默认最近工作区目录且可改；移动先复制并逐文件 SHA-256 校验成功再删源；进度可见可取消；同名冲突保留两者/替换/跳过与批量全部应用；仅改文件页与存储层；补 JVM 回归；中文注释；PR 交付。
-- 本次不包含：聊天页、协议/RPC、权限/安全边界、发布版本号、正式签名、APK/源码包发布、合并。
-- 用户改变或暂停的要求（需保留）：不合并、不发布；API Key 保存问题仍暂停，本轮未触碰；设备由独立 QA 独占，本轮未申请设备或模拟器。
+- 修审计 P0 #4/#5 与 R4.1/R4.2/R4.3：导入可读命名、重名不覆盖、完成提示/刷新/打开；手机条目与批量复制/移动到工作区；目标目录可选；移动先复制校验再删源；冲突三选和全部应用；流式读写与可取消；JVM 回归；中文注释；PR 交付。
+- 只改文件页、导入宿主接线与存储层；不改聊天页、RPC、权限清单、共享状态或发布版本。系统手机写权限与 DSH 本次写授权分开，后者不会因文件页移动而开启。
+- 不合并、不发布；API Key 保存、真实模型/账号与真机验收仍暂停。设备由独立 QA 独占，本会话未安装应用、未操作设备。
 
 ## 当前状态
 
-- 已实现：导入命名、导入完成事件与 Snackbar、手机→工作区复制/移动、冲突三选与批量应用、流式校验与取消清理、容量/剩余空间检查。
-- 已验证：完整 modernDebug JVM 单测、定向新增回归、lint、modernDebug assemble、仪器测试源码两套配置编译；均为本地非设备结果。
-- 待验证：真实设备/模拟器上的 SAF 选择器、手机存储授权与复制/移动、进度/取消、深色/大字体/360dp/TalkBack；独立 Review、GitHub CI、合并与发布。
-- 当前目标包名、分支、任务：`com.tanuki`；分支 `ao/file-import-move/p0-file-import-move`，基于 `origin/main=732cb79`（`feat(onboarding)` #67），会话根分支 `ao/file-import-move/root`；无运行中的设备任务、未安装 APK。
-- 关键事实与可定位源码/公共文档：命名与冲突纯逻辑 `app/src/main/kotlin/com/tanuki/storage/ImportNaming.kt`、`TransferEngine.kt`；导入落点 `WorkspaceStorage.kt`；跨位置传输 `WorkspaceFileManager.kt`；页面 `WorkspaceFilesPage.kt`；宿主事件 `MainActivity.kt`；JVM 回归 `ImportNamingTest.kt`、`TransferEngineTest.kt`。
+- 开始时先 fetch，基线为 `origin/main=732cb7965c8c7db378c70edb70f05f5a50ed30d6`；分支 `ao/file-import-move/p0-file-import-move`，原提交 `2200c0901a3aa0b02f310a4e800111d8e5901f84` 已推送并创建 PR #75，两项 CI 成功。
+- 开发期间 main 前进到 `8ba7b4b3ecdc82c17a200dca77ef9420924d76b1`。保留本地集成备份，从 PR 完整 head 恢复源分支后普通 merge main，复用已编译的文件页设计令牌冲突解决；保留已推送历史，后续普通推送，不 force-push。
+- 已实现：单文件以去最后扩展名的源文件名建立独立项目，多文件 `导入-yyyyMMdd-HHmm`；项目重名用 ` (2)`、` (3)`；项目内重名文件用 `合同 (2).pdf`。长名称按 UTF-8 完整字符截断并保留常见扩展名，悬空链接也视为名称已占用。
+- 已实现：顶部填充色「＋ 导入」，搜索/刷新/排序收进更多菜单；空态导入与新建文件夹；菜单「导入为新项目」及不覆盖说明。导入事件使用独立 ID 并随 Activity 保存，成功后刷新列表、显示「已导入 N 个文件到「目录」」+「打开」，一次性「刚刚导入：目录」提供「打开 / 忽略」。查看器中的显式复制也可显示并打开目标。
+- 已实现：手机条目与批量「复制到工作区 / 移动到工作区」，默认最近工作区目录；卷根/链接不能传输，不可删除条目禁用移动，旧系统缺写权限时单独申请。目标确认说明移动删源行为。
+- 已实现：同名普通文件保留两者/替换/跳过；目录、链接和不同类型条目不替换。全部应用仅作用于尚未处理的冲突。失败保留已完成项，并列出未完成项。
+- 已实现：64 KiB 分块复制，回读 SHA-256，核对源清单、文件版本与摘要后才发布；每项发布前检查实际容量预算，移动前/删源前复核系统授权。只清理本次已校验的源条目，新出现的文件不递归删除。取消清理未提交暂存；发布后删源失败保留目标并提示检查。
+- `content://` 查看继续直读提供方，不强制复制。现有 SAF 导入 512 MiB 单次限制及 64 MiB 磁盘余量保留。
+- 包名：开发验证使用 `com.tanuki.modern.workspacecheck`；未安装 APK。共享 `AGENT-STATE.md` / `CURRENT.json` 不修改。
 
 ## 本次改动
 
 | 文件 | 改动与目的 |
 |---|---|
-| `app/src/main/kotlin/com/tanuki/storage/ImportNaming.kt` | 新增纯 JVM 命名规则：单文件取源文件名去最后扩展名，多文件用 `导入-yyyyMMdd-HHmm`；过滤路径分隔符/控制字符/尾随点、限制 UTF-8 字节；重名追加 ` (2)`、` (3)`；项目名去掉前导点，避免导入后不可见。 |
-| `app/src/main/kotlin/com/tanuki/storage/TransferEngine.kt` | 新增流式复制校验引擎：64 KiB 分块、写后回读 SHA-256、大小一致才发布；暂存目录内完成后移动，取消/失败清理；移动仅在发布后删源，删源失败保留目标并报错；批量冲突策略与“全部应用”纯逻辑，替换策略不作用于目录。 |
-| `app/src/main/kotlin/com/tanuki/storage/WorkspaceStorage.kt` | `importFiles` 增加可选项目名；最终目录不再使用 `import-<uuid>`，改为可读名并原子选择未占用后缀；同批同名源文件在项目内自动改名，不再整批失败；保留 `.import-<uuid>` 仅作隐藏暂存与崩溃恢复。 |
-| `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt` | 新增 `workspaceConflicts` 预检与 `transferToWorkspace`：手机存储→工作区复制/移动，逐项冲突策略、目录递归、真实字节进度、容量/剩余空间检查、取消清理；移动先校验后删源。 |
-| `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt` | 导入完成事件去重、列表刷新、Snackbar「已导入 N 个文件到「目录」」+「打开」；手机条目菜单/批量条新增复制/移动到工作区；目标目录默认最近工作区目录且可改；冲突三选对话框与全部应用；空态导入入口；菜单文案改为「导入为新项目」；手机权限说明补充只读边界。 |
-| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 导入完成投递一次性 `WorkspaceImportEvent`；外部文件显式复制到工作区同样投递；文件页接入手机→工作区传输，复用 `FileTransfers` 进度与取消。 |
-| `app/src/test/kotlin/com/tanuki/ImportNamingTest.kt` | 新增 5 项 JVM 回归：单文件命名、多文件时间戳、重名 (2)/(3) 且不改已有、用户可编辑名清洗、长中文名 UTF-8 字节上限。 |
-| `app/src/test/kotlin/com/tanuki/TransferEngineTest.kt` | 新增 9 项 JVM 回归：复制保留源、移动复制校验期间源仍在且成功后删除、失败/取消不留暂存与目标、目录递归移动、替换文件、拒绝替换目录、批量全部应用、批量替换不作用于目录。 |
-| `app/src/androidTest/kotlin/com/tanuki/LiveProjectTransferTest.kt` | 导入目录期望从 `import-<uuid>` 改为源文件名。 |
-| `app/src/androidTest/kotlin/com/tanuki/FileTransferPresentationTest.kt` | SAF 往返按新命名匹配项目目录；菜单文案改为「导入为新项目」。 |
-| `app/src/androidTest/kotlin/com/tanuki/FilesBrowserPresentationTest.kt` | 同步导入菜单文案。 |
-| `docs/TEST-REPORT.md` | 记录本轮验证范围、命令、结果与未验证项。 |
+| `app/src/main/kotlin/com/tanuki/storage/ImportNaming.kt` | 文件/项目安全命名、UTF-8 截断、扩展名与序号、唯一项目发布；不覆盖文件/目录/悬空链接。 |
+| `app/src/main/kotlin/com/tanuki/storage/TransferEngine.kt` | 流式复制、长度/摘要/源清单校验、同目录暂存发布、移动安全删源与取消清理；纯 JVM 冲突批处理逻辑。 |
+| `app/src/main/kotlin/com/tanuki/storage/WorkspaceTransfer.kt` | 真实批量复制/移动执行器，串联冲突三选、进度、部分失败及容量/权限注入检查。 |
+| `app/src/main/kotlin/com/tanuki/storage/WorkspaceStorage.kt` | SAF 导入复用流式校验及可读项目命名，保留 journal、容量检查和恢复策略。 |
+| `app/src/main/kotlin/com/tanuki/storage/WorkspaceFileManager.kt` | 手机源/工作区目标边界、卷根限制、可删除信息、写权限复核和实际容量检查。 |
+| `app/src/main/kotlin/com/tanuki/ui/WorkspaceFilesPage.kt` | R4.1/R4.2/R4.3 交互：一级导入、刷新/打开/忽略、目标选择、冲突及全部应用、移动权限、阶段/耗时/取消。 |
+| `app/src/main/kotlin/com/tanuki/MainActivity.kt` | 导入事件保存/恢复、SAF 大小元数据、文件页独立写权限申请；串联传输进度与取消。 |
+| `app/src/test/kotlin/com/tanuki/ImportNamingTest.kt` | 8 项命名与真实发布回归，含后缀、扩展名、中文/emoji 字节边界和悬空链接。 |
+| `app/src/test/kotlin/com/tanuki/TransferEngineTest.kt` | 20 项流式复制/移动/取消/容量拒绝/源变化/摘要损坏/真实批量冲突回归。 |
+| `app/src/androidTest/kotlin/com/tanuki/LiveProjectTransferTest.kt` | 同步可读项目名期望。 |
+| `app/src/androidTest/kotlin/com/tanuki/FileTransferPresentationTest.kt` | 同步菜单路径与可读项目名。 |
+| `app/src/androidTest/kotlin/com/tanuki/FilesBrowserPresentationTest.kt` | 同步搜索/排序/刷新菜单路径、验证运行中一级导入入口，新增导入完成反馈/打开用例；仅编译。 |
+| `docs/WORKSPACE-STORAGE.md` | 更新命名、刷新、导入入口、手机传输与权限边界。 |
+| `docs/TEST-REPORT.md` | 本轮真实验证摘要；与历史/设备证据分开。 |
 
 ## 验证记录
 
+环境为 macOS ARM64、项目 JDK17、现有 Android SDK；Gradle 串行运行，无设备任务。
+
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
-| `git fetch origin --prune` | 成功；`origin/main=732cb79` | 共享 `.git` 需放宽沙箱；fetch 后 main 未前进 |
-| `./gradlew testModernDebugUnitTest --tests com.tanuki.ImportNamingTest --tests com.tanuki.TransferEngineTest` | BUILD SUCCESSFUL，14 tests / 0 failures | JDK17（项目内置下载器，`.build/jdk`）；定向回归 |
-| `./gradlew testModernDebugUnitTest` | 第一次完整运行有一个既有 `NpmAdaptiveWorkerPoolTest` 时序失败（8 vs 9）；单独重跑该用例与完整套件均 BUILD SUCCESSFUL；**1098 tests / 113 个结果文件 / 0 failures / 0 errors / 0 skipped** | 失败未抹掉；与本改动文件无调用关系；完整 modernDebug JVM，未使用设备 |
-| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugAndroidTestKotlin` | BUILD SUCCESSFUL（1m30s） | 仅编译仪器测试源码，未安装、未运行；不含设备证据 |
-| `./gradlew assembleModernProbeAndroidTest` | BUILD SUCCESSFUL | 仪器测试源码在默认 probe 配置下也可编译；未运行 |
-| `./gradlew lintModernDebug` | BUILD SUCCESSFUL；0 errors / 109 warnings / 1 hint | lint 不替代设备或人工验收 |
-| `./gradlew assembleModernDebug` | BUILD SUCCESSFUL；`app-modern-debug.apk` 17,559,104 字节，SHA-256 `a7bda140...` | 开发 debug 包，非发布候选；未安装 |
-| `git diff --check` | 通过 | 无空白/冲突标记问题 |
+| `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.ImportNamingTest --tests com.tanuki.TransferEngineTest --console=plain` | BUILD SUCCESSFUL；28 tests，0 failures / errors / skipped | 实际执行命名与流式/批量文件操作，不是仅检查策略枚举。 |
+| `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest --console=plain` | BUILD SUCCESSFUL（18m36s）；1188 tests / 120 个报告文件，0 failures / errors / skipped；lint 0 errors / 109 warnings / 1 hint；开发验证包与测试 APK 构建成功 | `com.tanuki.modern.workspacecheck`；只编译，不执行 Android 仪器测试。 |
+| 原提交 `2200c09` GitHub Actions | Host scripts 与 Android build/JVM/lint 均通过 | 仅适用于旧 head；最终 head 另行核对，不沿用旧结论。 |
+| 早期完整 JVM | 1098/113 文件；main 集成后 1174/120 文件均通过 | 过程结果，不作为最终代码验证；曾出现既有 NPM 线程池时序失败（期望 8，实际 9），单独和完整重跑通过。 |
 
-- 哪些是前一轮结果，哪些是本次新验证：本次新验证为上述 JVM、lint、assemble、仪器测试源码编译；未复用 0.1.12 发布轮的 1044 tests 等历史数字。
-- 未测试、超时、失败和暂未复现的情况：真实设备/模拟器上的 SAF 多选与保留权限、手机存储授权/撤销、复制/移动进度与取消、移动删源失败场景、同名冲突三选与全部应用、深色/大字体/360dp/TalkBack、隐藏文件与符号链接边界；Android 仪器测试未运行；GitHub CI 与独立 Review 未执行。
+- 定向覆盖：命名/重名与不覆盖、长 Unicode/扩展名、复制保留源、移动复制期间源仍在、目录递归、目标校验损坏、同大小同时间戳源改写、目录新增、容量拒绝、发布前取消无半成品、发布后删源失败保留副本、流式未知大小、三种冲突实际执行、全部应用与部分失败进度。
+- 失败记录保留：最初编译尝试在非挂起文件遍历回调调用挂起 API，已修正；JDK27 不满足工程要求，使用项目内 JDK17；沙箱拒绝共享 Git 元数据和用户 Gradle 缓存写入后，使用同命令一次权限重试。
+- 未执行：任何设备/模拟器安装和 Android 仪器测试，真实 SAF 提供方、系统权限弹窗/撤销、深色/大字体/360dp/TalkBack、实际手机 SD/USB 只读卷、进程被杀/断电。宿主合成文件和 Android 源码编译不代替这些验收。
 
 ## 未完成与暂停项
 
-- 未完成：创建 PR、独立 Codex High/人工审查、GitHub CI 结果核对；PR 合并需另行授权。
-- 外部阻塞：设备 QA 由独立 QA 独占，本会话未申请；真实 SAF 提供方与厂商 ROM 行为未提供。
-- 用户暂停：API Key 保存、真实模型/账号验收、真机验收、合并与发布；本轮均未触碰。
+- 本地完整验证已完成；交接与 Git 公开文件检查通过（779 个公开候选、0 findings）。最终 head 的 GitHub CI 由 PR #75 provider 检查核对；独立 Review 和独立设备 QA 待安排，旧 head 的批准或 CI 不沿用。
+- 设备 QA 为独立会话职责，不将实现 worker 的宿主结果当设备证据；无真实模型配置要求。
+- 用户暂停与授权边界不变：API Key 保存、真实模型/账号、真机验收、合并与发布均不执行。
 
 ## 下一步
 
-1. 在当前分支提交并创建 PR（目标 `main`），正文写明命名规则、交互流程、测试结果与未验证项；不合并、不发布。
-2. 独立 Reviewer 对当前 head 做审查；CI 在 PR 页面复跑 JVM/lint/assemble。
-3. 独立 QA 在授权设备上验证：SAF 导入命名/重名、导入 Snackbar 打开与刷新、手机存储复制/移动/取消/冲突三选/全部应用、移动删源失败保留目标、深色/大字体/360dp/TalkBack。
+1. 本地候选与普通 PR 交接已完成，以 `leezzou <115924933+leezzou@users.noreply.github.com>` 身份提交，普通推送更新原 PR #75，核对当前 head 的 GitHub CI。
+2. 已向编排方请求是否启动 AO 原生独立审查及独立 QA；获得同意后再触发，审查绑定最终完整 SHA，完成前不记为已通过。
+3. 独立 QA 检查 SAF 命名与重名、列表刷新与打开、手机权限与只读卷、复制/移动/冲突/取消/删源失败，以及浅深色/大字体/360dp/TalkBack；合并/发布需另行授权。
 
 ## 约束与风险
 
-- 数据/设备/权限边界：只操作工作区与合成临时目录；未读取真实 Key/Cookie/token/会话；未安装 APK、未操作设备、未改共享状态或权限策略。
-- 关键决策及理由：导入最终目录按源文件名/时间戳命名并用 ` (2)` 后缀，避免 UUID 与覆盖；移动采用“暂存→流式复制→回读 SHA-256→发布→删源”，把丢文件风险降到最低；手机存储文件页仍只读，复制/移动显式确认，避免把 DSH 写授权误解为文件页可写。
-- 失败尝试与避免重复踩坑的结论：`File.walkFileTree` 回调不是挂起上下文，改为递归 suspend 遍历并在每项检查取消；批处理“全部替换”曾会把同名目录也标记为替换，现只作用于普通文件，目录回退保留两者。
-- 风险：长文件名按 220 字节截断可能丢失末尾扩展名；目录复制会二次遍历统计总量，超大目录开始前有额外延迟；冲突预检与实际写入之间若外部进程新建同名文件，KEEP_BOTH 会再改名、REPLACE 仍受“目录不替换”保护；移动删源失败会同时保留源与目标，需要用户手动清理源。
-- 未覆盖：R4.3 中把导入提升为顶部一级图标并重排搜索/排序的布局改造本轮未做；仅在空态增加“导入文件”按钮并将菜单改为“导入为新项目”。
+- 目标替换只支持同类型普通文件；目录冲突的批量替换安全回退为保留两者，既有目录内容不会整体删除。
+- 目录复制存路径/大小/版本清单，不存文件正文，拒绝链接、特殊文件和超过 128 层目录；超大目录统计和多次摘要核验会增加耗时，阶段/耗时保持可见。
+- 移动没有跨应用文件锁；复制期间的源变更会拒绝或停止删源，发布后删源失败会保留目标。应停止其他应用对源的写入；不承诺恶意同 UID 并发或断电条件下的事务隔离。
+- 本轮新增/修改的第一方注释与文档使用中文，不引入外部参考实现名称。系统权限与 DSH 原生授权分开，不更改 RPC 或自动开放 AI 写入。
 
 ## 产物与校验
 
-- 新/旧 APK、源码 ZIP 及校验文件：仅生成未安装的 `app-modern-debug.apk` 用于编译核对；未生成源码 ZIP、未更新发布目录、未创建 tag/Release。
-- 是否覆盖安装 / 签名范围 / 未发布事项：未安装、未覆盖、未发布；debug 包不是正式签名候选。
-- 提交/推送前清理的过期记录、删除理由和必要结论的保留位置：未删除旧交接；本轮只新增本记录并补 `docs/TEST-REPORT.md`，旧记录事实仍在原文件。
-- 普通 PR 不刷新共享状态/印章；`docs/AGENT-STATE.md`、`docs/handoffs/CURRENT.json` 未修改，集成维护方在合并后统一运行 `--integrate`。
-
-结束前实际执行：
-
-```bash
-python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1247-file-import-transfer.md
-python3 scripts/check-publication.py --git
-git diff --check
-```
+- 只产生用于验证的开发 APK 与测试 APK，不覆盖安装、不签发正式包、不创建 tag/Release、不上传附件。开发包沿用 0.1.12/code14，`app-modern-debug.apk` 为 17,247,521 字节，SHA-256 `4fde01ef31fc2f2d71f05c37a106ef9ebb2b43c42389312e342dc065ffe5c413`；包名由输出元数据确认，不把它当作正式签名候选。
+- 源码候选包检查只在系统临时目录的公开源码副本运行 `scripts/package-source.py`，核对 `SOURCE-SHA256SUMS` 并执行 `scripts/check-publication.py --archive`；不把生成物、日志或本机配置纳入 PR，不向用户交付临时 ZIP。
+- 过期交接核对：审计是本任务验收依据，文件页布局记录仍含未完成设备 QA，故保留；未确认本范围内有可删除的过期独有记录，不跨 PR 清理。当前唯一交接修订在本文件，不新增重复记录。
+- 普通 PR 不刷新共享状态或印章。提交前执行：`python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1247-file-import-transfer.md`、`python3 scripts/check-publication.py --git`、`git diff --cached --check`；暂存区已解决冲突，普通 merge 的目标为 `8ba7b4b3ecdc82c17a200dca77ef9420924d76b1`。源码包与 CI 结果另在 PR 验证记录核对，未获独立审查/设备 QA 不能合并。

@@ -28,4 +28,14 @@ interface DshChatSource : DshSessionSource {
     suspend fun send(sessionId: String, text: String): Result<Unit>
     suspend fun cancel(sessionId: String): Result<Unit>
     fun live(sessionId: String): Flow<DshLiveEvent>
+
+    /**
+     * 读取早于 [beforeSeq] 的一页历史，用于向上翻页。
+     * `beforeSeq` 是当前窗口最早行的 seq 减一，实现方把它作为官方 `throughSeq` 上界。
+     */
+    suspend fun messagesBefore(
+        sessionId: String,
+        beforeSeq: Int,
+        maxMessages: Int
+    ): Result<DshSessionPage>
 }

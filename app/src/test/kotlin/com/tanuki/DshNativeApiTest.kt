@@ -246,6 +246,34 @@ class DshNativeApiTest {
         assertEquals("s1", args.getJSONObject("address").getString("sessionId"))
     }
 
+    @Test fun olderHistoryPageUsesBeforeSeqAsThroughSeqAndBoundsPageSize() {
+        val requests = CopyOnWriteArrayList<TestRequest>()
+        TestServer { request ->
+            requests += request
+            when {
+                request.target.startsWith("/connect?") -> TestResponse(
+                    302,
+                    listOf(
+                        "Location" to "./api/remote.mux",
+                        "Set-Cookie" to "dsh-session=abc; Path=/; HttpOnly"
+                    ),
+                    ""
+                )
+                request.target == "/api/session/page" -> TestResponse(200, listOf(), okFor(request, pageValue()))
+                else -> TestResponse(404, listOf(), "not found")
+            }
+        }.use { server ->
+            val client = DshNativeClient { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") }
+            val page = runBlocking { client.messagesBefore("s1", 41, 50) }
+            assertTrue(page.exceptionOrNull()?.toString(), page.isSuccess)
+        }
+        val request = JSONObject(requests.first { it.target == "/api/session/page" }.body)
+        val args = request.getJSONObject("payload").getJSONObject("args").getJSONObject("request")
+        assertEquals(41, args.getInt("throughSeq"))
+        assertEquals(50, args.getInt("maxMessages"))
+        assertEquals("s1", args.getJSONObject("address").getString("sessionId"))
+    }
+
     @Test fun missingEndpointFailsWithoutLeakingLaunchToken() {
         TestServer { request ->
             if (request.target.startsWith("/connect?")) {

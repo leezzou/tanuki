@@ -1,5 +1,8 @@
 package com.tanuki.storage
 
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,7 +29,7 @@ object ImportNaming {
         var name = invalid.replace(raw.trim(), "_").trimEnd(' ', '.')
         if (name.isEmpty() || name == "." || name == "..") return "导入"
         if (internalName.containsMatchIn(name)) name = "_" + name.trimStart('.')
-        name = limitUtf8(name, MAX_NAME_BYTES).trimEnd(' ', '.')
+        name = fitFileName(name, MAX_NAME_BYTES).trimEnd(' ', '.')
         return name.ifEmpty { "导入" }
     }
 
@@ -77,10 +80,59 @@ object ImportNaming {
         throw IllegalStateException("无法为同名条目分配新名称，请先整理目标目录")
     }
 
+    /** 同目录发布完整项目；目标含悬空链接时也视为已占用，绝不替换。 */
+    fun publishProject(stage: Path, root: Path, desired: String): Path {
+        require(stage.parent == root && Files.isDirectory(stage, LinkOption.NOFOLLOW_LINKS)) { "导入暂存目录无效" }
+        val base = sanitizeProject(desired)
+        for (index in 1..MAX_ATTEMPTS) {
+            val target = root.resolve(numbered(base, index))
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) continue
+            try {
+                return Files.move(stage, target)
+            } catch (_: java.nio.file.FileAlreadyExistsException) {
+                // 目标名刚被其他操作占用时继续分配，不重试其他 I/O 错误。
+            }
+        }
+        throw IllegalStateException("无法为导入项目分配唯一名称，原有项目已保留")
+    }
+
+    /** 文件重名把序号放在扩展名前，避免复制后的 PDF/图片失去类型识别。 */
+    fun uniqueFileName(desired: String, exists: (String) -> Boolean): String {
+        val safe = fitFileName(sanitize(desired), MAX_BASE_BYTES)
+        if (!exists(safe)) return safe
+        val (stem, extension) = splitExtension(safe)
+        for (index in 2..MAX_ATTEMPTS) {
+            val candidate = "$stem ($index)$extension"
+            if (!exists(candidate)) return candidate
+        }
+        throw IllegalStateException("无法为同名文件分配新名称，请先整理目标目录")
+    }
+
+    private fun splitExtension(name: String): Pair<String, String> {
+        val dot = name.lastIndexOf('.')
+        return if (dot > 0 && name.substring(dot).toByteArray(Charsets.UTF_8).size <= 40) {
+            name.substring(0, dot) to name.substring(dot)
+        } else name to ""
+    }
+
+    private fun fitFileName(name: String, maxBytes: Int): String {
+        val (stem, extension) = splitExtension(name)
+        return limitUtf8(stem, maxBytes - extension.toByteArray(Charsets.UTF_8).size) + extension
+    }
+
     private fun limitUtf8(value: String, maxBytes: Int): String {
-        if (value.toByteArray(Charsets.UTF_8).size <= maxBytes) return value
-        var end = value.length
-        while (end > 0 && value.substring(0, end).toByteArray(Charsets.UTF_8).size > maxBytes) end--
-        return value.substring(0, end)
+        val result = StringBuilder()
+        var bytes = 0
+        var index = 0
+        while (index < value.length) {
+            val point = value.codePointAt(index)
+            val text = String(Character.toChars(point))
+            val count = text.toByteArray(Charsets.UTF_8).size
+            if (bytes + count > maxBytes) break
+            result.append(text)
+            bytes += count
+            index += Character.charCount(point)
+        }
+        return result.toString()
     }
 }

@@ -61,4 +61,33 @@ class ImportNamingTest {
             name.toByteArray(Charsets.UTF_8).size <= 240)
         assertFalse(name.isBlank())
     }
+
+    @Test fun duplicateFilesKeepTheirExtension() {
+        assertEquals("合同 (3).pdf", ImportNaming.uniqueFileName("合同.pdf") { it in setOf("合同.pdf", "合同 (2).pdf") })
+        assertEquals(".env (2)", ImportNaming.uniqueFileName(".env") { it == ".env" })
+    }
+
+    @Test fun unicodeTruncationKeepsCodePointsAndFileExtension() {
+        val desired = "😀".repeat(100) + ".pdf"
+        val result = ImportNaming.uniqueFileName(desired) { false }
+        assertTrue(result.endsWith(".pdf"))
+        assertTrue(result.toByteArray(Charsets.UTF_8).size <= 240)
+        assertEquals(result, result.toByteArray(Charsets.UTF_8).toString(Charsets.UTF_8))
+    }
+
+    @Test fun projectPublicationNeverOverwritesFilesDirectoriesOrDanglingLinks() {
+        val root = Files.createTempDirectory("tanuki-import-publish-")
+        try {
+            Files.write(root.resolve("合同"), "existing".toByteArray())
+            Files.createDirectory(root.resolve("合同 (2)"))
+            Files.createSymbolicLink(root.resolve("合同 (3)"), root.resolve("absent"))
+            val stage = Files.createDirectory(root.resolve(".import-synthetic"))
+            Files.write(stage.resolve("合同.pdf"), "new".toByteArray())
+            val target = ImportNaming.publishProject(stage, root, "合同")
+            assertEquals("合同 (4)", target.fileName.toString())
+            assertEquals("existing", File(root.toFile(), "合同").readText())
+            assertEquals("new", target.resolve("合同.pdf").toFile().readText())
+            assertFalse(Files.exists(stage))
+        } finally { root.toFile().deleteRecursively() }
+    }
 }

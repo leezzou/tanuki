@@ -3,8 +3,10 @@ package com.tanuki
 import com.tanuki.web.DshDiffLineKind
 import com.tanuki.web.DshDiffPresentation
 import com.tanuki.web.DshFileDiff
+import com.tanuki.web.DshRiskAssessment
 import com.tanuki.web.DshRiskLevel
 import com.tanuki.web.DshTimelineItem
+import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolArguments
 import com.tanuki.web.DshToolDuration
 import com.tanuki.web.DshToolMerge
@@ -156,6 +158,19 @@ class DshToolTimelineTest {
         assertEquals(2L, merged.durationMs)
     }
 
+    @Test fun mergeKeepsOlderToolsWhenCapDisabled() {
+        val current = (300..499).map { toolItem(it) }
+        val older = (100..102).map { toolItem(it) }
+        val uncapped = DshToolMerge.merge(current, older, maxTools = null)
+        assertEquals(203, uncapped.size)
+        assertEquals((100..102) + (300..499), uncapped.map { it.seq })
+
+        // 默认仍保留既有上限，供不经过视口窗口的调用方兜底。
+        val capped = DshToolMerge.merge(current, older)
+        assertEquals(DshToolMerge.MAX_TOOLS, capped.size)
+        assertFalse(capped.any { it.seq < 300 })
+    }
+
     @Test fun diffPresentationShowsContextRemovedAndAddedLines() {
         val lines = DshDiffPresentation.lines(DshFileDiff("/w/a.txt", "a\nb\nc", "a\nB\nc"))
         assertEquals(
@@ -240,4 +255,21 @@ class DshToolTimelineTest {
         if (surfaceOp != null) event.put("surfaceOp", surfaceOp)
         return JSONObject().put("event", event)
     }
+
+    private fun toolItem(seq: Int) = DshToolItem(
+        seq = seq,
+        time = seq.toLong(),
+        callId = "call-$seq",
+        name = "Bash",
+        arguments = null,
+        status = DshToolStatus.SUCCESS,
+        output = null,
+        error = null,
+        command = null,
+        cwd = null,
+        diffs = emptyList(),
+        files = emptyList(),
+        outputTruncated = false,
+        risk = DshRiskAssessment(DshRiskLevel.LOW, "只读")
+    )
 }

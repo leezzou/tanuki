@@ -225,12 +225,13 @@ class DshNativeControllerTest {
         val controller = controller(source)
         controller.refresh()
         val state = awaitState(controller) { it.messages.any { message -> message.text == "最终回复" } }
-        assertEquals(1, state.messages.size)
+        // 空快照不能清掉 HTTP 历史页；落盘消息只出现一次，且不残留流式气泡。
+        assertEquals(1, state.messages.count { it.text == "最终回复" })
         assertEquals("", state.streamingText)
         // 给延迟刷新的旧任务留出时间；它不能把已落盘消息再插入成流式气泡。
         kotlinx.coroutines.delay(120)
         assertEquals("", controller.state.value.streamingText)
-        assertEquals(1, controller.state.value.messages.size)
+        assertEquals(1, controller.state.value.messages.count { it.text == "最终回复" })
     }
 
     @Test fun sendFailureKeepsPromptForRetryAndCopy() = runBlocking {
@@ -449,6 +450,13 @@ class DshNativeControllerTest {
                 )
             )
         }
+
+        // 本测试类不覆盖向前分页；分页用例在 DshNativePagingTest。
+        override suspend fun messagesBefore(
+            sessionId: String,
+            beforeSeq: Int,
+            maxMessages: Int
+        ): Result<DshSessionPage> = Result.success(DshSessionPage(emptyList(), false))
 
         override suspend fun send(sessionId: String, text: String): Result<Unit> {
             sendGate?.await()

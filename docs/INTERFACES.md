@@ -185,7 +185,22 @@ HTTP 200..399 或 401 → 存活
 | 资源 | 中继需一个双方可达的 TLS 端口；无公网服务器时降级为局域网直连、全局 IPv6、用户已有 SSH 跳板/组网；双方均在 CGNAT 且无任何会合/中继时无法保证跨网直连 |
 | 实现边界 | 参考中继/主机端见 `scripts/remote-relay/`；中继是字节转发，不是 SSH 代理，也不是恶意远程主机沙箱；参考实现未做高可用/限流/审计 |
 
-### 1.7 `WebState` 语义
+### 1.7 局域网自动发现（mDNS）
+
+主机端 agent 在启动中继注册的同时广播局域网服务，让手机在同一网络里直接看到电脑；发现只负责展示和选路，不是认证。
+
+| 项目 | 契约 |
+|---|---|
+| 服务类型 | `_tanuki-remote._tcp.local`；实例名 `<显示名>._tanuki-remote._tcp.local`，显示名 UTF-8、≤63 字节 |
+| SRV | 端口为 SSH 端口；target 为 `<主机标签>.local`，标签优先取 hostname 的 ASCII 首段，非 ASCII 时回退 `tanuki-<hostId 前 8 位>` |
+| TXT | `name=<显示名>`、`ssh=<1..65535>`、`dsh=<1..65535>`、`host=<32 位小写 hex hostId>`、`ver=1`、`fp=<sha256(hostId) 前 16 位小写 hex>`；UTF-8；**不得包含 token、room 或 SSH 凭据** |
+| A | 主机当前局域网 IPv4（可多条，过滤回环/链路本地） |
+| 广播实现 | 优先 `avahi-publish-service --no-reverse <name> _tanuki-remote._tcp <sshPort> <txt...>`，其次 `dns-sd -R <name> _tanuki-remote._tcp local <sshPort> <txt...>`；都不可用或启动失败时用标准库 UDP 5353 最小应答，只答本服务的 PTR/SRV/TXT/A |
+| 开关与失败 | `--no-mdns` 关闭；广播失败只记录日志，不阻塞、不影响中继注册；端口冲突或不需要发现时关闭 |
+| 信任边界 | 同网段可伪造发现信息；手机仍必须使用配对链接 token（或用户主动配置）并完成 SSH 主机密钥确认；`fp` 只用于界面显示/人工对照，不是认证凭据 |
+| 网络前提 | UDP 5353、组播 `224.0.0.251`；同一 Wi-Fi/热点，且路由器未启用 AP/客户端隔离或 mDNS 屏蔽 |
+
+### 1.8 `WebState` 语义
 
 `WebState` 描述管理网页连接，不表示 DSH 进程或环境状态。定义见 `runtime/State.kt`，中文标签见 `ui/Labels.kt`。
 
@@ -201,7 +216,7 @@ HTTP 200..399 或 401 → 存活
 
 `ServiceState`、`EnvironmentState`、`HealthState` 与 `WebState` 相互独立；不能把网页未连接写成 DSH 未运行，也不能把 401 写成进程失败。
 
-### 1.8 DSH 页面事件旁路（聊天通知）
+### 1.9 DSH 页面事件旁路（聊天通知）
 
 不新增 RPC。聊天通知只旁路 DSH 官方 `/api/remote.mux` WebSocket 的 `$events` 转发流，事件白名单来自官方 `dsh-api-remotes`：
 
@@ -219,12 +234,13 @@ HTTP 200..399 或 401 → 存活
 - 通知身份与正文：通知使用会话 tag + 固定通知 id，跨进程更新同一会话而不覆盖其他会话；PendingIntent 的 action/data 绑定会话。每个通过策略去重的新事件都再次提醒，摘要静默。正文仅使用 `ChatNotificationCopy` 的四类固定最小文案；应用内总开关、系统权限/渠道设置可关闭或调整。
 - 限制：需要 WebView 支持 `DOCUMENT_START_SCRIPT`/`WEB_MESSAGE_LISTENER`（当前最低 WebView 123 覆盖）；DSH 升级若调整转发事件表或侧栏 `data-*` 属性，必须先更新本节和回归；页面在回合已运行时才加载，靠会话行 `[data-state="ongoing"]` 补种一次 running；错误以官方 `api-session/error` 为准，若某类失败只写入 `turn/end` 而不触发该事件，只能按回合完成提示；WebView 后台节流和 ROM 后台限制可能延迟事件。
 
-### 1.9 可选原生界面的官方 DSH 接口
+### 1.10 可选原生界面的官方 DSH 接口
 
 设置 `ui/dsh-ui` 为 `native` 时，原生页通过官方 Typert Remote 读写会话、发送消息并处理审批，不另造聊天协议：
 
 - 认证：同一启动 token 调 `GET /connect?token=...&interactions=...`，只取签名 API Cookie；不跟随 302。聊天/实时/输入共用 `interactions=answer` Peer；审批切片另用独立 `interactions=answer` Peer（`$events`/`$events/result` 要求），两者不共享 Cookie 内存对象。只读列表可显式用 `none`。
 - 一元调用：`POST /api/<method>`，信封 `{"type":"client-request","rpcId":...,"method":...,"payload":{"args":...}}`；使用 `session/list`、`session/projections`、`session/page`、`session/prompt`（`mode=queue`）、`session/cancel`、`$events/result`，以及输入组件的 `commands/list`、`fileUploads/*`、`fileReferences/list`、`sessionReferenceResolver/*`。
+- 历史分页：`session/page` 的 `throughSeq` 是事件上界。首屏用 `session/projections` 的 `asOfSeq` 作 `throughSeq`、`maxMessages=120`；原生列表滚到顶部时用当前窗口最早行的 `seq - 1` 作下一次 `throughSeq`、`maxMessages=50` 向前读取一页，`hasMore` 由官方返回，客户端不猜测。消息按官方 `seq` 去重并排序；`session/follow` 快照只对账自己的 seq 区间，不删除已加载的更早分页或更新的实时行；内存窗口超过 500 条消息或 200 张工具卡时只释放视口上方的行，再向上翻页时重新读取；工具合并阶段不按“最新 N 张”截断，否则向前分页返回的更早工具会被静默丢弃。
 - 实时流：`/api/remote.mux` WebSocket 逻辑流 `open/item/end/cancel`；聊天打开 `$events`（`{args:{}}`）与 `session/follow`（`request.address.kind=session`、`assistantStream=true`、`maxMessages=120`）。`session/follow` 的 `snapshot` 提供历史窗口、工具事件与 assistant 基线，`event` 提供增量消息/工具，`assistant-stream` 只聚合 `text-delta`，落盘消息替换临时流式气泡。
 - 工具时间线：`session/page`/follow 的 `tool/call` 与 `tool/result` 由 `DshToolTimeline.parse` 合成；`meta.diffs[]` 读取 `FileDiff`；没有结果明确显示“进行中”，不伪造成功。实时工具事件通过 `DshLiveEvent.Timeline` 按 callId 合并。工具卡展示运行/成功/失败、真实起止耗时（`startedAt`/`finishedAt`/`durationMs`）、命令/cwd、文件变更、增删行配色 diff、折叠输出与复制；耗时未知时明确显示未知。实时 follow 分批事件须用 `DshToolMerge.merge` 合并，保留调用起点并补结束时间。
 - 计划：`DshPlanParser.extract(records)` 从计划事件或计划工具调用合成 `DshPlan`，返回 `planCallIds`；接线方必须用该集合把计划调用从普通工具卡中剔除，并使用 `DshPlanCard` 展示步骤进度/审阅状态。计划不得作为普通消息正文渲染；展示只保留前 20 步，但进度统计使用完整步骤，超长/损坏时显示“进度未知”，不能误报完成；计划审阅回答的真实事件字段仍由集成方按官方协议接线，本切片不新增 RPC。
@@ -234,7 +250,7 @@ HTTP 200..399 或 401 → 存活
 - 安全：token/Cookie 只在内存与精确 loopback origin 使用，不写日志/状态，不交给网页脚本；WebSocket 校验 `Sec-WebSocket-Accept`、客户端帧掩码、拒绝服务端掩码、单帧上限 1 MiB；WebView 同源与 Cookie 策略不变。
 - **临时实现**：`DshWebSocketClient.kt` 是审批切片保留的最小 RFC6455 客户端，`DshApprovalController` 只依赖 `DshApprovalTransport`；后续可替换为 42 的 `DshWebSocket.kt`/transport，不需要改审批 UI。不要再扩展它。
 - 用户提问：`DshQuestionParser.parse(eventId, sessionId, request)` 只解析 `questions[]` 的单选/多选/文本、选项、自定义与必填；`DshQuestionCard` 与 `DshQuestionDraft` 可独立测试。回答 RPC 未确认，`onSubmit` 可空，未接线时界面明确显示“回答入口待协议确认”，不伪造提交。
-- 缺口：模型/推理强度、用户提问的完整回答、历史向前分页、自动重连、工具卡与审批的实时关联仍未实现；计划与提问 UI 组件/解析已就绪，但 `DshNativePage`/状态接线由集成方完成；工具卡来自 page/follow 事件，不读取图片字节。
+- 缺口：模型/推理强度、用户提问的完整回答、自动重连、工具卡与审批的实时关联仍未实现；计划与提问 UI 组件/解析已就绪，但 `DshNativePage`/状态接线由集成方完成；工具卡来自 page/follow 事件，不读取图片字节。
 
 #### 1.9.1 原生输入与附件组件
 

@@ -333,18 +333,39 @@ class DshNativeClient(
             )
             val throughSeq = DshApiProtocol.parseProjectionSeq(projection)
                 ?: return@runCatching DshSessionPage(emptyList(), false)
-            val page = callEnvelope(
-                "session/page",
-                JSONObject().put(
-                    "request",
-                    JSONObject()
-                        .put("address", JSONObject().put("kind", "session").put("sessionId", sessionId))
-                        .put("throughSeq", throughSeq)
-                        .put("maxMessages", 120)
-                )
-            )
-            DshApiProtocol.parsePage(page)
+            pageThrough(sessionId, throughSeq, RECENT_MESSAGES)
         }
+    }
+
+    /**
+     * 向前分页：把当前窗口最早行的前一个 seq 作为 `throughSeq`，读取更早的一页。
+     * 只调用官方 `session/page`，不新增协议；`hasMore` 由官方返回，客户端不猜测。
+     */
+    override suspend fun messagesBefore(
+        sessionId: String,
+        beforeSeq: Int,
+        maxMessages: Int
+    ): Result<DshSessionPage> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(sessionId.isNotBlank()) { "会话标识为空" }
+            require(beforeSeq >= 0) { "历史游标无效" }
+            pageThrough(sessionId, beforeSeq, maxMessages.coerceIn(1, MAX_PAGE_MESSAGES))
+        }
+    }
+
+    /** `session/page` 的共用请求；`throughSeq` 是事件上界，`maxMessages` 是本页行数上限。 */
+    private suspend fun pageThrough(sessionId: String, throughSeq: Int, maxMessages: Int): DshSessionPage {
+        val page = callEnvelope(
+            "session/page",
+            JSONObject().put(
+                "request",
+                JSONObject()
+                    .put("address", JSONObject().put("kind", "session").put("sessionId", sessionId))
+                    .put("throughSeq", throughSeq)
+                    .put("maxMessages", maxMessages)
+            )
+        )
+        return DshApiProtocol.parsePage(page)
     }
 
     /** 官方 `session/prompt`；`mode=queue` 与官方网页默认一致，不伪造本地队列。 */
@@ -686,5 +707,11 @@ class DshNativeClient(
 
     private companion object {
         const val MAX_PROMPT_CHARS = 12_000
+
+        /** 首屏读取的最近消息条数；更早历史由原生列表按页向前读取。 */
+        const val RECENT_MESSAGES = 120
+
+        /** 官方 `session/page` 单页上限，与实时 follow 的 `maxMessages` 保持一致。 */
+        const val MAX_PAGE_MESSAGES = 200
     }
 }

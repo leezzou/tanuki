@@ -35,41 +35,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DshChatRenderTest {
-    @Test fun windowKeepsTailAndReportsHiddenCount() {
-        val items = (1..100).toList()
-        val window = DshChatRenderPolicy.window(items, limit = 80)
-        assertEquals(80, window.items.size)
-        assertEquals(21, window.items.first())
-        assertEquals(100, window.items.last())
-        assertEquals(20, window.hiddenBefore)
-        assertTrue(window.hasEarlier)
-
-        val all = DshChatRenderPolicy.window(items.take(20), limit = 80)
-        assertEquals(0, all.hiddenBefore)
-        assertFalse(all.hasEarlier)
-    }
-
-    @Test fun windowLimitIsBoundedAndGrowsInSteps() {
-        assertEquals(1, DshChatRenderPolicy.window((1..5).toList(), limit = 0).items.size)
-        assertEquals(200, DshChatRenderPolicy.window((1..200).toList(), limit = 1_000).items.size)
-        assertEquals(DshChatRenderPolicy.WINDOW_SIZE + DshChatRenderPolicy.WINDOW_STEP, DshChatRenderPolicy.nextWindow(DshChatRenderPolicy.WINDOW_SIZE))
-        assertEquals(DshChatRenderPolicy.MAX_WINDOW, DshChatRenderPolicy.nextWindow(DshChatRenderPolicy.MAX_WINDOW))
-    }
-
     @Test fun bottomDetectionNeedsLastItemAndOffset() {
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_000, 1_000))
         assertTrue(DshChatRenderPolicy.isAtBottom(9, 10, 1_010, 1_000))
         assertFalse(DshChatRenderPolicy.isAtBottom(8, 10, 1_000, 1_000))
         assertFalse(DshChatRenderPolicy.isAtBottom(9, 10, 1_200, 1_000))
         assertFalse(DshChatRenderPolicy.isAtBottom(0, 0, 0, 0))
-    }
-
-    @Test fun followStopsWhileDraggingAndResumesAtBottom() {
-        assertFalse(DshChatRenderPolicy.followAfterDrag(dragging = true, atBottom = true, following = true))
-        assertTrue(DshChatRenderPolicy.followAfterDrag(dragging = false, atBottom = true, following = false))
-        assertFalse(DshChatRenderPolicy.followAfterDrag(dragging = false, atBottom = false, following = false))
-        // 程序滚动造成的“未在底部”不改变原来的跟随状态。
-        assertTrue(DshChatRenderPolicy.followAfterDrag(dragging = false, atBottom = false, following = true))
     }
 
     @Test fun streamMergeHandlesCumulativeDeltaDuplicateAndReset() {

@@ -235,9 +235,11 @@ class WorkspaceStorage(private val paths: Paths) {
     suspend fun importFiles(
         names: List<String>,
         projectName: String? = null,
+        expectedSizes: List<Long?>? = null,
         onProgress: (Long) -> Unit = {},
         openSource: (Int) -> InputStream,
     ): File = withContext(Dispatchers.IO) {
+        require(expectedSizes == null || expectedSizes.size == names.size) { "导入名称与大小数量不一致" }
         val token = java.util.UUID.randomUUID().toString()
         val stage = File(paths.workspaces, ".import-$token")
         val desiredName = ImportNaming.projectName(names, projectName)
@@ -259,23 +261,21 @@ class WorkspaceStorage(private val paths: Paths) {
             stageOwned = true
             names.forEachIndexed { index, display ->
                 currentCoroutineContext().ensureActive()
-                val name = ImportNaming.uniqueName(File(display).name) { candidate -> File(stage, candidate).exists() }
+                val name = ImportNaming.uniqueFileName(display) { candidate ->
+                    Files.exists(File(stage, candidate).toPath(), LinkOption.NOFOLLOW_LINKS)
+                }
                 allowance.beforeWrite(0)
-                openSource(index).use { input -> File(stage, name).outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        allowance.beforeWrite(count)
-                        output.write(buffer, 0, count)
-                        received += count
-                        onProgress(received)
-                    }
-                } }
+                val base = received
+                openSource(index).use { input ->
+                    StreamingTransfer.copyFileVerified(
+                        input, expectedSizes?.get(index)?.takeIf { it >= 0 }, File(stage, name).toPath(),
+                        beforeWrite = allowance::beforeWrite,
+                    ) { count, _ -> received = base + count; onProgress(received) }
+                }
             }
             requireCanCommitImport()
-            val destination = commitUnique(stage, desiredName)
+            currentCoroutineContext().ensureActive()
+            val destination = ImportNaming.publishProject(stage.toPath(), paths.workspaces.toPath(), desiredName).toFile()
             committed = true
             destination
         } catch (error: Throwable) { originalFailure = error; throw error }
@@ -296,22 +296,6 @@ class WorkspaceStorage(private val paths: Paths) {
                 }
             }
         }
-    }
-
-    /** 在 workspaces 内选择第一个未被占用的项目名；rename 失败且目标已存在时继续尝试下一个。 */
-    private fun commitUnique(stage: File, desired: String): File {
-        for (index in 1..10_000) {
-            val destination = File(paths.workspaces, ImportNaming.numbered(desired, index))
-            if (destination.exists()) continue
-            try {
-                Files.move(stage.toPath(), destination.toPath())
-                return destination
-            } catch (error: java.io.IOException) {
-                // 并发导入/新建目录抢到同名目标时重新选名；其他错误必须原样抛出。
-                if (!destination.exists()) throw error
-            }
-        }
-        throw IllegalStateException("无法为导入项目分配唯一名称，原有项目已保留")
     }
 
     /** Called by a watcher tied to one runtime; it does not itself terminate anything. */

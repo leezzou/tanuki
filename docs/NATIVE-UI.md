@@ -35,7 +35,7 @@
 |---|---|---|
 | `session/list` | 读取可见会话摘要；标题在 `projections.values.title`，事件切点在 `projections.asOfSeq` | 使用 |
 | `session/projections` | 读取单会话 `kind=sequenced` 的 `asOfSeq` | 使用；作为 `session/page` 的 `throughSeq` |
-| `session/page` | 读取一段历史事件；`records[].event` 含 `user/message`、`assistant/message` 等 | 使用；只提取文本，`maxMessages=120` |
+| `session/page` | 读取一段历史事件；`records[].event` 含 `user/message`、`assistant/message` 等；`throughSeq` 是事件上界 | 使用；首屏 `maxMessages=120`；向前分页 `maxMessages=50`、`throughSeq=最早 seq-1` |
 | `session/prompt` | 发送提示词 | 未使用；原生切片没有输入框 |
 | `session/cancel` | 取消运行 | 未使用 |
 | `session/create` / `rename` / `selectModel` / `updateQueue` | 会话管理 | 未使用 |
@@ -62,7 +62,7 @@
 |---|---|
 | `app/src/main/kotlin/com/tanuki/web/DshUiMode.kt` | 偏好枚举与纯策略：默认官方；只有“用户选原生 + 服务运行 + 无回退原因”才显示原生 |
 | `app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt` | 42 已接入 `DshSessionPage.timeline`、follow 工具事件与 `DshTransport`；聊天/流式/审批状态共用 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 42 已增加 `tools` 状态、`tool(sessionId,callId)` 与工具结果合并 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 会话/历史/发送/停止状态；2026-11-11 增加 `loadOlder()`、`onViewportTop()`、内存窗口释放、重连对账与 `DshMessageLedger` 合并 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalProtocol.kt` | 审批帧/回答信封/风险/本次运行记忆的纯协议 |
 | `app/src/main/kotlin/com/tanuki/web/DshWebSocketClient.kt` | **临时实现，待收敛到 42 transport**：最小 RFC6455 客户端，loopback、Cookie、Accept 校验、掩码、握手超时与大小上限 |
 | `app/src/main/kotlin/com/tanuki/web/DshApprovalSession.kt` | `/connect` 认证、`$events` 流、`$events/result` 回答、401 断开重连/独立 Peer |
@@ -72,9 +72,10 @@
 | `app/src/main/kotlin/com/tanuki/ui/DshToolCard.kt` | 工具卡片：运行/成功/失败、耗时、命令与 cwd、文件变更、增删行配色 diff、折叠输出与复制 |
 | `app/src/main/kotlin/com/tanuki/web/DshPlan.kt` | 计划步骤/审阅状态模型；保守解析计划事件与计划工具调用，返回计划与需从普通工具卡剔除的 callId |
 | `app/src/main/kotlin/com/tanuki/ui/DshPlanCard.kt` | 计划卡片：多步骤状态、进度条、当前步骤、待审阅时“同意执行/要求修改”；不复用普通消息气泡 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 挂载 `DshToolCard`、输入栏、Markdown、审批入口条/抽屉；46 增加窗口化消息、滚动跟随、发送失败卡片；51 接入 `DshApprovalEntryBar`/`DshApprovalSheet` |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 挂载 `DshToolCard`、输入栏、Markdown、审批入口条/抽屉；46 增加发送失败卡片；51 接入 `DshApprovalEntryBar`/`DshApprovalSheet`；2026-11-11 改为历史段 + 锚点 + 新消息段的两段列表、新消息胶囊与顶部向前分页 |
 | `app/src/main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 46 渲染层：标题/嵌套列表/任务列表/引用/表格/分隔线/代码块/行内样式；代码横向滚动与可选行号、链接确认、图片/附件占位与查看器 |
-| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：消息窗口、底部跟随、流式增量合并、图片采样、composer 发送记录/失败跟踪、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 46 纯策略：底部判定、流式增量合并、图片采样、composer 发送记录/失败跟踪、链接/图片/附件分类、错误可读化、代码行号与表格上限 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt` | 2026-11-11 纯策略：锚点分段与跟随判定、向前分页游标、内存窗口裁剪、消息账本去重/快照对账 |
 | `app/src/main/kotlin/com/tanuki/web/DshToolTimeline.kt` | `tool/call`/`tool/result` 时间线、命令/diff/文件变更解析；51 已改用 `DshToolMerge.merge` 保留真实起止时间 |
 | `app/src/main/kotlin/com/tanuki/web/DshQuestion.kt` | 用户提问模型与保守解析；单选/多选/文本、选项、草稿选择与必填校验 |
 | `app/src/main/kotlin/com/tanuki/ui/DshQuestionCard.kt` | 用户提问独立卡片：单选/多选/文本、选项与本地提交草稿；`onSubmit=null` 时明确标注“回答入口待协议确认” |
@@ -118,8 +119,8 @@
 ### 46 渲染质量切片（2026-11-10）
 
 - 流式：`assistant-stream` 全文在控制器内按约 32ms 合并，同一帧只发布最后一版；committed/assistant 消息到达时取消待发布增量，避免临时气泡与落盘消息重复。
-- 长列表：`LazyColumn` 只渲染末尾窗口（默认 80 项，每次“显示更早”增加 40，最多 400）；时间线按 `messages/tools` 记忆化，流式文本不重建整段历史。官方无向前分页参数，更早于已加载页的历史仍跳官方界面。
-- 跟随：只有用户回到底部才恢复自动跟随；拖动开始时立即停止跟随，松手/惯性结束后若在底部自动恢复，并提供“↓ 最新”按钮。滚动对齐最后一项底部，长流式回复仍能看到最新一行。
+- 长列表：46 切片曾用末尾渲染窗口（80 项起、每次加 40、最多 400）；该截断已由 2026-11-11 的两段锚定 + 向前分页 + 控制器内存窗口取代，见下节。时间线仍按 `messages/tools` 记忆化，流式文本不重建整段历史。
+- 跟随：46 切片在拖动开始时停止跟随、回到底部恢复并显示“↓ 最新”；2026-11-11 改为用户一滚动就冻结锚点、胶囊显示「N 条新消息」，见下节。
 - Markdown：标题、段落、引用、分隔线、有序/无序/嵌套/任务列表、带对齐表格、围栏代码块（等宽、横向滚动、长行不换行、可选行号）、行内粗体/斜体/粗斜体/删除线/行内代码/链接。单条消息最多 300 个块、代码 400 行、表格 60 行/12 列，超出明确提示且复制仍用全文。
 - 链接：`http/https/mailto/tel` 点击先弹确认框，确认后才调起系统应用；`javascript/data/intent/file/content` 等直接拒绝并给中文原因，附件/相对路径只提示需要工作区授权。
 - 图片/附件：Markdown 图片显示占位卡片与中文原因；本地/内嵌图片点击后在对话框按尺寸采样解码，失败显示“图片加载失败：文件不可读、已损坏或格式不支持”；远程图片保持不自动联网。附件链接显示占位卡片，可查看地址/复制，不静默读取工作区文件。
@@ -128,6 +129,16 @@
 - 发送状态：观察输入栏真实 `DshComposerController` 的 sending/error 变化，发送中显示占位，失败保留本次提交原文并提供重试/回填/复制；不再只依赖控制器内部的发送路径。
 - 评审修复：图片采样只按原始宽高除以 2 的幂采样（8192→4、32768→16）；新流空串重置在帧合并中保留；发送记录改到 transport 边界；重试绑定失败提交，草稿变化/含附件时禁用。补图片采样、快慢失败、重试边界与跨 start 流式回归。
 - 未验证：真实设备上的链接点击、文本选择与链接手势冲突、图片解码内存、长代码/表格滚动、深色/大字体、低端机帧率；审批停靠条与 composer 失败卡片的设备界面未验。
+
+### 聊天列表两段锚定与向前分页（2026-11-11，android_agent-62）
+
+- 结构：消息列表逻辑上分两段——历史段（含锚点行）只向上增长，新消息段只从锚点下方向下增长。跟随状态下锚点与列表尾部重合；用户离开底部后冻结“当时的最后一行”为锚点，流式增量与新消息都落在锚点下方，因此不会改变正在阅读的视口。
+- 脱离与恢复：`NestedScrollConnection` 只在 `NestedScrollSource.UserInput` 时冻结锚点（拖动与随后的惯性都不会再被自动贴底拉回）；`isAtBottom` 为真时恢复跟随；未跟随时右下角显示「N 条新消息」（没有新消息时「↓ 最新」），点击回到底部。程序滚动不会误触发脱离。
+- 索引恢复：向前分页只在历史段头部插入，窗口化只释放头部行；两者都会改变 LazyColumn 索引。界面记录视口内第一条可定位行（时间线行或锚点）的稳定 key 与相对偏移，在 `historyRevision` 变化后按 **实际渲染 key 顺序**（顶部提示、历史段、锚点分隔行、新消息段）调用 `scrollToItem` 回到同一内容；锚点之后的消息也计入分隔行，不会跳到前一条。用户正在阅读的一屏不会因释放而消失。
+- 向前分页：滚到顶部（或点“加载更早历史”）时，用当前窗口最早行 `seq - 1` 作为官方 `session/page` 的 `throughSeq`、`maxMessages=50` 读取一页；`hasMore` 由官方返回。按 `seq` 去重排序，重复页/空页停止续页，失败保留已加载内容并显示中文原因；没有更多时明确显示“已到会话最早一条”。
+- 内存窗口：控制器保留最近 500 条消息与 200 张工具卡，超出后只释放视口上方的行；工具与消息共用同一视口边界（消息释放边界之前的工具一并释放），不再在合并阶段按“最新 200 张”截断，否则向前分页返回的更早工具会在合并瞬间消失。释放后重新标记为“还有更早历史”，再次向上翻页会重新读取，页首提示已释放条数。上翻时（视口首行 seq 变小）不释放，避免刚加载的更早页立刻被裁掉；首次布局或向下滚动时才按预算释放。用户在顶部阅读时宁可暂时超出预算，也不释放正在看的内容。
+- 幂等与对账：`DshMessageLedger` 以官方 `seq` 为唯一键去重、排序；同一事件重复投递或重连重放不会插入第二条。follow 快照只覆盖自己的 `seq` 区间，保留已加载的更早分页与更新的实时行；重连后第二次 `Connected` 会主动触发一次历史对账（首连仍交给历史页/快照）。
+- 纯策略与回归：`DshChatWindow.kt` 提供 `DshChatAnchorPolicy`、`DshChatWindowPolicy`、`DshMessageLedger`；`DshChatFollowState.kt` 提供会话级跟随状态。JVM 覆盖锚点分段与渲染 key 顺序、上翻不跟随、A→B 会话隔离、消息/工具预算边界、只释放视口上方、工具合并不截断、seq 去重、快照对账与重连对账。设备手势、帧率、深色/大字体与真实 DSH 历史未验证。
 
 ### 53 本轮组件与接线 hook（DshNativePage/MainActivity 由集成方接线）
 

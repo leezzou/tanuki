@@ -4,16 +4,29 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 ## 文件导入命名与手机存储复制/移动验证（2026-11-11，android_agent-70，非设备）
 
-- 范围：P0 #4/#5，基于 `origin/main=732cb79`、分支 `ao/file-import-move/p0-file-import-move`。导入最终目录改为源文件名/时间戳并用 ` (2)`/` (3)` 去重；导入完成 Snackbar「已导入 N 个文件到「目录」」+「打开」并在文件页刷新；手机存储条目/批量新增复制、移动到工作区，目标目录默认最近工作区目录且可改；移动先流式复制并回读 SHA-256 校验成功再删源；冲突保留两者/替换/跳过与批量全部应用；取消清理暂存。只改文件页与存储层，不碰聊天页。
+- PR [#75](https://github.com/leezzou/tanuki/pull/75)，分支 `ao/file-import-move/p0-file-import-move`。初始 fetch 基线 `732cb79`，普通 merge 集成 `main=8ba7b4b` 后继续验证，保留已推送历史，不强推；不合并、不发布。
+- 覆盖审计 P0 #4/#5 与 R4.1/R4.2/R4.3：导入按源文件名/时间戳建立独立项目，重名 ` (2)`/` (3)` 且保留扩展名；导入完成刷新、Snackbar「打开」与一次性提示；顶部一级「＋ 导入」、更多菜单与空态；手机条目/批量复制移动、目标目录选择、写权限确认、冲突三选/全部应用、真实进度与可取消。
+- 实际执行（macOS ARM64、项目 JDK17、Android SDK）：
+  - `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.ImportNamingTest --tests com.tanuki.TransferEngineTest --console=plain` → BUILD SUCCESSFUL；**28 tests / 0 failures / 0 errors / 0 skipped**。
+  - 最终 `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest --console=plain` → BUILD SUCCESSFUL（18m36s）；**1188 tests / 120 个报告文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 109 warnings / 1 hint**；workspacecheck 应用 APK 与 Android 测试 APK 均构建成功，仪器测试未运行。
+- 开发验证包 `com.tanuki.modern.workspacecheck`，沿用 0.1.12/code14；17,247,521 字节，SHA-256 `4fde01ef31fc2f2d71f05c37a106ef9ebb2b43c42389312e342dc065ffe5c413`。未安装或交付发布附件，输出元数据不能替代设备验收。
+- 新增回归实测名称清洗/重名/真实目录发布/悬空链接/Unicode/扩展名；流式未知大小读取；移动前后源存在性、目录递归、容量拒绝、源同大小同时间戳改写/目录新增、摘要损坏、取消无半成品、删源失败保留副本；真实批量保留两者/替换/跳过/全部应用/部分失败进度。仪器测试新增导入完成反馈与打开用例，并同步菜单路径，仅编译不计设备通过。
+- 过程失败保留：早期完整 JVM 曾出现既有 NPM 线程池时序失败（期望 8、实际 9），单独与完整复跑通过；早期 1098、main 集成后 1174 均为过程数字，最终代码用上述 1188 项结果。
+- 未执行设备/模拟器安装、Android 仪器测试、真实 SAF 提供方/系统授权撤销/SD-USB 只读卷、复制移动实际进度取消、深色/大字体/360dp/TalkBack；当前 head 独立 Review 与 QA 待编排。宿主结果不替代设备验收。
+- 边界：目录、链接及不同类型冲突不替换；移动没有跨应用文件锁，检测源变化后拒绝发布或停止删源并保留副本；发布后新出现文件不递归删除。目录拒绝超过 128 层、链接与特殊文件；现有 SAF 导入 512 MiB/64 MiB 磁盘余量保留。`content://` 查看继续直读，不强制复制。
+
+## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
+
+- 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。
 - 实际执行（本 worktree，JDK17、Android SDK、macOS ARM64）：
-  - `./gradlew testModernDebugUnitTest` → BUILD SUCCESSFUL；**1098 tests / 113 个结果文件 / 0 failures / 0 errors / 0 skipped**。第一次完整运行出现既有 `NpmAdaptiveWorkerPoolTest` 时序失败（8 vs 9），单独重跑与完整重跑均通过；该用例与本改动无调用关系，失败未抹掉。
-  - 定向 `ImportNamingTest`、`TransferEngineTest` → 14 tests / 0 failures。
-  - `./gradlew lintModernDebug` → BUILD SUCCESSFUL；**0 errors / 109 warnings / 1 hint**。
-  - `./gradlew assembleModernDebug` → BUILD SUCCESSFUL；开发 debug APK 17,559,104 字节、SHA-256 `a7bda140...`，未安装。
-  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（仅编译）；`assembleModernProbeAndroidTest` → BUILD SUCCESSFUL。
-- 新增 14 项 JVM 回归：单文件去扩展名、多文件时间戳、重名 `(2)`/`(3)` 且不改已有条目、用户可编辑名清洗、长中文 UTF-8 字节上限；复制保留源、移动复制校验期间源仍在且成功后删除、失败/取消不留暂存与目标、目录递归移动、替换文件、拒绝替换目录、批量全部应用、批量替换不作用于目录。
-- 未执行：真实设备/模拟器 SAF 多选、手机存储授权/撤销、复制/移动真实进度与取消、移动删源失败、冲突三选与全部应用、深色/大字体/360dp/TalkBack；Android 仪器测试未运行；独立 Review、CI、合并与发布未执行。编译/JVM/lint 不能替代设备验收。
-- 已知边界：长文件名按 220 字节截断可能丢失末尾扩展名；冲突预检与写入之间若外部新建同名条目，保留两者会再改名、替换仍拒绝目录；R4.3 顶部一级导入图标与搜索/排序重排本轮未做。
+  - `bash scripts/verify-workspace.sh` → BUILD SUCCESSFUL（最终代码 3m17s）；workspacecheck app/test APK 构建通过；**1059 tests / 109 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 103 warnings / 1 hint**，改动文件无新增告警。
+  - 定向 `TanukiPageVisualsTest` **12 tests**、`TanukiContrastTest` **4 tests** → 全部通过。
+  - `python3 scripts/check-handoff.py --pr`、`python3 scripts/check-publication.py --git` → 通过（0 findings）。
+  - GitHub Actions：PR #70 的 `Host scripts and handoff checks` 与 `Android build, JVM tests and lint` 在推送 head 上通过；新提交后以 PR 页面当前 head 的检查为准。
+- 新增 12 项 JVM 回归：行高/间距/动效/字体令牌取值；状态 chip 容器正文与状态点在浅/深色下的对比度；卡片说明与路径文字对比度；文件大小多单位与 locale 格式化；文件空态四类文案；权限语气（可写/只读/待授权/可授权）；会话状态标签语气与呼吸；会话权限语气覆盖未知值。
+- 评审 P1 修复（详情内二级确认被窗口遮挡）：详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `TanukiBottomSheet` 会被盖住。重命名/归档/完全权限三条从详情发起的确认改回窗口级 `AlertDialog`（仍用令牌按钮），列表层的新建/批量归档/批量上限保留页面内弹层。新增仪器回归 `SessionManagerDetailDialogTest`：从详情依次进入三条确认，验证确认层出现在详情之上、取消与返回只关闭确认层；`compileModernDebugAndroidTestKotlin` 通过，**无设备，未运行**。
+- 评审 P2 修复（弹层正文继承颜色）：`TanukiBottomSheet` 只画 sheet 背景、没有提供 `LocalContentColor`，深色下正文继承页面默认黑色。现由组件在内容根部提供 `textPrimary`，并在 `TanukiPageVisualsTest` 增加 `textPrimary/textSecondary × sheet` 对比度断言。
+- 未执行：模拟器/真机上的深色/浅色、1.3x/2x 大字体、360dp 窄屏逐页截图对照、TalkBack、输入法遮挡、滚动手感；Android 仪器测试未运行（含新增用例）；未合并、未发布。编译/JVM/lint 不能替代设备验收。
 
 ## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）
 

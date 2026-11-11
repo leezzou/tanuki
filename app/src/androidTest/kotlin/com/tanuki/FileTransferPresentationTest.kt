@@ -114,6 +114,7 @@ class FileTransferPresentationTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
             ui { runtime.state.value = runtime.state.value.copy(service = ServiceState.RUNNING) }
             appClick("文件")
+            appClick("文件操作")
             appClick("搜索当前文件夹")
             await("文件搜索框应显示") { nodes().any { it.packageName?.toString() == context.packageName && it.isVisibleToUser && it.isEditable } }
             assertTrue(nodes().first { it.packageName?.toString() == context.packageName && it.isVisibleToUser && it.isEditable }
