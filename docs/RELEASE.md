@@ -30,7 +30,7 @@ python3 scripts/prepare-app-release.py --version 0.1.12 --version-code 14 --chan
 - `Tanuki-native-corresponding-sources.tar.gz`、`native-source-SHA256SUMS`
 - `RELEASE-SHA256SUMS`：以上附件的实际 SHA-256。
 
-该渠道是 **开发证书签名、non-debuggable 的 release 构建**，并非正式签名。目标为 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34；保持原开发证书才能覆盖之前同包测试版。生成过程不读取或上传用户数据，不访问设备，不创建 tag/Release。候选 APK 的实际大小/SHA-256 为 12,120,954 字节 / `40a3eed27e2a2a5c4ef28d08a21ee8b346b3ad56f7a36e0fcb28b7e17ef872b9`，证书 `371dc301...`；最终以发布目录的校验清单和交接记录为准。
+该渠道是 **开发证书签名、non-debuggable 的 release 构建**，并非正式签名。目标为 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34；保持原开发证书才能覆盖之前同包测试版。生成过程不读取或上传用户数据，不访问设备，不创建 tag/Release。候选 APK 的实际大小/SHA-256 为 12,295,334 字节 / `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`，证书 `371dc301...`；最终以发布目录的校验清单和交接记录为准。
 
 ```bash
 (cd artifacts/releases/0.1.12 && shasum -a 256 -c RELEASE-SHA256SUMS)
@@ -88,7 +88,7 @@ PRoot/talloc 等采用 GPL/LGPL，APK 发布必须同时提供精确对应源码
 
 版本说明应列明应用版本/ARM64/SDK、开发或正式签名、证书公开指纹、APK SHA-256；Ubuntu/Node/npm/pnpm/DSH/PRoot 实际版本与来源许可；空间与首次下载、模型 API 数据边界；模拟器/真机/合成登录/真实模型的分别验证范围；WebView123+ 与 Android Linux 沙箱/后台限制；完整源码和构建方式。不要把局部测试等同正式产品验收。
 
-0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布分支与 PR 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
+0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布分支与 PR #61 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
 
 
 ## 审批规则历史与用户合并

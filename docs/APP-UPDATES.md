@@ -1,6 +1,6 @@
 # 应用内更新
 
-**0.1.12/code14 workspacecheck 候选已核验（基于最终 `main=f338bdb`，含 #48/#51/#57/#58/#59，未发布）**：包名 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34，候选 APK SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、12,295,334 字节。发布 PR 待合并；**未创建 tag/Release、未上传附件。** 已发布版本仍为 **0.1.11/code13**（Pre-release，tag `v0.1.11`，main=`4f2a3717d6d7`）：APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节。上一 Pre-release 0.1.9/code11（tag `5c680b9`）APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节；0.1.10/code12 为历史本地候选，未发布。
+**0.1.12/code14 workspacecheck 候选已核验（基于最终 `main=f338bdb`，含 #48/#51/#57/#58/#59，未发布）**：包名 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34，候选 APK SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、12,295,334 字节。发布 PR #61 待合并；**未创建 tag/Release、未上传附件。** 已发布版本仍为 **0.1.11/code13**（Pre-release，tag `v0.1.11`，main=`4f2a3717d6d7`）：APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节。上一 Pre-release 0.1.9/code11（tag `5c680b9`）APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节；0.1.10/code12 为历史本地候选，未发布。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -76,4 +76,4 @@ python3 scripts/prepare-app-release.py --version 0.1.12 --version-code 14 --chan
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布 PR 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
+0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布 PR #61 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
