@@ -9,6 +9,24 @@ data class FailedOperation(
     val cancelled: Boolean = false,
 )
 
+/** 组件安装必须重新走入口恢复失败任务的版本；其他操作继续重放原任务。 */
+internal fun operationRetryAction(
+    request: FailureRetry?,
+    installComponent: (RuntimeComponent, Boolean, String?) -> Unit,
+    replay: () -> Unit,
+): () -> Unit {
+    if (request == null) return replay
+    val component = when (request.command) {
+        "UBUNTU_INSTALL", "UBUNTU_REINSTALL" -> RuntimeComponent.UBUNTU
+        "NODE_INSTALL", "NODE_REINSTALL" -> RuntimeComponent.NODE
+        else -> return replay
+    }
+    val force = request.command == "${component.name}_REINSTALL"
+    val version = request.version
+    // 安装入口先恢复选择并校验清单、空闲状态，不能只重放会读取新选择的安装主体。
+    return { installComponent(component, force, version) }
+}
+
 /**
  * 重试仅重放用户刚刚选择的同一操作。编号绑定失败结果，开始新操作或点击一次后，
  * 旧按钮立即失效；回调在锁外运行，避免重试再次登记时交叉加锁。

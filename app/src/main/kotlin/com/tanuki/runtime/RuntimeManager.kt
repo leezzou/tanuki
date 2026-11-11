@@ -233,7 +233,11 @@ class RuntimeManager(val context: Context) {
                     return@launch
                 }
                 val before=state.value
-                val retryId = beginOperationRetry { launchExclusive(label, retry, block) }
+                val retryId = beginOperationRetry(operationRetryAction(
+                    request = retry,
+                    installComponent = components::install,
+                    replay = { launchExclusive(label, retry, block) },
+                ))
                 state.update { it.copy(operation=label,operationRetry=retry,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
                     check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
