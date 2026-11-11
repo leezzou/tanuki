@@ -39,8 +39,12 @@ data class DshSession(
     val running: Boolean,
     val blank: Boolean,
     val agentAvailable: Boolean,
-    val asOfSeq: Int?
+    val asOfSeq: Int?,
+    /** 沿用官方会话摘要的目录，不从工具调用或其他页面推测。 */
+    val cwd: String? = null,
 ) {
+    val displayWorkspace: String get() = cwd?.trim()
+        ?.takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) } ?: "工作区"
     // JSON 空值、空白和旧数据里的字面 null 均不能作为用户看到的会话名。
     val displayTitle: String get() = title.trim().takeUnless { it.equals("null", ignoreCase = true) }
         .orEmpty().ifBlank { "新对话" }
@@ -167,7 +171,8 @@ object DshApiProtocol {
                 running = item.optBoolean("running", false),
                 blank = item.optBoolean("blank", false),
                 agentAvailable = item.optBoolean("agentAvailable", false),
-                asOfSeq = projections?.takeIf { it.has("asOfSeq") }?.optInt("asOfSeq", -1)?.takeIf { it >= 0 }
+                asOfSeq = projections?.takeIf { it.has("asOfSeq") }?.optInt("asOfSeq", -1)?.takeIf { it >= 0 },
+                cwd = item.opt("cwd") as? String,
             )
         }
         return result.sortedByDescending { it.updatedAt }

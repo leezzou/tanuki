@@ -982,7 +982,7 @@ class SetupPresentationTest {
             }
             find("操作进度"); instrumentation.waitForIdleSync()
             assertEquals("安装入口出现不能改变文件页边界", idle, area.get())
-            click("操作进度"); find("正在准备"); click("关闭进度详情")
+            click("操作进度"); find("正在安装"); click("关闭进度详情")
             instrumentation.runOnMainSync {
                 state.value = state.value.copy(snapshot = Snapshot(environment = EnvironmentState.READY))
             }

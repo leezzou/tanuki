@@ -396,6 +396,16 @@ class DshChatRenderTest {
         assertTrue(DshErrorPresenter.describe("会话已结束").detail.contains("会话已结束"))
     }
 
+    @Test fun routineErrorCopyUsesAssistantAndReplyTermsWithoutChangingClassification() {
+        listOf("session/agent-busy", "connect timed out", "WebSocket 已断开", "官方接口响应格式不正确").forEach { raw ->
+            val info = DshErrorPresenter.describe(raw)
+            val copy = info.title + info.hint
+            assertFalse(listOf("DSH", "session", "transport", "interop", "协议", "回合").any { it in copy })
+            assertEquals(raw, info.detail)
+        }
+        assertTrue(DshErrorPresenter.describe("session/agent-busy").hint.contains("本次回复"))
+    }
+
     private fun promptArgs(sessionId: String, text: String): JSONObject = JSONObject().put(
         "request",
         JSONObject()

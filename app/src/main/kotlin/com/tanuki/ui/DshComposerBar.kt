@@ -458,9 +458,9 @@ fun DshComposerBar(
             // 停止结果独立显示，避免底部操作行在窄屏把状态文案挤掉。
             state.stopOutcome?.takeIf { state.notice == null }?.let { outcome ->
                 val text = when {
-                    state.stopping -> "正在停止，等待官方确认"
-                    outcome == DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
-                    outcome == DshStopOutcome.STOPPED -> "已停止当前回合"
+                    state.stopping -> "正在结束本次回复"
+                    outcome == DshStopOutcome.REQUESTED -> "正在结束本次回复，仍在收尾"
+                    outcome == DshStopOutcome.STOPPED -> "已结束本次回复"
                     else -> "停止失败，可重试"
                 }
                 val color = when {
@@ -674,15 +674,15 @@ fun DshComposerBar(
                 }
                 val statusText = when {
                     readingAttachments > 0 -> "正在读取附件…"
-                    state.stopping -> "正在停止…"
+                    state.stopping -> "正在结束本次回复…"
                     state.uploadBusy -> "附件上传中（可取消）"
-                    state.stopOutcome == DshStopOutcome.REQUESTED -> "停止请求已发送，仍在收尾"
-                    state.stopOutcome == DshStopOutcome.STOPPED -> "已停止当前回合"
+                    state.stopOutcome == DshStopOutcome.REQUESTED -> "正在结束本次回复，仍在收尾"
+                    state.stopOutcome == DshStopOutcome.STOPPED -> "已结束本次回复"
                     state.stopOutcome == DshStopOutcome.FAILED -> "停止失败，可重试"
                     state.sendFailed -> "发送失败，内容已保留，可重发"
                     state.sending -> "发送中…"
-                    state.runStateStale -> "长时间无运行事件；可继续发送，停止仍可用"
-                    state.generationRunning -> "可边生成边编辑；流式插话未确认，主键用于停止"
+                    state.runStateStale -> "回复较久没有更新，可继续发送或结束本次回复"
+                    state.generationRunning -> "助手正在回复，可编辑下一条消息或结束本次回复"
                     else -> "Ctrl/⌘+Enter 发送"
                 }
                 val statusFailed = state.sendFailed || state.stopOutcome == DshStopOutcome.FAILED
@@ -736,7 +736,7 @@ private fun ComposerContextUsage() {
     }
     if (details) androidx.compose.material3.AlertDialog(
         onDismissRequest = { details = false }, title = { Text("上下文用量") },
-        text = { Text("当前原生协议投影未提供 token 用量与上下文上限，因此不能计算百分比。") },
+        text = { Text("暂未获取到用量与容量信息，暂时无法计算使用比例。") },
         confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } }
     )
 }

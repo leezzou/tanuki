@@ -429,14 +429,14 @@ class DshComposerControllerTest {
         val requested = awaitState(controller) { it.stopOutcome == DshStopOutcome.REQUESTED }
         assertTrue(requested.generationRunning)
         assertTrue(requested.stopping)
-        assertTrue(requested.notice.orEmpty().contains("正在停止"))
+        assertTrue(requested.notice.orEmpty().contains("正在结束本次回复"))
         assertTrue(remote.calls.any { it.method == "session/cancel" })
 
         controller.setGenerationRunning(false)
         val stopped = awaitState(controller) { it.stopOutcome == DshStopOutcome.STOPPED }
         assertFalse(stopped.generationRunning)
         assertFalse(stopped.stopping)
-        assertTrue(stopped.notice.orEmpty().contains("已停止"))
+        assertTrue(stopped.notice.orEmpty().contains("已结束本次回复"))
     }
 
     @Test fun stopTimeoutReopensStopEntryAndKeepsRequested() {

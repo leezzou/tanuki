@@ -12,6 +12,15 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 - PR #100 CI跟进：首轮head `e2b6417` 的两个Host checks成功；pull_request Android合并候选编译失败，WorkspaceFilesPage重复import TanukiDesign。最新main=`fde9e396c6e2d43bf8f63d03d982c850e9369562` 在文件顶部新增了同一import，与本批另一位置的新增被同时保留。本批移除自己的import、单次工厂访问改限定名；以373基线/fde9/main与修正本分支三方文本合并预检通过，结果恰好1条import。首轮push事件Android build/JVM/lint亦成功，失败仅在pull_request合并候选。修复后同套完整命令 **BUILD SUCCESSFUL（2m47s）/退出0**：产品/测试源码compile、**8类88项（0失败/错误/跳过）**，lint **0 errors/105 warnings/2 hints**。新head合并候选CI以PR Checks为准，不把文本合并或旧head通过当作新head CI通过。
 
+## 视觉验收四项 P2 修正（2026-11-11，android_agent-96，Host）
+
+- 基线为 fetch 与 provider 实核的 `13f1b235207abed24e6a662bc67e71fff369c930`，分支 `ao/visual-qa/p2-copy`。只改 VQ-02/03/04/05 的文案、既有 cwd 字段显示及进度展示映射；不改运行控制、协议或导航逻辑。
+- `source scripts/ao-worktree-env.sh` 后串行执行产品/Android 测试源码 compile、定向 JVM 和 lint。最终 JVM XML 实核 **171 项 / 11 类 / 0 failures / 0 errors / 0 skipped**：DshNativeApi 16、DshNativeController 35、DshNativeComposerBinding 8、DshComposerController 29、DshChatRender 24、OperationProgressPresentation 15、OperationProgress 7、OperationProgressLayout 5、OnboardingEnvironment 8、OnboardingFlow 13、OnboardingPrepare 11。最终命令 BUILD SUCCESSFUL（2m41s），退出 0，lint 为 **0 errors / 106 warnings / 2 hints**。
+- 首轮四类 67 项通过。扩大验证最初 171 项中 2 项失败：停止提示旧断言、main 已存在的文件传输入口源码断言过时（#99 重构后不再有 `else summary?.let`）。只同步断言至现有文案和互斥条件，未修改文件页产品代码；最终重跑结果以上述 XML 为准。首轮不存在的 OnboardingTest 过滤不计引导覆盖。
+- 完整命令、变更映射及公开检查见 [本次交接](handoffs/20261111-2200-visual-p2-copy.md)。首轮包含真实原生构建；最终宿主检查使用 `-x buildNativeRuntime --offline`，未生成/安装设备交付 APK。未执行完整 JVM、Android 仪器、模拟器/真机视觉复验、真实安装/启动或真实模型；API Key、真实模型、真机暂停，独立 QA 与 Codex High 审查需绑定 PR 最新 SHA。
+
+- PR #103 rebase 刷新：已在 `3ba8ef1fc2ee4aa45347b50677b0c395aa6a88b6` 上保留 #100 聊天行动效、#102 完整布局断言；文档冲突保留双方记录，布局测试采用 main 原样内容。原命令追加 TanukiListMotionTest、DshMessageMotionTest、DshNativePagingTest、DshChatWindowTest、DshChatFollowStateTest 后，**BUILD SUCCESSFUL（1m5s）/退出0**，产品与Android测试源码 compile通过，**16类224项 / 0失败/错误/跳过**，lint **0 errors/106 warnings/2 hints**。此前171项与4a832b3中间基线223项为阶段证据；设备/模型边界不变。
+
 ## 动效 B 批页面转场（2026-11-11，android_agent-90，Host）
 
 - 起始基线 fetch 实核 `226c3f95e0b71b8e4a34b13f8302ec68abce5314`，分支 `ao/motion/batch-b`；保留本地改动无冲突快进新 main `824c6c9be855389708e2b3d5886f5670cbc6695e` 后刷新验证。编排已批准文件/浏览器最小接线，主目的地、设置、文件列表/查看器、浏览器原生二级、窄屏 TwoPane 共用转场组件；业务页旧入场已清零。WebView 只用原生背景遮罩，旧内容立即卸载，原 BackHandler 和返回目标不改。

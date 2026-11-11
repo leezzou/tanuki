@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import com.tanuki.runtime.HealthState
+import com.tanuki.runtime.ServiceState
 import com.tanuki.runtime.EnvironmentState
 import com.tanuki.runtime.Snapshot
 import com.tanuki.runtime.UpdateState
@@ -16,6 +18,7 @@ internal enum class OperationStage(val label: String) {
     UNINSTALL("卸载"),
     START("启动"),
     CHECK("检查"),
+    STOP("停止"),
 }
 
 /**
@@ -64,10 +67,20 @@ internal data class OperationFailure(
 /**
  * 把运行时阶段文案归一到“下载 / 解压 / 校验 / 安装”等短标签。
  *
- * 优先看第一个出现的动作词，避免“下载 DSH 依赖（已校验 1/2）”被括号里的
+ * 启动、停止和健康检查先看真实状态；其余优先看第一个动作词，避免“下载 DSH 依赖（已校验 1/2）”被括号里的
  * “校验”误判；同时包含“校验与解压”时按耗时最长的“解压”展示。
  */
-internal fun operationStage(stage: String, environment: EnvironmentState, update: UpdateState): OperationStage {
+internal fun operationStage(
+    stage: String,
+    environment: EnvironmentState,
+    update: UpdateState,
+    service: ServiceState = ServiceState.STOPPED,
+    health: HealthState = HealthState.UNKNOWN,
+): OperationStage {
+    // 启动和健康检查可能沿用安装完成后的阶段说明，真实运行状态优先。
+    if (service == ServiceState.STARTING) return OperationStage.START
+    if (service == ServiceState.STOPPING) return OperationStage.STOP
+    if (health == HealthState.CHECKING || environment == EnvironmentState.CHECKING) return OperationStage.CHECK
     val text = stage.trim()
     if (text.contains("解压") || text.contains("展开")) return OperationStage.EXTRACT
     val candidates = listOf(
@@ -76,7 +89,8 @@ internal fun operationStage(stage: String, environment: EnvironmentState, update
         OperationStage.INSTALL to listOf("安装", "写入", "补齐"),
         OperationStage.UNINSTALL to listOf("卸载", "移除"),
         OperationStage.START to listOf("启动"),
-        OperationStage.CHECK to listOf("检查", "检测", "解析", "测速", "准备", "自检"),
+        OperationStage.CHECK to listOf("检查", "检测", "解析", "测速", "自检"),
+        OperationStage.PREPARE to listOf("准备"),
     ).mapNotNull { (stageKind, words) ->
         words.map { text.indexOf(it) }.filter { it >= 0 }.minOrNull()?.let { it to stageKind }
     }
@@ -155,7 +169,7 @@ internal fun operationProgress(
     val elapsedSeconds = ((nowMillis - start).coerceAtLeast(0) / 1000)
     val quietSeconds = ((nowMillis - lastActivity).coerceAtLeast(0) / 1000)
     val stage = operationStage(if (active) snapshot.stage else snapshot.failedOperation?.stage ?: snapshot.stage,
-        snapshot.environment, snapshot.update)
+        snapshot.environment, snapshot.update, snapshot.service, snapshot.health)
     if (failure != null) {
         return OperationProgressText(
             active = false,
@@ -176,7 +190,16 @@ internal fun operationProgress(
             failureTitle = failure.title,
         )
     }
-    val fraction = snapshot.measuredFraction()
+    val runtimeStage = stage in setOf(OperationStage.START, OperationStage.CHECK, OperationStage.STOP)
+    val stageText = when {
+        snapshot.service == ServiceState.STARTING -> "正在启动助手"
+        snapshot.service == ServiceState.STOPPING -> "正在停止助手"
+        snapshot.health == HealthState.CHECKING -> "正在检查运行环境"
+        snapshot.environment == EnvironmentState.CHECKING -> "正在检查运行环境"
+        else -> snapshot.stage.ifBlank { stage.label }
+    }
+    // 启动和检查没有可信总量，不沿用之前下载留下的字节数。
+    val fraction = if (runtimeStage) null else snapshot.measuredFraction()
     val percent = fraction?.let { (it * 100).toInt().coerceIn(0, 100) }
     return OperationProgressText(
         active = true,
@@ -184,12 +207,20 @@ internal fun operationProgress(
         stage = stage,
         fraction = fraction,
         percent = percent,
-        statusText = percent?.let { "${stage.label} $it%" } ?: "正在准备",
-        stageText = snapshot.stage.ifBlank { stage.label },
-        detail = downloadDetail(snapshot),
+        statusText = percent?.let { "${stage.label} $it%" } ?: "正在${stage.label}",
+        stageText = stageText,
+        detail = if (stage == OperationStage.DOWNLOAD) downloadDetail(snapshot) else stageText,
         elapsedText = "已用 " + duration(elapsedSeconds),
-        remainingText = remainingText(snapshot, fraction),
-        quietWarning = if (quietSeconds >= 60) "已 ${duration(quietSeconds)}没有新进展。网络、解压或安装脚本可能仍在等待；请检查网络，必要时取消后重试。" else null,
+        remainingText = if (runtimeStage) null else remainingText(snapshot, fraction),
+        quietWarning = if (quietSeconds >= 60) {
+            "已 ${duration(quietSeconds)}没有新进展。" + when (stage) {
+                OperationStage.DOWNLOAD -> "请检查网络，必要时取消后重试。"
+                OperationStage.START -> "助手仍在启动，请稍候；若持续无响应，可查看运行诊断。"
+                OperationStage.CHECK -> "运行环境仍在检查，请稍候；若持续无响应，可查看运行诊断。"
+                OperationStage.STOP -> "助手仍在结束运行，请稍候。"
+                else -> "当前操作仍在进行，请稍候；若持续无响应，可查看运行诊断。"
+            }
+        } else null,
         canCancel = snapshot.service !in setOf(
             com.tanuki.runtime.ServiceState.STARTING,
             com.tanuki.runtime.ServiceState.STOPPING,
