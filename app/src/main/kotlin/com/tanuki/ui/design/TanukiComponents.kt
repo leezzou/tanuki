@@ -1,6 +1,6 @@
 package com.tanuki.ui.design
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -83,12 +83,22 @@ internal fun TanukiPillButton(
     val colors = tanukiPillButtonColors(tokens.colors, tone, enabled)
     val interaction = remember { MutableInteractionSource() }
     val active = enabled && !loading
+    val pressed by interaction.collectIsPressedAsState()
+    val motion = TanukiDesign.motion
+    val scale by animateFloatAsState(
+        targetValue = motion.pressScale(pressed && active),
+        animationSpec = motion.press(pressed && active), label = "按钮按压",
+    )
     // leading 槽位中的图标默认读取 LocalContentColor；必须与按钮 tone/enabled 同步，
     // 否则图标会沿用外层页面的颜色，在 Filled/Danger 背景上失去对比度。
     CompositionLocalProvider(LocalContentColor provides Color(colors.content)) {
         Row(
             modifier = modifier
                 .heightIn(min = TanukiSpace.TOUCH_TARGET_MIN_DP.dp)
+                .graphicsLayer {
+                    scaleX = if (tokens.reducedMotion) 1f else scale
+                    scaleY = if (tokens.reducedMotion) 1f else scale
+                }
                 .clip(TanukiShapeTokens.pill)
                 .background(Color(colors.background))
                 .then(
@@ -218,7 +228,7 @@ private fun rememberPulseAlpha(): Float {
         animationSpec = infiniteRepeatable(
             animation = tween(
                 durationMillis = TanukiMotion.AMBIENT_MS / 2,
-                easing = FastOutSlowInEasing,
+                easing = TanukiMotionEasing.linear,
             ),
             repeatMode = RepeatMode.Reverse,
         ),
@@ -240,11 +250,12 @@ internal fun TanukiStatusChip(
 ) {
     val tokens = TanukiDesign.tokens
     val role = tokens.colors.statusColors(tone)
+    val background by animateColorAsState(Color(role.container), TanukiDesign.motion.toggle(), label = "状态颜色")
     val interaction = remember { MutableInteractionSource() }
     val base = modifier
         .heightIn(min = if (onClick != null) TanukiSpace.TOUCH_TARGET_MIN_DP.dp else 28.dp)
         .clip(TanukiShapeTokens.pill)
-        .background(Color(role.container))
+        .background(if (tokens.reducedMotion) Color(role.container) else background)
         // 需要更完整说法（例如“权限：可写，点击管理”）时覆盖朗读内容；
         // 不传时保留下面的可见标签，不产生额外语义节点。
         .then(
@@ -294,25 +305,23 @@ internal fun TanukiPressable(
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     shape: Shape = TanukiShapeTokens.card,
-    pressScale: Float = 0.98f,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val tokens = TanukiDesign.tokens
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val target = if (pressed && enabled && onClick != null) pressScale else 1f
+    val motion = TanukiDesign.motion
+    val activePress = pressed && enabled && onClick != null
+    val target = motion.pressScale(activePress)
     val scale by animateFloatAsState(
         targetValue = target,
-        animationSpec = tween(
-            durationMillis = if (tokens.reducedMotion) 0 else TanukiMotion.pressIn.durationMs,
-            easing = FastOutSlowInEasing,
-        ),
+        animationSpec = motion.press(activePress),
         label = "按压反馈",
     )
     val shapeModifier = Modifier
         .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
+            scaleX = if (tokens.reducedMotion) 1f else scale
+            scaleY = if (tokens.reducedMotion) 1f else scale
         }
         .clip(shape)
         .then(

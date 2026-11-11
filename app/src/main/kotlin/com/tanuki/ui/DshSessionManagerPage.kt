@@ -1,8 +1,6 @@
 package com.tanuki.ui
 
 import android.widget.Toast
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -80,7 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.Redact
 import com.tanuki.ui.design.TanukiBottomSheet
-import com.tanuki.ui.design.TanukiMotion as TanukiMotionTokens
 import com.tanuki.ui.design.TanukiPillButton
 import com.tanuki.ui.design.TanukiPillButtonTone
 import com.tanuki.ui.design.TanukiPressable
@@ -298,11 +295,7 @@ fun DshSessionManagerPage(
                     state.sessions.isEmpty() -> ManagerPhase.EMPTY
                     else -> ManagerPhase.LIST
                 }
-                Crossfade(
-                    targetState = phase,
-                    animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
-                    label = "managerPhase",
-                ) { currentPhase ->
+                TanukiStateCrossfade(target = phase) { currentPhase ->
                     when (currentPhase) {
                         ManagerPhase.STOPPED -> ManagerEmpty(
                             title = "DSH 未运行",
@@ -338,7 +331,7 @@ fun DshSessionManagerPage(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             LazyColumn(
-                                Modifier.fillMaxSize().tanukiEnter(),
+                                Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(
                                     start = TanukiSpace.LG_DP.dp,
                                     end = TanukiSpace.LG_DP.dp,

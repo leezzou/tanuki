@@ -6,17 +6,9 @@ import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -630,19 +622,7 @@ fun DshComposerBar(
                         contentColor = sendStopContent
                     ) {
                         // 只让图标形变，避免整条输入框闪烁。
-                        AnimatedContent(
-                            targetState = showStop,
-                            transitionSpec = {
-                                (
-                                    fadeIn(tween(120)) + scaleIn(initialScale = 0.65f) +
-                                        slideInVertically { it / 2 }
-                                    ) togetherWith (
-                                    fadeOut(tween(90)) + scaleOut(targetScale = 0.65f) +
-                                        slideOutVertically { -it / 2 }
-                                    )
-                            },
-                            label = "composer-send-stop"
-                        ) { stopping ->
+                        TanukiIconSwap(showStop, Modifier.size(24.dp)) { stopping ->
                             Text(
                                 if (stopping) "■" else "↑",
                                 fontSize = if (stopping) 13.sp else 20.sp,

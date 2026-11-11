@@ -140,12 +140,15 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 ## 6. 动效令牌
 
+动效 A 批（基线 `3c63c9b`）已扩展统一工厂和可观察 reduced-motion。`TanukiDesign.motion` 返回 `TanukiMotionSpecs`；`instant` 与 `layout` 是新增入口，兼容原有 `sheetDismiss` 及历史枚举列表，不重复统计语义别名。
+
 | 类型 | 令牌 | 时长 | 用途 |
 |---|---|---:|---|
+| 即时 | `instant` | 0ms | 恢复与移除动画 |
 | 反馈 | `pressIn` | 100ms | 按下 |
 | 反馈 | `pressOut` | 140ms | 抬起/取消 |
 | 反馈 | `toggle` | 160ms | 开关、选中态 |
-| 结构 | `sheetDismiss` | 240ms | 弹层收起 |
+| 结构 | `layout` / `sheetDismiss` | 240ms | 局部布局 / 弹层收起 |
 | 结构 | `sheetOpen` | 280ms | 弹层展开 |
 | 结构 | `expand` | 300ms | 折叠展开 |
 | 结构 | `page` | 320ms | 页面/大块结构切换 |
@@ -154,6 +157,24 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 环境 | `ambientShimmer` | 2400ms | 骨架/环境微动 |
 
 约束：反馈 ≤160ms；结构 240–340ms；环境约 2.4s。`TanukiMotion.durationMs(token, reducedMotion=true)` 恒为 **0**；状态点和流式光标在 reduced-motion 下保持静态常亮。
+
+### 6.1 A 批语义工厂与共享设置
+
+曲线为 `enter(0.2,0,0,1)`、`standard(0.4,0,0.2,1)`、`exit(0.4,0,1,1)`、linear；手势释放 settle 为 `spring(dampingRatio=1, stiffness=500)`，移除动画时 snap。`TanukiMotionSpecs` 提供 toggle、press、icon、state、expand、list、count、copy、progress，对应审计的 S-*；reduced-motion 下有限工厂均为 0ms、列表 spec 为 null。expand/list/progress 工厂已提供，不据此宣称 B/C 批的展开、列表与进度迁移已完成。
+
+`TanukiMotionSettings` 进程内单例监听 `Settings.Global.ANIMATOR_DURATION_SCALE`，Activity 恢复及原生浮窗显示时补读。主题和 `BrowserOverlayWindow` 共用同一 StateFlow，不修改用户系统设置。开启移除动画时按压保持 scale=1，状态点/光标关闭循环，复制反馈文字仍保留；普通非零系统缩放交给平台，不重复乘倍率。
+
+五类反馈与五页接入：
+
+| 页面 | A 批接入 | 行为边界 |
+|---|---|---|
+| 原生聊天 | `DshComposerBar` 发送/停止图标 alpha + 0.92→1，无位移/尺寸补间；`DshToolCard` 固定宽度复制确认 | 发送/停止、工具展开和剪贴板回调即时；确认默认1500ms，重复点击重置并服从无障碍建议超时 |
+| 会话管理 | 固定内容区域的 S-state；公共按钮/卡片按下0.98、松手1，保留ripple | 去掉列表二次入场；设置开关只改spec，不更换状态宿主；搜索/筛选/权限回调不变 |
+| 文件页 | 项数固定最小宽度、新数字只淡入；公共胶囊按压 | 首次计数直接显示，不改变目录/排序/多选/传输 |
+| 浏览器 | 控制图标S-icon；原生浮窗按钮共用S-press与系统设置 | AI权限与点击/取消即时，保留原生ripple；网页、拖动和窗口几何不参与动画 |
+| 远程设置 | 我的连接数量固定最小宽度淡入 | 连接、发现、指纹确认及错误状态不等待动效 |
+
+新封装位于 `ui/TanukiMotionFeedback.kt`：`TanukiIconSwap`、`TanukiStateCrossfade`、`TanukiAnimatedCount`、`TanukiCopyButton`。状态区不做高度动画，图标关闭 SizeTransform；系统 sheet 不再包动画。Host 回归见 `TanukiMotionSpecsTest`；Android实际设置通知、五页视觉效果、浮窗触摸、TalkBack与帧率仍待独立QA。
 
 ## 7. 基础组件
 
@@ -170,7 +191,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | `TanukiGlassPill` | `backdrop, contentPadding` | 玻璃胶囊，至少 48dp，适合短标签/单个操作 |
 | `TanukiGlassChrome` | `backdrop, contentPadding` | 顶栏/底栏 chrome，至少 56dp |
 | `TanukiCardSurface` | `onClick, content` | 不模糊内容卡；可点击时走 `TanukiPressable` |
-| `TanukiPressable` | `onClick, enabled, shape, pressScale` | 0.98 缩放 + 按压反馈；无回调时不拦截触摸 |
+| `TanukiPressable` | `onClick, enabled, shape` | 按下0.98/100ms、松手1/140ms并保留ripple；reduced保持1；无回调时不拦截触摸 |
 | `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, heightFraction, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌；`heightFraction` 为空时按内容包裹，传 0.9 时固定占屏并在内部滚动；内容根部提供 `textPrimary` 的 `LocalContentColor`，深色下正文不会继承页面默认黑色 |
 | `TanukiStreamingCursor` | `visible` | 2×18dp 竖条；2.4s 明暗周期；reduced-motion 常亮 |
 | `TanukiCodeText` | `text, maxLines` | 唯一允许等宽的命令/代码文本 |

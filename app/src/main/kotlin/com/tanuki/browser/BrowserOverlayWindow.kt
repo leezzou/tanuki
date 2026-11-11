@@ -27,6 +27,8 @@ import android.widget.*
 import androidx.compose.ui.graphics.toArgb
 import com.tanuki.R
 import com.tanuki.ui.tanukiColorScheme
+import com.tanuki.ui.design.TanukiMotionSettings
+import com.tanuki.ui.design.TanukiMotionSpecs
 import kotlinx.coroutines.*
 import kotlin.math.roundToInt
 
@@ -45,6 +47,7 @@ internal class BrowserOverlayWindow(
     private val appOps = context.getSystemService(AppOpsManager::class.java)
     private val preferences = context.getSharedPreferences("browser-overlay-geometry", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val motionState = TanukiMotionSettings.get(context)
     private var colors = tanukiColorScheme(isDark())
     private var shown = false
     private var closed = false
@@ -218,6 +221,7 @@ internal class BrowserOverlayWindow(
         render(controller.state.value)
     }
     fun show(): Boolean {
+        motionState.refresh()
         if (closed || !Settings.canDrawOverlays(context)) return false
         if (shown) return true
         updateFrame(publish = false)
@@ -227,12 +231,20 @@ internal class BrowserOverlayWindow(
             appOps.startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, context.packageName, permissionListener)
             controller.setOverlayFrame(actualFrame(), collapsed)
             scope.launch { controller.state.collect { state -> if (state.closed) onClose() else render(state) } }
+            scope.launch {
+                motionState.reducedMotion.collect { reduced ->
+                    if (reduced) buttons.forEach { button ->
+                        button.animate().cancel(); button.scaleX = 1f; button.scaleY = 1f
+                    }
+                }
+            }
             true
         } catch (_: Exception) { close(); false }
     }
     fun close() {
         if (closed) return
         closed = true; persistGeometry(); scope.cancel()
+        buttons.forEach { it.animate().cancel() }
         runCatching { appOps.stopWatchingMode(permissionListener) }
         if (shown) runCatching { windows.removeViewImmediate(root) }
         shown = false
@@ -477,6 +489,23 @@ internal class BrowserOverlayWindow(
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, TypedValue.COMPLEX_UNIT_SP)
         setOnClickListener { action() }; tintButton(this)
+        // 只观察触摸来缩放按钮；返回 false，点击、取消与系统 ripple 仍由原生 Button 处理。
+        setOnTouchListener { view, event ->
+            val pressed = view.isEnabled && when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> true
+                MotionEvent.ACTION_MOVE -> event.x >= 0 && event.x < view.width && event.y >= 0 && event.y < view.height
+                else -> false
+            }
+            val motion = TanukiMotionSpecs(motionState.reducedMotion.value)
+            val target = motion.pressScale(pressed)
+            view.animate().cancel()
+            if (motion.reducedMotion) { view.scaleX = 1f; view.scaleY = 1f } else {
+                val spec = motion.press<Float>(pressed)
+                view.animate().scaleX(target).scaleY(target).setDuration(spec.durationMillis.toLong())
+                    .setInterpolator { spec.easing.transform(it) }.start()
+            }
+            false
+        }
     }
     private fun tintButton(button: Button) {
         button.setTextColor(ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),

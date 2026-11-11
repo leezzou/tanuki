@@ -43,6 +43,8 @@ internal fun BrowserControlButton(state: BrowserControlUiState, onToggle: () -> 
             containerColor = if (state.aiControlled) colors.primary else colors.surfaceContainerHighest,
             contentColor = if (state.aiControlled) colors.onPrimary else colors.onSurface,
         )) {
-        Icon(if (state.aiControlled) Icons.Default.SmartToy else Icons.Default.Person, null, Modifier.size(26.dp))
+        TanukiIconSwap(state.aiControlled, Modifier.size(26.dp)) { controlled ->
+            Icon(if (controlled) Icons.Default.SmartToy else Icons.Default.Person, null, Modifier.size(26.dp))
+        }
     }
 }

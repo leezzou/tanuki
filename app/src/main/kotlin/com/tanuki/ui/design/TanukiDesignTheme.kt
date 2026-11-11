@@ -1,6 +1,8 @@
 package com.tanuki.ui.design
 
-import android.animation.ValueAnimator
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -97,6 +99,9 @@ internal object TanukiDesign {
     val tokens: TanukiDesignTokens
         @Composable @ReadOnlyComposable
         get() = LocalTanukiDesignTokens.current
+    val motion: TanukiMotionSpecs
+        @Composable @ReadOnlyComposable
+        get() = TanukiMotionSpecs(tokens.reducedMotion)
 }
 
 private val LocalTanukiDesignTokens = staticCompositionLocalOf<TanukiDesignTokens> {
@@ -135,7 +140,12 @@ internal fun TanukiDesignTheme(
 
 /** 系统关闭动画时返回 true；组件据此把动效时长压到 0 并停用循环动画。 */
 @Composable
-internal fun rememberTanukiReducedMotion(): Boolean = !ValueAnimator.areAnimatorsEnabled()
+internal fun rememberTanukiReducedMotion(): Boolean {
+    val context = LocalContext.current
+    val source = remember(context.applicationContext) { TanukiMotionSettings.get(context) }
+    val reduced by source.reducedMotion.collectAsState()
+    return reduced
+}
 
 /**
  * 原生 View 读取同一套调色板的入口。

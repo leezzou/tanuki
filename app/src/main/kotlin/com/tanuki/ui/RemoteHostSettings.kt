@@ -729,7 +729,7 @@ private fun SavedProfilesCard(
         Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("我的连接", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                Text("${model.remoteProfiles.size} 个", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TanukiAnimatedCount("${model.remoteProfiles.size} 个", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (model.remoteProfiles.isEmpty()) {
                 Text(
