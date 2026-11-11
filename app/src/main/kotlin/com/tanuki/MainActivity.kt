@@ -35,9 +35,11 @@ import com.tanuki.storage.ExternalDocumentAccess
 import com.tanuki.storage.ExternalDocumentDescriptor
 import com.tanuki.storage.ExternalDocumentPolicy
 import com.tanuki.storage.ExternalDocumentSaveState
+import com.tanuki.storage.FileLocation
 import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
+import com.tanuki.storage.WorkspaceTransferMode
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
@@ -51,6 +53,7 @@ import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.DshSessionManagerActivity
 import com.tanuki.ui.SharedPreferencesDshDraftStore
 import com.tanuki.ui.WorkspaceFilesPage
+import com.tanuki.ui.WorkspaceImportEvent
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
 import com.tanuki.ui.TanukiUiCallbacks
@@ -120,7 +123,9 @@ class MainActivity : ComponentActivity() {
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
                 "请先停止 DSH，再管理文件；避免与 Agent 同时修改文件。"
             }
-        }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) })
+        }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) }, requirePhoneWrite = {
+            check(PhoneStorageAccess.isWriteGranted(this)) { "手机存储写权限已撤销，源文件未删除" }
+        })
     }
     private var fileViewerFullscreen by mutableStateOf(false)
     // 外部 content:// 文档只在 Activity 状态中保存描述；进程重建后按描述重新申请读取。
@@ -128,9 +133,21 @@ class MainActivity : ComponentActivity() {
     private var externalConsumedRequest: String? = null
     private val externalOpenSequence = AtomicLong(0)
     private var filesOpenRequest by mutableIntStateOf(0)
+    // 事件用独立标识去重，避免 Activity 重建后的计数归零吞掉下一次导入。
+    private var importEvent by mutableStateOf<WorkspaceImportEvent?>(null)
     private var phoneStorageGranted by mutableStateOf(false)
+    private var phoneFileWriteGranted by mutableStateOf(false)
+    private val phoneFileWritePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
+    }
+    private fun requestPhoneMovePermission() {
+        if (android.os.Build.VERSION.SDK_INT <= 29) {
+            phoneFileWritePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else requestPhoneStoragePermission()
+    }
     private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
     }
     private var pendingPhoneWriteRun: Long? = null
     private val phoneWritePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -151,6 +168,7 @@ class MainActivity : ComponentActivity() {
     }
     private val phoneStorageSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
     }
     private fun requestPhoneStoragePermission() {
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -168,6 +186,7 @@ class MainActivity : ComponentActivity() {
         applyChatForeground()
         (application as TanukiApp).chatNotifications.refresh()
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
         if (!PhoneStorageAccess.isWriteGranted(this)) manager.phoneFiles.setWriteAllowed(false)
     }
     private var pendingFileExport: Pair<WorkspaceFileManager, String>? = null
@@ -481,6 +500,7 @@ class MainActivity : ComponentActivity() {
                 var storageUsage by remember { mutableStateOf("点击统计各目录的实际占用") }
                 var notices by remember { mutableStateOf<String?>(null) }
                 var confirmation by remember { mutableStateOf<String?>(null) }
+                var pendingFailureRetry by remember { mutableStateOf<FailureRetry?>(null) }
                 var chatNotifyDialog by remember { mutableStateOf(false) }
                 var selected by remember { mutableStateOf<Release?>(null) }
                 val deviceInfo = remember { manager.deviceInfo() }
@@ -551,12 +571,19 @@ class MainActivity : ComponentActivity() {
                         onboarding=onboardingPresentation),
                     callbacks = TanukiUiCallbacks(
                         command = { command ->
+                            pendingFailureRetry = null
                             when (command) {
-                                "START", "HEALTH", "BACKGROUND" -> action(command)
+                                "START", "HEALTH", "BACKGROUND", "TOOLS" -> action(command)
                                 "CANCEL" -> { manager.cancel(); updates.cancel() }
                                 "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL",
                                 "INIT", "BASE", "STOP", "RESTART", "SLIM", "WEBVIEW_CHECK", "RECONNECT", "EXPORT", "BACKUP", "RESTORE", "RESUME_UPDATE", "CACHE",
                                 "RECOVERY_TRIAL", "RECOVERY_SAFE" -> confirmation = command
+                            }
+                        },
+                        retryFailure = { retry ->
+                            when (retry.command) {
+                                "START", "HEALTH", "BACKGROUND", "TOOLS" -> action(retry.command, retry.version)
+                                else -> { pendingFailureRetry = retry; confirmation = retry.command }
                             }
                         },
                         install = { release -> selected = release; confirmation = "UPDATE" },
@@ -740,12 +767,23 @@ class MainActivity : ComponentActivity() {
                             onFullscreen = { fileViewerFullscreen = it },
                             phoneStorageGranted = phoneStorageGranted,
                             onRequestStoragePermission = ::requestPhoneStoragePermission,
+                            onOpenFreeSpace = ::openStorageSpaceSettings,
                             phoneWriteAllowed = phoneWriteAllowed,
                             phoneWritingAvailable = phoneStorageGranted && s.service == ServiceState.RUNNING,
                             onRequestPhoneWrite = ::grantPhoneWriteForCurrentRun,
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
                             transfers = manager.fileTransfers.state,
                             onCancelTransfer = { manager.fileTransfers.cancel(it) },
+                            importEvent = importEvent,
+                            phoneMoveGranted = phoneFileWriteGranted,
+                            onRequestPhoneMovePermission = ::requestPhoneMovePermission,
+                            onTransferToWorkspace = { sources, target, mode, decisions, phase ->
+                                manager.fileTransfers.track(if (mode == WorkspaceTransferMode.MOVE) "移动到工作区" else "复制到工作区") { id ->
+                                    workspaceFiles.inLocation(FileLocation.PHONE).transferToWorkspace(
+                                        sources, target, mode, decisions, onPhase = phase,
+                                    ) { received, total -> manager.fileTransfers.update(id, received, total) }
+                                }
+                            },
                             previewMaxDimension = deviceCondition.previewMaxDimension,
                             previewMaxPixels = deviceCondition.previewMaxPixels,
                             onExportFile = { files, path, name ->
@@ -839,13 +877,14 @@ class MainActivity : ComponentActivity() {
                         confirmButton = { TextButton(onClick = { notices = null }) { Text("关闭") } })
                 }
                 confirmation?.let { command ->
-                    AlertDialog(onDismissRequest = { confirmation = null }, title = { Text(confirmationTitle(command)) },
-                        text = { Text(confirmationMessage(command, selected)) },
+                    AlertDialog(onDismissRequest = { confirmation = null; pendingFailureRetry = null }, title = { Text(confirmationTitle(command)) },
+                        text = { Text(confirmationMessage(command, selected, pendingFailureRetry?.takeIf { it.command == command }?.version)) },
                         confirmButton = {
                             TextButton(onClick = {
                                 when (command) {
-                                    "INIT", "BASE", "STOP", "SLIM", "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL" -> action(command)
-                                    "DSH_UNINSTALL" -> action(command,selected?.version)
+                                    "INIT", "BASE", "STOP", "SLIM", "UBUNTU_INSTALL", "UBUNTU_REINSTALL", "UBUNTU_UNINSTALL", "NODE_INSTALL", "NODE_REINSTALL", "NODE_UNINSTALL" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version)
+                                    "DSH_UNINSTALL" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version ?: selected?.version)
+                                    "DSH_SWITCH" -> action(command, pendingFailureRetry?.takeIf { it.command == command }?.version)
                                     "DSH_REINSTALL" -> selected?.let { updates.install(it,true) }
                                     "DSH_STAGE" -> selected?.let(updates::stage)
                                     "RESTART" -> lifecycleScope.launch {
@@ -884,9 +923,10 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 confirmation = null
+                                pendingFailureRetry = null
                             }) { Text(if (command in setOf("INIT", "BASE")) "确认来源并下载" else "确认") }
                         },
-                        dismissButton = { TextButton(onClick = { confirmation = null }) { Text("取消") } })
+                        dismissButton = { TextButton(onClick = { confirmation = null; pendingFailureRetry = null }) { Text("取消") } })
                 }
             }
         }
@@ -911,6 +951,7 @@ class MainActivity : ComponentActivity() {
         "RECOVERY_SAFE" -> "退出试用并回到安全模式"
         "UPDATE" -> "安装所选 DSH 版本"
         "DSH_UNINSTALL" -> "卸载 DSH 程序"
+        "DSH_SWITCH" -> "切换已安装 DSH 版本"
         "DSH_REINSTALL" -> "重新安装当前 DSH"
         "DSH_STAGE" -> "安装 DSH 备用程序"
         "UBUNTU_INSTALL" -> "安装精简 Ubuntu"
@@ -930,13 +971,14 @@ class MainActivity : ComponentActivity() {
         else -> "确认操作"
     }
 
-    private fun confirmationMessage(command: String, release: Release?): String = when (command) {
+    private fun confirmationMessage(command: String, release: Release?, targetVersion: String? = null): String = when (command) {
         "INIT", "BASE" -> "下载所选 Ubuntu Base ${manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64 精简镜像，不含桌面。${if(command=="INIT") "随后安装所选 Node.js ${manager.components.selected(RuntimeComponent.NODE).version} 与官方 DSH ${RuntimeManager.DSH}，仅添加必要工具。" else "本次只验证 App 内 Linux 启动。"}\n\nUbuntu 下载源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}；Node.js 下载源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。每个版本使用对应官方 SHA-256 校验。建议预留 4 GB 空间；模型上下文会发送至你选择的服务商。"
-        "UBUNTU_INSTALL", "UBUNTU_REINSTALL" -> "下载 Ubuntu Base ${manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}。验证该镜像对应的官方 SHA-256 后安装基础工具。${if(command=="UBUNTU_REINSTALL") "Ubuntu 内自行安装的软件与系统修改会被替换。" else ""}\n\n独立 Node.js、DSH 引擎、配置、会话与项目保留；失败时恢复原 Ubuntu。请先停止 DSH。"
+        "UBUNTU_INSTALL", "UBUNTU_REINSTALL" -> "下载 Ubuntu Base ${targetVersion ?: manager.components.selected(RuntimeComponent.UBUNTU).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.UBUNTU).title}。验证该镜像对应的官方 SHA-256 后安装基础工具。${if(command=="UBUNTU_REINSTALL") "Ubuntu 内自行安装的软件与系统修改会被替换。" else ""}\n\n独立 Node.js、DSH 引擎、配置、会话与项目保留；失败时恢复原 Ubuntu。请先停止 DSH。"
         "UBUNTU_UNINSTALL" -> "移除 Ubuntu 镜像及其中安装的软件。Node.js 将迁移并保留在独立目录；DSH 程序、配置、会话、快照和项目保留。重新安装 Ubuntu 后才能再次运行 DSH。请先停止服务。"
-        "NODE_INSTALL", "NODE_REINSTALL" -> "下载 Node.js ${manager.components.selected(RuntimeComponent.NODE).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。验证该版本压缩包、pnpm 和 DSH 的兼容性后再替换；失败时保留当前 Node。Ubuntu、DSH 程序、配置、会话与项目保留。请先停止服务。"
+        "NODE_INSTALL", "NODE_REINSTALL" -> "下载 Node.js ${targetVersion ?: manager.components.selected(RuntimeComponent.NODE).version} ARM64，来源：${manager.components.sourceFor(RuntimeComponent.NODE).title}。验证该版本压缩包、pnpm 和 DSH 的兼容性后再替换；失败时保留当前 Node。Ubuntu、DSH 程序、配置、会话与项目保留。请先停止服务。"
         "NODE_UNINSTALL" -> "只移除 Node.js 与 pnpm 工具层，保留 Ubuntu、DSH 程序、配置、会话与项目。重新安装 Node.js 后才能再次运行 DSH。请先停止服务。"
-        "DSH_UNINSTALL" -> "卸载 DSH ${release?.version ?: ""} 的备用程序目录，保留配置、会话、插件、Skill、项目、数据快照和其他已安装版本。当前使用版本不能卸载；卸载失败会回滚并保留原程序。请先停止服务。"
+        "DSH_UNINSTALL" -> "卸载 DSH ${targetVersion ?: release?.version ?: ""} 的备用程序目录，保留配置、会话、插件、Skill、项目、数据快照和其他已安装版本。当前使用版本不能卸载；卸载失败会回滚并保留原程序。请先停止服务。"
+        "DSH_SWITCH" -> "切换到已安装 DSH ${targetVersion ?: "所选版本"}；执行兼容性检查并保留切换前快照。请先停止服务。"
         "DSH_STAGE" -> "下载并安装官方 DSH ${release?.version ?: "所选版本"} 程序，使用隔离目录检查启动；不打开正式会话，不更改当前版本或数据。较旧版本可先安装为备用，再恢复匹配的数据快照。请先停止服务。"
         "DSH_REINSTALL" -> "移除并重新安装当前 DSH ${release?.version ?: ""} 的官方程序与依赖。配置、会话、插件和项目保留；若下载失败，引擎会保持待安装，可重试。请先停止服务。"
         "EXPORT" -> "导出工作区文件，默认排除常见凭据文件。运行中可以导出；发现文件在读取期间变化时会提示重试。整个工作区不是同一时刻的快照，仍需检查源文件中的敏感内容。"
@@ -1051,6 +1093,10 @@ class MainActivity : ComponentActivity() {
     /** 进程重建后从 Activity 状态恢复同一 URI；实际读取仍会重新校验权限。 */
     private fun restoreExternalDocument(state: Bundle?) {
         if (state == null) return
+        state.getString("workspaceImportId")?.let { id ->
+            val project = state.getString("workspaceImportProject")
+            if (project != null) importEvent = WorkspaceImportEvent(id, project, state.getInt("workspaceImportCount"))
+        }
         val saved = ExternalDocumentSaveState.restore(
             uri = state.getString("externalUri"),
             name = state.getString("externalName"),
@@ -1100,13 +1146,17 @@ class MainActivity : ComponentActivity() {
             try {
                 manager.fileTransfers.track("复制到工作区", descriptor.bytes) { id ->
                     val name = ExternalDocumentPolicy.sanitizeDisplayName(descriptor.displayName)
-                    val destination = manager.workspaceStorage.importFiles(
-                        names = listOf(name),
-                        onProgress = { received -> manager.fileTransfers.update(id, received, descriptor.bytes) },
-                    ) { _ ->
-                        contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
+                    val destination = manager.mutation.withLock {
+                        manager.workspaceStorage.importFiles(
+                            names = listOf(name),
+                            expectedSizes = listOf(descriptor.bytes.takeIf { it >= 0 }),
+                            onProgress = { received -> manager.fileTransfers.update(id, received, descriptor.bytes) },
+                        ) { _ ->
+                            contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
+                        }
                     }
-                    manager.event("已复制到工作区新项目 ${destination.name}；可在文件页打开")
+                    publishImported(destination, 1)
+                    manager.event("已复制到工作区「${destination.name}」；可在文件页打开")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1149,6 +1199,17 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
     private fun openAppSettings() { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+
+    /** 空间不足时优先打开系统存储管理；没有对应页面再退回应用信息，用户仍可清理缓存。 */
+    private fun openStorageSpaceSettings() {
+        val candidates = listOf(
+            Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS),
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+        )
+        for (intent in candidates) {
+            try { startActivity(intent); return } catch (_: Exception) { continue }
+        }
+    }
 
     /** 只在 Activity 前台且 DSH 标签实际显示时抑制对应会话的通知。 */
     private fun applyChatForeground() {
@@ -1214,6 +1275,11 @@ class MainActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        importEvent?.let { event ->
+            outState.putString("workspaceImportId", event.id)
+            outState.putString("workspaceImportProject", event.projectName)
+            outState.putInt("workspaceImportCount", event.fileCount)
+        }
         val b = Bundle(); browser.save(b); outState.putBundle("web", b)
         agentBrowser?.let { controller -> val state = Bundle(); controller.saveState(state); outState.putBundle("agentBrowser", state) }
         // 关闭查看器后 descriptor 为空，已消费请求仍必须保存，避免恢复时重放旧 Intent。
@@ -1268,32 +1334,44 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, "无法打开系统文件选择器，请稍后重试", android.widget.Toast.LENGTH_LONG).show()
     }
 
-    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) = manager.mutation.withLock {
-        // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
-        val selected = uris.mapIndexed { index, uri ->
-            currentCoroutineContext().ensureActive()
-            var name: String? = null
-            var size: Long? = null
-            runCatching {
-                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
-                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) {
+        val destination = manager.mutation.withLock {
+            // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
+            val selected = uris.mapIndexed { index, uri ->
+                currentCoroutineContext().ensureActive()
+                var name: String? = null
+                var size: Long? = null
+                runCatching {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                        }
                     }
                 }
+                name to size
             }
-            name to size
+            val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
+            // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
+            manager.fileTransfers.update(transferId, 0, total)
+            manager.workspaceStorage.importFiles(
+                selected.mapIndexed { index, item -> item.first ?: "file-$index" },
+                expectedSizes = selected.map { it.second },
+                onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
+            ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
         }
-        val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
-        // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
-        manager.fileTransfers.update(transferId, 0, total)
-        val destination = manager.workspaceStorage.importFiles(
-            selected.mapIndexed { index, item -> item.first ?: "file-$index" },
-            onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
-        ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
-        manager.event("已导入新项目 ${destination.name}")
+        publishImported(destination, uris.size)
+        manager.event("已导入 ${uris.size} 个文件到「${destination.name}」")
+    }
+
+    /** 投递一次性导入事件；文件页据此刷新并显示“已导入 N 个文件到目录 / 打开”。 */
+    private suspend fun publishImported(destination: java.io.File, fileCount: Int) {
+        withContext(NonCancellable + Dispatchers.Main) {
+            importEvent = WorkspaceImportEvent(java.util.UUID.randomUUID().toString(), destination.name, fileCount)
+            filesOpenRequest++
+        }
     }
     private suspend fun exportProjects(uri: Uri, transferId: Long) = manager.mutation.withLock {
         contentResolver.openOutputStream(uri, "w")!!.use { output ->

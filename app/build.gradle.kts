@@ -77,6 +77,8 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     // 直连 SSH 隧道：纯 Java、Revised BSD，避免为最小切片引入大型终端/中继框架。
     implementation("com.github.mwiede:jsch:2.28.8")
+    // 扫描电脑端配对二维码；结果只在内存中交给现有严格解析器，不上传图片。
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // 仅 JVM 测试使用真实 XmlPullParser 实现；产品运行时依赖 Android 内置实现，不新增运行时库。

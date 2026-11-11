@@ -62,7 +62,7 @@ object OnboardingPrepare {
             phase = OnboardingPreparePhase.FAILED,
             fraction = null,
             label = "准备未完成",
-            detail = detail,
+            detail = error.trim().ifBlank { detail },
             retryable = true,
             failure = OnboardingFailure.describe(error.ifBlank { detail }),
         )
@@ -151,8 +151,7 @@ object OnboardingFailure {
                 "操作已取消。可以随时重试，已完成的下载会继续复用。"
             listOf("timeout", "timed out", "超时", "unknownhost", "unable to resolve", "connect", "网络", "下载源", "下载失败", "连接失败").any { it in lower } ->
                 "网络连接失败或下载源不可用。请切换网络后重试；准备过程会自动尝试其他可用下载源。"
-            else -> "准备没有完成：" + text.lineSequence().firstOrNull { it.isNotBlank() }
-                .orEmpty().take(160) + "。请重试；若仍失败，可在设置 → 关于与诊断中查看运行诊断。"
+            else -> "环境准备没有完成，操作已经停止。请重试；若仍失败，可展开技术细节查看原因或复制反馈。"
         }
     }
 }

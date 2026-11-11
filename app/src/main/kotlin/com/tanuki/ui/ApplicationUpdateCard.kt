@@ -8,7 +8,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.tanuki.runtime.FailureActionKind
 import com.tanuki.update.ApkUpdateCheckState
+import com.tanuki.update.AppUpdateFailure
 import com.tanuki.update.AppUpdatePhase
 import com.tanuki.update.AppUpdateState
 import com.tanuki.update.UpdateCheckStatus
@@ -19,7 +21,8 @@ import java.util.Locale
 @Composable
 internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String, installAllowed: Boolean,
     onCheck: () -> Unit, onDownload: () -> Unit, onInstall: () -> Unit, onCancel: () -> Unit,
-    background: ApkUpdateCheckState = ApkUpdateCheckState()) {
+    background: ApkUpdateCheckState = ApkUpdateCheckState(),
+    onCleanCache: () -> Unit = {}, onOpenStorage: () -> Unit = {}, onOpenSettings: () -> Unit = {}) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(state.busy, state.startedAt) {
         while (state.busy) { now = SystemClock.elapsedRealtime(); delay(1_000) }
@@ -40,8 +43,24 @@ internal fun ApplicationUpdateCard(state: AppUpdateState, currentVersion: String
                 Text("上次后台检查未成功，已静默记录；将在下个周期重试，不影响手动检查。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(state.message, style = MaterialTheme.typography.bodyMedium,
-                color = if (state.phase == AppUpdatePhase.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+            val failure = AppUpdateFailure.from(state)
+            if (failure != null) {
+                InlineFailureBlock(
+                    failure = failure,
+                    onAction = { kind ->
+                        when (kind) {
+                            FailureActionKind.RETRY -> if (state.candidate != null) onDownload() else onCheck()
+                            FailureActionKind.CLEAN_CACHE -> onCleanCache()
+                            FailureActionKind.OPEN_STORAGE -> onOpenStorage()
+                            FailureActionKind.OPEN_SETTINGS -> onOpenSettings()
+                            else -> Unit
+                        }
+                    }
+                )
+            } else {
+                Text(state.message, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface)
+            }
             OutlinedButton(onClick = onCheck, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text("检查更新")
             }

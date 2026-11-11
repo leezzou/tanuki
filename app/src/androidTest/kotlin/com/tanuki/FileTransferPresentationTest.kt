@@ -114,6 +114,7 @@ class FileTransferPresentationTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
             ui { runtime.state.value = runtime.state.value.copy(service = ServiceState.RUNNING) }
             appClick("文件")
+            appClick("文件操作")
             appClick("搜索当前文件夹")
             await("文件搜索框应显示") { nodes().any { it.packageName?.toString() == context.packageName && it.isVisibleToUser && it.isEditable } }
             assertTrue(nodes().first { it.packageName?.toString() == context.packageName && it.isVisibleToUser && it.isEditable }
@@ -132,7 +133,7 @@ class FileTransferPresentationTest {
             assertFalse(runtime.hasLiveChild)
 
             appClick("文件操作")
-            appClick("导入文件到工作区")
+            appClick("导入为新项目")
             pickerDownloads()
             await("系统选择器应显示本用例导出的唯一文件") {
                 nodes().any { it.isVisibleToUser && label(it, filename) }
@@ -141,8 +142,9 @@ class FileTransferPresentationTest {
             await("MainActivity导入回调应原子发布新的项目目录") {
                 if (pickerShown() || runtime.fileTransfers.state.value.isNotEmpty()) false
                 else {
+                    val expectedProject = filename.substringBeforeLast('.')
                     imported = runtime.paths.workspaces.listFiles().orEmpty().firstOrNull { directory ->
-                        directory.isDirectory && directory.name.matches(Regex("import-[0-9a-f-]{36}")) &&
+                        directory.isDirectory && (directory.name == expectedProject || directory.name.startsWith("$expectedProject (")) &&
                             File(directory, filename).isFile && File(directory, filename).readBytes().contentEquals(content)
                     }
                     imported != null

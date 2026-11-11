@@ -425,7 +425,7 @@ private fun FailureCard(prepare: OnboardingPrepareState, canRetry: Boolean, onRe
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (prepare.detail.isNotBlank() && prepare.detail != prepare.failure) {
-                Text(prepare.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FailureTechnicalDetails(prepare.detail)
             }
             if (!canRetry) {
                 Text(
