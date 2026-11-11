@@ -3,7 +3,7 @@
 - Agent/会话标识：android_agent-62（AO worker）
 - 时间：2026-11-11 10:07–11:00 CST
 - 状态：已完成本地实现、JVM 与 lint 验证；设备验证、独立审查、合并与发布未执行
-- 前一记录：[查看器传输胶囊避让](20261111-0538-viewer-transfer-capsule-inset.md)（已合并，PR #60）
+- 前一记录：[查看器传输胶囊历史验证](../TEST-REPORT.md)（已合并，PR #60）
 
 > 普通 PR 只新增本记录，不修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`；共享状态由集成维护方统一刷新。
 

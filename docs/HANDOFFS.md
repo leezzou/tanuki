@@ -14,7 +14,7 @@
 
 新机制把“写记录”和“刷新共享状态”拆开：
 
-- **普通 PR 只新增自己的 `docs/handoffs/<日期>-<主题>.md`**，不修改 `AGENT-STATE.md`、`CURRENT.json`。
+- **普通 PR 新增/补完自己的 `docs/handoffs/<日期>-<主题>.md`，并清理本次确认过期的相关记录**；不修改 `AGENT-STATE.md`、`CURRENT.json`。
 - **共享状态只在集成阶段由一个维护方刷新**：批量合并后、发布前或需要收口时。
 - CI 默认使用**普通 PR 模式**，只校验本 PR 的记录自身完整，并强制“公开文件有改动就必须附带交接记录”。
 - **发布流程使用严格模式**，要求印章、记录哈希、公开源码指纹和最新记录全部一致。
@@ -23,7 +23,7 @@
 
 | 角色 | 何时 | 写什么 | 检查命令 |
 |---|---|---|---|
-| 普通 Worker / PR 作者 | 开始任务、结束或中断前 | 只新增/补完自己的 `docs/handoffs/YYYYMMDD-HHMM-topic.md` | `python3 scripts/check-handoff.py --pr --record docs/handoffs/<记录>.md` |
+| 普通 Worker / PR 作者 | 开始任务、结束或中断前与每次提交前 | 新增/补完自己的 `docs/handoffs/YYYYMMDD-HHMM-topic.md`；归档结论后清理本次相关过期记录 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/<记录>.md` |
 | 集成维护方（同一时间只有一人） | 一批 PR 合并后、准备发布前、状态明显滞后时 | 刷新 `AGENT-STATE.md` 指针与最近 N 条；确认最新记录完整；重建印章 | `python3 scripts/check-handoff.py --integrate --record docs/handoffs/<最新记录>.md`，再 `--release` |
 | 发布维护方 | 发布打包前 | 只读核对严格模式，不改记录正文 | `python3 scripts/check-handoff.py --release` |
 | 只读 Agent | 任意 | 不落盘，输出同模板完整文本交主 Agent | 由主 Agent/集成方执行 |
@@ -73,12 +73,13 @@ python3 scripts/check-handoff.py --release
 1. 从最新 `origin/main` 建独立分支，开始任务时记录实际基线 SHA。
 2. 从 [交接模板](handoffs/TEMPLATE.md) 复制出唯一记录 `docs/handoffs/YYYYMMDD-HHMM-topic.md`，先写目标/范围/开始状态。
 3. 结束、移交或中断前补完：改动文件与目的、实际验证命令及结果、未测试范围、失败与原因、关键决策、未完成/暂停项、下一步、产物边界。
-4. 运行普通 PR 检查；共享状态不链接本记录、`CURRENT.json` 仍是旧的，都不影响通过：
+4. **每次提交前清理过期交接**：逐条判断任务是否完成或被替代、必要结论是否已归入专题/`TEST-REPORT.md`、是否仍有独有未完成事项或被引用的验证依据。先迁移有用事实、未完成项并修复引用，再删除确认过期的相关记录；在本次交接写清清理范围、理由、结论保留位置。保留最近一次交接、`TEMPLATE.md`、`CURRENT.json` 和仍需使用的验证依据，不按日期盲删或无理由改写历史。跨主题收口由集成维护方负责。
+5. 运行普通 PR 检查；共享状态不链接本记录、`CURRENT.json` 仍是旧的，都不影响通过：
    ```bash
    python3 scripts/check-handoff.py --pr --record docs/handoffs/<本次记录>.md
    ```
-5. 只提交本记录、代码/文档改动与必要的过期记录清理。**不要改 `AGENT-STATE.md`，不要改 `CURRENT.json`。**
-6. 交付 PR。CI 用 PR 模式校验；源码有改动时，PR 必须包含本次记录。
+6. 只提交本记录、代码/文档改动与必要的过期记录清理。**不要改 `AGENT-STATE.md`，不要改 `CURRENT.json`。**
+7. 交付 PR。CI 用 PR 模式校验；源码有改动时，PR 必须包含本次记录。
 
 ## 5. 集成阶段流程
 
@@ -110,6 +111,8 @@ python3 scripts/check-handoff.py --release
 发生共享状态冲突时：**不要手工合并两个 `CURRENT.json`**。取 main 的版本，重新执行第 3–5 步生成新印章；`AGENT-STATE.md` 冲突则取 main，再按当前 main 的最新记录重写指针和最近 N 条。
 
 ## 6. 发布流程
+
+**发版时把 `docs/handoffs/` 的交接文档总数控制在 10 个以内。** 发布/集成维护方先把仍有用的结论迁入专题或 `TEST-REPORT.md`，把未完成事项汇入当前有效交接，再清理已完成或被替代的记录并修复引用；最近一次交接、模板/印章和仍被使用的验证依据必须保留。不能为凑数量丢掉未闭环 QA 或独有证据，也不能依赖 Git 历史或 `.build` 才能接手。日常普通 PR 负责本次范围的清理，不擅自裁剪整个目录。
 
 1. 集成方先完成第 5 节，确保 `--release` 通过。
 2. 发布打包脚本 `scripts/prepare-app-release.py` 会调用 `check-handoff.py --release`；失败即停止，不生成发布附件。
@@ -152,7 +155,7 @@ python3 scripts/check-handoff.py --release
 - “最近 N 条”建议保留 5 条，最少 3 条；按记录文件名日期排序，不按 mtime。
 - 每条必须能看出：状态、已验证什么、未验证/暂停什么；细节链接到记录，不复制整段实现。
 - 当前交接必须是最新记录；这是集成模式的强制项。
-- 更早的记录仍保留在 `docs/handoffs/`，可按主题检索，不要求全部列进状态。
+- 更早的记录只保留仍有未完成事项或仍被使用的验证依据；已完成/被替代且结论已归档的记录按提交前清理规则删除。历史主题从专题文档与 `TEST-REPORT.md` 检索，不要求全部列进状态。
 - 全局未验证/暂停项不能因为精简而消失；没有则明确写“无”。
 
 ## 8. 迁移步骤：把现有 AGENT-STATE 精简为指针 + 最近 N 条
@@ -202,7 +205,7 @@ python3 scripts/check-handoff.py --release
 - **最近记录**：状态文件的“最近 N 条”表格。
 - **验证证据**：每条记录的“验证记录”章节；跨版本摘要见 [TEST-REPORT](TEST-REPORT.md)。
 - **未完成/暂停**：每条记录的“未完成与暂停项” + 状态文件的“全局未验证与暂停项”。
-- **历史主题**：`docs/handoffs/` 全量记录（文件名即日期+主题）。
+- **历史主题**：专题文档、`TEST-REPORT.md` 与仍有效的 `docs/handoffs/` 记录（文件名即日期+主题），不靠堆积过期记录追溯。
 
 常用检索：
 

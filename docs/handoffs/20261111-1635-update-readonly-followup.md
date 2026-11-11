@@ -3,7 +3,7 @@
 - Agent/会话标识：android_agent-73
 - 时间：2026-11-11 CST
 - 状态：实现和 Host 定向验证完成；以 `ao/update-page/v2` 交付，未合并、未发布
-- 前一记录：[安装进度重开](20261111-1520-pr77-reopen.md)
+- 前一记录：[组件进度与重试专题](../COMPONENTS.md)；安装进度重开的历史验证已归入 [测试现状](../TEST-REPORT.md)。
 
 ## 用户目标与范围
 
@@ -93,3 +93,5 @@ main 的 `hasActiveOperation` 还包含 `mutation.isLocked` 与常驻 `serverJob
 - 本轮不生成新 app/test APK，不安装、不分发旧输出；只生成 `artifacts/sources/Tanuki-0.1.7-source.zip` 源码检查候选及 `artifacts/SOURCE-SHA256SUMS`，名称沿用日常检查默认值，不代表确认了发布版本。文档收尾后重打归档并复核外部 checksum，不把源码 ZIP 自身哈希写回归档。
 - author/committer 使用 `leezzou <115924933+leezzou@users.noreply.github.com>`。
 - 已复核本轮相关交接：main 中仅 `20261111-1520-pr77-reopen.md`，没有旧分支的1254记录可清理；1520仍保留生产重试路由RED→GREEN等独有验证依据及未完成设备边界，不判定过期。保留当前指针使用的发布记录与跨 PR 材料，不按日期删文档。本轮无确认过期且属本轮的记录；跨 PR 清理由集成维护方负责。
+
+- 后续文档维护：本功能已由 PR #88 合入 `b324d54dce2727e8e304fa939fb84c143add6b20`；过期记录迁移/引用修复及长期清理规则见 [文档收尾记录](20261111-1802-handoff-cleanup.md)。本记录保留原产品验证事实，不将后补文档检查写成产品重测。
