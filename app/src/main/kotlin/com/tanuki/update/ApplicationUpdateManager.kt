@@ -25,7 +25,7 @@ import java.security.MessageDigest
 /** 此状态只描述 Tanuki APK，不与 Ubuntu/Node/DSH 的更新状态混用。 */
 enum class AppUpdatePhase { IDLE, CHECKING, AVAILABLE, CURRENT, NO_RELEASE, DOWNLOADING, VERIFYING, READY, FAILED, CANCELLED }
 data class AppUpdateState(val phase: AppUpdatePhase = AppUpdatePhase.IDLE,
-    val message: String = "检查本项目 GitHub Release，不上传本机环境或账号信息",
+    val message: String = "检查应用新版本，不上传运行环境或账号信息",
     val candidate: AppUpdateAsset? = null, val received: Long = 0, val total: Long = 0, val startedAt: Long = 0) {
     val busy: Boolean get() = phase in setOf(AppUpdatePhase.CHECKING, AppUpdatePhase.DOWNLOADING, AppUpdatePhase.VERIFYING)
 }
@@ -43,7 +43,7 @@ class ApplicationUpdateManager(
     val hasActiveOperation: Boolean get() = job?.isActive == true || state.value.busy
     private val directory get() = AppUpdateFiles.directory(app.cacheDir)
 
-    fun check() = operation(AppUpdateState(AppUpdatePhase.CHECKING, "正在检查 GitHub 发布列表")) {
+    fun check() = operation(AppUpdateState(AppUpdatePhase.CHECKING, "正在检查应用新版本")) {
         val startedAt = System.currentTimeMillis()
         ApkInstallAccess.revoke(app)
         readyFile = null
@@ -68,10 +68,10 @@ class ApplicationUpdateManager(
             if (candidate != null && (best == null || candidate.versionCode > best.versionCode)) best = candidate
         }
         val result = when {
-            best != null -> AppUpdateState(AppUpdatePhase.AVAILABLE, "发现可覆盖当前应用的更新", best)
+            best != null -> AppUpdateState(AppUpdatePhase.AVAILABLE, "发现新版本，可以下载更新", best)
             invalidManifest -> AppUpdateState(AppUpdatePhase.FAILED, "发布清单不完整或没有同包、同签名的兼容 APK；现有环境未改动")
-            supportedManifest -> AppUpdateState(AppUpdatePhase.CURRENT, "本次检查的公开发布中没有更高版本的兼容更新")
-            else -> AppUpdateState(AppUpdatePhase.NO_RELEASE, "暂无可用于应用内更新的 Release；发布时需附带 app-update.json")
+            supportedManifest -> AppUpdateState(AppUpdatePhase.CURRENT, "没有适用于当前应用的更高版本")
+            else -> AppUpdateState(AppUpdatePhase.NO_RELEASE, "暂时没有可用更新，请稍后再检查")
         }
         if (result.phase == AppUpdatePhase.AVAILABLE || result.phase == AppUpdatePhase.CURRENT) {
             try { onCheckCompleted(result.candidate, startedAt) }
@@ -99,10 +99,10 @@ class ApplicationUpdateManager(
                         lastNotice = now
                     }
                 }).fetch(candidate.url, target, candidate.sha256, candidate.bytes)
-                mutable.value = mutable.value.copy(phase = AppUpdatePhase.VERIFYING, message = "正在校验 APK 包名、版本和签名证书")
+                mutable.value = mutable.value.copy(phase = AppUpdatePhase.VERIFYING, message = "正在检查更新文件")
                 verify(target, candidate)
                 readyFile = target
-                mutable.value = AppUpdateState(AppUpdatePhase.READY, "校验通过；由你确认后交给 Android 安装器", candidate,
+                mutable.value = AppUpdateState(AppUpdatePhase.READY, "更新已准备好，请点击“安装更新”并在系统中确认", candidate,
                     candidate.bytes, candidate.bytes)
             } catch (error: Throwable) { target.delete(); throw error }
         }
@@ -118,7 +118,7 @@ class ApplicationUpdateManager(
 
     fun prepareInstall(onReady: (Intent) -> Unit) {
         if (state.value.phase != AppUpdatePhase.READY || !installAllowed()) {
-            mutable.value = state.value.copy(message = "请先停止 DSH，并等待环境安装、更新和文件任务结束，再安装 APK")
+            mutable.value = state.value.copy(message = "请先停止助手，等待运行环境和文件操作结束后再安装更新")
             return
         }
         val candidate = state.value.candidate ?: return
@@ -129,7 +129,7 @@ class ApplicationUpdateManager(
             val uri = FileProvider.getUriForFile(app, "${app.packageName}.updates", file)
             val installer = ApkInstallAccess.prepare(app, uri)
             withContext(Dispatchers.Main.immediate) {
-                mutable.value = AppUpdateState(AppUpdatePhase.READY, "正在等待 Android 安装确认；取消安装不会清除运行环境", candidate,
+                mutable.value = AppUpdateState(AppUpdatePhase.READY, "请在系统中确认安装；取消不会清除运行环境", candidate,
                     candidate.bytes, candidate.bytes)
                 if (installAllowed()) onReady(installer) else ApkInstallAccess.revokeAsync(app)
             }
@@ -138,7 +138,7 @@ class ApplicationUpdateManager(
 
     fun installerFailed() {
         ApkInstallAccess.revokeAsync(app)
-        mutable.value = state.value.copy(message = "无法打开系统安装器，请检查安装权限后重试")
+        mutable.value = state.value.copy(message = "无法打开安装器，请在系统设置中允许 Tanuki 安装未知应用后重试")
     }
     fun cancel() { if (hasActiveOperation) job?.cancel() }
 
@@ -149,7 +149,7 @@ class ApplicationUpdateManager(
             val intent = Intent(app, RuntimeService::class.java).setAction("APP_UPDATE")
             if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(intent) else app.startService(intent)
         } catch (_: Exception) {
-            mutable.value = initial.copy(phase = AppUpdatePhase.FAILED, message = "无法启动更新前台任务，请在应用前台重试")
+            mutable.value = initial.copy(phase = AppUpdatePhase.FAILED, message = "更新未能开始，请保持应用在前台后重试")
             return
         }
         job = scope.launch {

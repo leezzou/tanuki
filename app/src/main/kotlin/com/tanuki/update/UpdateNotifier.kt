@@ -36,7 +36,7 @@ object UpdateNotifier {
             context = context,
             id = APK_NOTIFICATION_ID,
             title = "Tanuki 有可用更新",
-            text = "新版本 $version 已发布；可在“设置 → 应用更新”查看。不会自动下载或安装。"
+            text = "发现 $version，请到设置的“引擎与更新 → 应用更新”查看；由你选择下载和安装。"
         )
     }
 
@@ -44,16 +44,16 @@ object UpdateNotifier {
         post(
             context = context,
             id = DSH_NOTIFICATION_ID,
-            title = "DSH 有可用更新",
-            text = "新版本 $version 已发布；可在“组件维护与诊断”查看。不会自动下载或安装。"
+            title = "助手有可用更新",
+            text = "发现 $version，请到“组件维护与诊断”查看；由你选择下载和安装。"
         )
     }
 
     private fun post(context: Context, id: Int, title: String, text: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "应用与引擎更新", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Tanuki APK 与 DSH 引擎的新版本提示"
+            NotificationChannel(CHANNEL_ID, "应用与助手更新", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "发现应用或助手新版本时提醒"
             }
         )
         val content = PendingIntent.getActivity(

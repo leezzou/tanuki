@@ -237,7 +237,7 @@ object LanDiscoveryCopy {
     const val RETRY = "重新扫描"
     const val USE_QR = "改用扫码"
     const val USE_MANUAL = "手动填写地址"
-    const val PERMISSION_DENIED = "未开启局域网发现权限，已改为扫码或粘贴连接。"
+    const val PERMISSION_DENIED = "附近设备权限用于发现同一 Wi-Fi 下的电脑。\n拒绝后仍可扫码或粘贴连接；可在系统设置的“Tanuki → 权限 → 附近设备”中开启。"
     const val OTHER_TITLE = "其他方式"
     const val OTHER_DETAIL = "不在同一 Wi-Fi，或列表里没有电脑时，扫码或粘贴配对链接。"
     const val SAFETY = "连接时会核对电脑指纹，密码和私钥只加密存在本机"
