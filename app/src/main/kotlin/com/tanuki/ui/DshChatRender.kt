@@ -12,6 +12,22 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.Locale
 
+/** 聊天局部动效边界；尺寸上限不随实时行数增长，业务状态不经过动画中间值。 */
+internal object DshChatMotionPolicy {
+    const val DIFF_PREVIEW_LINES = 24
+    const val DIFF_PREVIEW_DP = 240
+    const val DIFF_EXPANDED_DP = 480
+
+    fun diffViewportDp(expanded: Boolean): Int = if (expanded) DIFF_EXPANDED_DP else DIFF_PREVIEW_DP
+
+    fun isLongDetail(vararg text: String?): Boolean = text.filterNotNull().any {
+        it.length > 600 || it.count { char -> char == '\n' } >= 6
+    }
+
+    fun canSubmit(hasSubmit: Boolean, valid: Boolean, submitting: Boolean): Boolean =
+        hasSubmit && valid && !submitting
+}
+
 /**
  * 原生聊天渲染层的确定性策略集合。
  *

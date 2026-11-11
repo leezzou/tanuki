@@ -1,5 +1,20 @@
 package com.tanuki.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.BorderStroke
 import com.tanuki.ui.design.TanukiDesign
 import androidx.compose.foundation.background
@@ -71,10 +86,12 @@ internal fun DshToolGroupCard(
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
                 TanukiIconSwap(expanded, Modifier.size(24.dp)) { Text(if (it) "⌃" else "⌄") }
             }
-            // 不补间高度，避免与停靠条或输入换行同时播放高度动画。
-            if (expanded) tools.forEach { item ->
-                DshToolCard(item, embedded = true, awaitingApproval = item.callId in pendingApprovalCalls,
-                    onOpenApproval = onOpenApproval)
+            // 组过渡时暂停子卡高度动画，避免父子同时追赶同一高度。
+            DshDetailVisibility(expanded, longDetail = true) {
+                tools.forEach { item ->
+                    DshToolCard(item, embedded = true, awaitingApproval = item.callId in pendingApprovalCalls,
+                        onOpenApproval = onOpenApproval)
+                }
             }
         }
     }
@@ -167,8 +184,12 @@ fun DshToolCard(
             if (item.diffs.isNotEmpty()) {
                 DiffsBlock(item.diffs, diffExpanded) { diffExpanded = !diffExpanded }
             }
-            if (expanded) {
-                DshToolArguments.pretty(item.arguments)?.let { pretty ->
+            // 初始失败态直接展示；只有标题点击改变 visible，结果更新不触发高度补间。
+            val prettyArguments = remember(item.arguments) { DshToolArguments.pretty(item.arguments) }
+            DshDetailVisibility(expanded, longDetail = DshChatMotionPolicy.isLongDetail(
+                prettyArguments, item.output, item.error,
+            )) {
+                prettyArguments?.let { pretty ->
                     LabeledBlock("参数") {
                         SelectionContainer {
                             Text(
@@ -235,7 +256,8 @@ fun DshToolCard(
                         }
                     }
                 }
-            } else if (!item.output.isNullOrBlank()) {
+            }
+            if (!expanded && !item.output.isNullOrBlank()) {
                 Text(
                     "输出已折叠 · 点击卡片展开",
                     style = MaterialTheme.typography.labelSmall,
@@ -251,6 +273,36 @@ fun DshToolCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+/** 父详情正在过渡时，子详情只切换 alpha，不再创建第二个高度所有者。 */
+private val LocalDshHeightMotionAllowed = compositionLocalOf { true }
+
+/** 显隐状态从当前值初始化，恢复/失败首帧不播放；调用方只在用户点击时改变目标。 */
+@Composable
+internal fun DshDetailVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    longDetail: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val motion = TanukiDesign.motion
+    val state = remember { MutableTransitionState(visible) }
+    state.targetState = visible
+    val animateHeight = LocalDshHeightMotionAllowed.current
+    AnimatedVisibility(
+        visibleState = state, modifier = modifier.clipToBounds(),
+        enter = fadeIn(motion.toggle()) + if (animateHeight) expandVertically(
+            animationSpec = motion.expand(true, longDetail), expandFrom = Alignment.Top, clip = true,
+        ) else androidx.compose.animation.EnterTransition.None,
+        exit = fadeOut(motion.toggle()) + if (animateHeight) shrinkVertically(
+            animationSpec = motion.expand(false, longDetail), shrinkTowards = Alignment.Top, clip = true,
+        ) else androidx.compose.animation.ExitTransition.None,
+    ) {
+        CompositionLocalProvider(LocalDshHeightMotionAllowed provides (animateHeight && state.isIdle)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
         }
     }
 }
@@ -330,6 +382,14 @@ private fun CommandBlock(command: String, cwd: String?) {
 
 @Composable
 private fun DiffsBlock(diffs: List<DshFileDiff>, expanded: Boolean, onToggle: () -> Unit) {
+    val motion = TanukiDesign.motion
+    val heightMotion = if (LocalDshHeightMotionAllowed.current) motion
+        else com.tanuki.ui.design.TanukiMotionSpecs(reducedMotion = true)
+    // 动画目标只由用户 expanded 改变；异步增加行数只更新虚拟列表内容。
+    val viewportHeight by animateDpAsState(
+        DshChatMotionPolicy.diffViewportDp(expanded).dp,
+        animationSpec = heightMotion.expand(opening = expanded, longDetail = true), label = "diff 视口",
+    )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         diffs.forEach { diff ->
             val (added, removed) = DshDiffPresentation.counts(diff)
@@ -355,29 +415,35 @@ private fun DiffsBlock(diffs: List<DshFileDiff>, expanded: Boolean, onToggle: ()
                         color = Color(TanukiDesign.tokens.colors.danger)
                     )
                 }
-                val lines = DshDiffPresentation.lines(diff)
-                val shown = if (expanded) lines else lines.take(24)
+                val lines = remember(diff) { DshDiffPresentation.lines(diff) }
+                val longDiff = lines.size > DshChatMotionPolicy.DIFF_PREVIEW_LINES
+                val shown = if (expanded) lines else lines.take(DshChatMotionPolicy.DIFF_PREVIEW_LINES)
                 Surface(
                     color = Color(TanukiDesign.tokens.colors.canvas),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(Modifier.padding(vertical = 6.dp)) {
-                        shown.forEach { line -> DiffLineRow(line) }
-                        if (!expanded && lines.size > shown.size) {
-                            TextButton(
-                                onClick = onToggle,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Text("展开完整 diff（${lines.size} 行）")
+                        if (longDiff) {
+                            // 数千行也只测量视口；单一高度所有者在列表外，不对整卡做尺寸动画。
+                            Crossfade(targetState = expanded,
+                                modifier = Modifier.fillMaxWidth().height(viewportHeight).clipToBounds()
+                                    .semantics { contentDescription = "diff 内容区域" },
+                                animationSpec = motion.toggle(), label = "diff 内容") { showAll ->
+                                LazyColumn(Modifier.fillMaxWidth()) {
+                                    items(if (showAll) lines else lines.take(DshChatMotionPolicy.DIFF_PREVIEW_LINES)) {
+                                        line -> DiffLineRow(line)
+                                    }
+                                }
+                            }
+                        } else {
+                            LazyColumn(Modifier.fillMaxWidth().heightIn(max = DshChatMotionPolicy.DIFF_PREVIEW_DP.dp)) {
+                                items(shown) { line -> DiffLineRow(line) }
                             }
                         }
-                        if (expanded && lines.size > 24) {
-                            TextButton(
-                                onClick = onToggle,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Text("收起 diff")
+                        if (longDiff) {
+                            TextButton(onClick = onToggle, modifier = Modifier.padding(horizontal = 8.dp)) {
+                                Text(if (expanded) "收起 diff" else "展开完整 diff（${lines.size} 行）")
                             }
                         }
                     }

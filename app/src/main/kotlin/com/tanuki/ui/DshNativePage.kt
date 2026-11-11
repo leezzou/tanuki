@@ -788,7 +788,7 @@ internal fun DshShareButton(text: String) {
 @Composable
 private fun StreamingCard(text: String) {
     // 流式正文直接显示；状态和停止入口分别由状态条与输入栏承担。
-    DshMarkdown(text, Modifier.fillMaxWidth())
+    DshMarkdown(text, Modifier.fillMaxWidth(), streaming = true)
 }
 
 @Composable

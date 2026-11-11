@@ -1,5 +1,9 @@
 package com.tanuki.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import com.tanuki.ui.design.TanukiDesign
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -90,17 +94,18 @@ fun DshApprovalEntryBar(
 ) {
     val entry = DshApprovalEntry.of(state, sessionId)
     if (!entry.visible) return
+    val motion = TanukiDesign.motion
+    val containerColor by animateColorAsState(
+        if (entry.hasError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+        animationSpec = motion.toggle(), label = "审批条目背景",
+    )
+    val contentColor by animateColorAsState(
+        if (entry.hasError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+        animationSpec = motion.toggle(), label = "审批条目文字",
+    )
     Surface(
-        color = if (entry.hasError) {
-            MaterialTheme.colorScheme.errorContainer
-        } else {
-            MaterialTheme.colorScheme.secondaryContainer
-        },
-        contentColor = if (entry.hasError) {
-            MaterialTheme.colorScheme.onErrorContainer
-        } else {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        },
+        color = containerColor,
+        contentColor = contentColor,
         shape = RoundedCornerShape(12.dp),
         modifier = modifier
             .fillMaxWidth()
@@ -112,7 +117,8 @@ fun DshApprovalEntryBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(entry.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            TanukiAnimatedCount(entry.label, minWidth = 112.dp,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold))
             if (entry.highRiskCount > 0) {
                 Text(
                     "高风险 ${entry.highRiskCount}",
@@ -172,7 +178,9 @@ fun DshApprovalSheet(
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
             // 固定预留槽：提示切换不参与滚动内容排版，审批卡和按钮位置不会上下跳。
             Box(Modifier.fillMaxWidth().height(40.dp)) {
-                if (arrival.visible) {
+                androidx.compose.animation.AnimatedVisibility(visible = arrival.visible,
+                    enter = fadeIn(TanukiDesign.motion.toggle()),
+                    exit = fadeOut(TanukiDesign.motion.toggle())) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,

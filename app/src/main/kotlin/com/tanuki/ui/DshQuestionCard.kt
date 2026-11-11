@@ -1,5 +1,8 @@
 package com.tanuki.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import com.tanuki.ui.design.TanukiDesign
 import androidx.compose.ui.graphics.Color
 
@@ -100,7 +103,8 @@ fun DshQuestionCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { onSkip?.invoke() }, enabled = onSkip != null && !submitting,
                     modifier = Modifier.weight(1f)) { Text("不回答") }
-                Button(enabled = onSubmit != null && draft.canSubmit() && !submitting,
+                // 可操作性读取真实草稿，不能等待选中色或文案动画结束。
+                Button(enabled = DshChatMotionPolicy.canSubmit(onSubmit != null, draft.canSubmit(), submitting),
                     onClick = { onSubmit?.invoke(draft.answers()) }, modifier = Modifier.weight(1f)) {
                     Text(if (submitting) "提交中…" else "提交")
                 }
@@ -136,6 +140,17 @@ private fun QuestionBlock(
                 Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
         }
         question.options.forEach { option ->
+            val selected = draft.selected(question.id, option.id)
+            val colors = TanukiDesign.tokens.colors
+            val motion = TanukiDesign.motion
+            val background by animateColorAsState(
+                Color(if (selected) colors.primaryContainer else colors.surface),
+                animationSpec = motion.toggle(), label = "回答选中背景",
+            )
+            val border by animateColorAsState(
+                Color(if (selected) colors.primary else colors.outline),
+                animationSpec = motion.toggle(), label = "回答选中边框",
+            )
             val optionModifier = if (question.kind == DshQuestionKind.MULTI) {
                 Modifier.toggleable(value = draft.selected(question.id, option.id), enabled = enabled,
                     role = Role.Checkbox, onValueChange = { onToggle(option.id) })
@@ -143,7 +158,10 @@ private fun QuestionBlock(
                 Modifier.selectable(selected = draft.selected(question.id, option.id), enabled = enabled,
                     role = Role.RadioButton, onClick = { onToggle(option.id) })
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(optionModifier), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .background(background, RoundedCornerShape(10.dp))
+                .border(1.dp, border, RoundedCornerShape(10.dp)).then(optionModifier),
+                verticalAlignment = Alignment.CenterVertically) {
                 when (question.kind) {
                     DshQuestionKind.MULTI -> Checkbox(
                         checked = draft.selected(question.id, option.id),

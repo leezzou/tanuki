@@ -34,9 +34,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
+import com.tanuki.ui.design.TanukiStreamingCursor
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -544,8 +550,12 @@ private fun AnnotatedString.Builder.appendLink(
  * 链接点击先弹确认框，确认后才交给系统浏览器/邮件/拨号。
  */
 @Composable
-fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
+fun DshMarkdown(text: String, modifier: Modifier = Modifier, streaming: Boolean = false) {
+    // 流式增量只替换原文；不把 text 作为元素入场身份或创建逐字动画。
     val blocks = remember(text) { DshMarkdownParser.parse(text) }
+    var seenBlockCount by remember { mutableIntStateOf(blocks.size) }
+    val previousBlockCount = seenBlockCount
+    SideEffect { seenBlockCount = maxOf(seenBlockCount, blocks.size) }
     val codeBackground = Color(TanukiDesign.tokens.colors.canvas)
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
@@ -561,41 +571,45 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         blocks.forEachIndexed { index, block ->
-            when (block) {
-                is DshMarkdownBlock.Paragraph -> SelectionContainer {
-                    Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp)
-                    )
-                }
-                is DshMarkdownBlock.Heading -> {
-                    val style = when (block.level) {
-                        1 -> MaterialTheme.typography.titleLarge
-                        2 -> MaterialTheme.typography.titleMedium
-                        3 -> MaterialTheme.typography.titleSmall
-                        else -> MaterialTheme.typography.bodyLarge
+            Box(Modifier.fillMaxWidth().dshMessageElement(animate = !streaming && index >= previousBlockCount)) {
+                when (block) {
+                    is DshMarkdownBlock.Paragraph -> SelectionContainer {
+                        Text(
+                            dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.sp, lineHeight = 24.sp)
+                        )
                     }
-                    Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
-                        style = style,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 2.dp)
+                    is DshMarkdownBlock.Heading -> {
+                        val style = when (block.level) {
+                            1 -> MaterialTheme.typography.titleLarge
+                            2 -> MaterialTheme.typography.titleMedium
+                            3 -> MaterialTheme.typography.titleSmall
+                            else -> MaterialTheme.typography.bodyLarge
+                        }
+                        Text(
+                            dshInlineMarkdown(block.text, codeBackground, onLink, Color(TanukiDesign.tokens.colors.primary)),
+                            style = style,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    is DshMarkdownBlock.Code -> DshCodeBlock(index, block.language, block.code)
+                    is DshMarkdownBlock.Quote -> DshQuote(block.text, codeBackground, onLink)
+                    is DshMarkdownBlock.ListBlock -> DshList(block, codeBackground, onLink)
+                    is DshMarkdownBlock.Table -> DshTable(block, codeBackground, onLink)
+                    is DshMarkdownBlock.Image -> DshImageCard(block) { viewingImage = block }
+                    is DshMarkdownBlock.Attachment -> DshAttachmentCard(block) { viewingAttachment = block }
+                    is DshMarkdownBlock.Truncated -> Text(
+                        block.message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(TanukiDesign.tokens.colors.textSecondary)
                     )
+                    DshMarkdownBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
                 }
-                is DshMarkdownBlock.Code -> DshCodeBlock(index, block.language, block.code)
-                is DshMarkdownBlock.Quote -> DshQuote(block.text, codeBackground, onLink)
-                is DshMarkdownBlock.ListBlock -> DshList(block, codeBackground, onLink)
-                is DshMarkdownBlock.Table -> DshTable(block, codeBackground, onLink)
-                is DshMarkdownBlock.Image -> DshImageCard(block) { viewingImage = block }
-                is DshMarkdownBlock.Attachment -> DshAttachmentCard(block) { viewingAttachment = block }
-                is DshMarkdownBlock.Truncated -> Text(
-                    block.message,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(TanukiDesign.tokens.colors.textSecondary)
-                )
-                DshMarkdownBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
             }
         }
+        // 唯一流式标记复用 2400ms 完整呼吸；reduced 分支不创建循环且保持常亮。
+        TanukiStreamingCursor(visible = streaming)
     }
 
     pendingLink?.let { decision ->
@@ -650,6 +664,16 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
     viewingAttachment?.let { attachment ->
         DshAttachmentViewer(attachment) { viewingAttachment = null }
     }
+}
+
+/** 元素身份保留在组合位置；正文变化不重播，仅使用 alpha，不干扰消息列表滚动。 */
+internal fun Modifier.dshMessageElement(animate: Boolean): Modifier = composed {
+    val motion = TanukiDesign.motion
+    val alpha = remember { Animatable(if (animate && !motion.reducedMotion) 0f else 1f) }
+    LaunchedEffect(motion.reducedMotion) {
+        if (motion.reducedMotion) alpha.snapTo(1f) else alpha.animateTo(1f, motion.toggle())
+    }
+    graphicsLayer { this.alpha = if (motion.reducedMotion) 1f else alpha.value }
 }
 
 @Composable
