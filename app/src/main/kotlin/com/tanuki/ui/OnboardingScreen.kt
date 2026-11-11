@@ -21,11 +21,11 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import com.tanuki.ui.design.TanukiButton as Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -139,7 +139,7 @@ private fun OnboardingHeader(step: OnboardingStep) {
             ) {
                 TanukiIcon(TanukiGlyph.Terminal, tint = colors.primary, modifier = Modifier.size(19.dp))
             }
-            Text("TANUKI · 首次设置", style = MaterialTheme.typography.labelMedium, color = colors.primary, modifier = Modifier.weight(1f))
+            Text("TANUKI · 首次设置", style = MaterialTheme.typography.labelMedium, color = colors.onSurface, modifier = Modifier.weight(1f))
             Text("${step.ordinal + 1} / ${OnboardingStep.entries.size}", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
         }
         Row(
@@ -573,8 +573,9 @@ internal fun OnboardingBannerCard(
     Surface(
         Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(with(androidx.compose.ui.platform.LocalDensity.current) { 1.toDp() }, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),

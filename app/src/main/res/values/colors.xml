@@ -1,0 +1,14 @@
+<resources>
+    <!-- 启动窗口与 TanukiColorTokens.Light 保持一致。 -->
+    <color name="tanuki_canvas">#FFFFFF</color>
+    <!-- 图标只保留中性明暗与天蓝叶片，不改变原有路径。 -->
+    <color name="tanuki_icon_background">#FFFFFF</color>
+    <color name="tanuki_icon_group">#F5F6F7</color>
+    <color name="tanuki_icon_secondary">#5A6068</color>
+    <color name="tanuki_icon_muted">#8C929A</color>
+    <color name="tanuki_icon_paper">#FFFFFF</color>
+    <color name="tanuki_icon_ink">#111315</color>
+    <color name="tanuki_icon_accent">#0EA5E9</color>
+    <color name="tanuki_icon_accent_text">#0369A1</color>
+    <color name="tanuki_link">#0369A1</color>
+</resources>

@@ -217,7 +217,7 @@ private fun TanukiColorTokens.toMaterialColorScheme(): ColorScheme {
     val base = if (isDark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = Color(primary),
-        onPrimary = Color(onPrimary),
+        onPrimary = Color(if (isDark) canvas else onPrimary),
         primaryContainer = Color(primaryContainer),
         onPrimaryContainer = Color(onPrimaryContainer),
         secondary = Color(textSecondary),
@@ -228,7 +228,7 @@ private fun TanukiColorTokens.toMaterialColorScheme(): ColorScheme {
         onTertiary = Color(onInfo),
         tertiaryContainer = Color(infoContainer),
         onTertiaryContainer = Color(onInfoContainer),
-        error = Color(danger),
+        error = Color(if (isDark) danger else onDangerContainer),
         onError = Color(onDanger),
         errorContainer = Color(dangerContainer),
         onErrorContainer = Color(onDangerContainer),
@@ -238,7 +238,7 @@ private fun TanukiColorTokens.toMaterialColorScheme(): ColorScheme {
         onSurface = Color(textPrimary),
         surfaceVariant = Color(surfaceMuted),
         onSurfaceVariant = Color(textSecondary),
-        surfaceTint = Color(primary),
+        surfaceTint = Color.Transparent,
         inverseSurface = Color(textPrimary),
         inverseOnSurface = Color(surface),
         inversePrimary = Color(primaryContainer),

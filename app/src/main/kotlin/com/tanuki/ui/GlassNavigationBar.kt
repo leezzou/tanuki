@@ -21,7 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -57,6 +56,7 @@ internal fun GlassNavigationBar(
     icon: @Composable (Int, Color) -> Unit,
 ) {
     if (labels.isEmpty()) return
+    val tokens = com.tanuki.ui.design.TanukiDesign.tokens.colors
     val colors = MaterialTheme.colorScheme
     val dark = isSystemInDarkTheme()
     val direction = LocalLayoutDirection.current
@@ -156,10 +156,7 @@ internal fun GlassNavigationBar(
                             if (backdrop != null) drawRect(colors.surface.copy(alpha = if (dark) 0.38f else 0.32f))
                         },
                     )
-                    .border(0.75.dp, Brush.verticalGradient(listOf(
-                        Color.White.copy(alpha = if (dark) 0.16f else 0.65f),
-                        colors.outlineVariant.copy(alpha = 0.25f),
-                    )), panelShape)
+                    .border(with(density) { 1.toDp() }, colors.outlineVariant, panelShape)
                     .padding(4.dp).selectableGroup(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -181,8 +178,8 @@ internal fun GlassNavigationBar(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                     ) {
-                        Box(Modifier.clearAndSetSemantics {}) { icon(index, colors.onSurface) }
-                        Text(label, color = colors.onSurface, style = MaterialTheme.typography.labelMedium,
+                        Box(Modifier.clearAndSetSemantics {}) { icon(index, if (selectedIndex == index) Color(tokens.accentIcon) else colors.onSurfaceVariant) }
+                        Text(label, color = if (selectedIndex == index) colors.primary else colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -206,7 +203,7 @@ internal fun GlassNavigationBar(
                                 scaleY = 1f + 0.08f * pressure
                             },
                             onDrawSurface = {
-                                drawRect((if (dark) Color.White else Color.Black).copy(alpha = 0.09f - 0.035f * pressure))
+                                drawRect(Color(tokens.accent).copy(alpha = 0.09f - 0.035f * pressure))
                             },
                         ),
                 )

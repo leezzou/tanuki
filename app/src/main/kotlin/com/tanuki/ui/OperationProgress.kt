@@ -1,5 +1,9 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
+
+import com.tanuki.ui.design.TanukiButton as Button
+
 import android.os.SystemClock
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -134,7 +138,7 @@ internal fun OperationProgressBar(
     height: Dp = 4.dp,
 ) {
     val trackColor = MaterialTheme.colorScheme.primaryContainer
-    val barColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val barColor = if (failed) MaterialTheme.colorScheme.error else androidx.compose.ui.graphics.Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.accent)
     BoxWithConstraints(
         modifier
             .then(if (failed) Modifier else if (fraction != null) Modifier.progressSemantics(fraction.coerceIn(0f, 1f))

@@ -1,0 +1,12 @@
+<resources>
+    <!-- 导航栏深色图标从 API 27 起支持，基础资源不声明此属性。 -->
+    <style name="Theme.Tanuki" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@color/tanuki_canvas</item>
+        <item name="android:colorBackground">@color/tanuki_canvas</item>
+        <item name="android:colorAccent">@color/tanuki_link</item>
+        <item name="android:statusBarColor">@color/tanuki_canvas</item>
+        <item name="android:navigationBarColor">@color/tanuki_canvas</item>
+    </style>
+</resources>

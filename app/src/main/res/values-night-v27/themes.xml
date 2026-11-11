@@ -1,0 +1,12 @@
+<resources>
+    <!-- 与 API 27 的浅色方案成对，深色保持浅色系统图标。 -->
+    <style name="Theme.Tanuki" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">@color/tanuki_canvas</item>
+        <item name="android:colorBackground">@color/tanuki_canvas</item>
+        <item name="android:colorAccent">@color/tanuki_link</item>
+        <item name="android:statusBarColor">@color/tanuki_canvas</item>
+        <item name="android:navigationBarColor">@color/tanuki_canvas</item>
+    </style>
+</resources>

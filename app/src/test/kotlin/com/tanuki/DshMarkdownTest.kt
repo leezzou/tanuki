@@ -112,6 +112,18 @@ class DshMarkdownTest {
         assertTrue(clickable.styles?.style?.textDecoration == TextDecoration.Underline)
     }
 
+    @Test fun linkColorsFollowTheExplicitThemeInAllStates() {
+        for (tokens in listOf(com.tanuki.ui.design.TanukiColorTokens.Light, com.tanuki.ui.design.TanukiColorTokens.Dark)) {
+            val color = Color(tokens.primary)
+            val background = Color(tokens.surfaceMuted)
+            val text = dshInlineMarkdown("[链接](https://example.invalid/doc)", background, linkColor = color)
+            val link = text.getLinkAnnotations(0, text.length).single().item as LinkAnnotation.Clickable
+            assertEquals(color, link.styles?.style?.color)
+            assertEquals(color, link.styles?.pressedStyle?.color)
+            assertTrue(com.tanuki.ui.design.TanukiColorMath.contrastRatio(tokens.primary, tokens.surfaceMuted) >= 4.5)
+        }
+    }
+
     @Test fun bareAndAngleBracketLinksBecomeClickable() {
         val bare = dshInlineMarkdown("访问 https://example.invalid/path。", Color.Gray)
         assertEquals("访问 https://example.invalid/path。", bare.text)

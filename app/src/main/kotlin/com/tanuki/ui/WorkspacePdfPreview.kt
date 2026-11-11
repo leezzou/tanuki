@@ -97,9 +97,6 @@ private const val PDF_RENDER_OVERSAMPLE = 1.5
 private val PDF_PAGE_SPACING = 8.dp
 private val PDF_PAGE_HORIZONTAL_PADDING = 8.dp
 private val PDF_DEFAULT_ASPECT = 595f / 842f
-private val PDF_PAGE_BORDER = Color(0x1F000000)
-private val PDF_PLACEHOLDER_TEXT = Color(0xFF6B6B6B)
-private val PDF_PAGE_ERROR_TEXT = Color(0xFFB3261E)
 
 /** 一页已渲染位图及其内存记账信息。 */
 internal class PdfPageBitmap(val bitmap: Bitmap, val bytes: Long, val aspect: Float)
@@ -620,8 +617,8 @@ private fun PdfPageItem(
     Box(
         modifier
             .clip(shape)
-            .background(Color.White)
-            .border(0.5.dp, PDF_PAGE_BORDER, shape),
+            .background(MaterialTheme.colorScheme.surface)
+            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, shape),
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -640,13 +637,13 @@ private fun PdfPageItem(
             ) {
                 Text(
                     "第 ${index + 1} 页无法渲染",
-                    color = PDF_PAGE_ERROR_TEXT,
+                    color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.labelLarge,
                 )
                 Text(
                     error,
                     modifier = Modifier.padding(horizontal = 16.dp),
-                    color = PDF_PLACEHOLDER_TEXT,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
                 TextButton(onClick = onRetry) { Text("重试") }
@@ -658,7 +655,7 @@ private fun PdfPageItem(
                 CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                 Text(
                     "正在渲染第 ${index + 1} 页",
-                    color = PDF_PLACEHOLDER_TEXT,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
             }

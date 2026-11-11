@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
@@ -46,12 +45,7 @@ internal fun TanukiGlassSurface(
 ) {
     val tokens = TanukiDesign.tokens
     val spec = TanukiElevation.of(layer)
-    val borderBrush = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = if (tokens.isDark) 0.14f else 0.62f),
-            Color(tokens.colors.outline).copy(alpha = 0.24f),
-        ),
-    )
+    val borderWidth = with(androidx.compose.ui.platform.LocalDensity.current) { 1.toDp() }
     // 没有背板时只画半透明底色，不调用模糊；这条路径不会假装已经折射或模糊。
     if (backdrop == null) {
         Box(
@@ -59,7 +53,7 @@ internal fun TanukiGlassSurface(
                 .shadow(elevation = spec.shadowDp.dp, shape = shape, clip = false)
                 .clip(shape)
                 .background(Color(tokens.colors.surface).copy(alpha = spec.fillAlpha.toFloat()))
-                .border(width = 0.75.dp, brush = borderBrush, shape = shape),
+                .border(width = borderWidth, color = Color(tokens.colors.outline), shape = shape),
             content = content,
         )
         return
@@ -85,7 +79,7 @@ internal fun TanukiGlassSurface(
                 },
             )
             .clip(shape)
-            .border(width = 0.75.dp, brush = borderBrush, shape = shape),
+            .border(width = borderWidth, color = Color(tokens.colors.outline), shape = shape),
         content = content,
     )
 }
@@ -160,14 +154,9 @@ internal fun TanukiCardSurface(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = TanukiDesign.tokens
-    val spec = TanukiElevation.of(TanukiSurfaceLayer.Card)
     val shape = TanukiShapeTokens.card
     TanukiPressable(
-        modifier = modifier.shadow(
-            elevation = spec.shadowDp.dp,
-            shape = shape,
-            clip = false,
-        ),
+        modifier = modifier,
         onClick = onClick,
         shape = shape,
     ) {
@@ -175,7 +164,7 @@ internal fun TanukiCardSurface(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(tokens.colors.surfaceRaised))
-                .border(0.75.dp, Color(tokens.colors.hairline), shape)
+                .border(with(androidx.compose.ui.platform.LocalDensity.current) { 1.toDp() }, Color(tokens.colors.hairline), shape)
                 .padding(TanukiSpace.LG_DP.dp),
             content = content,
         )

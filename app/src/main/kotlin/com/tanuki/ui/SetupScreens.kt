@@ -1,5 +1,9 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
+
+import com.tanuki.ui.design.TanukiButton as Button
+
 import com.tanuki.power.DeviceCondition
 import com.tanuki.power.DeviceConditionState
 

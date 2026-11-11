@@ -42,7 +42,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -394,10 +394,10 @@ fun DshComposerBar(
     val showStop = state.generationRunning || state.stopping
     val sendStopEnabled = if (showStop) !state.stopping else state.canSend
     val sendStopContainer = if (sendStopEnabled) {
-        MaterialTheme.colorScheme.primary
+        Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.primaryFill)
     } else MaterialTheme.colorScheme.surfaceVariant
     val sendStopContent = if (sendStopEnabled) {
-        MaterialTheme.colorScheme.onPrimary
+        Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.onPrimary)
     } else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
 
     Surface(

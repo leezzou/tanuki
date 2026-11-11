@@ -1,7 +1,11 @@
 <resources>
-    <!-- WebView derives prefers-color-scheme from the platform Activity theme. -->
+    <!-- WebView 从 Activity 主题读取系统明暗模式。 -->
     <style name="Theme.Tanuki" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowBackground">#F6F7FB</item>
+        <item name="android:windowBackground">@color/tanuki_canvas</item>
+        <item name="android:colorBackground">@color/tanuki_canvas</item>
+        <item name="android:colorAccent">@color/tanuki_link</item>
+        <item name="android:statusBarColor">@color/tanuki_canvas</item>
+        <item name="android:navigationBarColor">@color/tanuki_canvas</item>
     </style>
 </resources>

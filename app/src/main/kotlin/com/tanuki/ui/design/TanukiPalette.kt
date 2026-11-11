@@ -26,7 +26,7 @@ internal enum class TanukiColorFamily(
     val hueDegrees: Double,
     val chroma: Double,
 ) {
-    Neutral(110.0, 0.008),
+    Neutral(0.0, 0.0),
     Success(150.0, 0.11),
     Warning(75.0, 0.13),
     Danger(27.0, 0.15),
@@ -106,11 +106,20 @@ internal data class TanukiColorTokens(
     val textPrimary: Long,
     val textSecondary: Long,
     val textTertiary: Long,
+    /** 弱灰仅用于停用、占位和装饰；可读说明使用 textTertiary。 */
     val textDisabled: Long,
     val outline: Long,
     val outlineStrong: Long,
     val hairline: Long,
+    /** 可读强调文字；浅色深天蓝、深色浅天蓝，普通文字必须达到 4.5:1。 */
     val primary: Long,
+    /** 装饰天蓝仅用于选中、进度、状态点和细描边，不用于正文或白字背景。 */
+    val accent: Long,
+    /** 图标需达到 3:1；浅色使用深天蓝，避免装饰天蓝在白底不足 3:1。 */
+    val accentIcon: Long,
+    /** 白字主按钮独立于主题文字色；两种主题均用深天蓝。 */
+    val primaryFill: Long,
+    val primaryPressed: Long,
     val onPrimary: Long,
     val primaryContainer: Long,
     val onPrimaryContainer: Long,
@@ -135,6 +144,14 @@ internal data class TanukiColorTokens(
     val neutralStatusContainer: Long,
     val onNeutralStatusContainer: Long,
 ) {
+    /** 白底说明色在分组浅底不足 4.5:1 时，使用可读的次级文字色。 */
+    fun descriptionOn(background: Long): Long =
+        if (TanukiColorMath.contrastRatio(textTertiary, background) >= TanukiContrastAudit.BODY_MINIMUM) {
+            textTertiary
+        } else {
+            textSecondary
+        }
+
     fun statusColors(tone: TanukiStatusTone): TanukiStatusRoleColors = when (tone) {
         TanukiStatusTone.Neutral -> TanukiStatusRoleColors(
             dot = neutralStatus,
@@ -144,114 +161,105 @@ internal data class TanukiColorTokens(
         TanukiStatusTone.Success -> TanukiStatusRoleColors(success, successContainer, onSuccessContainer)
         TanukiStatusTone.Warning -> TanukiStatusRoleColors(warning, warningContainer, onWarningContainer)
         TanukiStatusTone.Danger -> TanukiStatusRoleColors(danger, dangerContainer, onDangerContainer)
-        TanukiStatusTone.Info -> TanukiStatusRoleColors(info, infoContainer, onInfoContainer)
+        TanukiStatusTone.Info -> TanukiStatusRoleColors(accent, infoContainer, onInfoContainer)
     }
 
     companion object {
-        private val palette: TanukiTonePalette by lazy { TanukiTonePalette.standard() }
-
-        private fun neutral(stop: Int): Long = palette[TanukiColorFamily.Neutral][stop].toArgb()
-        private fun success(stop: Int): Long = palette[TanukiColorFamily.Success][stop].toArgb()
-        private fun warning(stop: Int): Long = palette[TanukiColorFamily.Warning][stop].toArgb()
-        private fun danger(stop: Int): Long = palette[TanukiColorFamily.Danger][stop].toArgb()
-        private fun info(stop: Int): Long = palette[TanukiColorFamily.Info][stop].toArgb()
-
-        /**
-         * 浅色主题：近白画布、深石墨正文。
-         *
-         * 正文主色取 12 档，次级 9 档、三级 8 档，均高于 4.5:1；7 档留给
-         * 停用态或大号图标。语义实心色统一取 8 档并配近白前景，四类均高于 4.5:1。
-         */
+        /** 浅色主题使用纯白/中性灰，天蓝只点缀操作与状态。 */
         val Light: TanukiColorTokens = TanukiColorTokens(
             isDark = false,
-            canvas = neutral(1),
-            surface = neutral(0),
-            surfaceRaised = neutral(0),
-            surfaceSunken = neutral(2),
-            surfaceMuted = neutral(2),
-            sheet = neutral(0),
-            chromeBase = neutral(0),
-            scrim = TanukiRgb(0, 0, 0).toArgb(alpha = 0x66),
-            textPrimary = neutral(12),
-            textSecondary = neutral(9),
-            textTertiary = neutral(8),
-            textDisabled = neutral(7),
-            outline = neutral(5),
-            outlineStrong = neutral(7),
-            hairline = neutral(3),
-            primary = neutral(11),
-            onPrimary = neutral(0),
-            primaryContainer = neutral(2),
-            onPrimaryContainer = neutral(12),
-            success = success(8),
-            onSuccess = neutral(0),
-            successContainer = success(2),
-            onSuccessContainer = neutral(12),
-            warning = warning(8),
-            onWarning = neutral(0),
-            warningContainer = warning(2),
-            onWarningContainer = neutral(12),
-            danger = danger(8),
-            onDanger = neutral(0),
-            dangerContainer = danger(2),
-            onDangerContainer = neutral(12),
-            info = info(8),
-            onInfo = neutral(0),
-            infoContainer = info(2),
-            onInfoContainer = neutral(12),
-            neutralStatus = neutral(8),
-            onNeutralStatus = neutral(0),
-            neutralStatusContainer = neutral(2),
-            onNeutralStatusContainer = neutral(12),
+            canvas = 0xFFFFFFFF,
+            surface = 0xFFFFFFFF,
+            surfaceRaised = 0xFFFFFFFF,
+            surfaceSunken = 0xFFF5F6F7,
+            surfaceMuted = 0xFFF5F6F7,
+            sheet = 0xFFFFFFFF,
+            chromeBase = 0xFFFFFFFF,
+            scrim = 0x66111315,
+            textPrimary = 0xFF111315,
+            textSecondary = 0xFF5A6068,
+            textTertiary = 0xFF6B7280,
+            textDisabled = 0xFF8C929A,
+            outline = 0xFFECEDEF,
+            outlineStrong = 0xFFECEDEF,
+            hairline = 0xFFECEDEF,
+            primary = 0xFF0369A1,
+            accent = 0xFF0EA5E9,
+            accentIcon = 0xFF0369A1,
+            primaryFill = 0xFF0369A1,
+            primaryPressed = 0xFF075985,
+            onPrimary = 0xFFFFFFFF,
+            primaryContainer = 0xFFE6F4FE,
+            onPrimaryContainer = 0xFF0369A1,
+            // 成功/警告实色仅用于语义图形；深色前景保证实色标签的文字对比度。
+            success = 0xFF16A34A,
+            onSuccess = 0xFF052E16,
+            successContainer = 0xFFF0FDF4,
+            onSuccessContainer = 0xFF166534,
+            warning = 0xFFD97706,
+            onWarning = 0xFF111315,
+            warningContainer = 0xFFFFFBEB,
+            onWarningContainer = 0xFF92400E,
+            danger = 0xFFDC2626,
+            onDanger = 0xFFFFFFFF,
+            dangerContainer = 0xFFFEF2F2,
+            onDangerContainer = 0xFFB91C1C,
+            info = 0xFF0369A1,
+            onInfo = 0xFFFFFFFF,
+            infoContainer = 0xFFE6F4FE,
+            onInfoContainer = 0xFF0369A1,
+            neutralStatus = 0xFF5A6068,
+            onNeutralStatus = 0xFFFFFFFF,
+            neutralStatusContainer = 0xFFF5F6F7,
+            onNeutralStatusContainer = 0xFF5A6068,
         )
 
-        /**
-         * 深色主题：近黑画布、近白正文。
-         *
-         * 正文主色取 0 档，次级 5 档、三级 6 档；语义实心色取 6 档并配近黑
-         * 前景，四类均高于 4.5:1。语义容器取 10 档，容器正文取 1 档。
-         */
+        /** 深色主题单独取明度，不复用浅色语义色；卡片不出现白底、画布不取纯黑。 */
         val Dark: TanukiColorTokens = TanukiColorTokens(
             isDark = true,
-            canvas = neutral(13),
-            surface = neutral(12),
-            surfaceRaised = neutral(11),
-            surfaceSunken = neutral(13),
-            surfaceMuted = neutral(11),
-            sheet = neutral(11),
-            chromeBase = neutral(12),
-            scrim = TanukiRgb(0, 0, 0).toArgb(alpha = 0x99),
-            textPrimary = neutral(0),
-            textSecondary = neutral(5),
-            textTertiary = neutral(6),
-            textDisabled = neutral(7),
-            outline = neutral(9),
-            outlineStrong = neutral(7),
-            hairline = neutral(10),
-            primary = neutral(2),
-            onPrimary = neutral(12),
-            primaryContainer = neutral(9),
-            onPrimaryContainer = neutral(1),
-            success = success(6),
-            onSuccess = neutral(13),
-            successContainer = success(10),
-            onSuccessContainer = success(1),
-            warning = warning(6),
-            onWarning = neutral(13),
-            warningContainer = warning(10),
-            onWarningContainer = warning(1),
-            danger = danger(6),
-            onDanger = neutral(13),
-            dangerContainer = danger(10),
-            onDangerContainer = danger(1),
-            info = info(6),
-            onInfo = neutral(13),
-            infoContainer = info(10),
-            onInfoContainer = info(1),
-            neutralStatus = neutral(6),
-            onNeutralStatus = neutral(13),
-            neutralStatusContainer = neutral(10),
-            onNeutralStatusContainer = neutral(1),
+            canvas = 0xFF0E1012,
+            surface = 0xFF1A1D21,
+            surfaceRaised = 0xFF1A1D21,
+            surfaceSunken = 0xFF16181B,
+            surfaceMuted = 0xFF16181B,
+            sheet = 0xFF1A1D21,
+            chromeBase = 0xFF16181B,
+            scrim = 0x990E1012,
+            textPrimary = 0xFFF2F4F6,
+            textSecondary = 0xFFA8AFB8,
+            textTertiary = 0xFF9AA1AA,
+            textDisabled = 0xFF6F767F,
+            outline = 0xFF24282D,
+            outlineStrong = 0xFF24282D,
+            hairline = 0xFF24282D,
+            primary = 0xFF7DD3FC,
+            accent = 0xFF38BDF8,
+            accentIcon = 0xFF38BDF8,
+            primaryFill = 0xFF0369A1,
+            primaryPressed = 0xFF075985,
+            onPrimary = 0xFFFFFFFF,
+            primaryContainer = 0xFF0B2B3A,
+            onPrimaryContainer = 0xFF7DD3FC,
+            success = 0xFF4ADE80,
+            onSuccess = 0xFF052E16,
+            successContainer = 0xFF102A1B,
+            onSuccessContainer = 0xFF86EFAC,
+            warning = 0xFFFBBF24,
+            onWarning = 0xFF111315,
+            warningContainer = 0xFF30230E,
+            onWarningContainer = 0xFFFCD34D,
+            danger = 0xFFF87171,
+            onDanger = 0xFF450A0A,
+            dangerContainer = 0xFF32181B,
+            onDangerContainer = 0xFFFCA5A5,
+            info = 0xFF7DD3FC,
+            onInfo = 0xFF0E1012,
+            infoContainer = 0xFF0B2B3A,
+            onInfoContainer = 0xFF7DD3FC,
+            neutralStatus = 0xFFA8AFB8,
+            onNeutralStatus = 0xFF0E1012,
+            neutralStatusContainer = 0xFF16181B,
+            onNeutralStatusContainer = 0xFFA8AFB8,
         )
     }
 }
@@ -271,62 +279,45 @@ internal data class TanukiContrastCheck(
 }
 
 /**
- * 设计令牌的对比度审计。
- *
- * 正文（含次级、三级文字和容器正文）要求 ≥4.5:1；停用文字、图标和状态点
- * 只要求 ≥3.0:1。玻璃 chrome 按 0.86 不透明度压在画布上后再检查正文。
+ * 用途审计：正文、链接、按钮与标签 ≥4.5:1，大字及有信息含义的图标 ≥3:1。
+ * 装饰天蓝、弱灰停用内容及细分隔线不作为可读文字或图标，不参与阈值断言。
  */
 internal object TanukiContrastAudit {
     const val BODY_MINIMUM: Double = 4.5
     const val LARGE_MINIMUM: Double = 3.0
 
-    fun checks(tokens: TanukiColorTokens): List<TanukiContrastCheck> {
-        val result = mutableListOf<TanukiContrastCheck>()
-        fun body(name: String, foreground: Long, background: Long) {
-            result += TanukiContrastCheck(name, foreground, background, BODY_MINIMUM)
+    fun checks(tokens: TanukiColorTokens): List<TanukiContrastCheck> = buildList {
+        fun body(name: String, fg: Long, bg: Long) {
+            add(TanukiContrastCheck(name, fg, bg, BODY_MINIMUM))
         }
-        fun large(name: String, foreground: Long, background: Long) {
-            result += TanukiContrastCheck(name, foreground, background, LARGE_MINIMUM)
-        }
-
-        body("正文/画布", tokens.textPrimary, tokens.canvas)
-        body("正文/表面", tokens.textPrimary, tokens.surface)
-        body("正文/抬升表面", tokens.textPrimary, tokens.surfaceRaised)
-        body("正文/弹层", tokens.textPrimary, tokens.sheet)
-        body("次级正文/画布", tokens.textSecondary, tokens.canvas)
-        body("次级正文/表面", tokens.textSecondary, tokens.surface)
-        body("次级正文/凹陷表面", tokens.textSecondary, tokens.surfaceMuted)
-        body("三级正文/画布", tokens.textTertiary, tokens.canvas)
-        body("三级正文/表面", tokens.textTertiary, tokens.surface)
-        body("三级正文/凹陷表面", tokens.textTertiary, tokens.surfaceMuted)
-        large("停用正文/画布", tokens.textDisabled, tokens.canvas)
-        large("停用正文/表面", tokens.textDisabled, tokens.surface)
-        large("强边框图标/表面", tokens.outlineStrong, tokens.surface)
-        large("状态点/画布", tokens.neutralStatus, tokens.canvas)
-
-        val chromeOverCanvas = TanukiColorMath.composite(
-            foreground = tokens.chromeBase,
-            alpha = TanukiElevation.of(TanukiSurfaceLayer.Chrome).fillAlpha,
-            background = tokens.canvas,
+        val surfaces = linkedMapOf(
+            "画布" to tokens.canvas, "卡片" to tokens.surface,
+            "分组" to tokens.surfaceMuted, "弹层" to tokens.sheet,
+            "选中容器" to tokens.primaryContainer,
         )
-        body("玻璃 chrome 正文/画布", tokens.textPrimary, chromeOverCanvas)
-        body("玻璃 chrome 次级正文/画布", tokens.textSecondary, chromeOverCanvas)
-
-        body("主操作正文/主色", tokens.onPrimary, tokens.primary)
-        body("主容器正文/主容器", tokens.onPrimaryContainer, tokens.primaryContainer)
-        body("成功正文/成功色", tokens.onSuccess, tokens.success)
-        body("成功容器正文/成功容器", tokens.onSuccessContainer, tokens.successContainer)
-        body("警告正文/警告色", tokens.onWarning, tokens.warning)
-        body("警告容器正文/警告容器", tokens.onWarningContainer, tokens.warningContainer)
-        body("危险正文/危险色", tokens.onDanger, tokens.danger)
-        body("危险容器正文/危险容器", tokens.onDangerContainer, tokens.dangerContainer)
-        body("信息正文/信息色", tokens.onInfo, tokens.info)
-        body("信息容器正文/信息容器", tokens.onInfoContainer, tokens.infoContainer)
-        body("中性状态正文/中性状态色", tokens.onNeutralStatus, tokens.neutralStatus)
-        body("中性容器正文/中性容器", tokens.onNeutralStatusContainer, tokens.neutralStatusContainer)
-        return result
+        for ((name, bg) in surfaces) {
+            body("正文/$name", tokens.textPrimary, bg)
+            body("次级正文/$name", tokens.textSecondary, bg)
+            body("说明/$name", tokens.descriptionOn(bg), bg)
+            body("链接/$name", tokens.primary, bg)
+            add(TanukiContrastCheck("图标/$name", tokens.accentIcon, bg, LARGE_MINIMUM))
+            add(TanukiContrastCheck("大字/$name", tokens.textPrimary, bg, LARGE_MINIMUM))
+        }
+        val chrome = TanukiColorMath.composite(tokens.chromeBase, TanukiElevation.chrome.fillAlpha, tokens.canvas)
+        body("浮层正文", tokens.textPrimary, chrome)
+        body("浮层说明", tokens.textTertiary, chrome)
+        body("主按钮", tokens.onPrimary, tokens.primaryFill)
+        body("主按钮按下", tokens.onPrimary, tokens.primaryPressed)
+        body("强调容器", tokens.onPrimaryContainer, tokens.primaryContainer)
+        for ((tone, colors) in TanukiStatusTone.entries.map { it to tokens.statusColors(it) }) {
+            body("$tone 状态标签", colors.content, colors.container)
+        }
+        body("成功实色标签", tokens.onSuccess, tokens.success)
+        body("警告实色标签", tokens.onWarning, tokens.warning)
+        body("危险实色标签", tokens.onDanger, tokens.danger)
+        body("信息实色标签", tokens.onInfo, tokens.info)
+        body("中性实色标签", tokens.onNeutralStatus, tokens.neutralStatus)
     }
 
-    fun failures(tokens: TanukiColorTokens): List<TanukiContrastCheck> =
-        checks(tokens).filterNot { it.passes }
+    fun failures(tokens: TanukiColorTokens): List<TanukiContrastCheck> = checks(tokens).filterNot { it.passes }
 }

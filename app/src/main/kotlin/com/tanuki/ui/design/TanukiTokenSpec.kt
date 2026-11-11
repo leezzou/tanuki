@@ -194,7 +194,7 @@ internal data class TanukiLayerSpec(
  *
  * - chrome：最高层，默认开启模糊；用于顶栏、底栏和悬浮控制。
  * - sheet：模态弹层，不模糊；用遮罩和抬升保证密集内容可读。
- * - card：内容卡，不模糊；用细边框和轻微阴影分层。
+ * - card：内容卡，不模糊；用纯色和细边框分层。
  * - pill：玻璃胶囊，开启轻模糊；只承载短标签或单个操作。
  *
  * 实际模糊需要调用方提供已录制的背板（Backdrop）；没有背板时组件退化为
@@ -204,8 +204,8 @@ internal object TanukiElevation {
     val card = TanukiLayerSpec(
         layer = TanukiSurfaceLayer.Card,
         zIndex = 1f,
-        shadowDp = 2,
-        shadowAlpha = 0.06,
+        shadowDp = 0,
+        shadowAlpha = 0.0,
         fillAlpha = 1.0,
         blurEnabled = false,
         blurRadiusDp = 0,

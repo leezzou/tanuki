@@ -320,8 +320,6 @@ object DshMarkdownParser {
     }
 }
 
-private const val LINK_BLUE = 0xFF4C8DFF
-
 /**
  * 行内 Markdown 转 Compose AnnotatedString。
  * 链接生成可点击 [LinkAnnotation]，但只有用户确认后才会调起系统应用；
@@ -330,12 +328,13 @@ private const val LINK_BLUE = 0xFF4C8DFF
 internal fun dshInlineMarkdown(
     text: String,
     codeBackground: Color,
-    onLinkClick: ((String) -> Unit)? = null
+    onLinkClick: ((String) -> Unit)? = null,
+    linkColor: Color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.primary),
 ): AnnotatedString = buildAnnotatedString {
-    val linkStyle = SpanStyle(color = Color(LINK_BLUE), textDecoration = TextDecoration.Underline)
+    val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
     val linkStyles = TextLinkStyles(
         style = linkStyle,
-        pressedStyle = SpanStyle(color = Color(LINK_BLUE), background = codeBackground)
+        pressedStyle = SpanStyle(color = linkColor, background = codeBackground)
     )
     appendInline(this, text, codeBackground, linkStyles, onLinkClick)
 }
@@ -563,7 +562,7 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
             when (block) {
                 is DshMarkdownBlock.Paragraph -> SelectionContainer {
                     Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink),
+                        dshInlineMarkdown(block.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -575,7 +574,7 @@ fun DshMarkdown(text: String, modifier: Modifier = Modifier) {
                         else -> MaterialTheme.typography.bodyLarge
                     }
                     Text(
-                        dshInlineMarkdown(block.text, codeBackground, onLink),
+                        dshInlineMarkdown(block.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                         style = style,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 2.dp)
@@ -662,7 +661,7 @@ private fun DshQuote(text: String, codeBackground: Color, onLink: (String) -> Un
         )
         SelectionContainer {
             Text(
-                dshInlineMarkdown(text, codeBackground, onLink),
+                dshInlineMarkdown(text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                 Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -691,7 +690,7 @@ private fun DshList(block: DshMarkdownBlock.ListBlock, codeBackground: Color, on
                 )
                 SelectionContainer {
                     Text(
-                        dshInlineMarkdown(item.text, codeBackground, onLink),
+                        dshInlineMarkdown(item.text, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -712,7 +711,7 @@ private fun DshTable(
         Row(Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
             view.headers.forEachIndexed { index, header ->
                 Text(
-                    dshInlineMarkdown(header, codeBackground, onLink),
+                    dshInlineMarkdown(header, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                     cellModifier,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
@@ -728,7 +727,7 @@ private fun DshTable(
             ) {
                 row.forEachIndexed { index, cell ->
                     Text(
-                        dshInlineMarkdown(cell, codeBackground, onLink),
+                        dshInlineMarkdown(cell, codeBackground, onLink, MaterialTheme.colorScheme.primary),
                         cellModifier,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = view.alignments.getOrElse(index) { DshTableAlign.LEFT }.toTextAlign()

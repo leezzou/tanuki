@@ -275,8 +275,9 @@ private fun DocxPageCard(
     val items = remember(page, atoms, density) { groupDocxPageItems(page, atoms, density) }
     Surface(
         modifier = Modifier.width(geometry.pageWidthDp.dp).height(geometry.pageHeightDp.dp),
-        color = Color(0xFFFDFDFD),
-        shadowElevation = 2.dp,
+        // 纸张属于文档内容，保持原文前景；界面卡片与工具栏仍跟随主题。
+        color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.surface),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Box(Modifier.fillMaxSize().clipToBounds()) {
             Column(
@@ -299,14 +300,14 @@ private fun DocxPageCard(
             Text(
                 "${pageIndex + 1} / $pageCount",
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp),
-                color = Color(0xFF808080),
+                color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.textTertiary),
                 fontSize = 7.sp,
             )
             if (page.overflow) {
                 Text(
                     "本页内容超出纸张，已截断",
                     modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
-                    color = Color(0xFFB3261E),
+                    color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.onDangerContainer),
                     fontSize = 7.sp,
                 )
             }
@@ -401,11 +402,11 @@ private fun DocxRenderAtomView(atom: DocxRenderAtom, geometry: DocxPageGeometry)
             } else {
                 Box(
                     Modifier.width(atom.widthDp.dp).height(atom.heightDp.dp)
-                        .border(0.5.dp, Color(0xFFBDBDBD))
-                        .background(Color(0xFFF5F5F5)),
+                        .border(0.5.dp, Color(com.tanuki.ui.design.TanukiColorTokens.Light.outline))
+                        .background(Color(com.tanuki.ui.design.TanukiColorTokens.Light.surfaceMuted)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("图片无法显示", color = Color(0xFF707070), fontSize = 8.sp)
+                    Text("图片无法显示", color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.textSecondary), fontSize = 8.sp)
                 }
             }
         }
@@ -414,8 +415,8 @@ private fun DocxRenderAtomView(atom: DocxRenderAtom, geometry: DocxPageGeometry)
                 val cellWidth = atom.columnWidths.drop(cell.columnStart).take(cell.colSpan).sum()
                 Column(
                     Modifier.width(cellWidth.dp).height(atom.heightDp.dp).clipToBounds()
-                        .background(cell.shade?.let { Color(it) } ?: if (atom.header) Color(0xFFF2F2F2) else Color.Transparent)
-                        .border(0.5.dp, Color(0xFFBDBDBD))
+                        .background(cell.shade?.let { Color(it) } ?: if (atom.header) Color(com.tanuki.ui.design.TanukiColorTokens.Light.surfaceMuted) else Color.Transparent)
+                        .border(0.5.dp, Color(com.tanuki.ui.design.TanukiColorTokens.Light.outline))
                         .padding(3.dp),
                 ) {
                     cell.blocks.forEach { block ->
@@ -438,7 +439,7 @@ private fun DocxRenderAtomView(atom: DocxRenderAtom, geometry: DocxPageGeometry)
                             }
                             is DocxCellBlock.Placeholder -> {
                                 if (block.gapBefore > 0f) Spacer(Modifier.height(block.gapBefore.dp))
-                                Text(block.text, color = Color(0xFF707070), fontSize = 8.sp)
+                                Text(block.text, color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.textSecondary), fontSize = 8.sp)
                             }
                         }
                     }
@@ -448,7 +449,7 @@ private fun DocxRenderAtomView(atom: DocxRenderAtom, geometry: DocxPageGeometry)
         is DocxRenderAtom.Placeholder -> Text(
             atom.text,
             Modifier.padding(vertical = 2.dp),
-            color = Color(0xFF707070),
+            color = Color(com.tanuki.ui.design.TanukiColorTokens.Light.textSecondary),
             fontSize = 8.sp,
         )
     }
