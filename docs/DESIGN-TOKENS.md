@@ -171,7 +171,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | `TanukiGlassChrome` | `backdrop, contentPadding` | 顶栏/底栏 chrome，至少 56dp |
 | `TanukiCardSurface` | `onClick, content` | 不模糊内容卡；可点击时走 `TanukiPressable` |
 | `TanukiPressable` | `onClick, enabled, shape, pressScale` | 0.98 缩放 + 按压反馈；无回调时不拦截触摸 |
-| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, heightFraction, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌；`heightFraction` 为空时按内容包裹，传 0.9 时固定占屏并在内部滚动 |
+| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, heightFraction, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌；`heightFraction` 为空时按内容包裹，传 0.9 时固定占屏并在内部滚动；内容根部提供 `textPrimary` 的 `LocalContentColor`，深色下正文不会继承页面默认黑色 |
 | `TanukiStreamingCursor` | `visible` | 2×18dp 竖条；2.4s 明暗周期；reduced-motion 常亮 |
 | `TanukiCodeText` | `text, maxLines` | 唯一允许等宽的命令/代码文本 |
 | `TanukiPathText` | `path, maxLines` | 等宽路径文本，默认单行省略 |
@@ -212,6 +212,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 动效·状态切换 | 无/默认 | `Crossfade` + `TanukiMotion.toggle` | 160ms；移除动画时 0 |
 | 动效·按压 | Material 默认 | `TanukiPressable` + `TanukiMotion.pressIn` | 100ms |
 | 详情内二级确认 | 本轮初版用页面内 `TanukiBottomSheet` | 窗口级 `AlertDialog`（重命名/归档/完全权限） | 详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `Box` 会被遮住（PR #70 评审 P1） |
+| 弹层正文色 | 继承页面默认黑色 | `TanukiBottomSheet` 提供 `LocalContentColor = textPrimary` | 深色 sheet 上正文可读；对比度按 textPrimary/textSecondary × sheet 回归（PR #70 评审 P2） |
 
 ### 8.2 截图自查清单（静态核对，设备未验证）
 

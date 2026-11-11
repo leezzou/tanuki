@@ -12,6 +12,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - GitHub Actions：PR #70 的 `Host scripts and handoff checks` 与 `Android build, JVM tests and lint` 在推送 head 上通过；新提交后以 PR 页面当前 head 的检查为准。
 - 新增 12 项 JVM 回归：行高/间距/动效/字体令牌取值；状态 chip 容器正文与状态点在浅/深色下的对比度；卡片说明与路径文字对比度；文件大小多单位与 locale 格式化；文件空态四类文案；权限语气（可写/只读/待授权/可授权）；会话状态标签语气与呼吸；会话权限语气覆盖未知值。
 - 评审 P1 修复（详情内二级确认被窗口遮挡）：详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `TanukiBottomSheet` 会被盖住。重命名/归档/完全权限三条从详情发起的确认改回窗口级 `AlertDialog`（仍用令牌按钮），列表层的新建/批量归档/批量上限保留页面内弹层。新增仪器回归 `SessionManagerDetailDialogTest`：从详情依次进入三条确认，验证确认层出现在详情之上、取消与返回只关闭确认层；`compileModernDebugAndroidTestKotlin` 通过，**无设备，未运行**。
+- 评审 P2 修复（弹层正文继承颜色）：`TanukiBottomSheet` 只画 sheet 背景、没有提供 `LocalContentColor`，深色下正文继承页面默认黑色。现由组件在内容根部提供 `textPrimary`，并在 `TanukiPageVisualsTest` 增加 `textPrimary/textSecondary × sheet` 对比度断言。
 - 未执行：模拟器/真机上的深色/浅色、1.3x/2x 大字体、360dp 窄屏逐页截图对照、TalkBack、输入法遮挡、滚动手感；Android 仪器测试未运行（含新增用例）；未合并、未发布。编译/JVM/lint 不能替代设备验收。
 
 ## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）

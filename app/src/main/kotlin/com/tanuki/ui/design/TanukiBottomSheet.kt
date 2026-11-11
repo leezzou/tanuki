@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -207,27 +209,31 @@ internal fun TanukiBottomSheet(
                             .background(Color(tokens.colors.outline)),
                     )
                 }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = TanukiSpace.XL_DP.dp)
-                        .padding(bottom = TanukiSpace.XL_DP.dp),
-                ) {
-                    Text(
-                        text = title,
-                        color = Color(tokens.colors.textPrimary),
-                        style = tokens.type.titleMedium,
-                    )
-                    if (subtitle != null) {
-                        Spacer(Modifier.height(TanukiSpace.XS_DP.dp))
+                // 弹层自己绘制 sheet 背景，必须同时提供匹配的正文色；否则正文会
+                // 继承页面默认黑色，在深色 sheet 上不可读（PR #70 评审 P2）。
+                CompositionLocalProvider(LocalContentColor provides Color(tokens.colors.textPrimary)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = TanukiSpace.XL_DP.dp)
+                            .padding(bottom = TanukiSpace.XL_DP.dp),
+                    ) {
                         Text(
-                            text = subtitle,
-                            color = Color(tokens.colors.textSecondary),
-                            style = tokens.type.bodySmall,
+                            text = title,
+                            color = Color(tokens.colors.textPrimary),
+                            style = tokens.type.titleMedium,
                         )
+                        if (subtitle != null) {
+                            Spacer(Modifier.height(TanukiSpace.XS_DP.dp))
+                            Text(
+                                text = subtitle,
+                                color = Color(tokens.colors.textSecondary),
+                                style = tokens.type.bodySmall,
+                            )
+                        }
+                        Spacer(Modifier.height(TanukiSpace.MD_DP.dp))
+                        content()
                     }
-                    Spacer(Modifier.height(TanukiSpace.MD_DP.dp))
-                    content()
                 }
             }
         }

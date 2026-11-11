@@ -35,7 +35,7 @@
 | `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 设置分区标题/卡片、动作行、只读行、开关、折叠面板、分类入口改用令牌；折叠箭头与内容动效走令牌 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt` | 通用 `Shapes.large` 从“只有上圆角”改为 28dp 全圆角（弹层继续用 `TanukiSheetShape`）；新增 `tanukiDesignColorScheme(dark)` 供原生 View 使用 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiComponents.kt` | `TanukiStatusChip` 增加可选 `contentDescription`，保留“权限：…，点击管理”朗读 |
-| `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 增加可选 `heightFraction`，短确认框仍按内容包裹 |
+| `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 增加可选 `heightFraction`，短确认框仍按内容包裹；内容根部提供 `textPrimary` 的 `LocalContentColor`，修复深色下正文继承黑色 |
 | `app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt` | 新增 12 项 JVM 回归：行高/间距/动效/字体令牌、状态 chip 与卡片文字对比度、大小与空态文案、权限/会话语气映射 |
 | `app/src/androidTest/kotlin/com/tanuki/SessionManagerDetailDialogTest.kt` | 新增设备回归（仅编译，未运行）：从详情进入重命名/归档/完全权限，验证确认层出现在详情之上、取消与返回只关闭确认层 |
 | `docs/DESIGN-TOKENS.md` | 更新为“令牌 + 接入结果”：接入表、令牌映射表、未接入清单、本轮验证与未验证 |
@@ -53,6 +53,7 @@
 | `./gradlew :app:lintModernDebug -x buildNativeRuntime` | 通过：0 errors / 103 warnings / 1 hint | 改动文件没有新增告警；`ModifierParameter` 等来自既有 `TanukiIcon` 等位置 |
 | `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.NpmAdaptiveWorkerPoolTest'` | 通过（重跑） | 首次全量运行时该用例出现一次 `expected:<8> but was:<9>` 时序失败；未改该模块，单类重跑通过，记录为既有 flaky |
 | 静态自查：深色/浅色/大字体/窄屏 | 仅源码与令牌层面核对，逐页矩阵见 `docs/DESIGN-TOKENS.md` 8.2 | 未在设备/模拟器渲染；不能计为设备通过 |
+| `./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.TanukiPageVisualsTest'` | 通过（P2 修复后） | 新增弹层正文/副标题对比度断言 |
 | `./gradlew -PtestBuildType=debug :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin` | 通过 | 新增仪器用例仅编译；无设备未运行 |
 | GitHub Actions PR #70 | `Host scripts and handoff checks`、`Android build, JVM tests and lint` 在推送 head 上通过 | 以 PR 页面当前 head 的检查为准；新提交后需复跑 |
 
@@ -68,6 +69,7 @@
   - 聊天页与浏览器页通过根主题继承新调色板（未改其源码），其视觉会随主题变化，需要各自的 owner 在设备上确认。
   - 会话详情仍使用系统 `ModalBottomSheet`：拖拽/返回键/输入法行为保留，动画时长由平台决定（300ms，落在令牌 240–340ms 区间），不能由令牌置零。
   - 因此从详情发起的三条二级确认必须用窗口级 `AlertDialog`；不能用页面内 `TanukiBottomSheet`，否则会被详情窗口遮住（PR #70 评审 P1 已修复）。
+  - `TanukiBottomSheet` 自己绘制 sheet 背景，必须同时提供 `LocalContentColor`；否则深色下正文继承页面默认黑色（PR #70 评审 P2 已修复，并补 textPrimary/textSecondary × sheet 对比度断言）。
   - 文件页头部在 320dp 极窄屏下位置选择器可能只剩图标宽度；360dp 下按静态计算可容纳。
   - 大字体下会话行会变高；弹层动作按钮在 1.3x 起改为整行，避免省略号截断。
 

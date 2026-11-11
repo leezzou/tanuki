@@ -115,6 +115,9 @@ class TanukiPageVisualsTest {
             assertTrue("$theme 说明文字/卡片", TanukiContrast.passesNormalText(tokens.textSecondary, tokens.surfaceRaised))
             assertTrue("$theme 路径文字/卡片", TanukiContrast.passesNormalText(tokens.textTertiary, tokens.surfaceRaised))
             assertTrue("$theme 正文/分组底", TanukiContrast.passesNormalText(tokens.textPrimary, tokens.surfaceMuted))
+            // 弹层正文与副标题依赖 LocalContentColor：这里锁定它们实际继承的颜色。
+            assertTrue("$theme 弹层正文/弹层", TanukiContrast.passesNormalText(tokens.textPrimary, tokens.sheet))
+            assertTrue("$theme 弹层副标题/弹层", TanukiContrast.passesNormalText(tokens.textSecondary, tokens.sheet))
             // 停用行文字属于大号/非关键说明，按 3.0 检查。
             assertTrue("$theme 停用文字/分组底", TanukiContrast.passesLargeText(tokens.textDisabled, tokens.surfaceMuted))
         }
