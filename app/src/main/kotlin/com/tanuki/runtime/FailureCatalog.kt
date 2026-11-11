@@ -86,7 +86,7 @@ data class AppFailure(
         }
         if (attempt > 0) appendLine("已尝试：$attempt 次")
         if (detail.isNotBlank()) {
-            appendLine("技术详情：")
+            appendLine("问题详情：")
             append(detail)
         }
     }.trim()
@@ -275,7 +275,7 @@ object FailureCatalog {
     }
 
     private fun titleFor(domain: FailureDomain): String = when (domain) {
-        FailureDomain.INSTALL -> "安装没有完成"
+        FailureDomain.INSTALL -> "安装失败"
         FailureDomain.UPDATE -> "更新失败"
         FailureDomain.RUNTIME -> "助手已停止"
         FailureDomain.FILE -> "文件操作失败"

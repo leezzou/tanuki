@@ -43,7 +43,7 @@ class FailureCatalogTest {
         )
         assertEquals(FailureDomain.INSTALL, failure.domain)
         assertEquals(FailureCause.NETWORK, failure.cause)
-        assertEquals("安装没有完成", failure.title)
+        assertEquals("安装失败", failure.title)
         assertEquals(FailureActionKind.RETRY, failure.primaryAction.kind)
         assertEquals(FailureActionKind.SWITCH_SOURCE, failure.secondaryAction?.kind)
         assertEquals("ubuntu", failure.componentId)
@@ -229,10 +229,10 @@ class FailureCatalogTest {
             )
         )
         val text = failure.copyText("0.1.12")
-        assertTrue(text.contains("安装没有完成"))
+        assertTrue(text.contains("安装失败"))
         assertTrue(text.contains("应用版本：0.1.12"))
         assertTrue(text.contains("已尝试：2 次"))
-        assertTrue(text.contains("技术详情"))
+        assertTrue(text.contains("问题详情"))
         assertTrue(text.contains("SHA-256"))
     }
 }
