@@ -81,7 +81,28 @@ class OperationProgressLayoutTest {
         assertTrue("运行时浮层出现后应关闭传输抽屉", Regex(
             "LaunchedEffect\\(runtimeOverlay != null\\)\\s*\\{\\s*if \\(runtimeOverlay != null\\) sheet = false"
         ).containsMatchIn(overlay))
-        assertTrue("传输抽屉与运行时浮层互斥", overlay.contains("if (sheet && runtimeOverlay == null)"))
+        assertEquals("传输抽屉只能有一个常驻宿主", 1, Regex("TransferSheet\\s*\\(").findAll(overlay).count())
+        assertTrue("传输抽屉通过 visible 与运行时浮层互斥", Regex(
+            "TransferSheet\\s*\\(\\s*visible\\s*=\\s*sheet && runtimeOverlay == null\\s*,"
+        ).containsMatchIn(overlay))
+        // 宿主调用必须位于函数体直属层级；外包 if/let 会提前卸载并截断退出动画。
+        val beforeSheet = overlay.substringBefore("TransferSheet(")
+        assertEquals("禁止在外层条件块中提前卸载传输抽屉", 1,
+            beforeSheet.count { it == '{' } - beforeSheet.count { it == '}' })
+        assertFalse("不得恢复旧的外层挂载条件", Regex(
+            "if\\s*\\(sheet\\s*&&\\s*runtimeOverlay == null\\)"
+        ).containsMatchIn(overlay))
+    }
+
+    @Test fun `全局失败详情保留单一常驻宿主并传递可空模型`() {
+        val page = ui("TanukiUi.kt")
+        assertEquals("失败详情只能有一个常驻宿主", 1, Regex("FailureDetailSheet\\s*\\(").findAll(page).count())
+        assertTrue("关闭时应向宿主传递可空失败模型", Regex(
+            "val shownFailure = failureDetail\\s+FailureDetailSheet\\s*\\(\\s*failure = shownFailure,"
+        ).containsMatchIn(page))
+        val beforeSheet = page.substringBefore("FailureDetailSheet(")
+        assertEquals("失败详情不得被外层 if/let 提前卸载", 1,
+            beforeSheet.count { it == '{' } - beforeSheet.count { it == '}' })
     }
 
     @Test fun `更新页工程说明收起且检查按钮为主操作`() {
