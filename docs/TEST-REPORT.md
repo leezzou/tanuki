@@ -1,5 +1,38 @@
 # 测试现状
 
+## 0.1.14 / code19 最终 REBUILD（16c07591b）
+
+- 收到新的RBEBUILD后，实际fetch最终main `16c07591b7ba170a77fdc0720b201a77e5477db3`，在原发布分支上git merge --no-commit origin/main；唯一冲突为OperationProgressLayoutTest，完整保留main的加强版本，并按字节确认一致。旧0910cc1候选由本轮替代，PR #105继续更新；默认版本0.1.14/code19。
+- 本轮完整命令：source scripts/ao-worktree-env.sh后，`./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`，无过滤，BUILD SUCCESSFUL（59s）、退出0。完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 JUnit/lint XML独立汇总，布局类新增全局失败详情验证后为7项；不继承前轮1407项。
+- 核对真实绝对路径属于当前worktree后删除旧artifacts/releases/0.1.14；最后加载环境后，按固定PRoot提交恢复CLAUDE.md到AGENTS.md链接。通过worktree私有Gradle缓存内的init，仅在developmentReleaseSigning=true时引用仓库外既有开发证书，密码经环境提供，未复制密钥至源码或附件。
+- 按原普通入口执行 `python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck`，BUILD SUCCESSFUL（15s，52个任务UP-TO-DATE，package任务实际执行），六附件一次封装完成；不是复用旧APK封装。应用产品代码未变，原生输入未变所以native任务增量复用，不冒称重新编译全部native。
+- 独立aapt2/apksigner/ZIP与更新JSON核验：com.tanuki.modern.workspacecheck、0.1.14/code19、minSdk26/target34、仅ARM64、non-debuggable、必需原生库齐全。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 RELEASE-SHA256SUMS、native-source-SHA256SUMS和SOURCE-SHA256SUMS通过shasum -a 256 -c；文档收尾后刷新源码ZIP及外部散列，保持本轮已核APK字节。
+- 前轮发布交接及#104交接共2份，在完整正文规范化比对归入DEVELOPMENT-HISTORY后删除，修复引用；当前保留7文件。#104独有的61项定向/1408项全套、离线缺依赖失败、未跑lint/设备等原事实全部保留。前轮失败与签名修正不改记为本轮发生。
+- 未执行：Android仪器、设备安装/升级、实际sheet挂载/退出帧、真实DSH/模型/提问/审批/远程/SAF或真机。VQ-01/C批P2及历史QA新包复验继续保留；API Key、真实模型/账号、真机暂停。不合并/tag/创建或上传Release。
+
+## 0.1.14 / code19 前轮候选（efc1d9ae，历史）
+
+- 最终集成基线：`efc1d9ae4e5d62e6492807d965697a1b863a7511`，分支 `ao/release/0.1.14`。收到REBUILD后实际fetch并通过autostash合入最终main、无冲突恢复准备改动；版本仍0.1.14/code19，包含#98/#103。
+- 命令：source scripts/ao-worktree-env.sh 后运行 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`，无测试过滤。
+- 最终退出0，BUILD SUCCESSFUL（2m17s）：完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 JUnit与lint XML已独立解析核对，不沿用准备阶段1393项结果。
+- 中间失败保留：最终main首轮全套退出1（2m08s），1407项仅OperationProgressLayoutTest第84行失败。该断言要求旧`if (sheet && runtimeOverlay == null)`，C批已改为常驻TransferSheet的`visible = sheet && runtimeOverlay == null`；人工核对生产入口、关闭副作用、退出缓存及交互禁用保留，只同步该条正则断言，其余断言不变。定向6项通过（30s）后最终全套通过；产品代码未改。准备阶段两轮时序失败保留在下节。
+- 构建：`python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck` 普通入口release构建成功（2m56s，含native），身份/签名通过；其后原生源码封装因CLAUDE.md链接缺失退出64，未记六附件完成。原因是ao-worktree-env每次加载会清理缓存内已有符号链接；在最后一次加载环境后，按固定提交核对120000模式及AGENTS.md目标并恢复。随后用同一脚本`--verified-apk`和完整实际`--verified-apk-sha256`恢复封装，APK不重编/不重签，最终六附件完成。旧目录在核对真实绝对路径后确认不存在；未改第三方源码或绕过校验。
+- 签名修正：独立核验发现worktree自动生成的debug证书为1141466e前缀，不符合要求，该中间包不交付。核对既有开发证书公有指纹为371dc301后，用apksigner以既有debug签名重新签发同一已构建载荷，v2/v3验证通过；随后以修正APK和完整SHA恢复封装，更新清单和全部附件。后续重建必须显式沿用既有开发证书，不能信任新worktree默认keystore。
+- 独立实核：aapt2 dump badging与apksigner verify确认包名`com.tanuki.modern.workspacecheck`、0.1.14/code19、minSdk26/target34、non-debuggable、仅ARM64。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 必需原生库libproot/libproot-loader/libsupervisor均存在。
+- 六附件位于`artifacts/releases/0.1.14/`；RELEASE-SHA256SUMS、native-source-SHA256SUMS及SOURCE-SHA256SUMS通过shasum -a 256 -c，清单自身SHA另在最终回执列出。文档收尾后重打并更新源码ZIP及外部清单；APK保持已实核字节，源码ZIP自身SHA不写入包内文档形成循环。
+- 交接清理：此前75份记录先迁入6份专题，70份正文已与原Git证据规范化比对；两份设备QA、C批/P2两份独有设备待验记录、本次、模板和印章共7文件。C批旧动效引用已修复；不因已合并就宣称设备复验通过。
+- 未测试：设备安装/覆盖升级、Android仪器执行、真实DSH/模型/审批/提问/远程/SAF链路、低API/真机/弱网/视觉帧率。视觉P2代码已合并但新包设备复验未执行，VQ-01真实提问入口及C批记录中的遗留P2保留。API Key、真实模型/账号与真机继续暂停。不合并/tag/创建或上传Release。
+
+## 0.1.14 / code19 准备阶段历史（3ba8ef1f）
+
+- 准备基线：`3ba8ef1fc2ee4aa45347b50677b0c395aa6a88b6`，分支 `ao/release/0.1.14`；只更新版本默认值与文档，C 批/视觉 P2 在独立分支集成，最终包待明确 `rebuild`。
+- 首轮命令：`source scripts/ao-worktree-env.sh` 后运行 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug`。
+- 最终相同无过滤全套命令退出0，BUILD SUCCESSFUL（24s，增量编译，JVM任务实际执行）：**1393 tests / 142 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 116 warnings / 2 hints**。lint报告在单类复跑时生成，最终任务UP-TO-DATE，绑定同一产品/测试字节；独立解析JUnit/lint XML确认。本轮未改产品或测试逻辑。
+- 中间失败保留：首轮退出1（4m40s），1393项中1 failure：`DshNativeComposerBindingTest.acceptedSendThenDirectOfficialIdleClearsOptimisticRunning` 第88行等待清除乐观running超时5000ms；随后该类8项全过并完成lint（1m01s）。第二轮全套退出1（24s），1393项中仅 `NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 失败，应退休8个worker、实际9个，聊天绑定类已通过。NPM类单独复跑通过（8s）后最终全套通过。两个失败轮次均不计通过；复跑通过不等于已证明不存在时序问题。
+- 本版 APK、六附件和实际包名/证书/字节/SHA 核验尚未生成/执行；设备、仪器、升级覆盖、真实 DSH/sshd/中继/弱网均未测试。历史设备 QA 分别绑定自己的基线与 APK，不能继承为本版已测。
+- 交接清理：75 份中间记录已先迁移到 [研发历史事实](DEVELOPMENT-HISTORY.md)（70 份，保留基线/验证/失败/关键决策/待验项）及五份专题 [界面规格](NATIVE-UI-BEHAVIOR-SPEC.md)、[UX 审计](UX-AUDIT.md)、[第一波计划](UX-WAVE1-PLAN.md)、[动效审计](MOTION-AUDIT.md)、[文案审计](COPY-AUDIT.md)。交接目录保留本次、两份独立设备 QA、模板与印章，共 5 个文件；截图证据目录不删除。
+- 尚未闭环：QA-04/07/09/10/12 修复后的设备复验、视觉 QA 的 1P1/4P2、C 批浮层、首次安装/权限/SAF/远程/审批等真实链路，详见当前交接与保留 QA。API Key、真实模型/账号、真机仍暂停。
+
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
 ## 动效 D 批列表变化（2026-11-11，android_agent-92，Host）
@@ -8,7 +41,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 第一轮实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest`；七个 `--tests` 为 `com.tanuki.ui.TanukiListMotionTest`、`com.tanuki.ui.DshMessageMotionTest`、`com.tanuki.ui.design.TanukiMotionSpecsTest`、`com.tanuki.FileListPresentationTest`、`com.tanuki.DshChatWindowTest`、`com.tanuki.DshChatFollowStateTest`、`com.tanuki.DshChatRenderTest`。**BUILD SUCCESSFUL（4m1s）/ 退出 0**；XML 实核 **7 类71项（5/7/5/8/18/5/23），0 failures / 0 errors / 0 skipped**。
 - 新增13项覆盖实际文件排序、会话置顶与归档、240ms placement/160ms fade 时间采样、搜索异步提交及清空、目录/来源/隐藏筛选身份、首屏/加载/分页头插/窗口释放、工具组成员更新、占位/流式落盘替换，以及 reduced 全 null。补强一项验证正式消息先到、占位信号后清除时，不会反复补记抑制而漏掉后续新消息入场。宿主时间采样不代表 Android 实际帧行为。
 - 最终用相同配置、前三个任务与七类过滤，再追加 `--tests 'com.tanuki.DshNativePagingTest' :app:lintModernDebug` 完整重跑：**BUILD SUCCESSFUL（7m35s）/ 退出0**，产品/AndroidTest/JVM源码 compile 通过；XML实核 **8类88项（5/8/5/8/18/5/23/16），0 failures / 0 errors / 0 skipped**。lint **0 errors / 105 warnings / 2 hints**，公共策略与新增测试无告警。此前独立 lint 一轮亦成功（5m2s），不以首轮71项替代最终88项。
-- 编排者已批准并完成工具组的单点扩展：DshToolGroupCard 只增加默认 Modifier 参数并传给原根 Surface，历史/实时段复用同一新增行 alpha 策略，不改结构/展开/内容。初版接线后同套88项通过（5m55s），lint新增1条ModifierParameter警告；将Modifier移至第一个可选参数并同步调用点后，以上文完整八类命令最终重跑 **BUILD SUCCESSFUL（3m34s）/退出0**，产品/AndroidTest/JVM源码compile通过，**8类88项、0失败/错误/跳过**，lint **0 errors/105 warnings/2 hints**，新增警告消失。前述71项和7m35s结果只作为阶段证据。本地未执行完整 JVM、Android 仪器、设备安装/操作、实际 Compose 列表挂载/快速打断或帧率；未生成设备/发布 APK，跳过原生运行时的 Host 编译不作为可安装验收包。API Key/真实模型/真机暂停项保留。完整范围和后续见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
+- 编排者已批准并完成工具组的单点扩展：DshToolGroupCard 只增加默认 Modifier 参数并传给原根 Surface，历史/实时段复用同一新增行 alpha 策略，不改结构/展开/内容。初版接线后同套88项通过（5m55s），lint新增1条ModifierParameter警告；将Modifier移至第一个可选参数并同步调用点后，以上文完整八类命令最终重跑 **BUILD SUCCESSFUL（3m34s）/退出0**，产品/AndroidTest/JVM源码compile通过，**8类88项、0失败/错误/跳过**，lint **0 errors/105 warnings/2 hints**，新增警告消失。前述71项和7m35s结果只作为阶段证据。本地未执行完整 JVM、Android 仪器、设备安装/操作、实际 Compose 列表挂载/快速打断或帧率；未生成设备/发布 APK，跳过原生运行时的 Host 编译不作为可安装验收包。API Key/真实模型/真机暂停项保留。完整范围和后续见 [D 批交接](DEVELOPMENT-HISTORY.md#20261111-2043-motion-batch-d)。
 
 - PR #100 CI跟进：首轮head `e2b6417` 的两个Host checks成功；pull_request Android合并候选编译失败，WorkspaceFilesPage重复import TanukiDesign。最新main=`fde9e396c6e2d43bf8f63d03d982c850e9369562` 在文件顶部新增了同一import，与本批另一位置的新增被同时保留。本批移除自己的import、单次工厂访问改限定名；以373基线/fde9/main与修正本分支三方文本合并预检通过，结果恰好1条import。首轮push事件Android build/JVM/lint亦成功，失败仅在pull_request合并候选。修复后同套完整命令 **BUILD SUCCESSFUL（2m47s）/退出0**：产品/测试源码compile、**8类88项（0失败/错误/跳过）**，lint **0 errors/105 warnings/2 hints**。新head合并候选CI以PR Checks为准，不把文本合并或旧head通过当作新head CI通过。
 
@@ -27,12 +60,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 旧基线宿主阶段：compile 产品/Android 测试源码 + 3 类定向 23 项通过（2m16s）；单独 lint 0 errors / 105 warnings / 1 hint（2m02s）。这是接线前的阶段证据，不替代最终代码验证。
 - 最终命令：`source scripts/ao-worktree-env.sh` 后以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`，五个 `--tests` 为 `com.tanuki.ui.TanukiPageTransitionsTest`、`com.tanuki.ui.design.TanukiMotionSpecsTest`、`com.tanuki.TanukiPageVisualsTest`、`com.tanuki.TanukiSaveableStateTest`、`com.tanuki.FileViewerLayoutTest`。恢复边界修正后完整重跑 **BUILD SUCCESSFUL（2m57s）/ 退出 0**；产品/Android 测试源码 compile 通过，XML 实核 **40 项 / 5 类（8/5/12/4/11）/ 0 failures / 0 errors / 0 skipped**；lint **0 errors / 105 warnings / 1 hint**，新宿主无告警。此前接线阶段同组 40 项与 lint（3m06s）为阶段证据，最终结果以此次重跑为准。
 - 新增 8 项覆盖全部主目的地对无位移、层级 320/240ms 曲线与相反方向、RTL 镜像、reduced 在 0ns 已终态、设置/详情/浏览器已有返回目标、WebView 零位移；文件阅读恢复应立即显示、主动重开仍前进。既有保存状态与布局回归一同运行。
-- 未执行完整 JVM、Android 仪器、设备安装/操作、Compose 实际挂载/快速打断、WebView/Surface 帧时序与性能；未生成发布 APK。跳过原生运行时的 Host 编译不作为设备包。API Key/真实模型/真机暂停项保留。范围与后续见 [B 批交接](handoffs/20261111-1900-motion-batch-b.md)。
+- 未执行完整 JVM、Android 仪器、设备安装/操作、Compose 实际挂载/快速打断、WebView/Surface 帧时序与性能；未生成发布 APK。跳过原生运行时的 Host 编译不作为设备包。API Key/真实模型/真机暂停项保留。范围与后续见 [B 批交接](DEVELOPMENT-HISTORY.md#20261111-1900-motion-batch-b)。
 
 ## 纯白灰与天蓝主题落库（2026-11-11，android_agent-73，Host）
 
 - 从fetch实核的 `origin/main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935`（含#87/#88/#89）建立 `ao/theme-colors/sky-theme`。原补丁SHA256 `e91e1787b06113dc597748e5a541ed6bef47c5948f62abe4124bee3450e8b821` 匹配，全部48文件兼容检查通过；精确应用47路径，以本次落库记录替代已完成的1731补丁交付记录，无冲突或手工产品代码调整。保留main动效工厂/设置/令牌、按压时序和章节，完整配色表与landing逐行相同。
-- 实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行主源码/Android测试源码编译与 `:app:testModernDebugUnitTest`，过滤下列五类：`TanukiDesignTokensTest`、`TanukiPlatformThemeTest`、`TanukiContrastTest`、`TanukiPageVisualsTest`、`DshMarkdownTest`。BUILD SUCCESSFUL（1m43s），完整命令见 [落库交接](handoffs/20261111-1819-sky-theme-landing.md)。
+- 实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行主源码/Android测试源码编译与 `:app:testModernDebugUnitTest`，过滤下列五类：`TanukiDesignTokensTest`、`TanukiPlatformThemeTest`、`TanukiContrastTest`、`TanukiPageVisualsTest`、`DshMarkdownTest`。BUILD SUCCESSFUL（1m43s），完整命令见 [落库交接](DEVELOPMENT-HISTORY.md#20261111-1819-sky-theme-landing)。
 - XML实核 **58项 / 5结果文件 / 0失败 / 0错误 / 0跳过**，各类23/3/4/12/16；两套主题的生产用途审计各45项，共 **90项通过**，包含普通文字≥4.5、图标/大字≥3以及装饰色不可冒充文字的负向回归。未降低阈值。
 - 本轮未执行lint、完整JVM、设备/adb、Android仪器或逐页截图，不生成/分发APK。编译仅既有弃用/API、SDK XML和analytics写权限提示，无编译或测试失败。下节是原实现会话的旧基线结果，不冒充本次lint或设备证据。
 
@@ -45,7 +78,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - #6B7280 在纯白通过，但在分组/选中浅底分别只有 4.47/4.31:1；`descriptionOn` 在这些底色回退 #5A6068。装饰天蓝配白字的不足通过负向断言明确锁定，不能改低阈值冒充通过。
 - 首次 lint 报 2 个 NewApi errors / 103 warnings / 1 hint：把 API 27 的 `windowLightNavigationBar` 放在了 minSdk26 基础资源。已移到 values-v27 / values-night-v27，JVM 同时断言基础资源不能声明此属性；修复后原命令完整重跑 BUILD SUCCESSFUL（5m52s），58 项定向 JVM 全通过，lint **0 errors / 103 warnings / 1 hint**。API 26 不支持导航栏深色图标，不宣称已验证其设备表现。构建另有既有弃用/API、SDK XML 版本和工作区外 analytics 不可写提示。
 - 本会话没有启动、操作或安装到设备；Android 测试源码编译不等于仪器执行。深浅逐页渲染、透明导航在真实内容上的像素、系统栏、文档原文色彩、TalkBack/大字体、模拟器/真机仍待独立 QA。`-x buildNativeRuntime` 的宿主产物不是设备/发布包；未合并、未发布，API Key/真实模型/真机暂停项保留。
-- 原实现会话Git创建子分支因共享 `.git` ref lock 不可写失败，HEAD/branch未改变，因此交付完整补丁；以上均为7cfe1446上的历史验证。后由android_agent-73从含#89动效的4710c5e0接管，最新落库验证与保留边界见 [主题落库交接](handoffs/20261111-1819-sky-theme-landing.md)。原1731阶段交接的有用事实与未验事项已归入本节/设计专题和该记录，不再重复引入已完成的补丁交付记录。
+- 原实现会话Git创建子分支因共享 `.git` ref lock 不可写失败，HEAD/branch未改变，因此交付完整补丁；以上均为7cfe1446上的历史验证。后由android_agent-73从含#89动效的4710c5e0接管，最新落库验证与保留边界见 [主题落库交接](DEVELOPMENT-HISTORY.md#20261111-1819-sky-theme-landing)。原1731阶段交接的有用事实与未验事项已归入本节/设计专题和该记录，不再重复引入已完成的补丁交付记录。
 
 ## 0.1.13 发布候选（2026-11-11，android_agent-81，非设备）
 
@@ -57,11 +90,11 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 本轮实际执行 `prepare-app-release.py --version 0.1.13 --version-code 18 --channel workspacecheck` 成功（release 构建 8m50s，含原生运行时及 lintVital）；APK 实核包名/版本/minSdk26/non-debuggable/ARM64 与证书 `371dc301...`，**12,950,514 字节**、SHA-256 `888859f1c2afd7f440b6b4f08a2e169d59df188ce29a48466ad1bfa981b3c7a3`；六附件齐全，两份校验清单通过。交接严格检查及公开检查通过（0 findings）。
 
-本轮执行结果见 [发布交接](handoffs/20261111-1643-release-0.1.13.md)。下文均保留各自原版本、原 SHA 与历史验证范围。
+本轮执行结果见 [发布交接](DEVELOPMENT-HISTORY.md#20261111-1643-release-0.1.13)。下文均保留各自原版本、原 SHA 与历史验证范围。
 
 ## 查看器与安装任务的历史验证归档（PR #60/#82）
 
-以下从已完成、被后续方案替代的交接迁入，属于各自旧基线的历史证据，不是 PR #88 或当前 main 的新验证。现行规则见 [文件与查看器](WORKSPACE-STORAGE.md) 和 [组件进度与重试](COMPONENTS.md)；当前实现的验证/设备缺口见 [更新页与安装期只读 follow-up](handoffs/20261111-1635-update-readonly-followup.md)。
+以下从已完成、被后续方案替代的交接迁入，属于各自旧基线的历史证据，不是 PR #88 或当前 main 的新验证。现行规则见 [文件与查看器](WORKSPACE-STORAGE.md) 和 [组件进度与重试](COMPONENTS.md)；当前实现的验证/设备缺口见 [更新页与安装期只读 follow-up](DEVELOPMENT-HISTORY.md#20261111-1635-update-readonly-followup)。
 
 - **PR #60 固定高度避让**：基线 `f338bdb4194ab697647122de164b0a502b219c6c`，实现 `a8e9667`，后合入 `62e4c30b`。当时使用导航 inset + 48dp 操作栏 + 12dp 间距，修复原定位重叠36dp；现已由实测操作栏高度和统一导航视口方案扩展。定向 `FileViewerLayoutTest` 3项通过；第一次断言误把24+48+12写成72，改为84后通过，实现未变。旧全量 JVM/lint 30分01秒通过：1047项/108结果文件，0失败/错误/跳过；lint 0错误/104警告/1提示。head `b64a27f` 的 GitHub runs 42928990235、42928997485 四项检查通过；均不能证明新 head 的设备触控通过。
 - **PR #82 初次重开**：基线 `eaf58ce37b6fc4da654f51c225924e546f97ead2`；保留 main 的 `WorkspaceImportEvent`、命名/打开、复制移动与分类错误，不恢复旧整文件。产品/仪器源码 compile + 定向 JVM 11分11秒79项通过；另跑文件进度5项和实际快照/启动门禁17项，1分38秒通过，首轮合计101项，均0失败/错误/跳过。原过滤项 `FileTransfersTest` 无匹配类，未计覆盖；实际类为 `FileTransferProgressTest`。
@@ -77,7 +110,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 四组回归均穷举字符内部切点：GBK 双字节 1 个、GB18030 四字节 3 个、UTF-8 三字节 2 个、UTF-8 四字节 3 个。每个切点覆盖下一页只有单字符与带“边界标记：第二页”两类样本，断言预期游标、严格递增、两页无 U+FFFD、文本相等及重编码后逐字节相等；JVM 还覆盖已知/未知大小顺序流，共 54 个跨页场景。
 - 最终实际执行：`source scripts/ao-worktree-env.sh; ./gradlew --console=plain -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest`，BUILD SUCCESSFUL（14m31s）。**1243 tests / 124 个结果文件 / 0 failures / 0 errors / 0 skipped**，其中 `TextFileReaderTest` **27/27**；lint **0 errors / 109 warnings / 1 hint**；app 与 AndroidTest APK 均构建通过，未跳过原生运行时任务。第一轮离线验证因缺 `jsch:2.28.8` 失败，联网解析后通过；补齐 flush 前的一次候选验证主动中断，不算最终结果。
 - `TextFilePagingBoundaryTest` 新增四项 Android 专项测试，覆盖同样的 18 个文件场景。宿主 JVM 在旧实现上也能保留残字节，不能宣称 Host 已复现 Android 缺陷；需要独立 QA 在最终 SHA 上运行 Android 测试并复测真实查看器下一段/上一段、中文与行号。
-- 未验证：Android 仪器执行、真实查看器/SAF 提供方、真机和低 API。本会话未安装、未连接或操作设备；debug 编译不等于设备验收，未合并、未发布。完整交接见 [本次记录](handoffs/20261111-1456-text-page-boundary.md)。
+- 未验证：Android 仪器执行、真实查看器/SAF 提供方、真机和低 API。本会话未安装、未连接或操作设备；debug 编译不等于设备验收，未合并、未发布。完整交接见 [本次记录](DEVELOPMENT-HISTORY.md#20261111-1456-text-page-boundary)。
 
 ## PR #73 普通 merge 对齐 #74/#75（2026-11-11，android_agent-69，非设备）
 
@@ -467,7 +500,7 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
   - `python3 scripts/check-development-gates.py --pr 12 --session android_agent-6` → exit 1（`PR 不是打开状态`）；用真实 `gh`/`ao` 只读 CLI 验证已合并 PR 被保守拒绝。
   - `python3 scripts/check-handoff.py --record …`、`python3 scripts/check-handoff.py`、`python3 scripts/check-publication.py --git` → 见 W7 交接/PR 的最终输出。
 - 本轮没有构建 APK、没有运行 Gradle/JVM/lint/Android 仪器或设备测试；没有真实 open PR 的完整门禁通过样例。历史数字只作范围参考。
-- W8 的只读核查与 host mock 结果记录在 [W8 报告](handoffs/20261106-1357-android-qa-readiness-audit.md)；其 `device-preflight.py` 已随 PR #13 合并为 `b2a018d`，但未在真实设备执行，不能算 Android 验收。
+- W8 的只读核查与 host mock 结果记录在 [W8 报告](DEVELOPMENT-HISTORY.md#20261106-1357-android-qa-readiness-audit)；其 `device-preflight.py` 已随 PR #13 合并为 `b2a018d`，但未在真实设备执行，不能算 Android 验收。
 
 ## W1 文档门禁验证（2026-11-06，历史记录，未在本轮复跑）
 

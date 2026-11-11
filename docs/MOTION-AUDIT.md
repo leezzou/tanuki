@@ -344,8 +344,8 @@ prefers-reduced-motion|@keyframes|transition:|animation:|requestAnimationFrame
 ## 交付与证据入口
 
 - 本轮只新增此方案（末尾包含执行交接）；不修改 `AGENT-STATE.md` / `CURRENT.json`，不改产品代码，不安装设备，不合并/发布。
-- 证据入口：[原生UI目录](../../app/src/main/kotlin/com/tanuki/ui/)、[动效封装](../../app/src/main/kotlin/com/tanuki/ui/TanukiMotion.kt)、[令牌](../../app/src/main/kotlin/com/tanuki/ui/design/TanukiTokenSpec.kt)、[主题策略](../../app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt)、[悬浮窗](../../app/src/main/kotlin/com/tanuki/browser/BrowserOverlayWindow.kt)、[设备门禁](../QA-GATES.md)。
-- 保留参考：[令牌专题](../DESIGN-TOKENS.md)、[输入/聊天接口](../INTERFACES.md)、[历史锚点交接](20261111-1007-chat-anchored-history.md)、[停靠接线交接](20261111-1246-dock-integration.md)。这些仍有独有验证边界，本轮未判过期。
+- 证据入口：[原生UI目录](../app/src/main/kotlin/com/tanuki/ui)、[动效封装](../app/src/main/kotlin/com/tanuki/ui/TanukiMotion.kt)、[令牌](../app/src/main/kotlin/com/tanuki/ui/design/TanukiTokenSpec.kt)、[主题策略](../app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt)、[悬浮窗](../app/src/main/kotlin/com/tanuki/browser/BrowserOverlayWindow.kt)、[设备门禁](QA-GATES.md)。
+- 保留参考：[令牌专题](DESIGN-TOKENS.md)、[输入/聊天接口](INTERFACES.md)、[历史锚点交接](DEVELOPMENT-HISTORY.md#20261111-1007-chat-anchored-history)、[停靠接线交接](DEVELOPMENT-HISTORY.md#20261111-1246-dock-integration)。这些仍有独有验证边界，本轮未判过期。
 
 ## 用户目标与范围
 
@@ -353,7 +353,7 @@ prefers-reduced-motion|@keyframes|transition:|animation:|requestAnimationFrame
 - 用户目标：基于 `20c9c829` 或最新 main，只读盘点十类全 App 动效，给出文件行号、当前参数、触发、reduced-motion、问题及逐文件spec、Top 10、统一令牌与实施分批；中文文档、PR交付、不合并。
 - 本次包含：源码只读审计、本文方案和执行交接、文档检查、提交推送与PR。本文即本次唯一交接记录。
 - 不包含：产品实现、业务协议/官方DSH包修改、设备操作、合并、tag或发布。
-- 前一记录：[当前共享状态所指发布准备](20261111-0325-release-0.1.12.md)；该状态较旧，实际基线以本轮fetch为准。
+- 前一记录：[当前共享状态所指发布准备](DEVELOPMENT-HISTORY.md#20261111-0325-release-0.1.12)；该状态较旧，实际基线以本轮fetch为准。
 - 用户暂停项保持：API Key 保存、真实模型/账号、真机验收。
 
 ## 当前状态
