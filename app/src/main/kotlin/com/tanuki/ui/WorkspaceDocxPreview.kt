@@ -108,9 +108,9 @@ internal fun DocxPreview(source: OpenDocument, modifier: Modifier = Modifier) {
         }
     }
     Column(modifier.fillMaxSize()) {
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (loading) ViewerLoadingLine()
         error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        document?.let { loaded -> DocxDocumentView(loaded, Modifier.weight(1f).fillMaxWidth()) }
+        document?.let { loaded -> DocxDocumentView(loaded, Modifier.weight(1f).fillMaxWidth().viewerReveal(loaded)) }
     }
 }
 
