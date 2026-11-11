@@ -152,6 +152,16 @@ class OnboardingFlowTest {
         assertTrue(state.open)
     }
 
+    @Test fun legacyInterfaceAndDoneReturnToVisibleWelcomeInOneAction() {
+        for (step in listOf(OnboardingStep.INTERFACE, OnboardingStep.DONE)) {
+            val state = OnboardingMachine.start(OnboardingRecord(), version, requested = step)
+            val back = OnboardingMachine.back(state, version)
+            assertEquals(OnboardingStep.WELCOME, back.step)
+            assertTrue(back.open)
+            assertEquals(state.record.completedSteps, back.record.completedSteps)
+        }
+    }
+
     @Test fun finishedRecordReopensForReviewWithoutLosingCompletion() {
         val completed = OnboardingMachine.complete(OnboardingMachine.start(OnboardingRecord(), version), version).record
         val review = OnboardingMachine.start(completed, version)

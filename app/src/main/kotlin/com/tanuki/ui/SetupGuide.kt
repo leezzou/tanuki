@@ -66,9 +66,9 @@ fun SetupGuide(
                 }
                 Text("运行环境", style = MaterialTheme.typography.labelMedium, color = colors.primary)
             }
-            Text("准备开始使用", style = MaterialTheme.typography.headlineLarge)
+            Text("组件与下载设置", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "完成以下步骤，就能在本机使用助手。",
+                "按需选择版本、下载源或修复单个组件。常规准备可返回上一页一键完成。",
                 style = MaterialTheme.typography.bodyLarge,
                 color = colors.onSurfaceVariant,
             )

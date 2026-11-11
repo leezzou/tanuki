@@ -8,16 +8,12 @@ import com.tanuki.power.DeviceCondition
 import com.tanuki.power.DeviceConditionState
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.*
@@ -32,15 +28,54 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
     val complete=listOf(comp.ubuntuInstalled,comp.nodeInstalled,toolsPassed,comp.dshInstalled)
     var step by rememberSaveable { mutableIntStateOf(complete.indexOfFirst { !it }.takeIf { it>=0 } ?: 3) }
     var showSteps by rememberSaveable { mutableStateOf(false) }
+    var showPermissions by rememberSaveable { mutableStateOf(false) }
     val ready=complete.all { it } && s.environment==EnvironmentState.READY
-    if(ready && !showSteps) {
-        ReadyWorkspace(model,c,openDsh,onShowSteps={showSteps=true},onOpenStorage=onOpenStorage)
+    if (!showSteps) {
+        val journey = rememberSetupJourney(s, comp, model.tools)
+        val report = model.onboarding?.device?.let { com.tanuki.onboarding.OnboardingEnvironment.evaluate(it) }
+        SetupJourneyContent(journey, s, canPrepare = report?.canContinue != false,
+            onPrepare = c.onboardingPrepare,
+            onCommand = { if (it == "OPEN_COMPONENTS") showSteps = true else c.command(it) },
+            onCancel = c.onboardingCancelPrepare, onOpenChat = openDsh,
+            webViewSupported = model.support.state != com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED,
+            conversationReady = model.cookieReady)
+        if (journey.phase == SetupJourneyPhase.FAILED) s.displayFailure()?.let { failure ->
+            failure.primaryAction.takeIf { it.kind != FailureActionKind.RETRY }?.let { action ->
+                TextButton(onClick = {
+                    performFailureAction(failure, action.kind, c, onOpenStorage,
+                        onViewVersions = { showSteps = true }, onSwitchSource = { showSteps = true })
+                }, modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
+            }
+            failure.secondaryAction?.let { action ->
+                TextButton(onClick = {
+                    performFailureAction(failure, action.kind, c, onOpenStorage,
+                        onViewVersions = { showSteps = true }, onSwitchSource = { showSteps = true })
+                }, modifier = Modifier.heightIn(min = 48.dp)) { Text(action.label) }
+            }
+        }
+        if (report?.blocking == true) {
+            report.requirements.filter { it.status == com.tanuki.onboarding.RequirementStatus.BLOCKING }.forEach {
+                SetupCaption(it.advice ?: "${it.title}：${it.actual}，要求 ${it.requirement}")
+            }
+        }
+        SetupDependencySummary(comp, model.tools)
+        if (ready) {
+            TextButton(onClick = { showPermissions = !showPermissions }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(if (showPermissions) "收起权限说明" else "权限说明")
+            }
+            if (showPermissions) SandboxGuidance(s)
+        }
+        TextButton(onClick = { showSteps = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("组件与下载设置")
+        }
+        if(model.support.state==com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED)WebViewCard(model.support,s.setupIdle,c)
+        RecoveryGuidance(s,c)
+        RuntimeRecoveryCard(s,c,comp,onOpenStorage)
+        DeviceConditionBanner(model.deviceCondition)
         return
     }
-    BackHandler(enabled=step>0 || (ready && showSteps)) {
-        if(step>0)step-- else showSteps=false
-    }
-    if(ready)TextButton(onClick={showSteps=false}) { Text("返回工作台") }
+    BackHandler(enabled=showSteps) { showSteps=false }
+    TextButton(onClick={showSteps=false}, modifier=Modifier.heightIn(min=48.dp)) { Text("返回准备页面") }
     LaunchedEffect(step,s.setupIdle,comp.selectedUbuntuVersion,comp.selectedNodeVersion,comp.ubuntuAutomatic,comp.nodeAutomatic) {
         if(s.setupIdle) {
             if(step==0 && comp.ubuntuAutomatic && !comp.ubuntuInstalled && model.ubuntuSpeed.measuredAtMillis==0L && !model.ubuntuSpeed.running)c.testSources(RuntimeComponent.UBUNTU)
@@ -108,13 +143,14 @@ internal fun RuntimeRecoveryCard(
 ) {
     val recovery = s.recovery
     val activeRuntimeFailure = s.displayFailure()?.takeIf { it.domain == FailureDomain.RUNTIME }
-    // 正常模式且服务已恢复时，旧失败不再占用页面；重启后仍保留上次失败供排查。
-    if (recovery.mode == RecoveryMode.NORMAL && s.service == ServiceState.RUNNING) return
+    // 正常模式已在执行新操作时，不把历史失败再画成需要处理的当前故障。
+    // 安全模式仍保留说明，正在启动时不展示来自旧代次的失败动作。
+    if (recovery.mode == RecoveryMode.NORMAL && (s.service == ServiceState.RUNNING || s.operationActive)) return
     if (recovery.mode == RecoveryMode.NORMAL && recovery.lastFailure == null && activeRuntimeFailure == null) return
     val fallback = recovery.lastFailure?.let {
         FailureCatalog.fromRuntimeFailure(it, recovery, s.error, recovery.lastFailureAtMillis, recovery.restartAttempts)
     }
-    val failure = activeRuntimeFailure ?: fallback
+    val failure = if (s.operationActive) null else activeRuntimeFailure ?: fallback
     var showVersions by rememberSaveable { mutableStateOf(false) }
 
     fun runAction(kind: FailureActionKind) {
@@ -230,66 +266,6 @@ internal fun RuntimeRecoveryCard(
 private fun recoveryTime(millis: Long): String = runCatching {
     java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(millis))
 }.getOrDefault("较早时间")
-
-@Composable
-private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->Unit,onShowSteps:()->Unit,onOpenStorage:()->Unit={}) {
-    val s=model.snapshot
-    var showPermissions by rememberSaveable { mutableStateOf(false) }
-    Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text("你的开发工作台",style=MaterialTheme.typography.headlineLarge)
-        SetupCaption("管理本机工作区，告诉助手你想完成的事。")
-    }
-    RecoveryGuidance(s,c)
-    RuntimeRecoveryCard(s,c,model.components,onOpenStorage)
-    if(model.support.state==com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED)WebViewCard(model.support,s.setupIdle,c)
-    Box(
-        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(tanukiHeroBrush()),
-    ) {
-        Column(Modifier.padding(28.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-                Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surface.copy(alpha=0.72f)) {
-                    Box(Modifier.size(52.dp),contentAlignment=Alignment.Center) {
-                        TanukiIcon(TanukiGlyph.Terminal,tint=MaterialTheme.colorScheme.primary)
-                    }
-                }
-                StatusPill(s.service.label,s.service==ServiceState.RUNNING)
-            }
-            Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                Text("助手",style=MaterialTheme.typography.headlineMedium)
-                Text("版本 ${s.dsh}",style=MaterialTheme.typography.bodyMedium,
-                    fontFamily=FontFamily.Monospace,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Button(onClick={if(s.service!=ServiceState.RUNNING)c.command("START");openDsh()},
-                enabled=!s.setupBusy && s.update!=UpdateState.RECOVERY_REQUIRED &&
-                    model.support.state!=com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED,
-                shape=MaterialTheme.shapes.large,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
-                Text(if(s.service==ServiceState.RUNNING)"打开对话" else if(s.service==ServiceState.STARTING)"正在启动…" else "启动助手")
-            }
-        }
-    }
-    Surface(
-        onClick=onShowSteps,
-        shape=MaterialTheme.shapes.extraLarge,
-        color=MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier=Modifier.fillMaxWidth(),
-    ) {
-        Row(Modifier.padding(22.dp).heightIn(min=52.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)) {
-            TanukiIcon(TanukiGlyph.Layers,tint=MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                Text("运行环境已就绪",style=MaterialTheme.typography.titleMedium)
-                SetupCaption("系统组件 ${model.components.ubuntuVersion} · 运行组件 ${model.components.nodeVersion}")
-                Text("查看组件版本",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
-            }
-            TanukiIcon(TanukiGlyph.Chevron,tint=MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    Column(Modifier.animateContentSize()) {
-        TextButton(onClick={showPermissions=!showPermissions},modifier=Modifier.heightIn(min=48.dp)) { Text("权限说明") }
-        AnimatedVisibility(visible=showPermissions) { SandboxGuidance(s) }
-    }
-    DeviceConditionBanner(model.deviceCondition)
-    OperationCard(s,c,onOpenStorage)
-}
 
 /**
  * 设备降级状态卡片。只在非正常状态出现，明确说明原因、降级额度和恢复方式，

@@ -229,7 +229,14 @@ class SetupPresentationTest {
                 components = state.value.components.copy(selectedNodeVersion = version))
         },
         setFullscreen = { full -> rec.fullscreen += full; windowMode.setFullscreen(full) }, testSources = {}, cancelSourceTests = {},
-        refreshWorkspaceStorage = {}, saveWorkspaceCapacity = {}
+        refreshWorkspaceStorage = {}, saveWorkspaceCapacity = {},
+        onboardingPrepare = { rec.commands += "INIT" },
+        onboardingCancelPrepare = { rec.commands += "CANCEL" },
+        onboardingContinue = {
+            state.value = state.value.copy(onboarding = state.value.onboarding?.copy(
+                step = com.tanuki.onboarding.OnboardingStep.ENVIRONMENT))
+        },
+        onboardingComplete = { rec.onboardingFinishes += it }
     )
     private fun model(snapshot: Snapshot = Snapshot(), support: WebViewSupport = supported()) = TanukiUiModel(
         snapshot = snapshot, support = support, versions = emptyList(), recentLogs = emptyList(), storageUsage = "fixture",
@@ -786,6 +793,92 @@ class SetupPresentationTest {
         } finally { before?.recycle(); during?.recycle(); cleanup(activity) }
     }
 
+    private fun firstRunModel() = model().copy(onboarding = com.tanuki.onboarding.OnboardingPresentation(
+        open = true, step = com.tanuki.onboarding.OnboardingStep.WELCOME,
+        record = com.tanuki.onboarding.OnboardingRecord(),
+        device = com.tanuki.onboarding.DeviceProfile(8L * 1024 * 1024 * 1024, 8L * 1024 * 1024 * 1024,
+            listOf("arm64-v8a"), 34), interfaceNative = false, banner = null))
+
+    @Test fun welcomeOffersRemoteBeforeAnyLocalInstallation() {
+        val activity = launch(); cancelSourceTests()
+        val state = mutableStateOf(firstRunModel()); val rec = Recorder()
+        try {
+            mount(activity, state, rec, browserOf(activity).view, night = true, fontScale = 1.5f)
+            click("连接远程电脑")
+            assertEquals(listOf(com.tanuki.onboarding.OnboardingFinish.REMOTE), rec.onboardingFinishes)
+            assertTrue("remote selection must not prepare a local runtime", rec.commands.isEmpty())
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun welcomeLeadsDirectlyToExplicitPreparation() {
+        val activity = launch(); cancelSourceTests()
+        val state = mutableStateOf(firstRunModel()); val rec = Recorder()
+        try {
+            mount(activity, state, rec, browserOf(activity).view, night = false, fontScale = 1.3f)
+            click("在这台手机上准备")
+            find("开始准备")
+            assertTrue("welcome navigation cannot trigger downloads", rec.commands.isEmpty())
+            assertFalse(nodes().any { matches(it, "发第一条消息") || matches(it, "设置完成") })
+            click("开始准备")
+            assertEquals(listOf("INIT"), rec.commands)
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun preparationIsExplicitAndUbuntuReadyDoesNotFinishWholeJourney() {
+        val activity = launch(); cancelSourceTests()
+        val state = mutableStateOf(model()); val rec = Recorder()
+        try {
+            mount(activity, state, rec, browserOf(activity).view, night = true, fontScale = 1.5f)
+            find("开始准备")
+            assertTrue("viewing preparation cannot install or start", rec.commands.isEmpty())
+            click("开始准备")
+            assertEquals(listOf("INIT"), rec.commands)
+            instrumentation.runOnMainSync {
+                state.value = state.value.copy(snapshot = Snapshot(environment = EnvironmentState.READY,
+                    operation = "initialize", stage = "安装运行组件"),
+                    components = ComponentInventory(ubuntuInstalled = true))
+            }
+            find("正在准备本机环境")
+            assertFalse(nodes().any { matches(it, "进入对话") })
+            click("停止准备")
+            assertEquals(listOf("INIT", "CANCEL"), rec.commands)
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun activeStartupDoesNotShowPreviousRecoveryFailureAsCurrent() {
+        val activity = launch(); cancelSourceTests()
+        val recovery = RuntimeRecoveryState(lastFailure = FailureKind.KILLED)
+        val previousTitle = FailureCatalog.fromRuntimeFailure(FailureKind.KILLED, recovery, "", 0L, 0).title
+        val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.READY,
+            service = ServiceState.STARTING, recovery = recovery)))
+        try {
+            mount(activity, state, Recorder(), browserOf(activity).view, night = true, fontScale = 1.3f)
+            find("正在启动助手")
+            assertFalse("previous attempt must not appear as a current failure", nodes().any { matches(it, previousTitle) })
+            instrumentation.runOnMainSync { state.value = state.value.copy(snapshot = state.value.snapshot.copy(service = ServiceState.FAILED)) }
+            find(previousTitle)
+        } finally { cleanup(activity) }
+    }
+
+    @Test fun installedComponentsStartBeforeConversationEntry() {
+        val activity = launch(); cancelSourceTests()
+        val state = mutableStateOf(model(Snapshot(environment = EnvironmentState.READY)).copy(
+            components = ComponentInventory(ubuntuInstalled = true, nodeInstalled = true,
+                dshInstalled = true, ubuntuVersion = "24.04"),
+            tools = RequiredToolsStatus(checked = true, ubuntuMarker = "24.04 profile")))
+        val rec = Recorder()
+        try {
+            mount(activity, state, rec, browserOf(activity).view, night = false, fontScale = 1.3f)
+            click("启动并进入对话")
+            assertEquals(listOf("START"), rec.commands)
+            assertFalse("must await actual readiness", glassTab("DSH").isSelected)
+            instrumentation.runOnMainSync { state.value = state.value.copy(snapshot = runningSnapshot()) }
+            instrumentation.waitForIdleSync()
+            assertTrue("explicit startup should enter chat after readiness", glassTab("DSH").isSelected)
+            assertEquals("rendering running status cannot start twice", listOf("START"), rec.commands)
+        } finally { cleanup(activity) }
+    }
+
     @Test fun setupGuideFirstStepSourceVersionAndLocalThemeScreenshots() {
         val activity = launch(); cancelSourceTests()
         val state = mutableStateOf(model()); val rec = Recorder()
@@ -794,11 +887,12 @@ class SetupPresentationTest {
         try {
             val browser = browserOf(activity)
             mount(activity, state, rec, browser.view, night = false, fontScale = 1.3f)
-            find("第 1 步，Ubuntu"); tap("第 2 步，Node.js"); find("先完成 Ubuntu")
-            tap("第 3 步，基础工具"); find("先完成 Ubuntu")
+            click("组件与下载设置")
+            find("第 1 步，系统组件"); tap("第 2 步，运行组件"); find("先完成 系统组件")
+            tap("第 3 步，基础工具"); find("先完成 系统组件")
             assertTrue("previewing guide steps must not install", rec.installs.isEmpty())
             assertTrue("previewing guide steps must not issue commands", rec.commands.isEmpty())
-            tap("第 1 步，Ubuntu")
+            tap("第 1 步，系统组件")
             click("查看测速与下载源"); click("使用清华 TUNA"); find("手动优先：清华 TUNA")
             assertTrue(rec.sourceSelections.contains(RuntimeComponent.UBUNTU to "tuna"))
             assertEquals("tuna", state.value.components.ubuntuSource)
@@ -811,9 +905,9 @@ class SetupPresentationTest {
                 state.value=state.value.copy(snapshot=beforeDownload.copy(environment=EnvironmentState.DOWNLOADING,
                     stage="正在下载 Ubuntu",download=RuntimeDownloadProgress("ubuntu","测试源",2,10,1,false)))
             }
-            tap("第 2 步，Node.js"); find("安装仍在继续")
+            tap("第 2 步，运行组件"); find("安装仍在继续")
             assertTrue("step navigation must not cancel the running install",rec.commands.isEmpty())
-            tap("第 1 步，Ubuntu")
+            tap("第 1 步，系统组件")
             instrumentation.runOnMainSync { state.value=state.value.copy(snapshot=beforeDownload) }
             light = run { SystemClock.sleep(300); screenshot("setup-guide-light-font130.png") }
             val nav = glassTabBounds("DSH")
@@ -1258,6 +1352,7 @@ class SetupPresentationTest {
             ))
             val record = Recorder()
             mount(activity, state, record, browserOf(activity).view, night = false, fontScale = 1f)
+            click("组件与下载设置")
             click("选择其他版本")
             val target = RuntimeCatalog.node.last()
             click("v${target.version}${if (target.lts) " · LTS" else " · 非 LTS"}")
@@ -1281,6 +1376,7 @@ class SetupPresentationTest {
 
     private class Recorder {
         val commands = ArrayList<String>(); val installs = ArrayList<Release>()
+        val onboardingFinishes = ArrayList<com.tanuki.onboarding.OnboardingFinish>()
         val sourceSelections = ArrayList<Pair<RuntimeComponent, String>>()
         val versionSelections = ArrayList<Pair<RuntimeComponent, String>>()
         val fullscreen = ArrayList<Boolean>()
