@@ -2,6 +2,19 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 文件导入命名与手机存储复制/移动验证（2026-11-11，android_agent-70，非设备）
+
+- PR [#75](https://github.com/leezzou/tanuki/pull/75)，分支 `ao/file-import-move/p0-file-import-move`。初始 fetch 基线 `732cb79`，普通 merge 集成 `main=8ba7b4b` 后继续验证，保留已推送历史，不强推；不合并、不发布。
+- 覆盖审计 P0 #4/#5 与 R4.1/R4.2/R4.3：导入按源文件名/时间戳建立独立项目，重名 ` (2)`/` (3)` 且保留扩展名；导入完成刷新、Snackbar「打开」与一次性提示；顶部一级「＋ 导入」、更多菜单与空态；手机条目/批量复制移动、目标目录选择、写权限确认、冲突三选/全部应用、真实进度与可取消。
+- 实际执行（macOS ARM64、项目 JDK17、Android SDK）：
+  - `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.ImportNamingTest --tests com.tanuki.TransferEngineTest --console=plain` → BUILD SUCCESSFUL；**28 tests / 0 failures / 0 errors / 0 skipped**。
+  - 最终 `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest --console=plain` → BUILD SUCCESSFUL（18m36s）；**1188 tests / 120 个报告文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 109 warnings / 1 hint**；workspacecheck 应用 APK 与 Android 测试 APK 均构建成功，仪器测试未运行。
+- 开发验证包 `com.tanuki.modern.workspacecheck`，沿用 0.1.12/code14；17,247,521 字节，SHA-256 `4fde01ef31fc2f2d71f05c37a106ef9ebb2b43c42389312e342dc065ffe5c413`。未安装或交付发布附件，输出元数据不能替代设备验收。
+- 新增回归实测名称清洗/重名/真实目录发布/悬空链接/Unicode/扩展名；流式未知大小读取；移动前后源存在性、目录递归、容量拒绝、源同大小同时间戳改写/目录新增、摘要损坏、取消无半成品、删源失败保留副本；真实批量保留两者/替换/跳过/全部应用/部分失败进度。仪器测试新增导入完成反馈与打开用例，并同步菜单路径，仅编译不计设备通过。
+- 过程失败保留：早期完整 JVM 曾出现既有 NPM 线程池时序失败（期望 8、实际 9），单独与完整复跑通过；早期 1098、main 集成后 1174 均为过程数字，最终代码用上述 1188 项结果。
+- 未执行设备/模拟器安装、Android 仪器测试、真实 SAF 提供方/系统授权撤销/SD-USB 只读卷、复制移动实际进度取消、深色/大字体/360dp/TalkBack；当前 head 独立 Review 与 QA 待编排。宿主结果不替代设备验收。
+- 边界：目录、链接及不同类型冲突不替换；移动没有跨应用文件锁，检测源变化后拒绝发布或停止删源并保留副本；发布后新出现文件不递归删除。目录拒绝超过 128 层、链接与特殊文件；现有 SAF 导入 512 MiB/64 MiB 磁盘余量保留。`content://` 查看继续直读，不强制复制。
+
 ## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
 
 - 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。

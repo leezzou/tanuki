@@ -35,9 +35,11 @@ import com.tanuki.storage.ExternalDocumentAccess
 import com.tanuki.storage.ExternalDocumentDescriptor
 import com.tanuki.storage.ExternalDocumentPolicy
 import com.tanuki.storage.ExternalDocumentSaveState
+import com.tanuki.storage.FileLocation
 import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
+import com.tanuki.storage.WorkspaceTransferMode
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
@@ -51,6 +53,7 @@ import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.DshSessionManagerActivity
 import com.tanuki.ui.SharedPreferencesDshDraftStore
 import com.tanuki.ui.WorkspaceFilesPage
+import com.tanuki.ui.WorkspaceImportEvent
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
 import com.tanuki.ui.TanukiUiCallbacks
@@ -120,7 +123,9 @@ class MainActivity : ComponentActivity() {
             check(!manager.hasLiveChild && manager.state.value.service in setOf(ServiceState.STOPPED, ServiceState.FAILED, ServiceState.INTERRUPTED)) {
                 "请先停止 DSH，再管理文件；避免与 Agent 同时修改文件。"
             }
-        }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) })
+        }, manager.workspaceStorage, phoneRoots = { PhoneStorageAccess.roots(this) }, requirePhoneWrite = {
+            check(PhoneStorageAccess.isWriteGranted(this)) { "手机存储写权限已撤销，源文件未删除" }
+        })
     }
     private var fileViewerFullscreen by mutableStateOf(false)
     // 外部 content:// 文档只在 Activity 状态中保存描述；进程重建后按描述重新申请读取。
@@ -128,9 +133,21 @@ class MainActivity : ComponentActivity() {
     private var externalConsumedRequest: String? = null
     private val externalOpenSequence = AtomicLong(0)
     private var filesOpenRequest by mutableIntStateOf(0)
+    // 事件用独立标识去重，避免 Activity 重建后的计数归零吞掉下一次导入。
+    private var importEvent by mutableStateOf<WorkspaceImportEvent?>(null)
     private var phoneStorageGranted by mutableStateOf(false)
+    private var phoneFileWriteGranted by mutableStateOf(false)
+    private val phoneFileWritePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
+    }
+    private fun requestPhoneMovePermission() {
+        if (android.os.Build.VERSION.SDK_INT <= 29) {
+            phoneFileWritePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else requestPhoneStoragePermission()
+    }
     private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
     }
     private var pendingPhoneWriteRun: Long? = null
     private val phoneWritePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -151,6 +168,7 @@ class MainActivity : ComponentActivity() {
     }
     private val phoneStorageSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
     }
     private fun requestPhoneStoragePermission() {
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -168,6 +186,7 @@ class MainActivity : ComponentActivity() {
         applyChatForeground()
         (application as TanukiApp).chatNotifications.refresh()
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
+        phoneFileWriteGranted = PhoneStorageAccess.isWriteGranted(this)
         if (!PhoneStorageAccess.isWriteGranted(this)) manager.phoneFiles.setWriteAllowed(false)
     }
     private var pendingFileExport: Pair<WorkspaceFileManager, String>? = null
@@ -731,6 +750,16 @@ class MainActivity : ComponentActivity() {
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
                             transfers = manager.fileTransfers.state,
                             onCancelTransfer = { manager.fileTransfers.cancel(it) },
+                            importEvent = importEvent,
+                            phoneMoveGranted = phoneFileWriteGranted,
+                            onRequestPhoneMovePermission = ::requestPhoneMovePermission,
+                            onTransferToWorkspace = { sources, target, mode, decisions, phase ->
+                                manager.fileTransfers.track(if (mode == WorkspaceTransferMode.MOVE) "移动到工作区" else "复制到工作区") { id ->
+                                    workspaceFiles.inLocation(FileLocation.PHONE).transferToWorkspace(
+                                        sources, target, mode, decisions, onPhase = phase,
+                                    ) { received, total -> manager.fileTransfers.update(id, received, total) }
+                                }
+                            },
                             previewMaxDimension = deviceCondition.previewMaxDimension,
                             previewMaxPixels = deviceCondition.previewMaxPixels,
                             onExportFile = { files, path, name ->
@@ -1036,6 +1065,10 @@ class MainActivity : ComponentActivity() {
     /** 进程重建后从 Activity 状态恢复同一 URI；实际读取仍会重新校验权限。 */
     private fun restoreExternalDocument(state: Bundle?) {
         if (state == null) return
+        state.getString("workspaceImportId")?.let { id ->
+            val project = state.getString("workspaceImportProject")
+            if (project != null) importEvent = WorkspaceImportEvent(id, project, state.getInt("workspaceImportCount"))
+        }
         val saved = ExternalDocumentSaveState.restore(
             uri = state.getString("externalUri"),
             name = state.getString("externalName"),
@@ -1085,13 +1118,17 @@ class MainActivity : ComponentActivity() {
             try {
                 manager.fileTransfers.track("复制到工作区", descriptor.bytes) { id ->
                     val name = ExternalDocumentPolicy.sanitizeDisplayName(descriptor.displayName)
-                    val destination = manager.workspaceStorage.importFiles(
-                        names = listOf(name),
-                        onProgress = { received -> manager.fileTransfers.update(id, received, descriptor.bytes) },
-                    ) { _ ->
-                        contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
+                    val destination = manager.mutation.withLock {
+                        manager.workspaceStorage.importFiles(
+                            names = listOf(name),
+                            expectedSizes = listOf(descriptor.bytes.takeIf { it >= 0 }),
+                            onProgress = { received -> manager.fileTransfers.update(id, received, descriptor.bytes) },
+                        ) { _ ->
+                            contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
+                        }
                     }
-                    manager.event("已复制到工作区新项目 ${destination.name}；可在文件页打开")
+                    publishImported(destination, 1)
+                    manager.event("已复制到工作区「${destination.name}」；可在文件页打开")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1199,6 +1236,11 @@ class MainActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        importEvent?.let { event ->
+            outState.putString("workspaceImportId", event.id)
+            outState.putString("workspaceImportProject", event.projectName)
+            outState.putInt("workspaceImportCount", event.fileCount)
+        }
         val b = Bundle(); browser.save(b); outState.putBundle("web", b)
         agentBrowser?.let { controller -> val state = Bundle(); controller.saveState(state); outState.putBundle("agentBrowser", state) }
         // 关闭查看器后 descriptor 为空，已消费请求仍必须保存，避免恢复时重放旧 Intent。
@@ -1253,32 +1295,44 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, "无法打开系统文件选择器，请稍后重试", android.widget.Toast.LENGTH_LONG).show()
     }
 
-    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) = manager.mutation.withLock {
-        // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
-        val selected = uris.mapIndexed { index, uri ->
-            currentCoroutineContext().ensureActive()
-            var name: String? = null
-            var size: Long? = null
-            runCatching {
-                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
-                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) {
+        val destination = manager.mutation.withLock {
+            // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
+            val selected = uris.mapIndexed { index, uri ->
+                currentCoroutineContext().ensureActive()
+                var name: String? = null
+                var size: Long? = null
+                runCatching {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                        }
                     }
                 }
+                name to size
             }
-            name to size
+            val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
+            // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
+            manager.fileTransfers.update(transferId, 0, total)
+            manager.workspaceStorage.importFiles(
+                selected.mapIndexed { index, item -> item.first ?: "file-$index" },
+                expectedSizes = selected.map { it.second },
+                onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
+            ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
         }
-        val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
-        // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
-        manager.fileTransfers.update(transferId, 0, total)
-        val destination = manager.workspaceStorage.importFiles(
-            selected.mapIndexed { index, item -> item.first ?: "file-$index" },
-            onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
-        ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
-        manager.event("已导入新项目 ${destination.name}")
+        publishImported(destination, uris.size)
+        manager.event("已导入 ${uris.size} 个文件到「${destination.name}」")
+    }
+
+    /** 投递一次性导入事件；文件页据此刷新并显示“已导入 N 个文件到目录 / 打开”。 */
+    private suspend fun publishImported(destination: java.io.File, fileCount: Int) {
+        withContext(NonCancellable + Dispatchers.Main) {
+            importEvent = WorkspaceImportEvent(java.util.UUID.randomUUID().toString(), destination.name, fileCount)
+            filesOpenRequest++
+        }
     }
     private suspend fun exportProjects(uri: Uri, transferId: Long) = manager.mutation.withLock {
         contentResolver.openOutputStream(uri, "w")!!.use { output ->
