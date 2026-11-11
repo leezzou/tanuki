@@ -12,6 +12,21 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import com.tanuki.ui.design.TanukiDesign
+import com.tanuki.ui.design.TanukiMotion
+import com.tanuki.ui.design.TanukiMotionEasing
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -33,6 +48,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -102,7 +119,7 @@ internal fun WorkspaceFileViewer(
     var compactToolsOpen by remember(document.key) { mutableStateOf(false) }
     fun report(e: Exception) {
         error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
-            ?: "无法读取此文件。它可能已被修改或移除，请返回后刷新。"
+        ?: "无法读取此文件。它可能已被修改或移除，请返回后刷新。"
     }
     suspend fun prepare(): Intent {
         copied = 0; copyTotal = 0
@@ -156,177 +173,291 @@ internal fun WorkspaceFileViewer(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // 宽大于高才进入紧凑布局；竖屏仍走原有顶部栏、工具行和底部操作栏。
             val compact = FileViewerLayout.isCompact(maxWidth, maxHeight)
-            Column(Modifier.fillMaxSize().padding(bottom = if (fullscreen) 0.dp else bottomInset).imePadding()) {
-                if (!fullscreen) Row(
-                    Modifier.fillMaxWidth()
-                        .then(if (compact) Modifier.height(FileViewerLayout.CompactHeaderHeight) else Modifier)
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "关闭文件") }
-                    if (compact) {
-                        // 横屏只保留一行文件名；字节与 MIME 让位给正文，不重复占两行。
-                        Text(document.displayName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    } else {
-                        Column(Modifier.weight(1f)) {
-                            Text(document.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(info?.let { "${viewerBytes(it.bytes)} · ${it.mimeType}" } ?: "读取文件信息…",
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                    if (compact && (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT))
-                        TextButton(onClick = { compactToolsOpen = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier = Modifier.heightIn(min = FileViewerLayout.CompactHeaderHeight)
-                                .semantics { contentDescription = "阅读工具" }) { Text("Aa") }
-                    if (canEdit && info?.kind == WorkspaceFileManager.FileKind.TEXT && (info?.bytes ?: Long.MAX_VALUE) <= WorkspaceFileManager.TEXT_LIMIT)
-                        TextButton(onClick = onEdit, enabled = !opening && !loading) { Text("编辑") }
-                }
-            if (opening) {
-                if (copyTotal > 0L) LinearProgressIndicator(progress = { (copied.toDouble() / copyTotal).coerceIn(0.0, 1.0).toFloat() }, modifier = Modifier.fillMaxWidth())
-                else LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("准备打开 · ${elapsed}秒" + if (copyTotal > 0L) " · ${viewerBytes(copied)} / ${viewerBytes(copyTotal)}" else "",
-                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
-            } else if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-            document.accessWarning?.let {
-                Text(it, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (error != null && (onReselect != null || onCopyToWorkspace != null)) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    onReselect?.let { action -> TextButton(onClick = action) { Text("重新选择文件") } }
-                    onCopyToWorkspace?.let { action -> TextButton(onClick = action) { Text("复制到工作区") } }
-                }
-            }
-            // 未知/不支持类型被强制按文本打开时，保留返回类型说明的入口，避免用户只能退出查看器。
-            if (forceText && info?.kind != null && info?.kind != WorkspaceFileManager.FileKind.TEXT) {
-                Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("按文本方式查看（只读）", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { forceText = false }) { Text("返回类型说明") }
-                    }
-                }
-            }
             val textMode = forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT
-            LaunchedEffect(compact, textMode, fullscreen) {
-                // 横屏文本工具条固定高度；其他操作栏按实际测量值避让。
-                if (compact && textMode && !fullscreen) onActionBarHeightChanged(FileViewerLayout.CompactBottomBarHeight)
-            }
-            if (textMode) {
-                TextViewerContent(
-                    document,
-                    Modifier.weight(1f),
-                    compact = compact && !fullscreen,
-                    toolsOpen = compactToolsOpen,
-                    onToolsOpenChange = { compactToolsOpen = it },
-                    clipboardCopy = { clipboard.setText(AnnotatedString(it)) },
-                    onOpenWith = ::openWith,
-                    onCopyPath = {
-                        clipboard.setText(AnnotatedString(document.copyablePath))
-                        copiedPath = true
-                    },
-                    pathCopied = copiedPath,
-                    initialReaderState = initialReaderState,
-                    onReaderStateChange = onReaderStateChange,
-                    onExport = onExport,
-                    exportEnabled = !opening && !loading && info != null,
-                    onCopyToWorkspace = onCopyToWorkspace,
-                )
-            } else {
-                val kind = info?.kind
-                val contentModifier = Modifier.weight(1f).fillMaxWidth()
-                    .padding(
-                        if (fullscreen || kind == WorkspaceFileManager.FileKind.PDF ||
-                            kind == WorkspaceFileManager.FileKind.DOCX || kind == WorkspaceFileManager.FileKind.XLSX
-                        ) 0.dp else 16.dp,
-                    )
-                Box(contentModifier, contentAlignment = Alignment.Center) {
-                    when (kind) {
-                        WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let { bitmap ->
-                            Zoomable(
-                                contentWidth = bitmap.width,
-                                contentHeight = bitmap.height,
-                                resetKey = document.key,
-                                modifier = Modifier.fillMaxSize(),
-                            ) { content ->
-                                Image(bitmap.asImageBitmap(), document.displayName, content, contentScale = ContentScale.Fit)
+            ViewerChromeLayout(
+                chromeVisible = !fullscreen,
+                modifier = Modifier.fillMaxSize().padding(bottom = if (fullscreen) 0.dp else bottomInset).imePadding(),
+                header = {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .then(if (compact) Modifier.height(FileViewerLayout.CompactHeaderHeight) else Modifier)
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, "关闭文件") }
+                        if (compact) {
+                            // 横屏只保留一行文件名；字节与 MIME 让位给正文，不重复占两行。
+                            Text(document.displayName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            Column(Modifier.weight(1f)) {
+                                Text(document.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(info?.let { "${viewerBytes(it.bytes)} · ${it.mimeType}" } ?: "读取文件信息…",
+                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        WorkspaceFileManager.FileKind.PDF -> PdfPreview(
-                            document, Modifier.fillMaxSize(),
-                            maxDimension = previewMaxDimension,
-                            maxPixels = previewMaxPixels,
-                        )
-                        WorkspaceFileManager.FileKind.DOCX -> DocxPreview(document, Modifier.fillMaxSize())
-                        WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(document, Modifier.fillMaxSize())
-                        WorkspaceFileManager.FileKind.DOC -> Column(
-                            Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text("旧版 Word 文档（.doc）", style = MaterialTheme.typography.titleMedium)
-                            Text("暂不支持内置预览，可用其他应用打开；外部文件也可复制到工作区。", style = MaterialTheme.typography.bodyMedium)
-                            onCopyToWorkspace?.let { action -> OutlinedButton(onClick = action) { Text("复制到工作区") } }
+                        if (compact && (forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT)) {
+                            TextButton(onClick = { compactToolsOpen = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.heightIn(min = FileViewerLayout.CompactHeaderHeight)
+                                    .semantics { contentDescription = "阅读工具" }) { Text("Aa") }
                         }
-                        WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
-                        WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
-                        WorkspaceFileManager.FileKind.OTHER -> UnsupportedPreview(
-                            name = document.displayName,
-                            mime = info?.mimeType.orEmpty(),
-                            copied = copiedPath,
-                            onOpenAsText = { forceText = true },
+                        if (canEdit && info?.kind == WorkspaceFileManager.FileKind.TEXT && (info?.bytes ?: Long.MAX_VALUE) <= WorkspaceFileManager.TEXT_LIMIT) {
+                            TextButton(onClick = onEdit, enabled = !opening && !loading) { Text("编辑") }
+                        }
+                    }
+                },
+                footer = { Column {
+                        // 横屏文字阅读把分页与导出收进内容区自己的 48dp 工具条；其他类型仍用这条操作栏。
+                        val showActionBar = !compact || !textMode
+                        if (showActionBar) HorizontalDivider()
+                        if (showActionBar) Row(
+                            Modifier.fillMaxWidth()
+                                .then(if (compact) Modifier.height(FileViewerLayout.CompactBottomBarHeight) else Modifier)
+                                .horizontalScroll(rememberScrollState())
+                                .onSizeChanged { onActionBarHeightChanged(with(density) { it.height.toDp() } + 1.dp) },
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            TextButton(onClick = onExport, enabled = !opening && !loading && info != null,
+                                modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
+                                TanukiIcon(TanukiGlyph.Download); Spacer(Modifier.width(8.dp)); Text("导出此文件")
+                            }
+                            TextButton(onClick = ::openWith, enabled = !opening && !loading && info != null,
+                                modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
+                                Icon(Icons.Default.ExitToApp, null); Spacer(Modifier.width(8.dp)); Text("使用其他应用打开")
+                            }
+                            // 外部文件即使内置预览失败（如提供方不支持随机读），也保留显式复制入口。
+                            onCopyToWorkspace?.let { action ->
+                                TextButton(onClick = action, enabled = !opening && !loading,
+                                    modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
+                                    Text("复制到工作区")
+                                }
+                            }
+                        }
+                    } },
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    if (opening) {
+                        if (copyTotal > 0L) LinearProgressIndicator(progress = { (copied.toDouble() / copyTotal).coerceIn(0.0, 1.0).toFloat() }, modifier = Modifier.fillMaxWidth())
+                        else ViewerLoadingLine()
+                        Text("准备打开 · ${elapsed}秒" + if (copyTotal > 0L) " · ${viewerBytes(copied)} / ${viewerBytes(copyTotal)}" else "",
+                            Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
+                    } else if (loading) ViewerLoadingLine()
+                    (error ?: actionError)?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+                    document.accessWarning?.let {
+                        Text(it, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (error != null && (onReselect != null || onCopyToWorkspace != null)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            onReselect?.let { action -> TextButton(onClick = action) { Text("重新选择文件") } }
+                            onCopyToWorkspace?.let { action -> TextButton(onClick = action) { Text("复制到工作区") } }
+                        }
+                    }
+                    // 未知/不支持类型被强制按文本打开时，保留返回类型说明的入口，避免用户只能退出查看器。
+                    if (forceText && info?.kind != null && info?.kind != WorkspaceFileManager.FileKind.TEXT) {
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("按文本方式查看（只读）", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { forceText = false }) { Text("返回类型说明") }
+                            }
+                        }
+                    }
+                    val textMode = forceText || info?.kind == WorkspaceFileManager.FileKind.TEXT
+                    LaunchedEffect(compact, textMode, fullscreen) {
+                        // 横屏文本工具条固定高度；其他操作栏按实际测量值避让。
+                        if (compact && textMode && !fullscreen) onActionBarHeightChanged(FileViewerLayout.CompactBottomBarHeight)
+                    }
+                    if (textMode) {
+                        TextViewerContent(
+                            document,
+                            Modifier.weight(1f),
+                            compact = compact,
+                            fullscreen = fullscreen,
+                            toolsOpen = compactToolsOpen,
+                            onToolsOpenChange = { compactToolsOpen = it },
+                            clipboardCopy = { clipboard.setText(AnnotatedString(it)) },
+                            onOpenWith = ::openWith,
                             onCopyPath = {
                                 clipboard.setText(AnnotatedString(document.copyablePath))
                                 copiedPath = true
                             },
+                            pathCopied = copiedPath,
+                            initialReaderState = initialReaderState,
+                            onReaderStateChange = onReaderStateChange,
+                            onExport = onExport,
+                            exportEnabled = !opening && !loading && info != null,
                             onCopyToWorkspace = onCopyToWorkspace,
                         )
-                        // 信息读取失败时由上方错误文案说明；这里给出兜底提示，不能留下空白区域。
-                        null -> if (!loading) Text("无法读取文件类型信息，请返回后重试。", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-                        else -> Unit
+                    } else {
+                        val kind = info?.kind
+                        val contentModifier = Modifier.weight(1f).fillMaxWidth()
+                            .padding(
+                            if (fullscreen || kind == WorkspaceFileManager.FileKind.PDF ||
+                                kind == WorkspaceFileManager.FileKind.DOCX || kind == WorkspaceFileManager.FileKind.XLSX
+                            ) 0.dp else 16.dp,
+                        )
+                        Box(contentModifier, contentAlignment = Alignment.Center) {
+                            when (kind) {
+                                WorkspaceFileManager.FileKind.IMAGE -> image?.image?.let { bitmap ->
+                                    Zoomable(
+                                        contentWidth = bitmap.width,
+                                        contentHeight = bitmap.height,
+                                        resetKey = document.key,
+                                        modifier = Modifier.fillMaxSize().viewerReveal(bitmap),
+                                        preserveViewportState = true,
+                                    ) { content ->
+                                        Image(bitmap.asImageBitmap(), document.displayName, content, contentScale = ContentScale.Fit)
+                                    }
+                                } ?: if (loading) Text("正在加载图片…", style = MaterialTheme.typography.bodySmall) else Unit
+                                WorkspaceFileManager.FileKind.PDF -> PdfPreview(
+                                    document, Modifier.fillMaxSize(),
+                                    maxDimension = previewMaxDimension,
+                                    maxPixels = previewMaxPixels,
+                                )
+                                WorkspaceFileManager.FileKind.DOCX -> DocxPreview(document, Modifier.fillMaxSize())
+                                WorkspaceFileManager.FileKind.XLSX -> XlsxTablePreview(document, Modifier.fillMaxSize())
+                                WorkspaceFileManager.FileKind.DOC -> Column(
+                                    Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    TanukiIcon(TanukiGlyph.File, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Text("旧版 Word 文档（.doc）", style = MaterialTheme.typography.titleMedium)
+                                    Text("暂不支持内置预览，可用其他应用打开；外部文件也可复制到工作区。", style = MaterialTheme.typography.bodyMedium)
+                                    onCopyToWorkspace?.let { action -> OutlinedButton(onClick = action) { Text("复制到工作区") } }
+                                }
+                                WorkspaceFileManager.FileKind.AUDIO -> openIntent?.data?.let { NativeAudioPlayer(it) }
+                                WorkspaceFileManager.FileKind.VIDEO -> openIntent?.data?.let { WorkspaceVideoPlayer(it, fullscreen, onFullscreen) }
+                                WorkspaceFileManager.FileKind.OTHER -> UnsupportedPreview(
+                                    name = document.displayName,
+                                    mime = info?.mimeType.orEmpty(),
+                                    copied = copiedPath,
+                                    onOpenAsText = { forceText = true },
+                                    onCopyPath = {
+                                        clipboard.setText(AnnotatedString(document.copyablePath))
+                                        copiedPath = true
+                                    },
+                                    onCopyToWorkspace = onCopyToWorkspace,
+                                )
+                                // 信息读取失败时由上方错误文案说明；这里给出兜底提示，不能留下空白区域。
+                                null -> if (!loading) Text("无法读取文件类型信息，请返回后重试。", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+                                else -> Unit
+                            }
+                        }
                     }
                 }
-            }
-            // 横屏文字阅读把分页与导出收进内容区自己的 48dp 工具条；其他类型仍用这条操作栏。
-            val showActionBar = !fullscreen && (!compact || !textMode)
-            if (showActionBar) HorizontalDivider()
-            if (showActionBar) Row(
-                Modifier.fillMaxWidth()
-                    .then(if (compact) Modifier.height(FileViewerLayout.CompactBottomBarHeight) else Modifier)
-                    .horizontalScroll(rememberScrollState())
-                    .onSizeChanged { onActionBarHeightChanged(with(density) { it.height.toDp() } + 1.dp) },
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                TextButton(onClick = onExport, enabled = !opening && !loading && info != null,
-                    modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
-                    TanukiIcon(TanukiGlyph.Download); Spacer(Modifier.width(8.dp)); Text("导出此文件")
-                }
-                TextButton(onClick = ::openWith, enabled = !opening && !loading && info != null,
-                    modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
-                    Icon(Icons.Default.ExitToApp, null); Spacer(Modifier.width(8.dp)); Text("使用其他应用打开")
-                }
-                // 外部文件即使内置预览失败（如提供方不支持随机读），也保留显式复制入口。
-                onCopyToWorkspace?.let { action ->
-                    TextButton(onClick = action, enabled = !opening && !loading,
-                        modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
-                        Text("复制到工作区")
-                    }
-                }
-            }
             }
         }
     }
 }
+
+/** 正文只按最终全屏状态测量一次；淡出的 chrome 覆盖绘制，不参与逐帧高度分配。 */
+internal object ViewerViewport {
+    fun contentHeight(height: Int, header: Int, footer: Int, fullscreen: Boolean): Int =
+        (height - if (fullscreen) 0 else header + footer).coerceAtLeast(0)
+}
+
+@Composable
+internal fun ViewerChromeLayout(
+    chromeVisible: Boolean,
+    modifier: Modifier = Modifier,
+    header: @Composable () -> Unit,
+    footer: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Layout(modifier = modifier, content = {
+            Box { content() }
+            Box {
+                ViewerChromeVisibility(chromeVisible) {
+                    // 退出保留原生 chrome；触控与无障碍立即失效。
+                    Surface(Modifier.viewerChromeInput(chromeVisible)) { header() }
+                }
+            }
+            Box {
+                ViewerChromeVisibility(chromeVisible) {
+                    Surface(Modifier.viewerChromeInput(chromeVisible)) { footer() }
+                }
+            }
+    }) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val chromeConstraints = constraints.copy(minWidth = width, minHeight = 0)
+        val top = measurables[1].measure(chromeConstraints)
+        val bottom = measurables[2].measure(chromeConstraints)
+        val bodyHeight = ViewerViewport.contentHeight(height, top.height, bottom.height, !chromeVisible)
+        val body = measurables[0].measure(Constraints.fixed(width, bodyHeight))
+        layout(width, height) {
+            body.placeRelative(0, if (chromeVisible) top.height else 0)
+            top.placeRelative(0, 0)
+            bottom.placeRelative(0, height - bottom.height)
+        }
+    }
+}
+
+/** chrome 只补间 alpha，reduced 在组合当帧切换，不等待退出动画调度。 */
+@Composable
+private fun ViewerChromeVisibility(visible: Boolean, content: @Composable () -> Unit) {
+    val motion = TanukiDesign.motion
+    if (motion.reducedMotion) {
+        if (visible) content()
+    } else {
+        val spec = tween<Float>(motion.duration(TanukiMotion.layout), easing = TanukiMotionEasing.standard)
+        AnimatedVisibility(visible, enter = fadeIn(spec), exit = fadeOut(spec)) { content() }
+    }
+}
+
+/** 搜索工具条是唯一高度动画所有者；父级不得再叠加尺寸补间。 */
+@Composable
+internal fun ViewerToolbarVisibility(visible: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val motion = TanukiDesign.motion
+    if (motion.reducedMotion) {
+        if (visible) Box(modifier) { content() }
+        return
+    }
+    val spec = tween<androidx.compose.ui.unit.IntSize>(motion.duration(TanukiMotion.layout), easing = TanukiMotionEasing.standard)
+    AnimatedVisibility(visible, modifier,
+        enter = expandVertically(spec, expandFrom = Alignment.Top) + fadeIn(tween(motion.duration(TanukiMotion.layout), easing = TanukiMotionEasing.standard)),
+        exit = shrinkVertically(spec, shrinkTowards = Alignment.Top) + fadeOut(tween(motion.duration(TanukiMotion.layout), easing = TanukiMotionEasing.standard)),
+    ) { Box(Modifier.viewerChromeInput(visible)) { content() } }
+}
+
+/** 未知加载量不造百分比；移除动画时保留静态阶段标识。 */
+@Composable
+internal fun ViewerLoadingLine(modifier: Modifier = Modifier.fillMaxWidth()) {
+    if (TanukiDesign.motion.reducedMotion) Box(modifier.height(4.dp)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+            .semantics { contentDescription = "正在加载" })
+    else LinearProgressIndicator(modifier)
+}
+
+/** 一份新内容在读取完成后淡入；不克隆文档、不改变位置，也不给解码设置最短等待。 */
+internal fun Modifier.viewerReveal(identity: Any?): Modifier = composed {
+    val motion = TanukiDesign.motion
+    val alpha = remember(identity) { Animatable(if (identity == null || motion.reducedMotion) 1f else 0f) }
+    LaunchedEffect(identity, motion.reducedMotion) {
+        if (identity == null || motion.reducedMotion) alpha.snapTo(1f)
+        else alpha.animateTo(1f, motion.state())
+    }
+    graphicsLayer { this.alpha = if (motion.reducedMotion) 1f else alpha.value }
+}
+
+/** 不可见 chrome 仍可退出绘制，但不能覆盖正文触控或被读屏选中。 */
+private fun Modifier.viewerChromeInput(visible: Boolean): Modifier = if (visible) this else
+    this.clearAndSetSemantics { }.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                .changes.forEach { it.consume() }
+        }
+    }
 
 @Composable
 private fun TextViewerContent(
     document: OpenDocument,
     modifier: Modifier,
     compact: Boolean,
+    fullscreen: Boolean,
     toolsOpen: Boolean,
     onToolsOpenChange: (Boolean) -> Unit,
     clipboardCopy: (String) -> Unit,
@@ -339,6 +470,7 @@ private fun TextViewerContent(
     exportEnabled: Boolean,
     onCopyToWorkspace: (() -> Unit)?,
 ) {
+    val motion = TanukiDesign.motion
     var requestedEncoding by rememberSaveable(document.key) { mutableStateOf(initialReaderState.encoding) }
     // 自动识别只在第一段做一次，后续分段沿用同一编码，避免从文件中部重新猜测。
     // 初始游标只在创建阅读器时读取；后续切换编码必须从首段重新分页。
@@ -393,7 +525,7 @@ private fun TextViewerContent(
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
-                ?: "无法读取此文本分段，请重试或使用其他应用打开。"
+            ?: "无法读取此文本分段，请重试或使用其他应用打开。"
         } finally { loading = false }
     }
     LaunchedEffect(page, layout) {
@@ -418,12 +550,12 @@ private fun TextViewerContent(
         }
             .distinctUntilChanged()
             .collectLatest { value ->
-                val previous = latestReaderState.value
-                latestReaderState.value = value
-                // 分段/编码改变立即保存；纯滚动仍防抖，避免每帧写偏好并重组父页面。
-                if (value.copy(scrollOffset = previous.scrollOffset) == previous) delay(250)
-                stateCallback(value)
-            }
+            val previous = latestReaderState.value
+            latestReaderState.value = value
+            // 分段/编码改变立即保存；纯滚动仍防抖，避免每帧写偏好并重组父页面。
+            if (value.copy(scrollOffset = previous.scrollOffset) == previous) delay(250)
+            stateCallback(value)
+        }
     }
     DisposableEffect(document.key) {
         onDispose { stateCallback(latestReaderState.value) }
@@ -431,13 +563,9 @@ private fun TextViewerContent(
     val binary = page?.let { it.binary || it.encoding == TextFileReader.BINARY_ENCODING } == true
     if (binary) {
         if (compact) {
-            Column(modifier.fillMaxWidth().fillMaxHeight()) {
-                BinaryFileNotice(
-                    modifier = Modifier.weight(1f),
-                    pathCopied = pathCopied,
-                    onOpenWith = onOpenWith,
-                    onCopyPath = onCopyPath,
-                )
+            ViewerChromeLayout(!fullscreen, modifier.fillMaxWidth().fillMaxHeight(),
+                header = {},
+                footer = {
                 CompactToolbar(
                     status = "二进制文件",
                     showPager = false,
@@ -453,7 +581,15 @@ private fun TextViewerContent(
                     copyLabel = if (pathCopied) "已复制路径" else "复制路径",
                     onCopy = onCopyPath,
                 )
-            }
+                },
+            ) { Column(Modifier.fillMaxSize()) {
+                BinaryFileNotice(
+                    modifier = Modifier.weight(1f),
+                    pathCopied = pathCopied,
+                    onOpenWith = onOpenWith,
+                    onCopyPath = onCopyPath,
+                )
+            } }
         } else {
             BinaryFileNotice(
                 modifier = modifier,
@@ -480,13 +616,19 @@ private fun TextViewerContent(
         TextPageLayout.displayOffsets(matches, text, numbered.prefixLength)
     }
     LaunchedEffect(query) { matchIndex = 0 }
-    LaunchedEffect(matchIndex, displayMatches, layout) {
+    LaunchedEffect(matchIndex, displayMatches, layout, motion.reducedMotion) {
         val target = displayMatches.getOrNull(matchIndex) ?: return@LaunchedEffect
         val result = layout ?: return@LaunchedEffect
         if (target < result.layoutInput.text.length) {
             val bounds = result.getBoundingBox(target)
-            vertical.animateScrollTo(bounds.top.toInt().coerceAtLeast(0))
-            if (!wrap) horizontal.animateScrollTo(bounds.left.toInt().coerceAtLeast(0))
+            if (motion.reducedMotion) {
+                vertical.scrollTo(bounds.top.toInt().coerceAtLeast(0))
+                if (!wrap) horizontal.scrollTo(bounds.left.toInt().coerceAtLeast(0))
+            } else kotlinx.coroutines.coroutineScope {
+                val spec = tween<Float>(motion.duration(TanukiMotion.layout), easing = TanukiMotionEasing.standard)
+                launch { vertical.animateScrollTo(bounds.top.toInt().coerceAtLeast(0), spec) }
+                if (!wrap) launch { horizontal.animateScrollTo(bounds.left.toInt().coerceAtLeast(0), spec) }
+            }
         }
     }
     val highlight = MaterialTheme.colorScheme.secondaryContainer
@@ -520,218 +662,230 @@ private fun TextViewerContent(
                 if (truncated) append(" · 已截断")
                 append(" · 第 $startLine–${startLine + numbered.lineCount - 1} 行")
             }
-            Column(Modifier.fillMaxSize()) {
-            // 菜单锚点放在正文右上角；Aa 按钮在顶部栏，视觉上从同一角落展开。
-            Box(Modifier.fillMaxWidth()) {
-                Box(Modifier.align(Alignment.TopEnd)) {
-                    DropdownMenu(expanded = toolsOpen, onDismissRequest = { onToolsOpenChange(false) }) {
-                        DropdownMenuItem(
-                            text = { Text(if (searchVisible) "关闭搜索" else "搜索当前段") },
-                            onClick = { searchVisible = !searchVisible; onToolsOpenChange(false) },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("字号 ${fontSize}sp") }, enabled = false, onClick = {})
-                        DropdownMenuItem(
-                            text = { Text("减小字号") },
-                            enabled = fontSize > 12,
-                            onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("增大字号") },
-                            enabled = fontSize < 32,
-                            onClick = { fontSize = (fontSize + 2).coerceAtMost(32) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text((if (showLineNumbers) "✓ " else "") + "显示行号") },
-                            onClick = { showLineNumbers = !showLineNumbers },
-                        )
-                        DropdownMenuItem(
-                            text = { Text((if (wrap) "✓ " else "") + "自动换行") },
-                            onClick = { wrap = !wrap },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("文本编码：${shortEncodingLabel(requestedEncoding)}") },
-                            onClick = { encodingMenu = true; onToolsOpenChange(false) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (copied) "已复制本段" else "复制本段") },
-                            enabled = page != null && !loading,
-                            onClick = { clipboardCopy(text); copied = true; onToolsOpenChange(false) },
-                        )
-                    }
-                    DropdownMenu(expanded = encodingMenu, onDismissRequest = { encodingMenu = false }) {
-                        TextFileReader.ENCODINGS.forEach { encoding ->
-                            DropdownMenuItem(
-                                text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
-                                onClick = {
-                                    requestedEncoding = encoding
-                                    offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
-                                    resolvedAutoEncoding = null
-                                    resetScroll = true
-                                    encodingMenu = false
-                                    encodingHintDismissed = false
-                                },
+            ViewerChromeLayout(!fullscreen, Modifier.fillMaxSize(),
+                header = { Column {
+                        // 菜单锚点放在正文右上角；Aa 按钮在顶部栏，视觉上从同一角落展开。
+                        Box(Modifier.fillMaxWidth()) {
+                            Box(Modifier.align(Alignment.TopEnd)) {
+                                DropdownMenu(expanded = toolsOpen, onDismissRequest = { onToolsOpenChange(false) }) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (searchVisible) "关闭搜索" else "搜索当前段") },
+                                        onClick = { searchVisible = !searchVisible; onToolsOpenChange(false) },
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(text = { Text("字号 ${fontSize}sp") }, enabled = false, onClick = {})
+                                    DropdownMenuItem(
+                                        text = { Text("减小字号") },
+                                        enabled = fontSize > 12,
+                                        onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("增大字号") },
+                                        enabled = fontSize < 32,
+                                        onClick = { fontSize = (fontSize + 2).coerceAtMost(32) },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text((if (showLineNumbers) "✓ " else "") + "显示行号") },
+                                        onClick = { showLineNumbers = !showLineNumbers },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text((if (wrap) "✓ " else "") + "自动换行") },
+                                        onClick = { wrap = !wrap },
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("文本编码：${shortEncodingLabel(requestedEncoding)}") },
+                                        onClick = { encodingMenu = true; onToolsOpenChange(false) },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (copied) "已复制本段" else "复制本段") },
+                                        enabled = page != null && !loading,
+                                        onClick = { clipboardCopy(text); copied = true; onToolsOpenChange(false) },
+                                    )
+                                }
+                                DropdownMenu(expanded = encodingMenu, onDismissRequest = { encodingMenu = false }) {
+                                    TextFileReader.ENCODINGS.forEach { encoding ->
+                                        DropdownMenuItem(
+                                            text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
+                                            onClick = {
+                                                requestedEncoding = encoding
+                                                offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
+                                                resolvedAutoEncoding = null
+                                                resetScroll = true
+                                                encodingMenu = false
+                                                encodingHintDismissed = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (showHint) {
+                            CompactEncodingHint(
+                                label = shortEncodingLabel(detectedEncoding.orEmpty()),
+                                onSwitch = { encodingMenu = true },
+                                onDismiss = { encodingHintDismissed = true },
                             )
                         }
+                    } },
+                footer = {
+                    CompactToolbar(
+                        status = status,
+                        showPager = true,
+                        previousEnabled = pageIndex > 0 && !loading,
+                        onPrevious = { resetScroll = true; pageIndex-- },
+                        nextEnabled = hasNext && !loading,
+                        nextLabel = if (truncated) "已截断" else "下一段",
+                        onNext = {
+                            resetScroll = true
+                            page?.let { current ->
+                                offsets = offsets.take(pageIndex + 1) + current.nextOffset
+                                lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
+                                pageIndex++
+                            }
+                        },
+                        exportEnabled = exportEnabled,
+                        onExport = onExport,
+                        onOpenWith = onOpenWith,
+                        onCopyToWorkspace = onCopyToWorkspace,
+                        copyLabel = if (copied) "已复制本段" else "复制本段",
+                        onCopy = { clipboardCopy(text); copied = true },
+                    )
+                },
+            ) { Column(Modifier.fillMaxSize()) {
+                    if (loading) ViewerLoadingLine()
+                    error?.let {
+                        Text(it, Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }
-                }
-            }
-            if (showHint) {
-                CompactEncodingHint(
-                    label = shortEncodingLabel(detectedEncoding.orEmpty()),
-                    onSwitch = { encodingMenu = true },
-                    onDismiss = { encodingHintDismissed = true },
-                )
-            }
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let {
-                Text(it, Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-            }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                SelectionContainer(
-                    Modifier.fillMaxSize().verticalScroll(vertical).padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Text(annotated, Modifier.fillMaxWidth().then(if (wrap) Modifier else Modifier.horizontalScroll(horizontal)),
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        SelectionContainer(
+                            Modifier.fillMaxSize().verticalScroll(vertical).padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text(annotated, Modifier.fillMaxWidth().viewerReveal(page).then(if (wrap) Modifier else Modifier.horizontalScroll(horizontal)),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp),
+                                softWrap = wrap, onTextLayout = { layout = it })
+                        }
+                        // 搜索条浮在正文上，不挤压可读高度；关闭后正文位置不变。
+                        ViewerToolbarVisibility(searchVisible, Modifier.align(Alignment.TopCenter)) { Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = MaterialTheme.shapes.extraLarge,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                OutlinedTextField(
+                                    query, { query = it },
+                                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodySmall,
+                                    placeholder = { Text("搜索当前段") },
+                                    trailingIcon = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(if (matches.isEmpty()) "0 处" else "${matchIndex + 1}/${matches.size}",
+                                                style = MaterialTheme.typography.labelSmall)
+                                            IconButton(onClick = { matchIndex = (matchIndex - 1 + matches.size) % matches.size }, enabled = matches.isNotEmpty()) {
+                                                Icon(Icons.Default.KeyboardArrowUp, "上一个匹配")
+                                            }
+                                            IconButton(onClick = { matchIndex = (matchIndex + 1) % matches.size }, enabled = matches.isNotEmpty()) {
+                                                Icon(Icons.Default.KeyboardArrowDown, "下一个匹配")
+                                            }
+                                            IconButton(onClick = { query = ""; searchVisible = false }) { Icon(Icons.Default.Close, "关闭搜索") }
+                                        }
+                                    },
+                                )
+                            } }
+                    }
+                } }
+        }
+    } else {
+        ViewerChromeLayout(!fullscreen, modifier.fillMaxWidth(),
+            header = { Column {
+                    if (showEncodingHint && !encodingHintDismissed) {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "已按 ${shortEncodingLabel(detectedEncoding.orEmpty())} 显示，如有乱码可切换编码",
+                                    Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                TextButton(onClick = { encodingMenu = true }) { Text("切换编码") }
+                                IconButton(onClick = { encodingHintDismissed = true }) { Icon(Icons.Default.Close, "关闭编码提示") }
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { searchVisible = !searchVisible }) { Icon(Icons.Default.Search, "查找文本") }
+                        IconButton(onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) }, enabled = fontSize > 12) { Text("A−", Modifier.semantics { contentDescription = "减小字号" }) }
+                        Text("${fontSize}sp", style = MaterialTheme.typography.labelMedium)
+                        IconButton(onClick = { fontSize = (fontSize + 2).coerceAtMost(32) }, enabled = fontSize < 32) { Text("A+", Modifier.semantics { contentDescription = "增大字号" }) }
+                        FilterChip(selected = showLineNumbers, onClick = { showLineNumbers = !showLineNumbers }, label = { Text("行号") })
+                        FilterChip(selected = wrap, onClick = { wrap = !wrap }, label = { Text("自动换行") })
+                        Spacer(Modifier.width(8.dp))
+                        Box {
+                            TextButton(onClick = { encodingMenu = true }) { Text("文本编码"); Icon(Icons.Default.ArrowDropDown, null) }
+                            DropdownMenu(expanded = encodingMenu, onDismissRequest = { encodingMenu = false }) {
+                                TextFileReader.ENCODINGS.forEach { encoding ->
+                                    DropdownMenuItem(
+                                        text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
+                                        onClick = {
+                                            requestedEncoding = encoding
+                                            offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
+                                            resolvedAutoEncoding = null
+                                            resetScroll = true
+                                            encodingMenu = false
+                                            encodingHintDismissed = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        TextButton(onClick = { clipboardCopy(text); copied = true }, enabled = page != null && !loading) { Text(if (copied) "已复制本段" else "复制本段") }
+                    }
+                    ViewerToolbarVisibility(searchVisible) {
+                        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            singleLine = true, label = { Text("搜索当前段") }, supportingText = { Text(if (matches.isEmpty()) "${matches.size} 处匹配" else "${matchIndex + 1} / ${matches.size} 处匹配") },
+                            trailingIcon = { Row {
+                                    IconButton(onClick = { matchIndex = (matchIndex - 1 + matches.size) % matches.size }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowUp, "上一个匹配") }
+                                    IconButton(onClick = { matchIndex = (matchIndex + 1) % matches.size }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowDown, "下一个匹配") }
+                                } })
+                    }
+                } },
+            footer = { Column {
+                    Text(
+                        "${shortEncodingLabel(page?.encoding ?: requestedEncoding)} · 第 $startLine–${startLine + numbered.lineCount - 1} 行" +
+                        page?.let { " · 已显示 ${viewerBytes(it.nextOffset)} / ${viewerBytes(it.totalBytes)}" }.orEmpty(),
+                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (truncated) Text(
+                        "文件较大（${viewerBytes(page?.totalBytes ?: 0)}），仅显示前 ${viewerBytes(TextPageLayout.MAX_VIEW_BYTES)}；已截断。可导出或使用其他应用打开完整文件。",
+                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        TextButton(onClick = { resetScroll = true; pageIndex-- }, enabled = pageIndex > 0 && !loading) { Text("上一段") }
+                        TextButton(onClick = {
+                                resetScroll = true
+                                page?.let { current ->
+                                    offsets = offsets.take(pageIndex + 1) + current.nextOffset
+                                    lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
+                                    pageIndex++
+                                }
+                            }, enabled = hasNext && !loading) { Text(if (truncated) "已截断" else "下一段") }
+                    }
+                } },
+        ) { Column(Modifier.fillMaxSize()) {
+                if (loading) ViewerLoadingLine()
+                error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+                SelectionContainer(Modifier.weight(1f).fillMaxWidth().verticalScroll(vertical).padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(annotated, Modifier.fillMaxWidth().viewerReveal(page).then(if (wrap) Modifier else Modifier.horizontalScroll(horizontal)),
                         style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp),
                         softWrap = wrap, onTextLayout = { layout = it })
                 }
-                // 搜索条浮在正文上，不挤压可读高度；关闭后正文位置不变。
-                if (searchVisible) Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                    OutlinedTextField(
-                        query, { query = it },
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall,
-                        placeholder = { Text("搜索当前段") },
-                        trailingIcon = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (matches.isEmpty()) "0 处" else "${matchIndex + 1}/${matches.size}",
-                                    style = MaterialTheme.typography.labelSmall)
-                                IconButton(onClick = { matchIndex = (matchIndex - 1 + matches.size) % matches.size }, enabled = matches.isNotEmpty()) {
-                                    Icon(Icons.Default.KeyboardArrowUp, "上一个匹配")
-                                }
-                                IconButton(onClick = { matchIndex = (matchIndex + 1) % matches.size }, enabled = matches.isNotEmpty()) {
-                                    Icon(Icons.Default.KeyboardArrowDown, "下一个匹配")
-                                }
-                                IconButton(onClick = { query = ""; searchVisible = false }) { Icon(Icons.Default.Close, "关闭搜索") }
-                            }
-                        },
-                    )
-                }
-            }
-            CompactToolbar(
-                status = status,
-                showPager = true,
-                previousEnabled = pageIndex > 0 && !loading,
-                onPrevious = { resetScroll = true; pageIndex-- },
-                nextEnabled = hasNext && !loading,
-                nextLabel = if (truncated) "已截断" else "下一段",
-                onNext = {
-                    resetScroll = true
-                    page?.let { current ->
-                        offsets = offsets.take(pageIndex + 1) + current.nextOffset
-                        lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
-                        pageIndex++
-                    }
-                },
-                exportEnabled = exportEnabled,
-                onExport = onExport,
-                onOpenWith = onOpenWith,
-                onCopyToWorkspace = onCopyToWorkspace,
-                copyLabel = if (copied) "已复制本段" else "复制本段",
-                onCopy = { clipboardCopy(text); copied = true },
-            )
-            }
-        }
-    } else {
-    Column(modifier.fillMaxWidth()) {
-        if (showEncodingHint && !encodingHintDismissed) {
-            Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "已按 ${shortEncodingLabel(detectedEncoding.orEmpty())} 显示，如有乱码可切换编码",
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    TextButton(onClick = { encodingMenu = true }) { Text("切换编码") }
-                    IconButton(onClick = { encodingHintDismissed = true }) { Icon(Icons.Default.Close, "关闭编码提示") }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { searchVisible = !searchVisible }) { Icon(Icons.Default.Search, "查找文本") }
-            IconButton(onClick = { fontSize = (fontSize - 2).coerceAtLeast(12) }, enabled = fontSize > 12) { Text("A−", Modifier.semantics { contentDescription = "减小字号" }) }
-            Text("${fontSize}sp", style = MaterialTheme.typography.labelMedium)
-            IconButton(onClick = { fontSize = (fontSize + 2).coerceAtMost(32) }, enabled = fontSize < 32) { Text("A+", Modifier.semantics { contentDescription = "增大字号" }) }
-            FilterChip(selected = showLineNumbers, onClick = { showLineNumbers = !showLineNumbers }, label = { Text("行号") })
-            FilterChip(selected = wrap, onClick = { wrap = !wrap }, label = { Text("自动换行") })
-            Spacer(Modifier.width(8.dp))
-            Box {
-                TextButton(onClick = { encodingMenu = true }) { Text("文本编码"); Icon(Icons.Default.ArrowDropDown, null) }
-                DropdownMenu(expanded = encodingMenu, onDismissRequest = { encodingMenu = false }) {
-                    TextFileReader.ENCODINGS.forEach { encoding ->
-                        DropdownMenuItem(
-                            text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
-                            onClick = {
-                                requestedEncoding = encoding
-                                offsets = listOf(0L); lineStarts = listOf(1); pageIndex = 0
-                                resolvedAutoEncoding = null
-                                resetScroll = true
-                                encodingMenu = false
-                                encodingHintDismissed = false
-                            },
-                        )
-                    }
-                }
-            }
-            TextButton(onClick = { clipboardCopy(text); copied = true }, enabled = page != null && !loading) { Text(if (copied) "已复制本段" else "复制本段") }
-        }
-        if (searchVisible) {
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                singleLine = true, label = { Text("搜索当前段") }, supportingText = { Text(if (matches.isEmpty()) "${matches.size} 处匹配" else "${matchIndex + 1} / ${matches.size} 处匹配") },
-                trailingIcon = { Row {
-                    IconButton(onClick = { matchIndex = (matchIndex - 1 + matches.size) % matches.size }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowUp, "上一个匹配") }
-                    IconButton(onClick = { matchIndex = (matchIndex + 1) % matches.size }, enabled = matches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowDown, "下一个匹配") }
-                } })
-        }
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        SelectionContainer(Modifier.weight(1f).fillMaxWidth().verticalScroll(vertical).padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(annotated, Modifier.fillMaxWidth().then(if (wrap) Modifier else Modifier.horizontalScroll(horizontal)),
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp, lineHeight = (fontSize * 1.5).sp),
-                softWrap = wrap, onTextLayout = { layout = it })
-        }
-        Text(
-            "${shortEncodingLabel(page?.encoding ?: requestedEncoding)} · 第 $startLine–${startLine + numbered.lineCount - 1} 行" +
-                page?.let { " · 已显示 ${viewerBytes(it.nextOffset)} / ${viewerBytes(it.totalBytes)}" }.orEmpty(),
-            Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (truncated) Text(
-            "文件较大（${viewerBytes(page?.totalBytes ?: 0)}），仅显示前 ${viewerBytes(TextPageLayout.MAX_VIEW_BYTES)}；已截断。可导出或使用其他应用打开完整文件。",
-            Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = { resetScroll = true; pageIndex-- }, enabled = pageIndex > 0 && !loading) { Text("上一段") }
-            TextButton(onClick = {
-                resetScroll = true
-                page?.let { current ->
-                    offsets = offsets.take(pageIndex + 1) + current.nextOffset
-                    lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
-                    pageIndex++
-                }
-            }, enabled = hasNext && !loading) { Text(if (truncated) "已截断" else "下一段") }
-        }
-    }
+            } }
     }
 }
+
+
 
 /** 横屏编码提示只占一行小字；点文字打开编码菜单，点 × 收起并把高度还给正文。 */
 @Composable
@@ -942,7 +1096,7 @@ private fun NativeAudioPlayer(uri: Uri) {
     Column(Modifier.fillMaxWidth().widthIn(max = 600.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(Icons.Default.PlayArrow, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
         if (failed) Text("设备无法解码此音频，请使用其他应用打开。", color = MaterialTheme.colorScheme.error)
-        else if (!ready) LinearProgressIndicator(Modifier.fillMaxWidth())
+        else if (!ready) ViewerLoadingLine()
         else {
             Slider(value = position.toFloat().coerceIn(0f, duration.coerceAtLeast(1).toFloat()),
                 onValueChange = { seeking = true; position = it.toInt() },

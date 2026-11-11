@@ -310,7 +310,7 @@ internal fun PdfPreview(
     }
 
     Column(modifier.fillMaxWidth()) {
-        if (opening) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (opening) ViewerLoadingLine()
         val message = openError
         if (message != null) {
             Text(
@@ -627,7 +627,7 @@ private fun PdfPageItem(
                 Image(
                     bitmap = image,
                     contentDescription = "PDF 第 ${index + 1} 页",
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().viewerReveal(index),
                     contentScale = ContentScale.Fit,
                 )
             }
@@ -652,7 +652,8 @@ private fun PdfPageItem(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                if (!com.tanuki.ui.design.TanukiDesign.motion.reducedMotion)
+                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                 Text(
                     "正在渲染第 ${index + 1} 页",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

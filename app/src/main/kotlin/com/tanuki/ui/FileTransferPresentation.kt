@@ -1,5 +1,8 @@
 package com.tanuki.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.*
+import com.tanuki.ui.design.TanukiDesign
 import com.tanuki.runtime.FileTransferProgress
 import java.util.Locale
 
@@ -21,6 +24,13 @@ internal data class FileTransferSummary(
 internal object FileTransferPresentation {
     fun imports(items: List<FileTransferProgress>): List<FileTransferProgress> =
         items.filter { it.kind == com.tanuki.runtime.FileTransferKind.IMPORT }
+
+    /** 任务集合或真实阶段改变时重置，字节更新与耗时 tick 不改变身份。 */
+    fun motionIdentity(items: List<FileTransferProgress>): List<Pair<Long, String>> =
+        items.map { it.id to it.label }.sortedBy { it.first }
+
+    fun fraction(received: Long, total: Long): Float? =
+        if (total > 0) (received.coerceIn(0, total).toDouble() / total).toFloat() else null
 
     fun percent(received: Long, total: Long): Int? =
         if (total > 0) ((received.coerceIn(0, total).toDouble() / total) * 100).toInt().coerceIn(0, 100) else null
@@ -76,4 +86,17 @@ internal object FileTransferPresentation {
         seconds >= 60 -> "${seconds / 60}分${seconds % 60}秒"
         else -> "${seconds}秒"
     }
+}
+
+/** 确定进度从当前显示值朝最新字节重定向；未知总量/换任务立即复位，不排队补播。 */
+@Composable
+internal fun rememberFileTransferFraction(identity: Any?, fraction: Float?): State<Float> {
+    val motion = TanukiDesign.motion
+    val progress = remember(identity, fraction != null) { Animatable(fraction ?: 0f) }
+    LaunchedEffect(progress, fraction, motion.reducedMotion) {
+        if (fraction == null || motion.reducedMotion) progress.snapTo(fraction ?: 0f)
+        else progress.animateTo(fraction, motion.progress())
+    }
+    // reduced 开关在组合当帧生效，不等待协程调度。
+    return if (motion.reducedMotion) rememberUpdatedState(fraction ?: 0f) else progress.asState()
 }

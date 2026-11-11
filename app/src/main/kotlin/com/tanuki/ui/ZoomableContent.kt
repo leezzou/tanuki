@@ -1,5 +1,13 @@
 package com.tanuki.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.rememberCoroutineScope
+import com.tanuki.ui.design.TanukiDesign
+import com.tanuki.ui.design.TanukiMotion
+import com.tanuki.ui.design.TanukiMotionEasing
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -78,20 +86,42 @@ internal fun Zoomable(
     resetKey: Any?,
     modifier: Modifier = Modifier,
     onScaleChange: (Float) -> Unit = {},
+    // 查看器图片全屏只改变视口；其他调用方保留原有重置语义。
+    preserveViewportState: Boolean = false,
     content: @Composable (Modifier) -> Unit,
 ) {
     var scale by remember(resetKey) { mutableFloatStateOf(ZoomPolicy.MIN_SCALE) }
     var pan by remember(resetKey) { mutableStateOf(ZoomPolicy.Pan.Zero) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    LaunchedEffect(resetKey, viewport) {
-        scale = ZoomPolicy.MIN_SCALE
-        pan = ZoomPolicy.Pan.Zero
+    val motion = TanukiDesign.motion
+    val scope = rememberCoroutineScope()
+    var zoomJob by remember(resetKey) { mutableStateOf<Job?>(null) }
+    var zoomTarget by remember(resetKey) { mutableStateOf<Float?>(null) }
+    LaunchedEffect(resetKey, viewport, motion.reducedMotion) {
+        zoomJob?.cancel()
+        if (motion.reducedMotion && zoomTarget != null) {
+            scale = zoomTarget!!
+            pan = ZoomPolicy.Pan.Zero
+        }
+        zoomTarget = null
+        if (!preserveViewportState) {
+            scale = ZoomPolicy.MIN_SCALE
+            pan = ZoomPolicy.Pan.Zero
+        } else {
+            val fitted = ZoomPolicy.fittedSize(contentWidth.toFloat(), contentHeight.toFloat(),
+                viewport.width.toFloat(), viewport.height.toFloat())
+            pan = ZoomPolicy.clampPan(pan, fitted.x * scale, fitted.y * scale,
+                viewport.width.toFloat(), viewport.height.toFloat())
+        }
         onScaleChange(scale)
     }
     val fitted = ZoomPolicy.fittedSize(
         contentWidth.toFloat(), contentHeight.toFloat(), viewport.width.toFloat(), viewport.height.toFloat(),
     )
     fun apply(factor: Float, centroid: Offset, move: Offset) {
+        // 手势立即接管当前显示值，不等待双击补间完成。
+        zoomJob?.cancel()
+        zoomTarget = null
         val next = ZoomPolicy.clampScale(scale * factor)
         val actual = if (scale > 0f) next / scale else 1f
         val zoomed = ZoomPolicy.zoomAround(pan, centroid.x, centroid.y,
@@ -112,12 +142,27 @@ internal fun Zoomable(
             .pointerInput(resetKey, fitted, viewport) {
                 detectTransformGestures { centroid, move, zoom, _ -> apply(zoom, centroid, move) }
             }
-            .pointerInput(resetKey, viewport) {
+            .pointerInput(resetKey, viewport, motion.reducedMotion) {
                 detectTapGestures(onDoubleTap = {
+                    zoomJob?.cancel()
                     val target = ZoomPolicy.nextDoubleTapScale(scale)
-                    scale = target
-                    pan = ZoomPolicy.Pan.Zero
-                    onScaleChange(target)
+                    if (!preserveViewportState || motion.reducedMotion) {
+                        scale = target
+                        pan = ZoomPolicy.Pan.Zero
+                        onScaleChange(target)
+                    } else {
+                        val fromScale = scale
+                        val fromPan = pan
+                        zoomTarget = target
+                        zoomJob = scope.launch {
+                            Animatable(0f).animateTo(1f, tween(motion.duration(TanukiMotion.layout),
+                                easing = TanukiMotionEasing.standard)) {
+                                scale = fromScale + (target - fromScale) * value
+                                pan = ZoomPolicy.Pan(fromPan.x * (1f - value), fromPan.y * (1f - value))
+                                onScaleChange(scale)
+                            }
+                        }
+                    }
                 })
             },
         contentAlignment = Alignment.Center,
