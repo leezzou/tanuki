@@ -2,6 +2,14 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 动效 B 批页面转场（2026-11-11，android_agent-90，Host）
+
+- 起始基线 fetch 实核 `226c3f95e0b71b8e4a34b13f8302ec68abce5314`，分支 `ao/motion/batch-b`；保留本地改动无冲突快进新 main `824c6c9be855389708e2b3d5886f5670cbc6695e` 后刷新验证。编排已批准文件/浏览器最小接线，主目的地、设置、文件列表/查看器、浏览器原生二级、窄屏 TwoPane 共用转场组件；业务页旧入场已清零。WebView 只用原生背景遮罩，旧内容立即卸载，原 BackHandler 和返回目标不改。
+- 旧基线宿主阶段：compile 产品/Android 测试源码 + 3 类定向 23 项通过（2m16s）；单独 lint 0 errors / 105 warnings / 1 hint（2m02s）。这是接线前的阶段证据，不替代最终代码验证。
+- 最终命令：`source scripts/ao-worktree-env.sh` 后以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`，五个 `--tests` 为 `com.tanuki.ui.TanukiPageTransitionsTest`、`com.tanuki.ui.design.TanukiMotionSpecsTest`、`com.tanuki.TanukiPageVisualsTest`、`com.tanuki.TanukiSaveableStateTest`、`com.tanuki.FileViewerLayoutTest`。恢复边界修正后完整重跑 **BUILD SUCCESSFUL（2m57s）/ 退出 0**；产品/Android 测试源码 compile 通过，XML 实核 **40 项 / 5 类（8/5/12/4/11）/ 0 failures / 0 errors / 0 skipped**；lint **0 errors / 105 warnings / 1 hint**，新宿主无告警。此前接线阶段同组 40 项与 lint（3m06s）为阶段证据，最终结果以此次重跑为准。
+- 新增 8 项覆盖全部主目的地对无位移、层级 320/240ms 曲线与相反方向、RTL 镜像、reduced 在 0ns 已终态、设置/详情/浏览器已有返回目标、WebView 零位移；文件阅读恢复应立即显示、主动重开仍前进。既有保存状态与布局回归一同运行。
+- 未执行完整 JVM、Android 仪器、设备安装/操作、Compose 实际挂载/快速打断、WebView/Surface 帧时序与性能；未生成发布 APK。跳过原生运行时的 Host 编译不作为设备包。API Key/真实模型/真机暂停项保留。范围与后续见 [B 批交接](handoffs/20261111-1900-motion-batch-b.md)。
+
 ## 纯白灰与天蓝主题落库（2026-11-11，android_agent-73，Host）
 
 - 从fetch实核的 `origin/main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935`（含#87/#88/#89）建立 `ao/theme-colors/sky-theme`。原补丁SHA256 `e91e1787b06113dc597748e5a541ed6bef47c5948f62abe4124bee3450e8b821` 匹配，全部48文件兼容检查通过；精确应用47路径，以本次落库记录替代已完成的1731补丁交付记录，无冲突或手工产品代码调整。保留main动效工厂/设置/令牌、按压时序和章节，完整配色表与landing逐行相同。

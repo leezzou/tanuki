@@ -42,8 +42,11 @@ internal fun tanukiToggleSpec(): FiniteAnimationSpec<Float> = TanukiDesign.motio
 
 /** 原生内容的一次性入场；不包含也不能包住任何 WebView。 */
 internal fun Modifier.tanukiEnter(): Modifier = composed {
+    // 页面宿主已接管时保留兼容调用，但不创建第二个入场动画。
+    if (LocalTanukiPageMotionOwned.current) return@composed this
     // 结构动画走 page 令牌（320ms，落在 240–340ms 区间）；移除动画时直接显示。
     val durationMs = tanukiMotionMs(TanukiMotionTokens.page)
+    if (durationMs == 0) return@composed this
     val progress = remember { Animatable(if (durationMs == 0) 1f else 0f) }
     LaunchedEffect(durationMs) {
         progress.animateTo(1f, animationSpec = tween(durationMillis = durationMs, easing = TanukiEnterEasing))

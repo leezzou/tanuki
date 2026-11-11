@@ -130,8 +130,14 @@ fun TanukiTwoPane(
             onDetailBack?.invoke()
         }
         // 窄屏也要保留调用方的 padding/尺寸约束，不能换成裸 fillMaxSize。
-        Box(modifier.fillMaxSize()) {
-            if (detailVisible) detail(Modifier.fillMaxSize()) else list(Modifier.fillMaxSize())
+        TanukiPageTransitionHost(
+            target = detailVisible,
+            navigation = { _, showingDetail ->
+                if (showingDetail) TanukiPageNavigation.Forward else TanukiPageNavigation.Back
+            },
+            modifier = modifier.fillMaxSize(),
+        ) { pageModifier ->
+            if (detailVisible) detail(pageModifier) else list(pageModifier)
         }
     }
 }

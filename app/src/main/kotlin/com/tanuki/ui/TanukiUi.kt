@@ -437,8 +437,14 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         end = padding.calculateEndPadding(layoutDirection), bottom = padding.calculateBottomPadding())
                     .consumeWindowInsets(padding)
                 Box(Modifier.fillMaxSize()) {
+                TanukiPageTransitionHost(
+                    target = TanukiPageRoute(tab, settingsSection.takeIf { tab == 4 }),
+                    navigation = ::tanukiPageNavigation,
+                    modifier = pageModifier,
+                    webView = tab == 3 || (tab == 1 && !nativeActive),
+                ) { pageContentModifier ->
                 when (tab) {
-                    1 -> DshPage(model, callbacks, browserView, pageModifier, home = { tab = 0 },
+                    1 -> DshPage(model, callbacks, browserView, pageContentModifier, home = { tab = 0 },
                         fullscreen = activeFullscreen, onFullscreen = { fullscreen = it }, settings = ::openSettings, bottomInset = bottomInset,
                         onOpenStorage = ::openStorageSettings,
                         native = nativeActive, nativePage = nativeDshPage, fallback = model.nativeDshFallback,
@@ -448,22 +454,22 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         })
                     2 -> pageStates.SaveableStateProvider("files") {
                         CompositionLocalProvider(LocalFileOperationOverlay provides if (hasRuntimeProgress) progressEntry else null) {
-                            filesPage(pageModifier, bottomInset)
+                            filesPage(pageContentModifier, bottomInset)
                         }
                     }
                     3 -> pageStates.SaveableStateProvider("browser") {
-                        agentBrowserPage(pageModifier, browserFullscreen, { browserFullscreen = it }, ::openSettings, bottomInset)
+                        agentBrowserPage(pageContentModifier, browserFullscreen, { browserFullscreen = it }, ::openSettings, bottomInset)
                     }
                     else -> key(tab, settingsSection.takeIf { tab == 4 }) {
                         val bottomSpace = 32.dp + bottomInset
-                        Box(pageModifier.background(tanukiPageBrush())) {
+                        Box(pageContentModifier.background(tanukiPageBrush())) {
                             // 远程页自带滚动与下拉刷新；放进外层 verticalScroll 会嵌套滚动并让手势失效。
                             if (tab == 4 && settingsSection == "远程主机") {
                                 Box(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize()) {
                                     RemoteHostSettingsPage(model, callbacks, bottomInset)
                                 }
                             } else {
-                                Column(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize().tanukiEnter().imePadding()
+                                Column(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize().imePadding()
                                     .verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottomSpace),
                                     verticalArrangement = Arrangement.spacedBy(28.dp)) {
                                     if (tab == 0) {
@@ -482,6 +488,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             }
                         }
                     }
+                }
                 }
                     // 文件页的唯一宿主按查看器高度定位；其他页面由外壳统一定位。
                     if (tab != 2) progressEntry(Modifier.align(Alignment.BottomCenter).imePadding()
