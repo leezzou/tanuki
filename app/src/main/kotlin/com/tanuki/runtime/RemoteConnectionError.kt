@@ -53,6 +53,56 @@ data class RemoteFailureInfo(
     val message: String get() = "$reason；$suggestion"
 }
 
+/**
+ * 配对失败的中文原因与下一步。
+ *
+ * 中继错误码先按 [RelayFailureKind] 分流，再给用户一个可以立即执行的动作；
+ * 这里只使用固定文案，不回显 token、配对链接或原始对端数据。
+ */
+object RemotePairingGuidance {
+    /** 一条配对失败建议；[reason] 说明发生了什么，[suggestion] 说明下一步做什么。 */
+    data class Advice(val reason: String, val suggestion: String)
+
+    fun of(kind: RelayFailureKind): Advice = when (kind) {
+        RelayFailureKind.EXPIRED -> Advice(
+            reason = "配对链接已过期：中继已不保留这次配对",
+            suggestion = "回到电脑上重新生成配对链接，再把新链接复制到手机；旧链接不能继续使用"
+        )
+        RelayFailureKind.ROOM_NOT_FOUND -> Advice(
+            reason = "中继上找不到这个配对房间",
+            suggestion = "确认链接来自电脑上正在运行的那次配对；中继重启或链接失效时，请在电脑上重新生成链接"
+        )
+        RelayFailureKind.HOST_OFFLINE -> Advice(
+            reason = "电脑端当前不在线，中继无法把它和手机接起来",
+            suggestion = "确认电脑上的 DSH 和远程连接服务仍在运行并已连上中继，然后重试；电脑刚重启时请重新生成链接"
+        )
+        RelayFailureKind.PIN_MISMATCH -> Advice(
+            reason = "中继证书指纹与配对链接不一致，已拒绝连接",
+            suggestion = "先不要继续连接：重新从电脑复制最新配对链接；若仍不一致，可能有人在替换中继，请核对电脑上显示的中继证书指纹"
+        )
+        RelayFailureKind.NETWORK, RelayFailureKind.IO -> Advice(
+            reason = "中继端口不可达：手机没能和链接里的中继地址建立连接",
+            suggestion = "确认手机当前网络能访问该地址和端口（可切换 Wi-Fi/移动网络重试），并确认中继服务在运行；地址或端口变化后需重新生成链接"
+        )
+        RelayFailureKind.TLS -> Advice(
+            reason = "中继 TLS 握手失败，无法确认中继身份",
+            suggestion = "确认中继证书仍有效、手机系统时间正确；使用自签名中继时必须使用带证书指纹的新配对链接"
+        )
+        RelayFailureKind.AUTH -> Advice(
+            reason = "中继拒绝了配对密钥",
+            suggestion = "链接里的配对密钥已失效或不属于该房间；请在电脑上重新生成配对链接后重试"
+        )
+        RelayFailureKind.ROOM_BUSY -> Advice(
+            reason = "该配对房间已有另一个客户端在使用",
+            suggestion = "先在另一台手机上断开，或等当前连接结束后重试；必要时在电脑上重新生成链接"
+        )
+        RelayFailureKind.PROTOCOL -> Advice(
+            reason = "中继协议不兼容，连接已停止",
+            suggestion = "确认手机和电脑上的连接组件版本匹配；更新后再试，仍失败请保留错误阶段信息反馈"
+        )
+    }
+}
+
 /** 把底层异常映射成阶段化中文提示；纯函数，便于 JVM 回归。 */
 object RemoteConnectionErrors {
     fun validation(problem: String): RemoteFailureInfo = RemoteFailureInfo(
@@ -74,11 +124,13 @@ object RemoteConnectionErrors {
             )
         }
         if (error is RemoteRelayException) {
+            val advice = RemotePairingGuidance.of(error.kind)
             return RemoteFailureInfo(
                 stage = RemoteConnectionStage.TCP,
                 kind = RemoteFailureKind.RELAY,
-                reason = error.message?.takeIf { it.isNotBlank() } ?: "中继配对失败",
-                suggestion = "确认中继地址可达、配对链接未过期；回到上一步重新粘贴主机端生成的完整配对链接后重试"
+                reason = advice.reason,
+                suggestion = advice.suggestion,
+                retryable = error.retryable
             )
         }
         if (error is RemoteHostFailure) {

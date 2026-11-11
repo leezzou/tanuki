@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-65（AO worker，DSH）
 - 时间：2026-11-11 10:17 CST
-- 状态：已完成（PR #64 CI 通过，待独立审查；未合并、未发布）
+- 状态：已完成（已合并 origin/main=7d58e90；PR #64 待最终 CI 与独立审查；未合并到 main、未发布）
 - 前一记录：[查看器传输胶囊避让](20261111-0538-viewer-transfer-capsule-inset.md)（结论已合并；本任务与其无代码依赖）
 
 > 普通 PR 只新增本记录，未修改 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。
@@ -19,7 +19,7 @@
 - 已实现：`quickstart.sh` 一条命令流程、`quickstart_lib.py` 辅助逻辑、`host_agent.py --pairing-relay`、CI 自测步骤、文档 3.1–3.3。
 - 已验证：19 项 quickstart 离线自测通过；既有 9 项 relay 回归通过；`--print-only` 无副作用；真实回环启动后 SIGINT 退出码 130，relay/agent 均退出、端口释放、pid 文件清理；发布检查 0 findings。
 - 待验证：PR 推送后的 GitHub CI；独立 Codex High 对当前 head 的审查；真实手机 + 真实 sshd/公网中继、真实剪贴板。
-- 当前分支：`ao/relay-quickstart/root`，基于 `origin/main=62e4c30`；PR：<https://github.com/leezzou/tanuki/pull/64>（CI 通过 head `2cb3341`）；无运行中的 relay/agent 测试进程。
+- 当前分支：`ao/relay-quickstart/root`，基于 `origin/main=62e4c30`，已合并 `origin/main=7d58e90`（#63 手机端自动配对）；PR：<https://github.com/leezzou/tanuki/pull/64>（上一 head `2cb3341` CI 通过，merge 后 CI 待重跑）；无运行中的 relay/agent 测试进程。
 - 关键事实与可定位源码：`scripts/remote-relay/quickstart.sh`、`quickstart_lib.py`、`test_quickstart.py`、`host_agent.py`（`--pairing-relay`）、`docs/REMOTE-CONNECT.md` 第 3 节、`.github/workflows/verify.yml` 的 “Test remote relay quickstart”。
 
 ## 本次改动
@@ -46,6 +46,7 @@
 | 回环启动后读取横幅 | stdout 含完整配对链接、6 位核对码、手机端三步、Ctrl+C 提示；链接中的 `pin` 与证书钉扎一致 | 临时状态目录；未验证真实手机粘贴/扫码 |
 | GitHub Actions 首轮 Host job（run 42948018982） | 失败：`test_port_detection_and_wait` 在 Linux 上对 backlog=1 的监听端口做第三次连接探测时超时 | 已改为直接断言 `probe_host` 的通配地址映射并增大 backlog；本地复跑 19 项通过 |
 | GitHub Actions（head `2cb3341`） | 通过：push run 42948762327（Android 7m47s、Host 40s）与 PR run 42948753628（Android 5m59s、Host 38s），4 个 check 全 pass | 本记录为 CI 后的 docs-only 提交，最终 head 的 CI 以 PR 为准；未跑设备 |
+| `git merge origin/main`（main=`7d58e90`，#63）后复跑 | 通过：quickstart 19 tests、既有 relay 9 tests；仅 `docs/REMOTE-CONNECT.md` 冲突 | 冲突保留 #63 的手机自动读剪贴板/自动算码内容，并同步 quickstart 横幅文案 |
 | `python3 scripts/check-publication.py --git` | 通过：0 findings（检查时新增文件尚未 `git add`，提交前需重跑） | 发布检查不打印匹配到的敏感值 |
 
 - 哪些是前一轮结果，哪些是本次新验证：本表全部为本次新验证；未引用前一轮产品测试数字。
@@ -53,7 +54,7 @@
 
 ## 未完成与暂停项
 
-- 未完成：独立 Codex High 审查绑定最终 head；真实公网/设备验收。
+- 未完成：merge 后最终 head 的 GitHub CI；独立 Codex High 审查绑定最终 head；真实公网/设备验收。
 - 外部阻塞：无（本地可完成部分已完成）。
 - 用户暂停：API Key、真实模型/账号、真机验收、合并/发布；本次未触碰，也未合并/发布。
 - 未删除任何旧交接记录：没有因本任务而过期的记录；历史验证依据保留。
@@ -69,6 +70,7 @@
 - 数据/设备/权限边界：未改 Android 代码；未读写真实凭据/用户目录（自测只用临时目录与回环端口）；未执行破坏性设备操作。
 - 关键决策及理由：用 Python 辅助模块承载钉扎/参数/解析，shell 只做编排，便于离线单测；新增 `--pairing-relay` 让 agent 连 `127.0.0.1`、配对链接展示手机可达地址，避免跨网络链接写成回环地址；端口检查放在证书生成前，失败不留半套文件；trap 先停 agent 再停 relay，避免重连孤儿。
 - 失败尝试与避免重复踩坑的结论：用 bash `&` 手动测试时 SIGINT 会被后台任务忽略，不能用它验证 INT trap；改用 Python `Popen`（默认 SIGINT）验证，退出码固定为 130。`py_compile` 在受限沙箱会尝试写 home 缓存，需设置 `PYTHONPYCACHEPREFIX` 到工作区。
+- 合并冲突：`origin/main` 的 #63 改了 `docs/REMOTE-CONNECT.md` 的手机配对流程，与本分支新增章节冲突；已保留双方内容，并把 quickstart 的“粘贴并输入核对码”文案改为“手机自动读取/算码，终端码用于对照”，避免误导。
 - 安全风险：配对链接含一次性房间 token，横幅与 `pairing.txt` 均视为秘密；`--print-only` 在配对文件存在时会打印旧链接，仅用于本机排查；默认 `--public-host` 是局域网 IPv4 的最好猜测，跨网络必须显式传公网地址。
 
 ## 产物与校验
