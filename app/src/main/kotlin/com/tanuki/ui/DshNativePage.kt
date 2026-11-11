@@ -334,7 +334,8 @@ private fun MessageList(
     LaunchedEffect(listState, state.selectedId) {
         snapshotFlow { listState.isAtBottom() }
             .collect { bottom ->
-                if (bottom && !following && !restoring) follow.reattach()
+                // 监听不读取组合期的 following 局部值；始终按当前会话状态决定是否恢复。
+                if (bottom && !restoring) follow.reattachIfDetached()
             }
     }
     // 跟随只负责贴底；用户手势进行中且已离开底部时让出手势，避免一帧抢滚动。
@@ -374,7 +375,8 @@ private fun MessageList(
     // 头部插入更早页或释放窗口后，按行 key 回到同一内容；跟随时由贴底逻辑接管。
     LaunchedEffect(state.historyRevision, state.selectedId) {
         val request = restore ?: return@LaunchedEffect
-        if (following) return@LaunchedEffect
+        // 用当前状态而不是组合期快照，避免脱离跟随后仍按旧值跳过恢复。
+        if (follow.snapshot.following) return@LaunchedEffect
         // 按实际渲染顺序定位：锚点之后的消息也要计入锚点分隔行，不能只按时间线索引 +1。
         val target = DshChatAnchorPolicy.restoreIndex(renderKeys, request.key, leadingRows = 0)
             ?: return@LaunchedEffect

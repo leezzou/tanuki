@@ -66,6 +66,25 @@ class DshChatFollowStateTest {
         assertFalse(follow.reattach())
     }
 
+    @Test fun returningToBottomAfterScrollResumesFollowForSameSession() {
+        val follow = DshChatFollowState()
+        val timeline = listOf(text(1), text(2))
+        assertTrue(follow.detach(timeline))
+        assertFalse(follow.snapshot.following)
+
+        // 监听按当前状态恢复，不依赖首次组合时捕获的 following=true。
+        assertTrue(follow.reattachIfDetached())
+        assertTrue(follow.snapshot.following)
+        assertNull(follow.snapshot.anchor)
+
+        // 恢复后新消息只增长时间线，不需要再点胶囊，也不会重新脱离。
+        val grown = timeline + listOf(text(3), text(4))
+        assertTrue(follow.snapshot.following)
+        assertNull(follow.snapshot.anchor)
+        assertFalse(follow.reattachIfDetached())
+        assertTrue(follow.snapshot.following)
+    }
+
     @Test fun detachIgnoresEmptyTimelineAndKeepsFollowing() {
         val follow = DshChatFollowState()
         assertFalse(follow.detach(emptyList()))

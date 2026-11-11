@@ -39,6 +39,12 @@ class DshChatFollowState {
         return true
     }
 
+    /**
+     * 回到底部时按当前状态恢复跟随。滚动监听必须调用本方法而不是捕获一个 `following`
+     * 局部值，否则监听只看到首次组合时的值，用户上翻后再滚回底部也不会恢复。
+     */
+    fun reattachIfDetached(): Boolean = if (snapshot.following) false else reattach()
+
     /** 回到底部：恢复跟随并清除锚点；返回是否发生状态变化。 */
     fun reattach(): Boolean {
         val current = mutableState.value

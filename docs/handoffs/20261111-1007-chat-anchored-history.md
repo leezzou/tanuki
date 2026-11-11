@@ -30,7 +30,7 @@
   - 会话级跟随状态：`DshChatFollowState` 按 `selectedId` 重建，nested scroll 监听通过 `rememberUpdatedState` 读取当前实例；修复评审指出的 A→B 切换后手势仍读写 A 状态、B 永远贴底的问题。
   - 协议：`DshChatSource.messagesBefore(sessionId, beforeSeq, maxMessages)`；`DshNativeClient` 复用官方 `session/page`，`throughSeq=beforeSeq`、单页上限 200。
   - 文档：INTERFACES 增加历史分页契约；NATIVE-UI 增加本轮结构说明；NATIVE-PARITY 更新 SESS-02/SESS-03 现状与 A-SESS-01 落地证据。
-- 已验证：定向 91 tests 与完整 JVM 1084 tests/111 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
+- 已验证：定向 7 个相关类全部通过（follow 5 / window 18 / paging 16 / tool 15 / render 16 / controller 22 / api 14）与完整 JVM 1085 tests/111 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
 - 待验证：设备/模拟器上的手势、流式滚动、顶部加载、深色/大字体、真实 DSH 历史分页；独立 Codex High 审查；合并与发布。
 - 关键源码：`app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt`（新增）、`DshChatFollowState.kt`（新增）、`DshNativeController.kt`、`DshNativePage.kt`、`app/src/main/kotlin/com/tanuki/web/DshLive.kt`、`DshNativeApi.kt`。
 
@@ -63,8 +63,8 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `git rev-parse origin/main` | `62e4c30b4a61636867cfc94736e44fa159f50b9f` | 基线核对 |
-| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatFollowStateTest' --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest' --tests 'com.tanuki.DshToolTimelineTest'` | 通过（定向 91 tests / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
-| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1084 tests / 111 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
+| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatFollowStateTest' --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest' --tests 'com.tanuki.DshToolTimelineTest'` | 通过（7 类 / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
+| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1085 tests / 111 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
 | `./gradlew ... :app:lintModernDebug` | 通过：0 errors / 104 warnings / 1 hint | 无新增 lint 错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1007-chat-anchored-history.md` | 通过 | 普通 PR 模式，不改共享状态 |
 | `python3 scripts/check-publication.py --git` | 739 public files / 735 index entries / 0 findings | 上传前检查 |
@@ -82,6 +82,10 @@
 3. thread `PRRT_kwDOVgRm4s62AmPG`（`DshNativePage.kt:372`，P2）：`split != null` 时实际列表多一个锚点分隔行，但恢复索引只加顶部提示行；锚点后的消息会少算一行，`scrollToItem` 跳到前一条。
    - 修复：新增 `DshChatAnchorPolicy.renderKeys`，按实际渲染顺序（顶部提示、历史段、锚点、新消息段）生成 key 列表，恢复时 `restoreIndex(renderKeys, key, leadingRows = 0)`。
    - 回归：`DshChatWindowTest` 覆盖锚点前、锚点本身、锚点后消息的恢复索引。
+4. thread `PRRT_kwDOVgRm4s62BJm4`（`DshNativePage.kt:337`，P2）：`following` 改为普通 Boolean 后，未随 `following` 重建的底部监听持续捕获首次组合的 `true`，上翻再滚回底部不会 `reattach`。
+   - 修复：新增 `DshChatFollowState.reattachIfDetached()`，底部监听直接按当前状态恢复；restore effect 也改为读取 `follow.snapshot.following`，不再使用组合期局部值。
+   - 回归：`DshChatFollowStateTest` 覆盖同一会话“上翻 → 回底恢复 → 新消息继续跟随”；Compose 监听本身仍由设备验收。
+5. thread `PRRT_kwDOVgRm4s62BJm6` / `PRRT_kwDOVgRm4s62BJm8`（针对 `bb15389` 的重复提交）：分别对应第 2、3 条的工具窗口与锚点索引问题，已在 `5ec8b2a` 一并修复；工作区提交后复审以新 head 为准。
 
 Compose 真实手势与渲染仍需设备验证。
 
