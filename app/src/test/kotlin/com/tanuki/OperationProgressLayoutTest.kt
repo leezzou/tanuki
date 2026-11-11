@@ -1,6 +1,7 @@
 package com.tanuki
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,13 +35,53 @@ class OperationProgressLayoutTest {
         assertTrue(page.contains("bottom = padding.calculateBottomPadding()"))
         assertFalse(page.contains("bottom = if (floatingNavigation) 0.dp"))
         assertTrue(page.contains("val bottomInset = 0.dp"))
-        assertTrue(page.contains("if (tab != 2) progressEntry("))
-        assertTrue(page.contains("LocalFileOperationOverlay provides"))
+        assertEquals("全局进度入口只定义一次", 1, Regex("OperationProgressEntry\\s*\\(").findAll(page).count())
+        assertTrue("文件页不得同时渲染外壳进度入口", page.contains("if (tab != 2) progressEntry("))
+        assertTrue("仅运行时任务通过文件页宿主显示", page.contains(
+            "LocalFileOperationOverlay provides if (hasRuntimeProgress) progressEntry else null"))
         assertFalse(page.contains("showFileTransfers = tab != 2"))
+
         val files = ui("WorkspaceFilesPage.kt")
-        assertTrue(files.contains("if (runtimeOverlay != null)"))
-        assertTrue(files.contains("else summary?.let"))
-        assertTrue(files.contains("viewerActionBarHeight"))
+        val externalViewer = files.substringAfter("externalDocument?.let { document ->")
+            .substringBefore("openedEntry?.let { entry ->")
+        val workspaceViewer = files.substringAfter("externalDocument?.let { document ->")
+            .substringAfter("openedEntry?.let { entry ->")
+            .substringBefore("Surface(pageModifier.fillMaxSize()")
+        val list = files.substringAfter("Surface(pageModifier.fillMaxSize()")
+            .substringBefore("private fun FileListState(")
+        listOf(externalViewer, workspaceViewer, list).forEach { branch ->
+            assertEquals("每条文件页面路径只能有一个进度宿主", 1,
+                Regex("FileTransferOverlay\\s*\\(").findAll(branch).count())
+        }
+        listOf(externalViewer, workspaceViewer).forEach { viewer ->
+            assertTrue("查看器分支必须提前返回，不能叠加列表宿主", viewer.contains("return@TanukiPageTransitionHost"))
+            assertTrue("查看器应上报实测操作栏高度", viewer.contains("onActionBarHeightChanged = { viewerActionBarHeight = it }"))
+            assertTrue("进度宿主需按全屏状态和实测操作栏高度避让", viewer.contains(
+                "viewerActionBarVisible = !fullscreen, viewerActionBarHeight = viewerActionBarHeight"))
+        }
+    }
+
+    @Test fun `运行时浮层优先且传输退出缓存不能形成第二个入口`() {
+        val overlay = ui("WorkspaceFilesPage.kt").substringAfter("internal fun FileTransferOverlay(")
+            .substringBefore("private fun PermissionChip(")
+        assertTrue("运行时与传输共用操作栏避让计算", overlay.contains(
+            "val progressBottom = FileViewerLayout.transferPillBottomPadding(bottomInset, viewerActionBarVisible, viewerActionBarHeight)"))
+        assertTrue("运行时入口使用同一避让高度", overlay.contains(
+            "runtimeOverlay(Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).padding(bottom = progressBottom))"))
+        assertTrue("只有没有运行时浮层时才能显示传输入口", overlay.contains(
+            "val pillVisible = runtimeOverlay == null && summary != null"))
+        assertTrue("退出动画保留最后一次传输摘要", overlay.contains("lastSummary = summary"))
+        assertTrue("退出动画保留最后一次任务标识", overlay.contains("lastIdentity = FileTransferPresentation.motionIdentity(items)"))
+        assertTrue("运行时浮层出现时，退出缓存也必须立即停止渲染", overlay.contains(
+            "(summary ?: lastSummary)?.takeIf { runtimeOverlay == null }?.let"))
+        assertEquals("活动摘要与退出缓存共用一个传输入口", 1, Regex("TransferPill\\s*\\(").findAll(overlay).count())
+        assertTrue("退出中的传输入口不可交互", overlay.contains("enabled = pillVisible"))
+        assertTrue("退出中的入口不能打开抽屉", overlay.contains("onOpen = { if (pillVisible) sheet = true }"))
+        assertTrue("退出中的入口不能取消任务", overlay.contains("onCancel = { if (pillVisible) items.forEach"))
+        assertTrue("运行时浮层出现后应关闭传输抽屉", Regex(
+            "LaunchedEffect\\(runtimeOverlay != null\\)\\s*\\{\\s*if \\(runtimeOverlay != null\\) sheet = false"
+        ).containsMatchIn(overlay))
+        assertTrue("传输抽屉与运行时浮层互斥", overlay.contains("if (sheet && runtimeOverlay == null)"))
     }
 
     @Test fun `更新页工程说明收起且检查按钮为主操作`() {
