@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,6 +69,13 @@ internal fun TanukiBottomSheet(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    /**
+     * 固定占屏比例；为空时按内容包裹。
+     *
+     * 密集详情页可以传 0.9 让弹层占满大部分屏幕并在内部滚动；短确认框保持
+     * 包裹，避免小弹层被拉成全屏。
+     */
+    heightFraction: Float? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = TanukiDesign.tokens
@@ -123,6 +131,7 @@ internal fun TanukiBottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (heightFraction != null) Modifier.fillMaxHeight(heightFraction) else Modifier)
                     .graphicsLayer {
                         translationY = if (dragging) dragOffset else settle.value
                     }

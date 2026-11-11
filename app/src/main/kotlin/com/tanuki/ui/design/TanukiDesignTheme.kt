@@ -64,11 +64,18 @@ internal object TanukiShapeTokens {
     val chrome: CornerBasedShape = RoundedCornerShape(TanukiRadius.CHROME_DP.dp)
     val pill: CornerBasedShape = RoundedCornerShape(percent = TanukiRadius.PILL_PERCENT)
 
+    /**
+     * 映射到 Material3 的通用圆角阶梯。
+     *
+     * 这里刻意不放 `sheet`：底部弹层的“只有上圆角”是专用形状，放进通用阶梯
+     * 会让普通卡片出现方下角。通用 large/extraLarge 统一使用 chrome 的 28dp
+     * 全圆角，弹层继续读 [TanukiSheetShape]。
+     */
     val material: Shapes = Shapes(
         extraSmall = RoundedCornerShape(TanukiRadius.SMALL_DP.dp),
         small = control,
         medium = card,
-        large = sheet,
+        large = chrome,
         extraLarge = chrome,
     )
 }
@@ -129,6 +136,15 @@ internal fun TanukiDesignTheme(
 /** 系统关闭动画时返回 true；组件据此把动效时长压到 0 并停用循环动画。 */
 @Composable
 internal fun rememberTanukiReducedMotion(): Boolean = !ValueAnimator.areAnimatorsEnabled()
+
+/**
+ * 原生 View 读取同一套调色板的入口。
+ *
+ * 浏览器悬浮层等非 Compose 界面用它在浅色/深色之间切换，保证和根主题
+ * 使用同一份色值，而不是各自维护一套十六进制颜色。
+ */
+internal fun tanukiDesignColorScheme(dark: Boolean): ColorScheme =
+    (if (dark) TanukiColorTokens.Dark else TanukiColorTokens.Light).toMaterialColorScheme()
 
 private fun buildTextStyles(): TanukiTextStyles {
     fun style(token: TanukiTypeToken): TextStyle = TextStyle(

@@ -1,10 +1,10 @@
 # 原生界面设计令牌与基础组件
 
-本文件记录 android_agent-59 新增的设计令牌与基础组件。范围只包括新增文件：不修改业务页面、不替换现有 `TanukiTheme`、不调整构建脚本、不引入新的第三方 UI 依赖。空/错/载三态和 WCAG 对比度复用 main 已有的 `com.tanuki.ui.TanukiStateView`、`com.tanuki.ui.TanukiContrast`，不再新建同义实现。页面接入步骤见第 8 节，由后续改动分批完成。
+本文件记录设计令牌、基础组件以及页面接入结果。令牌与组件由 android_agent-59 建立（PR #59）；android_agent-64 在 `origin/main=62e4c30b` 上把令牌接入根主题、文件页、会话管理页和设置页，并补齐可 JVM 回归的视觉映射。聊天页（`DshNativePage`/`DshNativeController`）与目标/待办停靠条不在本次接入范围，只通过根主题继承新调色板，未改其源码。
 
-- 基线：任务起始 `origin/main=1122d3f`；并发合并后已 rebase 到 `origin/main=7757b38`（2026-11-10）。
-- 代码位置：`app/src/main/kotlin/com/tanuki/ui/design/`。
-- JVM 回归：`app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt`。
+- 基线：任务起始 `origin/main=62e4c30b`（2026-11-11）。
+- 代码位置：`app/src/main/kotlin/com/tanuki/ui/design/`；页面视觉映射在 `app/src/main/kotlin/com/tanuki/ui/TanukiPageVisuals.kt`。
+- JVM 回归：`app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt`、`app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt`。
 - 相关文档：[原生界面实现边界](NATIVE-UI.md)、[原生界面行为规格](handoffs/20261110-1759-native-ui-parity-spec.md)、[代码规范](code-standards.md)。
 
 ## 1. 设计原则
@@ -123,6 +123,8 @@
 | `chrome` | 28dp | 顶栏/底栏/浮层 |
 | `pill` | 50% | 胶囊按钮、玻璃胶囊、状态 chip |
 
+Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20dp`、`large/extraLarge=28dp`（全圆角）。`sheet` 是只有上圆角的专用形状，只通过 `TanukiSheetShape` 给底部弹层使用，不放进通用阶梯，避免普通卡片出现方下角。
+
 ## 5. 海拔与玻璃四层
 
 | 层 | z | 阴影 | 填充不透明度 | 模糊 | 典型用途 |
@@ -163,43 +165,83 @@
 |---|---|---|
 | `TanukiPillButton` | `text, onClick, tone, enabled, loading, leading` | 五种语气 `Filled/Tonal/Outline/Ghost/Danger`；至少 48dp；加载时禁用点击并保留宽度；leading 图标继承当前 tone/enabled 的内容色 |
 | `TanukiStatusDot` | `tone, pulse, diameter, decorative` | 8dp 状态点；默认静态；可选的 2.4s 呼吸；装饰模式不产生重复无障碍节点 |
-| `TanukiStatusChip` | `tone, label, onClick, enabled, pulse` | 容器色 + 容器正文；默认 28dp；可点击时扩展到 48dp |
+| `TanukiStatusChip` | `tone, label, onClick, enabled, pulse, contentDescription` | 容器色 + 容器正文；默认 28dp；可点击时扩展到 48dp；可选 `contentDescription` 覆盖朗读文案（例如“权限：可写，点击管理”） |
 | `TanukiGlassSurface` | `layer, backdrop, shape` | 四层通用玻璃/海拔表面；无背板时退化为半透明底色 |
 | `TanukiGlassPill` | `backdrop, contentPadding` | 玻璃胶囊，至少 48dp，适合短标签/单个操作 |
 | `TanukiGlassChrome` | `backdrop, contentPadding` | 顶栏/底栏 chrome，至少 56dp |
 | `TanukiCardSurface` | `onClick, content` | 不模糊内容卡；可点击时走 `TanukiPressable` |
 | `TanukiPressable` | `onClick, enabled, shape, pressScale` | 0.98 缩放 + 按压反馈；无回调时不拦截触摸 |
-| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌 |
+| `TanukiBottomSheet` | `visible, onDismissRequest, title, subtitle, heightFraction, content` | 遮罩/返回键/下拉关闭；96dp 阈值；结构动画走令牌；`heightFraction` 为空时按内容包裹，传 0.9 时固定占屏并在内部滚动 |
 | `TanukiStreamingCursor` | `visible` | 2×18dp 竖条；2.4s 明暗周期；reduced-motion 常亮 |
 | `TanukiCodeText` | `text, maxLines` | 唯一允许等宽的命令/代码文本 |
 | `TanukiPathText` | `path, maxLines` | 等宽路径文本，默认单行省略 |
 
 主题入口：`TanukiDesignTheme(dark, reducedMotion) { ... }`。组件通过 `TanukiDesign.tokens` 读取颜色、排版和 reduced-motion 状态；未包裹主题时会明确报错，不会静默使用错误主题。
 
-## 8. 各页面接入方式
+## 8. 页面接入结果
 
-本 PR 只新增组件和令牌，不改业务页面。后续页面接入按以下顺序进行，每次只替换一个关注点并跑对应回归。
+本轮已接入（android_agent-64，基线 `62e4c30b`）：
 
-| 页面/文件 | 替换点 | 使用组件 | 注意事项 |
+| 页面/文件 | 已接入内容 | 使用的令牌/组件 | 保留边界 |
 |---|---|---|---|
-| `MainActivity.kt` / 根组合 | 根主题 | `TanukiDesignTheme` | 与现有 `TanukiTheme` 二选一；迁移期不要嵌套两套主题，避免颜色来源不一致 |
-| `TanukiUi.kt` 概览 | 主操作、概览卡、运行状态 | `TanukiPillButton`、`TanukiCardSurface`、`TanukiStatusDot/Chip` | 保留现有回调与状态模型；只替换视觉容器 |
-| `TanukiUi.kt` 底部导航 | 导航背板/浮动控制 | `TanukiGlassChrome`、`TanukiGlassPill` | 继续复用现有导航背板录制层；不要把 WebView 放进玻璃层 |
-| `DshNativePage.kt` | 加载/空/错、运行状态、流式尾部 | 现有 `com.tanuki.ui.TanukiStateView`、`TanukiStatusChip`、`TanukiStreamingCursor` | 光标只放在流式文本末尾；历史消息不显示光标 |
-| `DshSessionManagerPage.kt` | 会话管理弹层 | `TanukiBottomSheet`、现有 `com.tanuki.ui.TanukiStateView` | 弹层放在页面根部；保留现有会话筛选、搜索和生命周期回调 |
-| `DshComposerBar.kt` | 发送/停止按钮、附件路径 | `TanukiPillButton`、`TanukiPathText`、`TanukiStatusChip` | 发送/停止的禁用与加载语义沿用现有 controller；不要用视觉状态替代发送状态 |
-| `DshApprovalPanel.kt` / `DshToolCard.kt` | 审批/工具状态、命令/路径 | `TanukiStatusDot/Chip`、`TanukiCodeText`、`TanukiPathText` | 危险/成功/警告语义只做展示；不改变审批回答协议 |
-| `BrowserChrome.kt` / `AgentBrowserPage.kt` | 菜单弹层、顶栏、圆形/胶囊控制 | `TanukiBottomSheet`、`TanukiGlassChrome`、`TanukiPillButton` | 不改变 WebView 生命周期、整页截图和返回逻辑 |
-| `WorkspaceFilesPage.kt` / `WorkspaceStorageControls.kt` | 空/错/载、文件行按压、路径 | 现有 `com.tanuki.ui.TanukiStateView`、`TanukiPressable`、`TanukiPathText` | 文件行原有长按/多选语义不能被按压容器吞掉；先做单一入口回归 |
-| `SetupScreens.kt` / `RuntimeComponents.kt` | 安装阶段、成功/失败/进行中 | `TanukiStatusDot/Chip`、现有 `com.tanuki.ui.TanukiStateView` | 进度必须保留真实阶段和百分比；不能用状态 chip 代替真实进度 |
-| `DshVersionManagerDialog.kt` | 版本列表弹层 | `TanukiBottomSheet`、`TanukiStatusChip` | 卸载/切换确认仍是独立安全动作，不并入视觉弹层 |
+| `TanukiDesign.kt` 根主题 | `TanukiTheme` 直接委托 `TanukiDesignTheme`，只保留一套颜色来源；`tanukiColorScheme(dark)` 也读同一调色板，供浏览器悬浮层等原生 View 使用 | `TanukiDesignTheme`、`TanukiColorTokens`、`TanukiShapeTokens` | 深浅色跟随系统；不嵌套两套主题；`TanukiSpacing` 仅保留为兼容入口 |
+| `WorkspaceFilesPage.kt` | 位置选择器/行/权限 chip/传输胶囊/三态/弹层按钮 | `TanukiPillButton`、`TanukiStatusChip`、`TanukiStatusDot`、`TanukiGlassPill`、`TanukiPathText`、`TanukiStateView`、`TanukiShapeTokens` | 文件行长按多选、菜单项文案、传输取消/无障碍描述不变；未授权页主操作仍调用原回调 |
+| `DshSessionManagerPage.kt` | 列表行、分组头、筛选条、选择条、批量进度、消息搜索、横幅、三态、新建/重命名/归档/批量/完全权限弹层、详情内容 | `TanukiPressable`、`TanukiStatusChip`、`TanukiPillButton`、`TanukiBottomSheet`、`TanukiStateView`、`TanukiShapeTokens` | 筛选/搜索/分页/归档/权限协议不变；会话详情仍用系统 `ModalBottomSheet` 以保留拖拽、返回键和输入法行为 |
+| `TanukiUi.kt` 设置段 | 分区标题与卡片、动作行、只读行、开关、折叠面板、分类入口 | `TanukiShapeTokens`、`TanukiSpace`、`TanukiExpandVisibility`、`tanukiDisabledContentColor`、`TanukiMotion` | 回调、禁用条件和文案不变；概览/组件页共用的 `Caption`/`StatusPill` 未改 |
+| `TanukiMotion.kt` | 入场、折叠面板、状态切换、按压反馈统一读令牌 | `tanukiMotionMs`、`tanukiEnter`、`TanukiExpandVisibility`、`TanukiPressable` | 系统“移除动画”时时长为 0；循环动画保持静态 |
 
-接入约束：
+### 8.1 令牌映射表
 
-- 每次只改一个页面的一个关注点，保留现有业务状态、回调和安全边界。
-- 不把现有 `com.tanuki.ui.TanukiStateView` 用作整页错误横幅；消息流内的失败行仍按行为规格显示。
-- 不把等宽字体用于普通标签、按钮或标题；`TanukiCodeText`/`TanukiPathText` 是唯一入口。
-- 玻璃层放在内容之上时，必须提供真实背板；没有背板就用 card/sheet 的不透明表面。
+| 界面元素 | 旧实现 | 新令牌/组件 | 取值 |
+|---|---|---|---|
+| 根画布/表面 | `TanukiDesign.kt` 内的独立十六进制色表 | `TanukiColorTokens.Light/Dark` | `canvas/surface/surfaceRaised/surfaceMuted` |
+| 主操作按钮 | `Button`、`ExtendedFloatingActionButton`、`OutlinedButton` | `TanukiPillButton` | `Filled/Tonal/Outline/Ghost/Danger`；≥48dp |
+| 次操作/关闭 | `TextButton` | `TanukiPillButton` | `Ghost`（表单弹层底部） |
+| 筛选/选中 chip | `FilterChip`、自定义 `Pill` | `TanukiPillButton`（选中 `Filled`，未选中 `Outline`）、`TanukiStatusChip` | 胶囊 50%；可点击 ≥48dp |
+| 状态/权限标签 | 自定义 `Pill`、圆点 + `labelSmall` | `TanukiStatusChip` + `TanukiStatusDot` | 五种 `TanukiStatusTone`；28dp / 48dp |
+| 文件行 | `RoundedCornerShape(18/24)`，无最小行高 | `TanukiShapeTokens.control/card` + `TanukiFileVisuals.ROW_MIN_HEIGHT_DP` | 12/20dp；≥56dp |
+| 会话行 | `MaterialTheme.shapes.large` + `clickable` | `TanukiPressable` + `TanukiShapeTokens.card` | 20dp；≥56dp；按压 0.98 |
+| 分区/内容卡 | `shapes.extraLarge` + `surfaceContainerLow` | `TanukiShapeTokens.card` + `surfaceContainer` | 20dp；抬升表面 |
+| 卡片圆角（通用 large） | `large = sheet`（只有上圆角） | `large = chrome`（28dp 全圆角） | 修正普通卡片方下角 |
+| 三态（空/错/载） | 页面各自拼 `Column`/`Button` | `TanukiStateView` | 复用现有实现；新增可选 `title` 与次操作 |
+| 传输胶囊 | `Surface` + `RoundedCornerShape(50)` | `TanukiGlassPill` | 玻璃 pill 层；无背板时只画半透明表面 |
+| 路径文本 | `bodySmall` 普通字体 | `TanukiPathText` | 等宽 11/18；单行省略 |
+| 字号 | 散落 `MaterialTheme.typography.*` | `TanukiTypeScale` 经 `TanukiDesignTheme` 映射 | Title/Body/Caption/Code 各三档 |
+| 动效·入场 | 420ms 硬编码 | `tanukiEnter` + `TanukiMotion.page` | 320ms；移除动画时 0 |
+| 动效·面板 | `AnimatedVisibility` 默认弹簧 | `TanukiExpandVisibility` + `TanukiMotion.expand` | 300ms；移除动画时 0 |
+| 动效·状态切换 | 无/默认 | `Crossfade` + `TanukiMotion.toggle` | 160ms；移除动画时 0 |
+| 动效·按压 | Material 默认 | `TanukiPressable` + `TanukiMotion.pressIn` | 100ms |
+
+### 8.2 截图自查清单（静态核对，设备未验证）
+
+下表只记录源码/令牌层面的核对结论；“设备未验证”表示没有在模拟器或真机上渲染确认像素。
+
+| 页面 | 深色 | 浅色 | 1.3x/2x 大字体 | 360dp 窄屏 | 说明 |
+|---|---|---|---|---|---|
+| 文件页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 权限 chip 宽度上限 76dp，360dp 下头部按 48×4 图标 + 76dp chip 计算仍可容纳；320dp 可能只剩图标 |
+| 会话管理页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 筛选条与行内标签横向滚动；弹层动作 1.3x 起改整行按钮 |
+| 设置页 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 静态通过，设备未验证 | 行高 ≥56dp，说明文字换行；只读行的长值在 2x 字体下会换行而非截断；开关触控区由 Material 组件保证 |
+| 根主题/原生悬浮层 | 静态通过，设备未验证 | 静态通过，设备未验证 | 不适用 | 不适用 | `tanukiColorScheme(dark)` 与 Compose 主题同源；对比度由 JVM 审计 |
+
+核对依据：`TanukiPageVisualsTest` 的对比度/取值断言、`TanukiContrastTest`、以及 `docs/DESIGN-TOKENS.md` 第 2、3、6 节的令牌表。未验证项不能写成设备通过。
+
+### 8.3 尚未接入
+
+| 页面/文件 | 原因 | 下一步 |
+|---|---|---|
+| `DshNativePage.kt` / `DshNativeController.kt` | 归 android_agent-62；本轮不改聊天页 | 由该任务按本文件第 7 节组件表接入 |
+| 目标/待办停靠条 | 归 android_agent-63 | 同上 |
+| `DshComposerBar.kt`、`DshApprovalPanel.kt`、`DshToolCard.kt` | 不在本轮三个页面范围 | 后续按组件表分批接入 |
+| `BrowserChrome.kt` / `AgentBrowserPage.kt` | 不在本轮范围；仅通过根主题与 `tanukiColorScheme` 继承新调色板 | 后续单独接入玻璃层与菜单弹层 |
+| `SetupScreens.kt` / `RuntimeComponents.kt` | 不在本轮范围 | 进度语义保持不变，只替换状态组件 |
+| `DshVersionManagerDialog.kt` | 不在本轮范围 | 版本列表弹层迁移到 `TanukiBottomSheet` |
+
+接入约束（继续有效）：
+
+- 保留现有业务状态、回调、协议和安全边界；视觉状态不能替代发送/审批/写入状态。
+- 文件行的长按多选不能被按压容器吞掉；本轮仍用 `combinedClickable`。
+- 不把 `com.tanuki.ui.TanukiStateView` 用作整页错误横幅；消息流内的失败行仍按行为规格显示。
+- 玻璃层放在内容之上时必须提供真实背板；没有背板就用 card/sheet 的不透明表面。
 - WebView 保持原层级和生命周期，不包进玻璃、缩放或动画容器。
 
 ## 9. 对比度校验
@@ -230,17 +272,31 @@
 
 ## 10. 验证与未验证
 
-本轮已执行：
+本轮（android_agent-64，`62e4c30b` + 本 PR 改动）已执行：
 
 ```bash
-./gradlew :app:compileModernDebugKotlin -x buildNativeRuntime
-./gradlew :app:testModernDebugUnitTest \
-  --tests 'com.tanuki.ui.design.TanukiDesignTokensTest' -x buildNativeRuntime
-./gradlew :app:assembleModernDebug :app:testModernDebugUnitTest \
-  :app:lintModernDebug -x buildNativeRuntime
+./gradlew :app:compileModernDebugKotlin :app:compileModernDebugUnitTestKotlin -x buildNativeRuntime
+./gradlew :app:testModernDebugUnitTest -x buildNativeRuntime
+./gradlew :app:testModernDebugUnitTest --tests 'com.tanuki.TanukiPageVisualsTest' \
+  --tests 'com.tanuki.TanukiContrastTest' -x buildNativeRuntime
+./gradlew :app:lintModernDebug -x buildNativeRuntime
 ```
 
-结果：编译通过；定向 JVM 19 tests / 0 failures / 0 errors / 0 skipped；完整 JVM 952 tests / 102 个结果文件 / 0 failures / 0 errors / 0 skipped；lint `BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint，新增的 `ui/design` 文件没有 lint 告警；assemble 通过。该 APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。未执行：完整原生构建、Android 仪器测试、模拟器/真机视觉验收。页面尚未接入，因此本轮不能宣称任何业务页面的最终视觉已经验收。
+结果：
+
+- 编译通过（app 与 unit test）。
+- 完整 JVM：**1059 tests / 109 个结果文件 / 0 failures / 0 errors / 0 skipped**。
+- 定向 JVM：`TanukiPageVisualsTest` 12 tests、`TanukiContrastTest` 4 tests，全部通过。
+- lint：`BUILD SUCCESSFUL`，0 errors / 103 warnings / 1 hint；改动文件没有新增告警（`ModifierParameter` 等告警来自既有的 `TanukiIcon` 等位置）。
+- 期间 `NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 出现过一次 `expected:<8> but was:<9>` 的时序失败；单测类重跑通过，未改该模块，记录为既有 flaky 用例。
+- APK 使用 `-x buildNativeRuntime`，不含原生运行时，不能作为设备验收或发布包。
+
+未执行 / 未验证：
+
+- Android 仪器测试与模拟器/真机视觉验收（设备由独立 QA 独占）。
+- 深色/浅色/大字体/窄屏的逐页截图对照只在静态清单层面核对，未在设备上确认像素。
+- 真机手势、TalkBack、输入法遮挡和滚动性能未验证。
+- 完整原生构建、发布包与合并。
 
 ## 11. 文件清单
 
@@ -249,8 +305,12 @@
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiColorMath.kt` | OKLCH→sRGB、色域映射、WCAG 亮度/对比度、alpha 合成 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiPalette.kt` | 共享明度阶梯、五组色相、浅/深角色令牌、对比度审计 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiTokenSpec.kt` | 间距、圆角、四档字体、动效、海拔四层纯值 |
-| `app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt` | Compose 令牌入口、字体/形状映射、reduced-motion |
+| `app/src/main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt` | Compose 令牌入口、字体/形状映射、reduced-motion、原生 View 调色板 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiComponents.kt` | 胶囊按钮、状态点/chip、按压容器、流式光标、代码/路径文本 |
 | `app/src/main/kotlin/com/tanuki/ui/design/TanukiGlass.kt` | chrome/sheet/card/pill 表面、玻璃胶囊、内容卡 |
-| `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 可拖拽关闭的底部弹层骨架 |
+| `app/src/main/kotlin/com/tanuki/ui/design/TanukiBottomSheet.kt` | 可拖拽关闭的底部弹层骨架（支持固定占屏比例） |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiDesign.kt` | 根主题接线、`TanukiSpacing` 兼容入口、停用色 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiMotion.kt` | 动效令牌读取、入场、折叠面板 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiPageVisuals.kt` | 文件页/会话页的纯视觉映射与格式化 |
 | `app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt` | JVM 对比度、转换、令牌取值回归 |
+| `app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt` | 页面映射、令牌取值、对比度与格式化回归 |
