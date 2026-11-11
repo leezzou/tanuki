@@ -98,6 +98,7 @@ internal fun WorkspaceFilesPage(
     onRequestStoragePermission: () -> Unit = {}, phoneStorageGranted: Boolean = false,
     onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> },
     onOpenExternal: () -> Unit = {},
+    onOpenFreeSpace: () -> Unit = {},
     externalDocument: OpenDocument? = null,
     onCloseExternal: () -> Unit = {},
     onCopyExternalToWorkspace: (OpenDocument) -> Unit = {},
@@ -156,6 +157,10 @@ internal fun WorkspaceFilesPage(
     var transferPhase by remember { mutableStateOf<String?>(null) }
     var transferStartedAt by remember { mutableLongStateOf(0L) }
     var phoneTransferActive by remember { mutableStateOf(false) }
+    // 复制/移动结果按原因分类展示；同一结果重复出现时用版本号重新弹出提示。
+    var operationOutcome by remember { mutableStateOf<FileOperationOutcome?>(null) }
+    var outcomeVersion by remember { mutableIntStateOf(0) }
+    var showOperationDetails by remember { mutableStateOf(false) }
     // 手机存储发起复制/移动时默认落到用户最近停留的工作区目录。
     var lastWorkspaceDirectory by rememberSaveable { mutableStateOf("") }
     var phoneTransfer by remember { mutableStateOf<PhoneTransfer?>(null) }
@@ -169,6 +174,19 @@ internal fun WorkspaceFilesPage(
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocus = remember { FocusRequester() }
     val notice = if (action == null) error ?: feedback else null
+    fun handleOutcomeRecovery(recovery: FileOperationRecovery?) {
+        when (recovery) {
+            FileOperationRecovery.VIEW -> showOperationDetails = true
+            FileOperationRecovery.FREE_SPACE -> onOpenFreeSpace()
+            FileOperationRecovery.GRANT_PERMISSION -> permissionSheet = true
+            null -> Unit
+        }
+    }
+    fun publishOutcome(outcome: FileOperationOutcome) {
+        feedback = null; error = null; feedbackTarget = null
+        operationOutcome = outcome
+        outcomeVersion++
+    }
     LaunchedEffect(notice) {
         notice?.let {
             val target = if (error == null) feedbackTarget else null
@@ -184,6 +202,17 @@ internal fun WorkspaceFilesPage(
                 pendingOpenProject = target
             }
         }
+    }
+    LaunchedEffect(outcomeVersion) {
+        if (outcomeVersion == 0) return@LaunchedEffect
+        val outcome = operationOutcome ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = outcome.message,
+            actionLabel = outcome.actionLabel,
+            withDismissAction = true,
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) handleOutcomeRecovery(outcome.recovery)
     }
     LaunchedEffect(searching) { if (searching) runCatching { searchFocus.requestFocus() } }
     fun report(e: Exception) {
@@ -236,9 +265,9 @@ internal fun WorkspaceFilesPage(
                 feedbackTarget = current.target.takeIf { outcome.results.any { !it.skipped && it.error == null } }
                 selected = emptySet()
                 entries = runCatching { files.list(directory) }.getOrDefault(entries)
-                val summary = transferSummary(outcome, current.mode)
-                val failed = outcome.results.filter { it.error != null }
-                if (failed.isEmpty()) feedback = summary else error = "$summary；${failed.first().error}"
+                val result = FileOperationOutcome.fromTransfer(current.mode, outcome)
+                if (result.failures.isEmpty()) feedback = "已${result.action} ${result.completed} 项到${result.target}"
+                else publishOutcome(result)
                 phoneTransfer = null
             } catch (e: CancellationException) {
                 // 取消会清理暂存并保留源文件；列表回到稳定状态，不把取消当失败提示。
@@ -248,7 +277,14 @@ internal fun WorkspaceFilesPage(
                 throw e
             } catch (e: Exception) {
                 phoneTransfer = null
-                report(e)
+                // 批次尚未开始就失败（如总量空间检查、权限）也要落到可行动的结果入口。
+                val reason = FileOperationOutcome.classify(e)
+                val action = if (draft.mode == WorkspaceTransferMode.MOVE) "移动" else "复制"
+                val target = if (draft.target.isEmpty()) "工作区根目录" else "工作区「${draft.target}」"
+                publishOutcome(FileOperationOutcome(
+                    action, target, completed = 0, total = draft.entries.size,
+                    failures = draft.entries.map { FileOperationFailure(it.name, reason, e.message) },
+                ))
             } finally { busy = false; phoneTransferActive = false; transferPhase = null }
         }
     }
@@ -695,6 +731,16 @@ internal fun WorkspaceFilesPage(
             )
         }
     }
+    operationOutcome?.takeIf { showOperationDetails }?.let { outcome ->
+        FileOperationResultDialog(
+            outcome = outcome,
+            onDismiss = { showOperationDetails = false },
+            onRecovery = { recovery ->
+                showOperationDetails = false
+                handleOutcomeRecovery(recovery)
+            },
+        )
+    }
     if (permissionSheet) PermissionSheet(
         state = access,
         location = location,
@@ -717,15 +763,25 @@ internal fun WorkspaceFilesPage(
         onDismiss = { if (!busy) { destinationPicker = false; action = null } },
         onChoose = { target ->
             runTask {
-                val failed = mutableListOf<String>(); var completed = 0
+                val operation = action.orEmpty()
+                val total = actionEntries.size
+                val failures = mutableListOf<FileOperationFailure>()
+                var completed = 0
                 for (entry in actionEntries) {
-                    try { if (action == "复制") files.copy(entry.path, target) else files.move(entry.path, target); completed++ }
-                    catch (e: CancellationException) { throw e }
-                    catch (_: Exception) { failed += entry.name }
+                    try {
+                        if (operation == "复制") files.copy(entry.path, target) else files.move(entry.path, target)
+                        completed++
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // 保留真实异常用于分类；未知原因仍能在详情里看到具体信息。
+                        failures += FileOperationFailure(entry.name, FileOperationOutcome.classify(e), e.message)
+                    }
                 }
+                val targetLabel = if (target.isEmpty()) "当前位置" else files.guestPath(target)
                 destinationPicker = false; action = null; selected = emptySet(); entries = files.list(directory)
-                if (failed.isEmpty()) feedback = "已完成 $completed 项"
-                else error = "已完成 $completed 项；未处理：${failed.take(5).joinToString("、")}。检查是否同名、链接或空间不足；已有文件未覆盖。"
+                if (failures.isEmpty()) feedback = "已完成 $completed 项"
+                else publishOutcome(FileOperationOutcome(operation, targetLabel, completed, total, failures))
             }
         })
     else action?.let { kind ->
@@ -1293,17 +1349,59 @@ private fun ConflictDialog(
     )
 }
 
-/** 批量传输结果用用户能读懂的话汇总，失败项列出文件名。 */
-private fun transferSummary(report: WorkspaceTransferReport, mode: WorkspaceTransferMode): String {
-    val done = report.results.count { it.error == null && !it.skipped }
-    val skipped = report.results.count { it.skipped }
-    val place = if (report.targetDirectory.isEmpty()) "工作区根目录" else "工作区「${report.targetDirectory}」"
-    val action = if (mode == WorkspaceTransferMode.MOVE) "移动" else "复制"
-    val parts = mutableListOf("已${action} $done 项到$place")
-    if (skipped > 0) parts += "跳过 $skipped 个同名文件"
-    val failed = report.results.filter { it.error != null }
-    if (failed.isNotEmpty()) parts += "未完成 ${failed.size} 项：${failed.take(3).joinToString("、") { it.sourceName }}"
-    return parts.joinToString("；")
+/**
+ * 复制/移动结果弹层：按原因分组列出文件名。
+ *
+ * 同名组只说明未覆盖；空间不足和权限组就地给出恢复入口，混合原因也能逐组处理，
+ * 不再让用户面对一句“检查是否同名、链接或空间不足”。
+ */
+@Composable
+private fun FileOperationResultDialog(
+    outcome: FileOperationOutcome,
+    onDismiss: () -> Unit,
+    onRecovery: (FileOperationRecovery) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${outcome.action}结果") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(outcome.summary, style = MaterialTheme.typography.titleSmall)
+                Text("目标：${outcome.target}", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                outcome.groups.forEach { group ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text("${group.reason.title}（${group.failures.size} 个）", style = MaterialTheme.typography.titleSmall)
+                    when (group.reason) {
+                        FileOperationReason.DUPLICATE -> Text("同名文件已跳过，原文件没有被覆盖。",
+                            style = MaterialTheme.typography.bodySmall)
+                        FileOperationReason.NO_SPACE -> Text("清理空间后可以重新选择这些文件。",
+                            style = MaterialTheme.typography.bodySmall)
+                        FileOperationReason.PERMISSION -> Text("授权后再试；原文件保持未处理。",
+                            style = MaterialTheme.typography.bodySmall)
+                        FileOperationReason.OTHER -> Text("下面是系统返回的具体原因。",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    group.failures.take(12).forEach { failure ->
+                        val detail = failure.shortDetail.takeIf { group.reason == FileOperationReason.OTHER }
+                        Text(
+                            "· ${failure.name}" + detail?.let { "：$it" }.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (group.failures.size > 12) Text("…另有 ${group.failures.size - 12} 个",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (group.reason == FileOperationReason.NO_SPACE || group.reason == FileOperationReason.PERMISSION) {
+                        TextButton(onClick = { onRecovery(group.recovery) }) { Text(group.actionLabel) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 /** 文件大小格式化委托给可 JVM 回归的纯函数。 */
