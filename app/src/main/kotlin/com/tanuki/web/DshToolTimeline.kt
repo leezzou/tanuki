@@ -409,7 +409,15 @@ object DshToolArguments {
 object DshToolMerge {
     const val MAX_TOOLS = 200
 
-    fun merge(current: List<DshToolItem>, incoming: List<DshToolItem>): List<DshToolItem> {
+    /**
+     * 合并工具卡片。`maxTools = null` 表示不做合并期截断，由调用方的视口窗口统一释放；
+     * 原生聊天页使用这种模式，避免向前分页返回的更早工具在合并时被静默丢弃。
+     */
+    fun merge(
+        current: List<DshToolItem>,
+        incoming: List<DshToolItem>,
+        maxTools: Int? = MAX_TOOLS
+    ): List<DshToolItem> {
         if (incoming.isEmpty()) return current
         val merged = LinkedHashMap<String, DshToolItem>()
         current.forEach { merged[it.callId] = it }
@@ -440,7 +448,8 @@ object DshToolMerge {
                 finishedAt = item.finishedAt ?: previous.finishedAt
             )
         }
-        return merged.values.sortedBy { it.seq }.takeLast(MAX_TOOLS)
+        val sorted = merged.values.sortedBy { it.seq }
+        return if (maxTools == null) sorted else sorted.takeLast(maxTools.coerceAtLeast(1))
     }
 }
 

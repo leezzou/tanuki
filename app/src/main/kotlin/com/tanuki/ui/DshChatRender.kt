@@ -14,26 +14,10 @@ import java.util.Locale
  * 原生聊天渲染层的确定性策略集合。
  *
  * 这里只放不依赖 Android/Compose 运行时的纯函数，便于在 JVM 回归里覆盖：
- * 消息窗口、滚动跟随、流式增量合并、链接/图片/附件分类、错误可读化与代码行号。
+ * 底部判定、流式增量合并、链接/图片/附件分类、错误可读化与代码行号。
+ * 列表锚定、向前分页与内存窗口见 [DshChatAnchorPolicy] 与 [DshChatWindowPolicy]。
  */
-data class DshRenderWindow<T>(
-    val items: List<T>,
-    val hiddenBefore: Int
-) {
-    val hasEarlier: Boolean get() = hiddenBefore > 0
-}
-
-/** 单页渲染窗口。长历史只把末尾一段交给 LazyColumn，避免一次布局整段历史。 */
 object DshChatRenderPolicy {
-    /** 首屏最多渲染的消息/工具项数量；超出部分通过“显示更早”逐步展开。 */
-    const val WINDOW_SIZE = 80
-
-    /** 每次“显示更早”增加的数量。 */
-    const val WINDOW_STEP = 40
-
-    /** 本地已加载列表的最大渲染量；更早内容仍需官方历史页能力。 */
-    const val MAX_WINDOW = 400
-
     /** 单个代码块最多显示行数；完整内容仍可复制。 */
     const val MAX_CODE_LINES = 400
 
@@ -49,15 +33,6 @@ object DshChatRenderPolicy {
     /** 单个 Markdown 消息最多解析的块数；超出时明确提示而不是静默丢弃。 */
     const val MAX_MARKDOWN_BLOCKS = 300
 
-    fun <T> window(items: List<T>, limit: Int = WINDOW_SIZE): DshRenderWindow<T> {
-        val safeLimit = limit.coerceIn(1, MAX_WINDOW)
-        if (items.size <= safeLimit) return DshRenderWindow(items, 0)
-        val hidden = items.size - safeLimit
-        return DshRenderWindow(ArrayList(items.subList(hidden, items.size)), hidden)
-    }
-
-    fun nextWindow(limit: Int): Int = (limit.coerceAtLeast(1) + WINDOW_STEP).coerceAtMost(MAX_WINDOW)
-
     /** 是否已经看到列表最后一项且没有明显向上偏移。 */
     fun isAtBottom(
         lastVisibleIndex: Int,
@@ -70,17 +45,6 @@ object DshChatRenderPolicy {
         if (lastVisibleIndex < totalItems - 1) return false
         return lastItemEndOffset <= viewportEndOffset + tolerance
     }
-
-    /**
-     * 用户主动上滑时立即脱离跟随，避免新内容把阅读位置拉走；
-     * 用户回到底部后恢复跟随。普通程序滚动不改变该状态。
-     */
-    fun followAfterDrag(dragging: Boolean, atBottom: Boolean, following: Boolean): Boolean = when {
-        dragging -> false
-        atBottom -> true
-        else -> following
-    }
-
 }
 
 /**
