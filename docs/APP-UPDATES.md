@@ -1,10 +1,10 @@
 # 应用内更新
 
-**当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
+**当前候选：0.1.14/code19，workspacecheck，最终基线 `main=efc1d9ae4e5d62e6492807d965697a1b863a7511`。** 实核包名 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。六附件已生成并核验于 `artifacts/releases/0.1.14/`。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 以 `release: 0.1.14` PR交付；未合并、未打tag、未创建或上传Release。
 
-0.1.13 包含基线已合并的原生聊天历史分页/停靠条、设计令牌接入、首次启动引导、文件导入与复制移动、统一失败出口、局域网发现与远程页、横屏阅读/复制反馈、QA-10 会话同步/QA-07 阅读状态、文本完整字符分页、全局安装进度浮层与文件空态（#62/#67/#68/#70/#71/#73/#74/#75/#76/#79/#80/#82/#83）；#84 为动效盘点与方案文档，不宣称方案已实现。本轮仅更新发布版本与必要文档，不改产品逻辑。
+0.1.14 基于最终 main，已包含视觉 P2 #103、弹层/抽屉动效 C 批 #98，以及原生聊天/分页/停靠条、首启、文件传输、失败恢复、局域网发现、阅读恢复、主题/文案和动效 A/B/D/E/F。本发布分支只改版本、必要文档及一条过时的传输抽屉源码契约断言；产品逻辑与最终 main 相同。
 
-**本轮未验证：** JVM 全套、lint、Android 仪器执行、设备安装/升级、模拟器/真机 UI、真实 PRoot/DSH/sshd/中继、弱网、真实模型/账号；按用户要求不等待 QA，先出候选包。历史测试记录不作为本版已测依据。API Key 保存与真机/真实模型验收继续暂停。
+**最终集成验证：** 完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 最终集成首轮仅过时源码断言失败，定向6项及全量复跑后通过；中间失败保留于TEST-REPORT。APK实际身份/签名/字节/散列和六附件清单均已核验；未执行设备、Android仪器或真实链路。API Key、真实模型/账号、真机验收继续暂停。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -58,22 +58,22 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）、`v0.1.11`（code13）；本次确认 `v0.1.13`（code18）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）、`v0.1.11`（code13）；本次确认 `v0.1.14`（code19）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
 
-下面命令以本次 0.1.13/code18 候选为例；未来发版替换为用户确认的版本和递增 code：
+下面命令以本次 0.1.14/code19 候选为例；未来发版替换为用户确认的版本和递增 code：
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.13 --version-code 18 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
-脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.13/`：
+脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.14/`：
 
-- `Tanuki-0.1.13-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
-- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.13` 的同一个 Release，不能只上传 APK。
-- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.13-source.zip`、原生对应源码与校验文件。
+- `Tanuki-0.1.14-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
+- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.14` 的同一个 Release，不能只上传 APK。
+- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.14-source.zip`、原生对应源码与校验文件。
 
 清单结构为 `schemaVersion:1` / `packages` 数组，每个包包含 `packageName`、`versionName`、整数 `versionCode/minSdk/bytes`、`assetName`、`sha256`、`certificateSha256`。不要把文档示例或其他包/版本的元数据当成实际附件。更换/重打 APK 后必须重跑生成和外部散列检查。
 
@@ -85,4 +85,4 @@ python3 scripts/prepare-app-release.py --version 0.1.13 --version-code 18 --chan
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-0.1.13 基于 `main=9f5a2fe3` 准备，未合并/未发布；旧版附件保持原样。
+0.1.14 基于 `main=efc1d9ae` 准备，未合并/未发布；旧版附件保持原样。

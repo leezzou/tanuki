@@ -5,9 +5,9 @@
 - 基线：任务起始 `origin/main=62e4c30b`（2026-11-11）。
 - 代码位置：`app/src/main/kotlin/com/tanuki/ui/design/`；页面视觉映射在 `app/src/main/kotlin/com/tanuki/ui/TanukiPageVisuals.kt`。
 - JVM 回归：`app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt`、`app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt`。
-- 相关文档：[原生界面实现边界](NATIVE-UI.md)、[原生界面行为规格](handoffs/20261110-1759-native-ui-parity-spec.md)、[代码规范](code-standards.md)。
+- 相关文档：[原生界面实现边界](NATIVE-UI.md)、[原生界面行为规格](NATIVE-UI-BEHAVIOR-SPEC.md)、[代码规范](code-standards.md)。
 
-当前配色由 android_agent-87 在 `main=7cfe1446effa76d1e7901f839d6a22996778d013` 上实现，android_agent-73 从含#89动效的 `main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935` 落库；第2节配色取值表与落地说明逐行一致，保留主线动效工厂/时长及reduced-motion结构。当前集成验证见 [主题落库交接](handoffs/20261111-1819-sky-theme-landing.md)，下文历史验证均不代表本次设备验收。
+当前配色由 android_agent-87 在 `main=7cfe1446effa76d1e7901f839d6a22996778d013` 上实现，android_agent-73 从含#89动效的 `main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935` 落库；第2节配色取值表与落地说明逐行一致，保留主线动效工厂/时长及reduced-motion结构。当前集成验证见 [主题落库交接](DEVELOPMENT-HISTORY.md#20261111-1819-sky-theme-landing)，下文历史验证均不代表本次设备验收。
 
 ## 1. 设计原则
 
@@ -210,7 +210,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 层级位移按审计约定在 RTL 中镜像；所有同级位移恒为零。返回页采用与进入相反的起点，单槽不保留退出页。`reduced-motion` 直接显示目标态（alpha=1、位移=0、时长=0），动态切换设置也不重建页面内容。
 
-官方 DSH 与浏览器可能持有活 WebView：页面宿主只让原生背景遮罩从不透明到透明，不给网页祖先套 `graphicsLayer` 或移动/缩放，不截图或复制网页。返回网页也只揭示同一实例。嵌套宿主在父宿主正在转场时立即显示目标，保证一次导航只播一层页面动效。文件页旧 `tanukiEnter` 已移除；兼容入口在统一宿主内直接返回原 Modifier，不创建第二段入场。文件查看器保持原来的提前返回和列表弹窗条件，浏览器菜单与授权弹窗不进入页面动效。详情见 [B 批交接](handoffs/20261111-1900-motion-batch-b.md)。
+官方 DSH 与浏览器可能持有活 WebView：页面宿主只让原生背景遮罩从不透明到透明，不给网页祖先套 `graphicsLayer` 或移动/缩放，不截图或复制网页。返回网页也只揭示同一实例。嵌套宿主在父宿主正在转场时立即显示目标，保证一次导航只播一层页面动效。文件页旧 `tanukiEnter` 已移除；兼容入口在统一宿主内直接返回原 Modifier，不创建第二段入场。文件查看器保持原来的提前返回和列表弹窗条件，浏览器菜单与授权弹窗不进入页面动效。详情见 [B 批交接](DEVELOPMENT-HISTORY.md#20261111-1900-motion-batch-b)。
 
 回归 `TanukiPageTransitionsTest` 使用 Compose 实际动画 spec 的时间采样验证主目的地矩阵、层级曲线/方向、RTL、进入/返回方向互逆、0ns 即终态及 WebView 零位移；不把 JVM 策略验证称为 Android 视觉、WebView/Surface 或帧率验收。
 
@@ -222,7 +222,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 聊天历史与实时段均不使用 placement/退出动画；独立 `DshMessageMotionSnapshot` 按会话记录序号水位和新增行资格，只有新追加的已提交行允许 160ms alpha。首屏恢复、加载完成、历史 revision 变化（头插/窗口释放）、旧行重读、流式 delta、发送占位与流式落盘替换立即显示；工具组追加成员不重播。普通重组保留已入场行的 spec，不截断当前淡入。消息分组、渲染 key、锚定与自动/手动滚动逻辑保持原样。
 
-Host 回归 `TanukiListMotionTest` / `DshMessageMotionTest` 覆盖排序时间采样、异步搜索/清空边界、目录/来源/筛选身份、分页/窗口释放、分组与占位对账和 reduced 全 null；它们不代表 Compose 实际挂载、Android 视觉、滚动手势或帧率已验收。适用独立设备 QA 仍须在 PR 最新 SHA 上执行。范围和实际验证见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
+Host 回归 `TanukiListMotionTest` / `DshMessageMotionTest` 覆盖排序时间采样、异步搜索/清空边界、目录/来源/筛选身份、分页/窗口释放、分组与占位对账和 reduced 全 null；它们不代表 Compose 实际挂载、Android 视觉、滚动手势或帧率已验收。适用独立设备 QA 仍须在 PR 最新 SHA 上执行。范围和实际验证见 [D 批交接](DEVELOPMENT-HISTORY.md#20261111-2043-motion-batch-d)。
 
 ## 7. 基础组件
 

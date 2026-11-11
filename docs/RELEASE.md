@@ -13,18 +13,27 @@
 
 **明确禁止：** 等 QA 结果再上传、等文档写完再上传、等 CI 全绿再上传、把打包上传拆成多次确认。已获得的打包上传授权连续执行；实际合并、tag、Release 和上传范围以当次明确授权为准，未验证项如实保留。
 
-**当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
+**当前候选：0.1.14/code19，workspacecheck，最终基线 `main=efc1d9ae4e5d62e6492807d965697a1b863a7511`。** 实核包名 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。六附件已生成并核验于 `artifacts/releases/0.1.14/`。APK **13,093,605 字节**，SHA-256 `87bc0f8b9701eda85afdc384fdafd4953bce8ce334ee1b1fd1d40e42939c1f8f`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 以 `release: 0.1.14` PR交付；未合并、未打tag、未创建或上传Release。
 
-0.1.13 包含基线已合并的原生聊天历史分页/停靠条、设计令牌接入、首次启动引导、文件导入与复制移动、统一失败出口、局域网发现与远程页、横屏阅读/复制反馈、QA-10 会话同步/QA-07 阅读状态、文本完整字符分页、全局安装进度浮层与文件空态（#62/#67/#68/#70/#71/#73/#74/#75/#76/#79/#80/#82/#83）；#84 为动效盘点与方案文档，不宣称方案已实现。本轮仅更新发布版本与必要文档，不改产品逻辑。
+0.1.14 基于最终 main，已包含视觉 P2 #103、弹层/抽屉动效 C 批 #98，以及原生聊天/分页/停靠条、首启、文件传输、失败恢复、局域网发现、阅读恢复、主题/文案和动效 A/B/D/E/F。本发布分支只改版本、必要文档及一条过时的传输抽屉源码契约断言；产品逻辑与最终 main 相同。
 
-**本轮未验证：** JVM 全套、lint、Android 仪器执行、设备安装/升级、模拟器/真机 UI、真实 PRoot/DSH/sshd/中继、弱网、真实模型/账号；按用户要求不等待 QA，先出候选包。历史测试记录不作为本版已测依据。API Key 保存与真机/真实模型验收继续暂停。
+**最终集成验证：** 完整 JVM **1407 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 最终集成首轮仅过时源码断言失败，定向6项及全量复跑后通过；中间失败保留于TEST-REPORT。APK实际身份/签名/字节/散列和六附件清单均已核验；未执行设备、Android仪器或真实链路。API Key、真实模型/账号、真机验收继续暂停。
 
-**用户说要发布时，先询问版本号；已经明确的版本不重复问。** 历史记录：用户确认过 **v0.1.7**（code9）、**v0.1.8**（code10）、**v0.1.9**（code11）、**v0.1.11**（code13）；本次确认 **v0.1.13**（code18），沿用原有 workspacecheck 开发证书。后续封装前须重新核对公开、已安装及归档版本上限，确保 code 严格递增；不能只依据本地默认值判断。
+**用户说要发布时，先询问版本号；已经明确的版本不重复问。** 历史记录：用户确认过 **v0.1.7**（code9）、**v0.1.8**（code10）、**v0.1.9**（code11）、**v0.1.11**（code13）；本次确认 **v0.1.14**（code19），沿用原有 workspacecheck 开发证书。后续封装前须重新核对公开、已安装及归档版本上限，确保 code 严格递增；不能只依据本地默认值判断。
 
 
 源码已推送不等于 Release 已发布；本地打包、Git 提交/推送、创建 tag、上传附件和更改可见性分别遵守当前授权。
 
 发布按开头「发布顺序」连续完成，文档一致性、设备 QA 和遗留项在六附件上传后收尾。封装按已实核 APK 的实际 SHA-256 固定字节；如 APK 字节改变，重新核验，不能沿用旧结果。最终回执与外部校验清单记录交付结果，不为了回填提交自身再制造后续提交。
+
+本次任务按明确的两阶段授权执行：已收到 `rebuild`，完成fetch/merge最终origin/main、版本核对、旧目录检查、普通构建、APK实核及六附件校验；文档/源码副本收尾后统一一次commit/push，创建标题 `release: 0.1.14` 的PR。不合并、不打 tag、不创建或上传 Release。
+
+```bash
+source scripts/ao-worktree-env.sh
+python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck
+```
+
+workspacecheck 的 worktree 环境可能生成新的 debug.keystore，不能假设 `developmentReleaseSigning=true` 自动等于既有证书。必须实核完整 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`；不符时以仓库外既有开发证书重新签名已构建载荷，验证后使用下述固定字节封装模式。不要把密钥或密码加入源码或附件。本次已完成该修正，最终 APK 散列以上文为准。
 
 ## 已确认版本的最终封装
 
@@ -32,32 +41,32 @@
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.13 --version-code 18 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
 两个verified参数必须成对，哈希必须完整匹配。脚本先复制到私有临时文件固定字节，仍检查实际包名、版本、SDK和签名，封装副本再次核hash；只跳过重新编译。此方式避免推送改变AGP提交号元数据后生成另一份未测APK，不能用来宣称未经测试的包已通过。普通构建入口仍保留。
 
-脚本先以发布严格模式校验当前交接（`check-handoff.py --release`，要求印章、记录哈希、公开源码指纹与最新记录一致）；verified模式直接核对已测APK的字节和真实包名/版本/SDK/证书，普通模式才重新构建。输出 **`artifacts/releases/0.1.13/`**（只从此目录取本版发布附件；分类与历史归档见[取包说明](ARTIFACTS.md)）：
+脚本先以发布严格模式校验当前交接（`check-handoff.py --release`，要求印章、记录哈希、公开源码指纹与最新记录一致）；verified模式直接核对已测APK的字节和真实包名/版本/SDK/证书，普通模式才重新构建。输出 **`artifacts/releases/0.1.14/`**（只从此目录取本版发布附件；分类与历史归档见[取包说明](ARTIFACTS.md)）：
 
-- `Tanuki-0.1.13-workspacecheck-arm64-release.apk`
+- `Tanuki-0.1.14-workspacecheck-arm64-release.apk`
 - `app-update.json`：应用内更新所需清单；不是手写的可信证书来源。
-- `Tanuki-0.1.13-source.zip`：完整公开源码，另含必要原生对应源码附件。
+- `Tanuki-0.1.14-source.zip`：完整公开源码，另含必要原生对应源码附件。
 - `Tanuki-native-corresponding-sources.tar.gz`、`native-source-SHA256SUMS`
 - `RELEASE-SHA256SUMS`：以上附件的实际 SHA-256。
 
 该渠道是 **开发证书签名、non-debuggable 的 release 构建**，并非正式签名。目标为 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34；保持原开发证书才能覆盖之前同包测试版。生成过程不读取或上传用户数据，不访问设备，不创建 tag/Release。本版 APK 大小/SHA-256 以发布目录的实际校验清单为准，证书须实核前缀 `371dc301`。
 
 ```bash
-(cd artifacts/releases/0.1.13 && shasum -a 256 -c RELEASE-SHA256SUMS)
+(cd artifacts/releases/0.1.14 && shasum -a 256 -c RELEASE-SHA256SUMS)
 ```
 
-文档/源码变化后也须重打源码 ZIP，并更新发布目录内副本及外部散列，不能沿用打包前的旧 ZIP；已发布的 0.1.11 及更早附件不回写，下一次交付前重新打包。`python3 scripts/package-source.py --version 0.1.13` 仅生成源码包，不重新签发 APK；复制后重新核对发布清单。重新打 APK 则应重新执行准备脚本。
+文档/源码变化后也须重打源码 ZIP，并更新发布目录内副本及外部散列，不能沿用打包前的旧 ZIP；已发布的 0.1.11 及更早附件不回写，下一次交付前重新打包。`python3 scripts/package-source.py --version 0.1.14` 仅生成源码包，不重新签发 APK；复制后重新核对发布清单。重新打 APK 则应重新执行准备脚本。
 
 ## 用户网页发布
 
 1. 完成版本修改、构建、APK 实核与六附件准备，将对应源码提交推送并合并 release PR；tag 应指向与 APK 对应的提交。文档一致性、设备 QA 与遗留项在上传完成后收尾；公开文件与附件的数据边界仍按 [上传检查](PUBLICATION.md) 核对。
-2. GitHub 仓库 → **Releases → Draft a new release**，选择与本版已测源码一致的提交（合入PR后核对源码树），创建未使用的 **`v0.1.13`** tag，标题可为 **Tanuki v0.1.13**。不要只改 tag 而保留 APK 内旧版本。
+2. GitHub 仓库 → **Releases → Draft a new release**，选择与本版已测源码一致的提交（合入PR后核对源码树），创建未使用的 **`v0.1.14`** tag，标题可为 **Tanuki v0.1.14**。不要只改 tag 而保留 APK 内旧版本。
 3. 将上述发布目录的 **全部 6 个附件** 上传到同一个 Release，尤其不能漏掉 `app-update.json`。GitHub 自动生成的 Source code 压缩包不能替代带原生对应源码的完整附件。
 4. 本版为 workspacecheck 开发签名测试包，勾选 **Set as a pre-release**；核对版本说明、仓库可见性和附件，再由用户点击 **Publish release**。
 
@@ -91,7 +100,7 @@ python3 scripts/prepare-app-release.py --version 用户已确认的版本 --vers
 ```bash
 source scripts/env.sh
 ./gradlew -PtestBuildType=debug -PdevelopmentReleaseSigning=true \
-  -PtanukiVersionName=0.1.13 -PtanukiVersionCode=18 \
+  -PtanukiVersionName=0.1.14 -PtanukiVersionCode=19 \
   -I scripts/workspace-verification.init.gradle \
   :app:assembleModernDebug :app:assembleModernRelease
 ```
@@ -104,7 +113,7 @@ PRoot/talloc 等采用 GPL/LGPL，APK 发布必须同时提供精确对应源码
 
 版本说明应列明应用版本/ARM64/SDK、开发或正式签名、证书公开指纹、APK SHA-256；Ubuntu/Node/npm/pnpm/DSH/PRoot 实际版本与来源许可；空间与首次下载、模型 API 数据边界；模拟器/真机/合成登录/真实模型的分别验证范围；WebView123+ 与 Android Linux 沙箱/后台限制；完整源码和构建方式。不要把局部测试等同正式产品验收。
 
-0.1.13 基于 `main=9f5a2fe3` 准备，未合并/未发布；旧版附件保持原样。
+0.1.14 基于 `main=efc1d9ae` 准备，未合并/未发布；旧版附件保持原样。
 
 
 ## 审批规则历史与用户合并

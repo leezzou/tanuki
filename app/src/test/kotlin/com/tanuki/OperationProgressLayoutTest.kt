@@ -81,7 +81,9 @@ class OperationProgressLayoutTest {
         assertTrue("运行时浮层出现后应关闭传输抽屉", Regex(
             "LaunchedEffect\\(runtimeOverlay != null\\)\\s*\\{\\s*if \\(runtimeOverlay != null\\) sheet = false"
         ).containsMatchIn(overlay))
-        assertTrue("传输抽屉与运行时浮层互斥", overlay.contains("if (sheet && runtimeOverlay == null)"))
+        assertTrue("传输抽屉与运行时浮层互斥", Regex(
+            "TransferSheet\\(\\s*visible = sheet && runtimeOverlay == null,"
+        ).containsMatchIn(overlay))
     }
 
     @Test fun `更新页工程说明收起且检查按钮为主操作`() {

@@ -126,7 +126,7 @@
 - `TanukiSaveableStateTest`：原生/官方切换状态与会话二级页状态经 Saver 保存/恢复后完全一致。
 - `TanukiListStateStoreTest`：按会话保存/恢复、页面重进、Saver 跨 Activity 重建、重建后 `LazyListState` 位置、未设置 key、负值钳制、单 key/全部清理与空 key 拒绝。
 
-本轮实际：`compileModernDebugKotlin` 通过；新增 8 个测试类共 56 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 98 个结果文件、**850 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](handoffs/20261110-1745-native-ui-polish.md)；设备结果不在此列。
+本轮实际：`compileModernDebugKotlin` 通过；新增 8 个测试类共 56 tests / 0 failures / 0 errors / 0 skipped；最终完整 JVM 套件 98 个结果文件、**850 tests / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 102 warnings / 1 hint**。详细命令与限制见本轮交接记录 [20261110-1745-native-ui-polish](DEVELOPMENT-HISTORY.md#20261110-1745-native-ui-polish)；设备结果不在此列。
 
 ## 9. 未完成与后续
 

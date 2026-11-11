@@ -3,7 +3,7 @@
 - Agent/会话标识：android_agent-67（AO Worker）
 - 时间：2026-11-11 11:40 CST
 - 状态：已完成计划文档；未改代码；PR 待交付，不合并、不发布
-- 前一记录：[用户旅程审计](20261111-1050-ux-audit.md)
+- 前一记录：[用户旅程审计](UX-AUDIT.md)
 
 > 普通 PR 只新增本记录与计划文档，**没有修改 `docs/AGENT-STATE.md` 或 `docs/handoffs/CURRENT.json`**；共享状态由集成维护方统一刷新。
 

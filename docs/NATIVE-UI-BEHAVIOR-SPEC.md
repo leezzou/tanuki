@@ -4,7 +4,7 @@
 - 编写基线：`origin/main=4f2a3717`（2026-11-10，0.1.11 workspacecheck 候选）。
 - 对齐对象：成熟同类 Android 客户端的公开交互行为。只做运行行为与界面状态观察，结论全部改写成“目标行为”，不复制实现。
 - 适用面：Tanuki 原生界面（Compose）与原生远程连接入口；官方 WebView 回退入口不在本文范围。
-- 配套文档：[原生对齐矩阵](../NATIVE-PARITY.md)（功能域与优先级）、[原生界面实现边界](../NATIVE-UI.md)、[远程连接契约](../REMOTE-CONNECT.md)。
+- 配套文档：[原生对齐矩阵](NATIVE-PARITY.md)（功能域与优先级）、[原生界面实现边界](NATIVE-UI.md)、[远程连接契约](REMOTE-CONNECT.md)。
 
 ## 1. 范围与非目标
 
@@ -813,7 +813,7 @@
 
 ## 10. 风险与开放问题
 
-- **协议差异**：配对二次确认码依赖中继协议；Tanuki 当前契约是 `room/token/hostId/pin`，没有 8 位码。实现时应把“手机显示确认码、电脑端确认”映射为“指纹 + hostId 核对”，或先改 [INTERFACES](../INTERFACES.md) 再实现，不能只为对齐 UI 而新增无协议支撑的假确认。
+- **协议差异**：配对二次确认码依赖中继协议；Tanuki 当前契约是 `room/token/hostId/pin`，没有 8 位码。实现时应把“手机显示确认码、电脑端确认”映射为“指纹 + hostId 核对”，或先改 [INTERFACES](INTERFACES.md) 再实现，不能只为对齐 UI 而新增无协议支撑的假确认。
 - **性能**：语法高亮、图片解码、长列表折叠都可能引入卡顿；P1 实现必须给大文本/大图/长会话上限与降级路径。
 - **安全**：审批自动放行、链接外部打开、图片加载都扩大攻击面；任何放宽都必须有独立审查与设备验证。
 - **可达性**：大字体、深色、读屏是验收项，不是“后续优化”；状态不能只靠颜色表达。
@@ -846,7 +846,7 @@
 - 当前目标包名、分支/无 Git 状态：分支 `ao/native-ui-spec/parity-spec`，基线 `4f2a3717`；无运行中产品任务；未安装 APK、未启动设备。
 - 关键事实与可定位源码/公共文档：
   - 当前实现核对点：`app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt`（无 `LazyListState`）、`DshMarkdown.kt`（无语法高亮/图片加载/链接打开）、`DshComposerController.kt`（发送固定 `mode="queue"`）、`DshApprovalPanel.kt`（允许一次/拒绝/本次运行记住）、`web/DshMuxProtocol.kt`（按块序号累积 text-delta，无帧序号去重、无 reasoning/工具参数增量）、`ui/DshSessionManagerPage.kt`（新建/重命名/归档/搜索/模型/权限）。
-  - 既有矩阵：[原生对齐矩阵](../NATIVE-PARITY.md)；实现边界：[原生界面](../NATIVE-UI.md)；远程契约：[远程连接](../REMOTE-CONNECT.md)。
+  - 既有矩阵：[原生对齐矩阵](NATIVE-PARITY.md)；实现边界：[原生界面](NATIVE-UI.md)；远程契约：[远程连接](REMOTE-CONNECT.md)。
 - 基线说明：任务给定 `origin/main=4f2a3717`；编写时 `origin/main` 已前进到 `326726c`（仅 `docs: correct 0.1.11 post-release status` 文档提交）。本分支按要求基于 `4f2a3717`，未 rebase 到 `326726c`；合并前由集成方按最新 `origin/main` 处理。
 
 ## 本次改动
