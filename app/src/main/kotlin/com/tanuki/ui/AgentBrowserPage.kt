@@ -396,7 +396,7 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
         }
     }
     }
-    menu?.let { page -> BrowserMenuSheet(page == "tools", state.url.isNotEmpty() && !state.loading,
+    BrowserMenuSheet(menu, state.url.isNotEmpty() && !state.loading,
         onBack = { menu = "main" }, onDismiss = { menu = null }, onChoose = { name ->
             when (name) {
                 "工具箱" -> menu = "tools"
@@ -407,7 +407,8 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
                 "收藏当前页" -> { menu = null; bookmarkTitle = state.title; bookmarkFolder = library.bookmarks.firstOrNull { it.url == state.url }?.folder ?: "收藏夹"; dialog = name }
                 else -> showPage(name)
             }
-        }) }
+        })
+
     if (state.takeoverRequested && state.overlayFrame == null) AlertDialog(onDismissRequest = { controller.resolveTakeover(false) }, title = { Text("收回 AI 浏览器操作权限？") },
         text = { Column {
             Text("AI 操作已暂停，这次点击尚未执行。临时接管期间 AI 可查看网页，不能点击、输入或导航；30 秒未操作会自动交回操作权。")

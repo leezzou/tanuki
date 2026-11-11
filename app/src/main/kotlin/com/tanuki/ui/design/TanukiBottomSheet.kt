@@ -3,8 +3,8 @@ package com.tanuki.ui.design
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -50,13 +50,14 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.tanuki.ui.tanukiOverlayInput
 
 /**
  * 底部弹层骨架，支持下拉关闭。
  *
  * - 遮罩点击、返回键、向下拖动超过约 96dp 都会请求关闭。
  * - 拖动只改变弹层自身位移，不改变页面滚动或内容状态。
- * - 结构动画使用 240–340ms；系统移除动画时时长为 0。
+ * - 面板仅位移：打开 280ms enter，关闭 240ms exit；遮罩单独淡化 160ms。
  * - 调用方应把本组件放在页面根部，确保遮罩覆盖整个页面。
  * - 内容区不内置滚动；长内容由调用方使用 LazyColumn 或 verticalScroll，
  *   并自行处理与下拉手势的边界。
@@ -78,6 +79,7 @@ internal fun TanukiBottomSheet(
      * 包裹，避免小弹层被拉成全屏。
      */
     heightFraction: Float? = null,
+    onHidden: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = TanukiDesign.tokens
@@ -85,8 +87,14 @@ internal fun TanukiBottomSheet(
     val dismissThreshold = with(density) { 96.dp.toPx() }
     val sheetShape = TanukiSheetShape
     val spec = TanukiElevation.of(TanukiSurfaceLayer.Sheet)
-    val enterMs = if (tokens.reducedMotion) 0 else TanukiMotion.sheetOpen.durationMs
-    val exitMs = if (tokens.reducedMotion) 0 else TanukiMotion.sheetDismiss.durationMs
+    val motion = TanukiDesign.motion
+    val visibility = remember { MutableTransitionState(false) }
+    visibility.targetState = visible
+    val transition = rememberTransition(visibility, label = "底部弹层")
+    val hidden by rememberUpdatedState(onHidden)
+    LaunchedEffect(visibility.isIdle, visibility.currentState, visible) {
+        if (visibility.isIdle && !visibility.currentState && !visible) hidden()
+    }
     val scope = rememberCoroutineScope()
     val dismiss by rememberUpdatedState(onDismissRequest)
     var dragOffset by remember { mutableFloatStateOf(0f) }
@@ -94,6 +102,7 @@ internal fun TanukiBottomSheet(
     val settle = remember { Animatable(0f) }
 
     LaunchedEffect(visible) {
+        settle.stop()
         if (visible) {
             dragOffset = 0f
             dragging = false
@@ -103,10 +112,10 @@ internal fun TanukiBottomSheet(
     BackHandler(enabled = visible) { dismiss() }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn(animationSpec = tween(enterMs)),
-            exit = fadeOut(animationSpec = tween(exitMs)),
+        transition.AnimatedVisibility(
+            visible = { it },
+            enter = fadeIn(animationSpec = motion.scrim()),
+            exit = fadeOut(animationSpec = motion.scrim()),
         ) {
             Box(
                 Modifier
@@ -115,24 +124,25 @@ internal fun TanukiBottomSheet(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClick = { dismiss() },
+                        onClick = { if (visible) dismiss() },
                     ),
             )
         }
 
-        AnimatedVisibility(
-            visible = visible,
+        transition.AnimatedVisibility(
+            visible = { it },
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically(
-                animationSpec = tween(enterMs, easing = FastOutSlowInEasing),
-            ) { fullHeight -> fullHeight } + fadeIn(animationSpec = tween(enterMs)),
+                animationSpec = motion.sheet(true),
+            ) { fullHeight -> fullHeight },
             exit = slideOutVertically(
-                animationSpec = tween(exitMs, easing = FastOutSlowInEasing),
-            ) { fullHeight -> fullHeight } + fadeOut(animationSpec = tween(exitMs)),
+                animationSpec = motion.sheet(false),
+            ) { fullHeight -> fullHeight },
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .tanukiOverlayInput(visible)
                     .then(if (heightFraction != null) Modifier.fillMaxHeight(heightFraction) else Modifier)
                     .graphicsLayer {
                         translationY = if (dragging) dragOffset else settle.value
@@ -145,7 +155,8 @@ internal fun TanukiBottomSheet(
                     .clip(sheetShape)
                     .background(Color(tokens.colors.sheet))
                     .border(0.75.dp, Color(tokens.colors.hairline), sheetShape)
-                    .pointerInput(visible, dismissThreshold) {
+                    .pointerInput(visible, dismissThreshold, motion.reducedMotion) {
+                        if (!visible) return@pointerInput
                         detectVerticalDragGestures(
                             onDragStart = {
                                 dragging = true
@@ -170,10 +181,7 @@ internal fun TanukiBottomSheet(
                                         dragging = false
                                         settle.animateTo(
                                             targetValue = 0f,
-                                            animationSpec = tween(
-                                                durationMillis = if (tokens.reducedMotion) 0 else TanukiMotion.sheetDismiss.durationMs,
-                                                easing = FastOutSlowInEasing,
-                                            ),
+                                            animationSpec = motion.settle(),
                                         )
                                     }
                                 }
@@ -184,10 +192,7 @@ internal fun TanukiBottomSheet(
                                     dragging = false
                                     settle.animateTo(
                                         targetValue = 0f,
-                                        animationSpec = tween(
-                                            durationMillis = if (tokens.reducedMotion) 0 else TanukiMotion.sheetDismiss.durationMs,
-                                            easing = FastOutSlowInEasing,
-                                        ),
+                                        animationSpec = motion.settle(),
                                     )
                                 }
                             },

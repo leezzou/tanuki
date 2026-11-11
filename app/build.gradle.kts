@@ -85,4 +85,8 @@ dependencies {
     testImplementation("net.sf.kxml:kxml2:2.3.0")
     androidTestImplementation("androidx.test:runner:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    // 仅合成 Compose 仪器回归使用可控帧时钟及独立 Activity，不启动真实运行时。
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.02.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

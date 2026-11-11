@@ -49,7 +49,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
@@ -59,7 +58,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -428,8 +426,8 @@ fun DshSessionManagerPage(
         }
     }
 
-    if (hostSheet) {
-        HostPickerSheet(
+    HostPickerSheet(
+            visible = hostSheet,
             hosts = hosts,
             busy = hostBusy,
             onDismiss = { hostSheet = false },
@@ -438,7 +436,6 @@ fun DshSessionManagerPage(
                 onSelectHost(id)
             }
         )
-    }
 
     // 列表层发起的弹层（新建、批量归档、批量上限）使用页面内 TanukiBottomSheet，
     // 展开/收起走 240-340ms 结构动效；从详情窗口发起的三条二级确认（重命名、
@@ -665,132 +662,139 @@ fun DshSessionManagerPage(
         )
     }
 
-    if (session != null) {
-        // 详情沿用系统 ModalBottomSheet：拖拽、返回键和输入法行为由平台处理，
-        // 其 300ms 结构动画本身落在令牌 240-340ms 区间；内容仍使用令牌间距与组件。
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = {
-                detailId = null
-                detailModeName = DshDetailMode.DETAIL.name
-                detailTabName = DshDetailTab.OVERVIEW.name
-                controller.closeDetail()
-            },
-            sheetState = sheetState
+    TanukiModalSheet(
+        value = session?.let { DetailSheetModel(it, state, detailMode, detailTab) },
+        onDismissRequest = {
+            detailId = null
+            detailModeName = DshDetailMode.DETAIL.name
+            detailTabName = DshDetailTab.OVERVIEW.name
+            controller.closeDetail()
+        },
+    ) { shown ->
+        // 系统窗口保持唯一动画所有者；关闭后 tab 与控制器状态只影响下一次打开。
+        val session = shown.session
+        val state = shown.state
+        val detailMode = shown.mode
+        val detailTab = shown.tab
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 620.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = TanukiSpace.XL_DP.dp)
+                .padding(bottom = TanukiSpace.XXL_DP.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
         ) {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 620.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = TanukiSpace.XL_DP.dp)
-                    .padding(bottom = TanukiSpace.XXL_DP.dp)
-                    .navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(TanukiSpace.MD_DP.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (detailMode != DshDetailMode.DETAIL) {
-                        IconButton(onClick = { detailModeName = DshDetailMode.DETAIL.name }) {
-                        detailTabName = DshDetailTab.OVERVIEW.name
-                            Icon(Icons.Default.ArrowBack, "返回对话详情")
-                        }
-                    }
-                    Text(
-                        when (detailMode) {
-                            DshDetailMode.DETAIL -> "对话详情"
-                            DshDetailMode.MODELS -> "模型与推理强度"
-                            DshDetailMode.PERMISSIONS -> "权限模式"
-                            DshDetailMode.CATALOG -> "Skills 与斜杠命令"
-                        },
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    IconButton(onClick = {
-                        detailId = null
-                        detailModeName = DshDetailMode.DETAIL.name
-                        detailTabName = DshDetailTab.OVERVIEW.name
-                        controller.closeDetail()
-                    }) { Icon(Icons.Default.Close, "关闭详情") }
-                }
-                state.error?.let { SelectionErrorCard("操作未完成", it) }
-                state.notice?.let { SelectionNoticeCard(it) }
-                if (detailMode == DshDetailMode.DETAIL) {
-                    PrimaryTabRow(selectedTabIndex = detailTab.ordinal) {
-                        DshDetailTab.entries.forEach { tab ->
-                            Tab(
-                                selected = detailTab == tab,
-                                onClick = { detailTabName = tab.name },
-                                text = { Text(tab.label) }
-                            )
-                        }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (detailMode != DshDetailMode.DETAIL) {
+                    IconButton(onClick = { detailModeName = DshDetailMode.DETAIL.name }) {
+                    detailTabName = DshDetailTab.OVERVIEW.name
+                        Icon(Icons.Default.ArrowBack, "返回对话详情")
                     }
                 }
-                when (detailMode) {
-                    DshDetailMode.DETAIL -> when (detailTab) {
-                        DshDetailTab.OVERVIEW -> DetailHome(
-                            session = session,
-                            catalog = state.models,
-                            pinned = session.id in state.pinnedIds,
-                            readOnly = readOnly,
-                            onTogglePin = { controller.togglePinned(session.id) },
-                            onModels = {
-                                controller.clearMessages()
-                                detailModeName = DshDetailMode.MODELS.name
-                            },
-                            onPermissions = {
-                                controller.clearMessages()
-                                detailModeName = DshDetailMode.PERMISSIONS.name
-                            },
-                            onCatalog = {
-                                controller.clearMessages()
-                                detailModeName = DshDetailMode.CATALOG.name
-                            },
-                            onRename = {
-                                renameTitle = session.displayTitle
-                                renameTarget = session
-                            },
-                            onArchive = { archiveTarget = session },
-                            onCopyId = {
-                                clipboard.setText(AnnotatedString(session.id))
-                                Toast.makeText(context, "已复制会话 ID", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                        DshDetailTab.PROGRESS -> DetailProgressTab(session)
-                        DshDetailTab.ARTIFACTS -> DetailArtifactsTab()
-                        DshDetailTab.FILES -> DetailFilesTab(
-                            session = session,
-                            onCopyPath = { path ->
-                                clipboard.setText(AnnotatedString(path))
-                                Toast.makeText(context, "已复制工作目录", Toast.LENGTH_SHORT).show()
-                            }
+                Text(
+                    when (detailMode) {
+                        DshDetailMode.DETAIL -> "对话详情"
+                        DshDetailMode.MODELS -> "模型与推理强度"
+                        DshDetailMode.PERMISSIONS -> "权限模式"
+                        DshDetailMode.CATALOG -> "Skills 与斜杠命令"
+                    },
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge
+                )
+                IconButton(onClick = {
+                    detailId = null
+                    detailModeName = DshDetailMode.DETAIL.name
+                    detailTabName = DshDetailTab.OVERVIEW.name
+                    controller.closeDetail()
+                }) { Icon(Icons.Default.Close, "关闭详情") }
+            }
+            state.error?.let { SelectionErrorCard("操作未完成", it) }
+            state.notice?.let { SelectionNoticeCard(it) }
+            if (detailMode == DshDetailMode.DETAIL) {
+                PrimaryTabRow(selectedTabIndex = detailTab.ordinal) {
+                    DshDetailTab.entries.forEach { tab ->
+                        Tab(
+                            selected = detailTab == tab,
+                            onClick = { detailTabName = tab.name },
+                            text = { Text(tab.label) }
                         )
                     }
-                    DshDetailMode.MODELS -> ModelsPane(
-                        state = state,
+                }
+            }
+            when (detailMode) {
+                DshDetailMode.DETAIL -> when (detailTab) {
+                    DshDetailTab.OVERVIEW -> DetailHome(
                         session = session,
-                        onSelect = { selection -> controller.selectModel(session.id, selection) },
-                        onRetry = { controller.loadModels(force = true) }
-                    )
-                    DshDetailMode.PERMISSIONS -> PermissionsPane(
-                        state = state,
-                        session = session,
-                        onSelect = { preset ->
-                            if (preset == "danger-full-access") {
-                                fullAccessAcknowledged = false
-                                fullAccess = session.id to preset
-                            } else {
-                                controller.selectPermission(session.id, preset)
-                            }
+                        catalog = state.models,
+                        pinned = session.id in state.pinnedIds,
+                        readOnly = readOnly,
+                        onTogglePin = { controller.togglePinned(session.id) },
+                        onModels = {
+                            controller.clearMessages()
+                            detailModeName = DshDetailMode.MODELS.name
                         },
-                        onRetry = { controller.loadPermissions(force = true) }
+                        onPermissions = {
+                            controller.clearMessages()
+                            detailModeName = DshDetailMode.PERMISSIONS.name
+                        },
+                        onCatalog = {
+                            controller.clearMessages()
+                            detailModeName = DshDetailMode.CATALOG.name
+                        },
+                        onRename = {
+                            renameTitle = session.displayTitle
+                            renameTarget = session
+                        },
+                        onArchive = { archiveTarget = session },
+                        onCopyId = {
+                            clipboard.setText(AnnotatedString(session.id))
+                            Toast.makeText(context, "已复制会话 ID", Toast.LENGTH_SHORT).show()
+                        }
                     )
-                    DshDetailMode.CATALOG -> CatalogPane(
-                        state = state,
-                        onRetry = { controller.loadSessionCatalog(session.id) }
+                    DshDetailTab.PROGRESS -> DetailProgressTab(session)
+                    DshDetailTab.ARTIFACTS -> DetailArtifactsTab()
+                    DshDetailTab.FILES -> DetailFilesTab(
+                        session = session,
+                        onCopyPath = { path ->
+                            clipboard.setText(AnnotatedString(path))
+                            Toast.makeText(context, "已复制工作目录", Toast.LENGTH_SHORT).show()
+                        }
                     )
                 }
+                DshDetailMode.MODELS -> ModelsPane(
+                    state = state,
+                    session = session,
+                    onSelect = { selection -> controller.selectModel(session.id, selection) },
+                    onRetry = { controller.loadModels(force = true) }
+                )
+                DshDetailMode.PERMISSIONS -> PermissionsPane(
+                    state = state,
+                    session = session,
+                    onSelect = { preset ->
+                        if (preset == "danger-full-access") {
+                            fullAccessAcknowledged = false
+                            fullAccess = session.id to preset
+                        } else {
+                            controller.selectPermission(session.id, preset)
+                        }
+                    },
+                    onRetry = { controller.loadPermissions(force = true) }
+                )
+                DshDetailMode.CATALOG -> CatalogPane(
+                    state = state,
+                    onRetry = { controller.loadSessionCatalog(session.id) }
+                )
             }
         }
     }
 }
+
+private data class DetailSheetModel(
+    val session: DshAdminSession,
+    val state: DshSessionManagerState,
+    val mode: DshDetailMode,
+    val tab: DshDetailTab,
+)
 
 @Composable
 private fun ManagerHeader(
@@ -872,13 +876,13 @@ private fun HostChip(host: DshSessionHost, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HostPickerSheet(
+    visible: Boolean,
     hosts: List<DshSessionHost>,
     busy: Boolean,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    TanukiModalSheet(value = hosts.takeIf { visible }, onDismissRequest = onDismiss) { shown ->
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -889,7 +893,7 @@ private fun HostPickerSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            hosts.forEach { host ->
+            shown.forEach { host ->
                 Surface(
                     shape = TanukiShapeTokens.control,
                     color = if (host.active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,

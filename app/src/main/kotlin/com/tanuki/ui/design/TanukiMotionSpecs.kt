@@ -39,6 +39,11 @@ internal class TanukiMotionSpecs(val reducedMotion: Boolean) {
         easing = if (entering) TanukiMotionEasing.enter else TanukiMotionEasing.exit,
     )
     fun <T> state(): TweenSpec<T> = toggle()
+    fun <T> sheet(opening: Boolean): TweenSpec<T> = tween(
+        duration(if (opening) TanukiMotion.sheetOpen else TanukiMotion.layout),
+        easing = if (opening) TanukiMotionEasing.enter else TanukiMotionEasing.exit,
+    )
+    fun <T> scrim(): TweenSpec<T> = toggle()
     fun <T> expand(opening: Boolean, longDetail: Boolean = false): TweenSpec<T> = tween(
         duration(if (opening && longDetail) TanukiMotion.expand else TanukiMotion.layout),
         easing = when {

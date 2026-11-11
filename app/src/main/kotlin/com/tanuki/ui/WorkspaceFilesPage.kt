@@ -855,7 +855,8 @@ internal fun WorkspaceFilesPage(
             },
         )
     }
-    if (permissionSheet) PermissionSheet(
+    PermissionSheet(
+        visible = permissionSheet,
         state = access,
         location = location,
         runtimeRunning = runtimeRunning,
@@ -1140,9 +1141,10 @@ internal fun FileTransferOverlay(
                     else bottomInset + 16.dp))
         }
     }
-    if (sheet && runtimeOverlay == null) {
-        TransferSheet(transfers = items, onDismiss = { sheet = false }, onCancel = onCancelTransfer)
-    }
+    TransferSheet(
+        visible = sheet && runtimeOverlay == null,
+        transfers = items, onDismiss = { sheet = false }, onCancel = onCancelTransfer,
+    )
 }
 
 /**
@@ -1169,9 +1171,19 @@ private fun PermissionChip(
     )
 }
 
+/** 关闭期间只保存展示字段；权限动作仍校验当前 visible。 */
+private data class PermissionSheetModel(
+    val state: FileAccessState,
+    val location: FileLocation,
+    val runtimeRunning: Boolean,
+    val phoneStorageGranted: Boolean,
+    val phoneWritingAvailable: Boolean,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PermissionSheet(
+    visible: Boolean,
     state: FileAccessState,
     location: FileLocation,
     runtimeRunning: Boolean,
@@ -1183,8 +1195,16 @@ private fun PermissionSheet(
     onRevokeWrite: () -> Unit,
     onStopDsh: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    TanukiModalSheet(
+        value = if (visible) PermissionSheetModel(state, location, runtimeRunning,
+            phoneStorageGranted, phoneWritingAvailable) else null,
+        onDismissRequest = onDismiss,
+    ) { shown ->
+        val state = shown.state
+        val location = shown.location
+        val runtimeRunning = shown.runtimeRunning
+        val phoneStorageGranted = shown.phoneStorageGranted
+        val phoneWritingAvailable = shown.phoneWritingAvailable
         Column(
             Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())
                 .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),
@@ -1212,20 +1232,20 @@ private fun PermissionSheet(
             when {
                 state.needsStorageGrant -> TanukiPillButton(
                     text = "允许访问文件",
-                    onClick = onRequestStorage,
+                    onClick = { if (visible) onRequestStorage() },
                     tone = TanukiPillButtonTone.Filled,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.canGrantPhoneWrite -> TanukiPillButton(
                     text = "允许本次写入",
-                    onClick = onRequestWrite,
+                    onClick = { if (visible) onRequestWrite() },
                     enabled = phoneWritingAvailable,
                     tone = TanukiPillButtonTone.Filled,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.canRevokePhoneWrite -> TanukiPillButton(
                     text = "撤销助手写入",
-                    onClick = onRevokeWrite,
+                    onClick = { if (visible) onRevokeWrite() },
                     tone = TanukiPillButtonTone.Tonal,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1248,7 +1268,7 @@ private fun PermissionSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TanukiPillButton(
                     text = "停止助手",
-                    onClick = onStopDsh,
+                    onClick = { if (visible) onStopDsh() },
                     tone = TanukiPillButtonTone.Outline,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1318,28 +1338,23 @@ private fun TransferPill(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TransferSheet(
+    visible: Boolean,
     transfers: List<FileTransferProgress>,
     onDismiss: () -> Unit,
     onCancel: (Long) -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    var lastTransfers by remember { mutableStateOf(transfers) }
-    SideEffect { if (transfers.isNotEmpty()) lastTransfers = transfers }
-    val displayed = transfers.ifEmpty { lastTransfers }
-    fun dismiss() { scope.launch { sheetState.hide(); onDismiss() } }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     // sheet 打开期间每秒刷新剩余时间；浮层本身只随真实字节进度重组。
-    LaunchedEffect(transfers.size) {
-        while (transfers.isNotEmpty()) {
+    LaunchedEffect(visible, transfers.size) {
+        while (visible && transfers.isNotEmpty()) {
             delay(1000)
             now = SystemClock.elapsedRealtime()
         }
     }
-    LaunchedEffect(transfers.isEmpty()) {
-        if (transfers.isEmpty()) { sheetState.hide(); onDismiss() }
-    }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    LaunchedEffect(visible, transfers.isEmpty()) { if (visible && transfers.isEmpty()) onDismiss() }
+    TanukiModalSheet(
+        value = transfers.takeIf { visible && it.isNotEmpty() }, onDismissRequest = onDismiss,
+    ) { shown ->
         Column(
             Modifier.fillMaxWidth().heightIn(max = 620.dp).verticalScroll(rememberScrollState())
                 .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),
@@ -1347,9 +1362,9 @@ private fun TransferSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("传输进度", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                IconButton(onClick = ::dismiss) { Icon(Icons.Default.Close, "关闭传输详情") }
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭传输详情") }
             }
-            FileTransferPresentation.summary(displayed)?.let { summary ->
+            FileTransferPresentation.summary(shown)?.let { summary ->
                 Text(
                     if (summary.percent != null) "总进度 ${summary.percent}% · ${summary.count} 个文件任务"
                     else "${summary.count} 个文件任务 · 总大小未知",
@@ -1357,10 +1372,11 @@ private fun TransferSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            displayed.forEach { item ->
+            shown.forEach { item ->
                 key(item.id) {
-                    TransferRow(item = item, now = now, onCancel = { if (transfers.any { it.id == item.id }) onCancel(item.id) },
-                        enabled = transfers.any { it.id == item.id })
+                    TransferRow(item = item, now = now, onCancel = {
+                        if (visible && transfers.any { it.id == item.id }) onCancel(item.id)
+                    }, enabled = visible && transfers.any { it.id == item.id })
                 }
             }
             Text("进度按实际复制或下载的字节计算；总大小未知时显示不定进度，不估造百分比。",
