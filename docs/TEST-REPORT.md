@@ -2,6 +2,19 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 文件导入命名与手机存储复制/移动验证（2026-11-11，android_agent-70，非设备）
+
+- 范围：P0 #4/#5，基于 `origin/main=732cb79`、分支 `ao/file-import-move/p0-file-import-move`。导入最终目录改为源文件名/时间戳并用 ` (2)`/` (3)` 去重；导入完成 Snackbar「已导入 N 个文件到「目录」」+「打开」并在文件页刷新；手机存储条目/批量新增复制、移动到工作区，目标目录默认最近工作区目录且可改；移动先流式复制并回读 SHA-256 校验成功再删源；冲突保留两者/替换/跳过与批量全部应用；取消清理暂存。只改文件页与存储层，不碰聊天页。
+- 实际执行（本 worktree，JDK17、Android SDK、macOS ARM64）：
+  - `./gradlew testModernDebugUnitTest` → BUILD SUCCESSFUL；**1098 tests / 113 个结果文件 / 0 failures / 0 errors / 0 skipped**。第一次完整运行出现既有 `NpmAdaptiveWorkerPoolTest` 时序失败（8 vs 9），单独重跑与完整重跑均通过；该用例与本改动无调用关系，失败未抹掉。
+  - 定向 `ImportNamingTest`、`TransferEngineTest` → 14 tests / 0 failures。
+  - `./gradlew lintModernDebug` → BUILD SUCCESSFUL；**0 errors / 109 warnings / 1 hint**。
+  - `./gradlew assembleModernDebug` → BUILD SUCCESSFUL；开发 debug APK 17,559,104 字节、SHA-256 `a7bda140...`，未安装。
+  - `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugAndroidTestKotlin` → BUILD SUCCESSFUL（仅编译）；`assembleModernProbeAndroidTest` → BUILD SUCCESSFUL。
+- 新增 14 项 JVM 回归：单文件去扩展名、多文件时间戳、重名 `(2)`/`(3)` 且不改已有条目、用户可编辑名清洗、长中文 UTF-8 字节上限；复制保留源、移动复制校验期间源仍在且成功后删除、失败/取消不留暂存与目标、目录递归移动、替换文件、拒绝替换目录、批量全部应用、批量替换不作用于目录。
+- 未执行：真实设备/模拟器 SAF 多选、手机存储授权/撤销、复制/移动真实进度与取消、移动删源失败、冲突三选与全部应用、深色/大字体/360dp/TalkBack；Android 仪器测试未运行；独立 Review、CI、合并与发布未执行。编译/JVM/lint 不能替代设备验收。
+- 已知边界：长文件名按 220 字节截断可能丢失末尾扩展名；冲突预检与写入之间若外部新建同名条目，保留两者会再改名、替换仍拒绝目录；R4.3 顶部一级导入图标与搜索/排序重排本轮未做。
+
 ## 文件页信息层级重构验证（2026-11-10，android_agent-58，非设备）
 
 - 范围：`WorkspaceFilesPage` 顶部 56dp 主操作行、可横滚面包屑/搜索/选择三态第二行、权限 chip 与底部 sheet、传输悬浮胶囊与详情 sheet、Snackbar 提示、列表满高和固定底部避让；同时让文件页隐藏全局传输 banner，新增权限/传输纯状态与格式化回归。起点 `origin/main=1122d3f`，已 rebase 到最新 `origin/main=811b5d2`；分支 `ao/files-layout/info-hierarchy`，PR [#58](https://github.com/leezzou/tanuki/pull/58)，不合并、不发布。

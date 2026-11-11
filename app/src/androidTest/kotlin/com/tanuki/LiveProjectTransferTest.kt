@@ -61,7 +61,7 @@ class LiveProjectTransferTest {
 
             assertTrue(concurrentWrite)
             assertEquals("agent-original-updated", existing.readText())
-            assertTrue(imported.name.startsWith("import-"))
+            assertEquals("shared", imported.name)
             assertEquals(paths.workspaces.canonicalFile, imported.canonicalFile.parentFile)
             assertArrayEquals(payload, File(imported, "shared.txt").readBytes())
             assertEquals(payload.size.toLong(), progress.last())

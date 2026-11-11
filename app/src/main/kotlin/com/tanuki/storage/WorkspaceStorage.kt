@@ -227,10 +227,20 @@ class WorkspaceStorage(private val paths: Paths) {
         check(!sample.lowDisk) { "导入后设备剩余空间不足，已保留原有项目" }
     }
 
-    /** 调用方持有环境事务锁；运行中导入只提交独立的新项目，不覆盖已有文件。 */
-    suspend fun importFiles(names: List<String>, onProgress: (Long) -> Unit = {}, openSource: (Int) -> InputStream): File = withContext(Dispatchers.IO) {
+    /**
+     * 调用方持有环境事务锁；运行中导入只提交独立的新项目，不覆盖已有文件。
+     * 项目名默认取源文件名（单文件去扩展名）或时间戳；重名追加 (2)、(3)，
+     * 同一批出现同名文件时也只在项目内改名，不让整批失败。
+     */
+    suspend fun importFiles(
+        names: List<String>,
+        projectName: String? = null,
+        onProgress: (Long) -> Unit = {},
+        openSource: (Int) -> InputStream,
+    ): File = withContext(Dispatchers.IO) {
         val token = java.util.UUID.randomUUID().toString()
         val stage = File(paths.workspaces, ".import-$token")
+        val desiredName = ImportNaming.projectName(names, projectName)
         val allowance = beginImport(names.size)
         var recorded = false
         var stageOwned = false
@@ -249,8 +259,7 @@ class WorkspaceStorage(private val paths: Paths) {
             stageOwned = true
             names.forEachIndexed { index, display ->
                 currentCoroutineContext().ensureActive()
-                val name = File(display).name
-                require(name !in setOf("", ".", "..") && !name.contains('\u0000') && !File(stage, name).exists()) { "导入文件名重复或不安全" }
+                val name = ImportNaming.uniqueName(File(display).name) { candidate -> File(stage, candidate).exists() }
                 allowance.beforeWrite(0)
                 openSource(index).use { input -> File(stage, name).outputStream().use { output ->
                     val buffer = ByteArray(65536)
@@ -266,8 +275,7 @@ class WorkspaceStorage(private val paths: Paths) {
                 } }
             }
             requireCanCommitImport()
-            val destination = File(paths.workspaces, "import-$token")
-            check(!destination.exists() && stage.renameTo(destination)) { "无法提交项目导入，原有项目已保留" }
+            val destination = commitUnique(stage, desiredName)
             committed = true
             destination
         } catch (error: Throwable) { originalFailure = error; throw error }
@@ -288,6 +296,22 @@ class WorkspaceStorage(private val paths: Paths) {
                 }
             }
         }
+    }
+
+    /** 在 workspaces 内选择第一个未被占用的项目名；rename 失败且目标已存在时继续尝试下一个。 */
+    private fun commitUnique(stage: File, desired: String): File {
+        for (index in 1..10_000) {
+            val destination = File(paths.workspaces, ImportNaming.numbered(desired, index))
+            if (destination.exists()) continue
+            try {
+                Files.move(stage.toPath(), destination.toPath())
+                return destination
+            } catch (error: java.io.IOException) {
+                // 并发导入/新建目录抢到同名目标时重新选名；其他错误必须原样抛出。
+                if (!destination.exists()) throw error
+            }
+        }
+        throw IllegalStateException("无法为导入项目分配唯一名称，原有项目已保留")
     }
 
     /** Called by a watcher tied to one runtime; it does not itself terminate anything. */

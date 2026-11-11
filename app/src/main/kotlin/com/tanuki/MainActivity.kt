@@ -35,9 +35,11 @@ import com.tanuki.storage.ExternalDocumentAccess
 import com.tanuki.storage.ExternalDocumentDescriptor
 import com.tanuki.storage.ExternalDocumentPolicy
 import com.tanuki.storage.ExternalDocumentSaveState
+import com.tanuki.storage.FileLocation
 import com.tanuki.storage.OpenDocument
 import com.tanuki.storage.PhoneStorageAccess
 import com.tanuki.storage.DirectoryUsage
+import com.tanuki.storage.WorkspaceTransferMode
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.browser.AgentBrowserController
 import com.tanuki.browser.BrowserIntegration
@@ -51,6 +53,7 @@ import com.tanuki.ui.DshNativePage
 import com.tanuki.ui.DshSessionManagerActivity
 import com.tanuki.ui.SharedPreferencesDshDraftStore
 import com.tanuki.ui.WorkspaceFilesPage
+import com.tanuki.ui.WorkspaceImportEvent
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.TanukiUi
 import com.tanuki.ui.TanukiUiCallbacks
@@ -126,6 +129,9 @@ class MainActivity : ComponentActivity() {
     private var externalConsumedRequest: String? = null
     private val externalOpenSequence = AtomicLong(0)
     private var filesOpenRequest by mutableIntStateOf(0)
+    // 文件页用一次性事件显示导入结果与“打开”动作；序号在 Activity 生命周期内单调递增。
+    private var importEvent by mutableStateOf<WorkspaceImportEvent?>(null)
+    private var importSequence = 0L
     private var phoneStorageGranted by mutableStateOf(false)
     private val phoneStoragePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         phoneStorageGranted = PhoneStorageAccess.isGranted(this)
@@ -717,6 +723,14 @@ class MainActivity : ComponentActivity() {
                             onRevokePhoneWrite = { manager.phoneFiles.setWriteAllowed(false) },
                             transfers = manager.fileTransfers.state,
                             onCancelTransfer = { manager.fileTransfers.cancel(it) },
+                            importEvent = importEvent,
+                            onTransferToWorkspace = { sources, target, mode, decisions ->
+                                manager.fileTransfers.track(if (mode == WorkspaceTransferMode.MOVE) "移动到工作区" else "复制到工作区") { id ->
+                                    workspaceFiles.inLocation(FileLocation.PHONE).transferToWorkspace(
+                                        sources, target, mode, decisions,
+                                    ) { received, total -> manager.fileTransfers.update(id, received, total) }
+                                }
+                            },
                             previewMaxDimension = deviceCondition.previewMaxDimension,
                             previewMaxPixels = deviceCondition.previewMaxPixels,
                             onExportFile = { files, path, name ->
@@ -1077,7 +1091,8 @@ class MainActivity : ComponentActivity() {
                     ) { _ ->
                         contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("无法读取所选文件")
                     }
-                    manager.event("已复制到工作区新项目 ${destination.name}；可在文件页打开")
+                    publishImported(destination, 1)
+                    manager.event("已复制到工作区「${destination.name}」；可在文件页打开")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1239,32 +1254,43 @@ class MainActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, "无法打开系统文件选择器，请稍后重试", android.widget.Toast.LENGTH_LONG).show()
     }
 
-    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) = manager.mutation.withLock {
-        // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
-        val selected = uris.mapIndexed { index, uri ->
-            currentCoroutineContext().ensureActive()
-            var name: String? = null
-            var size: Long? = null
-            runCatching {
-                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
-                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+    private suspend fun importProjectFiles(uris: List<Uri>, transferId: Long) {
+        val destination = manager.mutation.withLock {
+            // 先只读元数据（名称/大小），拿到真实总量后再开始复制；查询失败按未知大小处理。
+            val selected = uris.mapIndexed { index, uri ->
+                currentCoroutineContext().ensureActive()
+                var name: String? = null
+                var size: Long? = null
+                runCatching {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex >= 0 && !cursor.isNull(nameIndex)) name = cursor.getString(nameIndex)
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                        }
                     }
                 }
+                name to size
             }
-            name to size
+            val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
+            // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
+            manager.fileTransfers.update(transferId, 0, total)
+            manager.workspaceStorage.importFiles(
+                selected.mapIndexed { index, item -> item.first ?: "file-$index" },
+                onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
+            ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
         }
-        val total = com.tanuki.storage.ImportProgress.totalBytes(selected.map { it.second })
-        // 总量确定后立即更新一次：进度条从不定进度切到真实百分比，避免长时间显示未知。
-        manager.fileTransfers.update(transferId, 0, total)
-        val destination = manager.workspaceStorage.importFiles(
-            selected.mapIndexed { index, item -> item.first ?: "file-$index" },
-            onProgress = { received -> manager.fileTransfers.update(transferId, received, total) },
-        ) { index -> contentResolver.openInputStream(uris[index]) ?: error("无法打开所选文件") }
-        manager.event("已导入新项目 ${destination.name}")
+        publishImported(destination, uris.size)
+        manager.event("已导入 ${uris.size} 个文件到「${destination.name}」")
+    }
+
+    /** 投递一次性导入事件；文件页据此刷新并显示“已导入 N 个文件到目录 / 打开”。 */
+    private suspend fun publishImported(destination: java.io.File, fileCount: Int) {
+        withContext(Dispatchers.Main) {
+            importSequence += 1
+            importEvent = WorkspaceImportEvent(importSequence, destination.name, fileCount)
+        }
     }
     private suspend fun exportProjects(uri: Uri, transferId: Long) = manager.mutation.withLock {
         contentResolver.openOutputStream(uri, "w")!!.use { output ->

@@ -132,7 +132,7 @@ class FileTransferPresentationTest {
             assertFalse(runtime.hasLiveChild)
 
             appClick("文件操作")
-            appClick("导入文件到工作区")
+            appClick("导入为新项目")
             pickerDownloads()
             await("系统选择器应显示本用例导出的唯一文件") {
                 nodes().any { it.isVisibleToUser && label(it, filename) }
@@ -141,8 +141,9 @@ class FileTransferPresentationTest {
             await("MainActivity导入回调应原子发布新的项目目录") {
                 if (pickerShown() || runtime.fileTransfers.state.value.isNotEmpty()) false
                 else {
+                    val expectedProject = filename.substringBeforeLast('.')
                     imported = runtime.paths.workspaces.listFiles().orEmpty().firstOrNull { directory ->
-                        directory.isDirectory && directory.name.matches(Regex("import-[0-9a-f-]{36}")) &&
+                        directory.isDirectory && (directory.name == expectedProject || directory.name.startsWith("$expectedProject (")) &&
                             File(directory, filename).isFile && File(directory, filename).readBytes().contentEquals(content)
                     }
                     imported != null

@@ -12,6 +12,7 @@ import androidx.core.content.FileProvider
 import com.tanuki.runtime.Paths
 import com.tanuki.storage.docx.DocxDocument
 import com.tanuki.storage.docx.DocxDocumentReader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -35,6 +36,26 @@ enum class FileLocation(val title: String, val guestPath: String, val writable: 
     WORKSPACE("工作区", "/workspaces", true), HOME("用户目录", "/home/tanuki", false),
     UBUNTU("Ubuntu 文件", "/", false), PHONE("手机存储", "/phone", false)
 }
+
+/** 手机存储到工作区的跨位置操作；移动必须先复制校验成功再删除源。 */
+enum class WorkspaceTransferMode { COPY, MOVE }
+
+/** 目标目录中已存在的同名条目；目录不能整体替换，界面只提供保留两者或跳过。 */
+data class WorkspaceConflict(val name: String, val directory: Boolean)
+
+data class WorkspaceTransferResult(
+    val sourceName: String,
+    val targetName: String?,
+    val skipped: Boolean,
+    val error: String? = null,
+)
+
+data class WorkspaceTransferReport(
+    val targetDirectory: String,
+    val results: List<WorkspaceTransferResult>,
+    val copiedBytes: Long,
+    val totalBytes: Long,
+)
 
 class WorkspaceFileManager(
     private val paths: Paths,
@@ -439,6 +460,130 @@ class WorkspaceFileManager(
             publish(stage.resolve("content"), target)
         } finally { removeTree(stage) }
     }
+    /** 预检手机条目复制到工作区目标目录时的同名冲突；不修改任何文件。 */
+    suspend fun workspaceConflicts(sources: List<String>, targetDirectory: String): List<WorkspaceConflict> = withContext(Dispatchers.IO) {
+        mutation.withLock {
+            lock.withLock {
+                val workspace = inLocation(FileLocation.WORKSPACE)
+                val target = workspace.directory(targetDirectory)
+                sources.mapNotNull { relative ->
+                    val source = resolve(relative, true)
+                    val name = source.fileName.toString()
+                    val candidate = target.resolve(name)
+                    if (Files.exists(candidate, noFollow)) WorkspaceConflict(name, Files.isDirectory(candidate, noFollow)) else null
+                }
+            }
+        }
+    }
+
+    /**
+     * 把手机存储中的条目复制或移动到工作区目录。
+     *
+     * 每个条目先写入目标目录内的暂存目录，流式复制并回读校验；只有校验成功才发布。
+     * 移动在发布成功后才删除源条目，删除失败会保留已校验的目标并作为该项错误上报。
+     * 取消发生在发布前时源文件不变，暂存由 [StreamingTransfer.transferPath] 清理。
+     */
+    suspend fun transferToWorkspace(
+        sources: List<String>,
+        targetDirectory: String,
+        mode: WorkspaceTransferMode,
+        decisions: Map<String, TransferConflictPolicy> = emptyMap(),
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): WorkspaceTransferReport = withContext(Dispatchers.IO) {
+        mutation.withLock {
+            lock.withLock {
+                check(location == FileLocation.PHONE) { "只有手机存储需要复制或移动到工作区" }
+                requireIdle()
+                storage.requireCanStart()
+                val workspace = inLocation(FileLocation.WORKSPACE)
+                val targetFolder = workspace.directory(targetDirectory)
+                val reserved = mutableSetOf<String>()
+
+                data class Planned(
+                    val source: Path,
+                    val name: String,
+                    val target: Path?,
+                    val policy: TransferConflictPolicy,
+                    val bytes: Long,
+                )
+
+                val plans = sources.map { relative ->
+                    currentCoroutineContext().ensureActive()
+                    val source = resolve(relative, true)
+                    val name = source.fileName.toString()
+                    val existing = targetFolder.resolve(name)
+                    val policy = decisions[name] ?: TransferConflictPolicy.KEEP_BOTH
+                    val target = when {
+                        !Files.exists(existing, noFollow) -> {
+                            check(reserved.add(name)) { "所选条目包含同名文件，请分批操作" }
+                            existing
+                        }
+                        policy == TransferConflictPolicy.SKIP -> null
+                        policy == TransferConflictPolicy.REPLACE -> existing
+                        else -> {
+                            val unique = ImportNaming.uniqueName(name) { candidate ->
+                                candidate in reserved || Files.exists(targetFolder.resolve(candidate), noFollow)
+                            }
+                            reserved += unique
+                            targetFolder.resolve(unique)
+                        }
+                    }
+                    val bytes = try {
+                        StreamingTransfer.measurePath(source)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        -1L
+                    }
+                    Planned(source, name, target, policy, bytes)
+                }
+                val total = if (plans.any { it.target != null && it.bytes < 0 }) -1L
+                    else plans.sumOf { if (it.target == null) 0L else it.bytes }
+                // 开始前用实际可用空间拒绝明显放不下的批次；复制过程中再按块复查。
+                val available = (paths.base.usableSpace - WorkspaceCapacity.DISK_RESERVE).coerceAtLeast(0)
+                check(total < 0 || total <= available) { "设备剩余空间不足，已取消复制；源文件未改动" }
+                onProgress(0, total)
+                var done = 0L
+                var copied = 0L
+                val results = mutableListOf<WorkspaceTransferResult>()
+                for (plan in plans) {
+                    currentCoroutineContext().ensureActive()
+                    if (plan.target == null) {
+                        results += WorkspaceTransferResult(plan.name, null, skipped = true)
+                        continue
+                    }
+                    try {
+                        val receipt = StreamingTransfer.transferPath(
+                            source = plan.source,
+                            target = plan.target,
+                            deleteSource = mode == WorkspaceTransferMode.MOVE,
+                            replace = plan.policy == TransferConflictPolicy.REPLACE,
+                        ) { received, _ ->
+                            if (paths.base.usableSpace <= WorkspaceCapacity.DISK_RESERVE) {
+                                throw java.io.IOException("设备剩余空间不足，复制已取消；源文件未改动")
+                            }
+                            onProgress(done + received, total)
+                        }
+                        copied += receipt.bytes
+                        results += WorkspaceTransferResult(plan.name, plan.target.fileName.toString(), skipped = false)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        results += WorkspaceTransferResult(
+                            plan.name,
+                            null,
+                            skipped = false,
+                            error = error.message ?: "复制失败，请检查空间和权限",
+                        )
+                    }
+                    done += plan.bytes.coerceAtLeast(0)
+                    onProgress(done, total)
+                }
+                WorkspaceTransferReport(targetDirectory, results, copied, total)
+            }
+        }
+    }
+
     suspend fun delete(relative: String) = io {
         val source = resolve(relative, true)
         inspectTree(source)

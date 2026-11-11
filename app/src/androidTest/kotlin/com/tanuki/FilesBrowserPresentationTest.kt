@@ -396,8 +396,8 @@ class FilesBrowserPresentationTest {
             disabledCreate.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             instrumentation.waitForIdleSync()
             assertFalse("禁用入口收到点击动作后也不能打开新建编辑器", nodes().any { it.isEditable && it.isVisibleToUser })
-            find("导入文件到工作区")
-            click("导入文件到工作区"); await { imports == 1 }
+            find("导入为新项目")
+            click("导入为新项目"); await { imports == 1 }
             click("文件操作"); click("导出整个工作区"); await { exports == 1 }
             find("hello.txt")
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
@@ -505,7 +505,7 @@ class FilesBrowserPresentationTest {
             find("浏览手机文件"); click("授权访问手机文件")
             find("内部共享存储"); click("内部共享存储"); click("hello.txt")
             find("original text"); find("导出此文件"); click("关闭文件")
-            click("文件操作"); find("导入文件到工作区")
+            click("文件操作"); find("导入为新项目")
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
     @Test fun audioFileOpensWithNativePlaybackControls() {
