@@ -56,7 +56,7 @@ class ReaderConfigChangeTest {
         store.clear()
         File(runtime.paths.workspaces, FILE_NAME).writeText(
             buildString {
-                repeat(1_200) { index ->
+                repeat(6_000) { index ->
                     append("LINE-")
                     append(index.toString().padStart(4, '0'))
                     append(" 阅读位置与配置重建测试内容\n")
@@ -76,7 +76,9 @@ class ReaderConfigChangeTest {
             name = "sample.txt",
             linked = true,
             location = FileLocation.WORKSPACE,
-            view = ReaderViewState(encoding = "GB18030", scrollOffset = 321, showLineNumbers = false),
+            view = ReaderViewState(encoding = "GB18030", scrollOffset = 321, showLineNumbers = false,
+                pageIndex = 2, offsets = listOf(0L, 65_535L, 131_070L),
+                lineStarts = listOf(1, 801, 1_601), resolvedEncoding = "GB18030"),
         )
         store.save(expected)
         assertEquals(expected.normalized(), store.load())
@@ -122,6 +124,47 @@ class ReaderConfigChangeTest {
         assertEquals(FileLocation.WORKSPACE, saved.location)
         assertFalse(saved.view.showLineNumbers)
         assertTrue("滚动偏移应大于 0", saved.view.scrollOffset > 0)
+    }
+
+    @Test fun configurationChangeKeepsThirdSegmentAndAllowsGoingBack() {
+        val activity = launch()
+        click("文件")
+        click(FILE_NAME)
+        findTextStartingWith("   1  LINE-0000")
+        click("行号")
+        repeat(2) { index ->
+            click("下一段")
+            waitForSegment(index + 1)
+        }
+        val before = requireNotNull(store.load()).view
+        val body = nodes().first { it.isVisibleToUser && it.text.toString().length > 1_000 }
+            .text.toString()
+        assertEquals(2, before.pageIndex)
+        assertTrue(before.offsets[2] > 0L)
+
+        // 模拟系统深色或字体配置引起的重建；必须恢复当前分段而不是首段。
+        instrumentation.runOnMainSync { activity.recreate() }
+        waitForRecreated(activity)
+        click("文件")
+        findTextStartingWith(body.take(100))
+        val after = requireNotNull(store.load()).view
+        assertEquals(before.pageIndex, after.pageIndex)
+        assertEquals(before.offsets, after.offsets)
+        assertEquals(before.lineStarts, after.lineStarts)
+        assertEquals(before.resolvedEncoding, after.resolvedEncoding)
+        click("上一段")
+        waitForSegment(1)
+        assertEquals(before.offsets[1], requireNotNull(store.load()).view.offsets[1])
+    }
+
+    private fun waitForSegment(index: Int) {
+        repeat(100) {
+            instrumentation.waitForIdleSync()
+            if (store.load()?.view?.pageIndex == index &&
+                nodes().any { it.isVisibleToUser && it.text.toString().length > 1_000 }) return
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("未恢复到第 ${index + 1} 段")
     }
 
     private fun launch(): MainActivity {

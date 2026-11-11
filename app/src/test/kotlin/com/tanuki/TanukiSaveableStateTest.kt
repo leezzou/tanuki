@@ -16,6 +16,32 @@ class TanukiSaveableStateTest {
         override fun canBeSaved(value: Any): Boolean = true
     }
 
+    @Test fun readerConfigurationRestoreKeepsNthPageAndPreviousBoundaries() {
+        val state = com.tanuki.ui.ReaderViewState(
+            scrollOffset = 321, showLineNumbers = false, pageIndex = 2,
+            offsets = listOf(0L, 65_535L, 131_070L), lineStarts = listOf(1, 801, 1_601),
+            resolvedEncoding = "GB18030",
+        )
+        val saver = com.tanuki.ui.ReaderViewStateSaver
+        for (encoding in listOf("GB18030", "Shift_JIS", "UTF-32LE")) {
+            val expected = state.copy(resolvedEncoding = encoding)
+            val saved = with(saver) { AllowAll.save(expected) }
+            val restored = requireNotNull(saver.restore(requireNotNull(saved)))
+            assertEquals(expected, restored)
+            assertEquals(131_070L, restored.offsets[restored.pageIndex])
+            assertEquals(801, restored.lineStarts[restored.pageIndex - 1])
+        }
+    }
+
+    @Test fun readerLegacyStateAndCorruptCursorRecoverToFirstPage() {
+        val saver = com.tanuki.ui.ReaderViewStateSaver
+        assertEquals(com.tanuki.ui.ReaderViewState(scrollOffset = 123),
+            saver.restore(listOf("自动", 123, true)))
+        val invalid = com.tanuki.ui.ReaderViewState(pageIndex = 2,
+            offsets = listOf(0L, -1L), lineStarts = listOf(1), scrollOffset = 321).normalized()
+        assertEquals(com.tanuki.ui.ReaderViewState(), invalid)
+    }
+
     @Test fun dshSwitchStateRoundTripsBothPanes() {
         val state = TanukiDshSwitchState(
             native = true,
