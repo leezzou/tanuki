@@ -53,7 +53,6 @@ import com.tanuki.storage.WorkspaceDocument
 import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.storage.WorkspaceTransferMode
 import com.tanuki.storage.WorkspaceTransferReport
-import com.tanuki.ui.design.TanukiDesign
 import com.tanuki.ui.design.TanukiGlassPill
 import com.tanuki.ui.design.TanukiMotion as TanukiMotionTokens
 import com.tanuki.ui.design.TanukiPathText
@@ -428,7 +427,7 @@ internal fun WorkspaceFilesPage(
     // 同目录刷新先保留旧列表，换目录才清空；避免排序期间闪空并重置滚动位置。
     val shown = FileListPresentation.visible(display, displayRequest)
     val listDataset = fileListMotionDataset(display, displayRequest)
-    val listMotion = listDataset.motion(TanukiDesign.motion,
+    val listMotion = listDataset.motion(com.tanuki.ui.design.TanukiDesign.motion,
         filtering = query.isNotEmpty() || listDataset.query.isNotEmpty())
     // 滚动状态随目录保存，排序、筛选和进度更新不会把列表拉回顶部；旋转后仍可恢复。
     val listState = rememberSaveable(files, directory, saver = LazyListState.Saver) { LazyListState() }
