@@ -125,12 +125,22 @@ internal suspend fun bindDshComposerRunState(
     nativeState: StateFlow<DshNativeState>,
     composer: DshComposerController
 ) {
-    nativeState.map { Triple(it.selectedId, it.running, if (it.running) it.streamingText else "") }
-        .distinctUntilChanged().collect { (sessionId, running, _) ->
-        composer.setSession(sessionId)
-        composer.setGenerationRunning(running)
+    nativeState.map {
+        DshComposerRunSignal(it.selectedId, it.running, it.runningConfirmationVersion,
+            if (it.running) it.streamingText else "")
+    }.distinctUntilChanged().collect { signal ->
+        composer.setSession(signal.sessionId)
+        composer.setGenerationRunning(signal.running)
     }
 }
+
+/** 只保留会影响运行确认与活跃窗口的投影，不让普通重组重放旧 idle。 */
+private data class DshComposerRunSignal(
+    val sessionId: String?,
+    val running: Boolean,
+    val confirmationVersion: Long,
+    val streamingText: String
+)
 
 /** 展示行保留首事件的稳定身份，工具聚合不改变协议时间线。 */
 data class DshChatRow(

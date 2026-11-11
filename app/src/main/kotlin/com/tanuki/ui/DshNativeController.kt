@@ -67,7 +67,9 @@ data class DshNativeState(
     val todos: TodoDockState? = null,
     /** 两类投影独立比较序号；清除后仍保留序号，防止旧页重新显示已移除的条。 */
     val lastGoalSeq: Int? = null,
-    val lastTodoSeq: Int? = null
+    val lastTodoSeq: Int? = null,
+    /** 官方 Running 确认的本地版本；同值 idle 也必须覆盖输入栏发送受理后的乐观运行态。 */
+    val runningConfirmationVersion: Long = 0L
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
 }
@@ -539,6 +541,7 @@ class DshNativeController(
                 _state.update { state ->
                     state.copy(
                         running = event.running,
+                        runningConfirmationVersion = state.runningConfirmationVersion + 1L,
                         stopping = if (event.running) state.stopping else false,
                         streamingText = if (event.running) state.streamingText else "",
                         sessions = state.sessions.map { session ->

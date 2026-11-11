@@ -13,6 +13,7 @@ import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshSession
 import com.tanuki.web.DshSessionPage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -69,6 +70,71 @@ class DshNativeComposerBindingTest {
             val idle = fixture.awaitComposer { it.stopOutcome == DshStopOutcome.STOPPED }
             assertFalse(idle.generationRunning)
         } finally {
+            fixture.close()
+        }
+    }
+
+    @Test fun acceptedSendThenDirectOfficialIdleClearsOptimisticRunning() = runBlocking {
+        val fixture = Fixture(initiallyRunning = false)
+        try {
+            fixture.start()
+            fixture.composer.updateText("短任务")
+            fixture.composer.send()
+            assertTrue(fixture.awaitComposer { it.notice == "已发送" }.generationRunning)
+            assertFalse(fixture.native.state.value.running)
+            val version = fixture.native.state.value.runningConfirmationVersion
+            // 没有注入中间的 true：同值 false 仍是一条新的官方确认。
+            fixture.source.emit("A", DshLiveEvent.Running(false))
+            val idle = fixture.awaitComposer { !it.generationRunning }
+            assertTrue(fixture.native.state.value.runningConfirmationVersion > version)
+            assertFalse(idle.stopping)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test fun acceptedStopThenDirectOfficialIdleConfirmsStopped() = runBlocking {
+        val fixture = Fixture(initiallyRunning = false)
+        try {
+            fixture.start()
+            fixture.composer.updateText("待停止任务")
+            fixture.composer.send()
+            fixture.awaitComposer { it.notice == "已发送" && it.generationRunning }
+            fixture.composer.requestStop()
+            fixture.awaitComposer { it.stopOutcome == DshStopOutcome.REQUESTED }
+            assertFalse(fixture.native.state.value.running)
+            fixture.source.emit("A", DshLiveEvent.Running(false))
+            val idle = fixture.awaitComposer { it.stopOutcome == DshStopOutcome.STOPPED }
+            assertFalse(idle.generationRunning)
+            assertFalse(idle.stopping)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test fun continuousStreamingAcrossTimeoutWindowNeverBecomesStaleUntilSilent() = runBlocking {
+        val fixture = Fixture(initiallyRunning = true, staleTimeoutMillis = 300)
+        var sawStale = false
+        val observer = launch(Dispatchers.Unconfined) {
+            fixture.composer.state.collect { if (it.runStateStale) sawStale = true }
+        }
+        try {
+            fixture.start()
+            fixture.awaitComposer { it.generationRunning }
+            val started = System.nanoTime()
+            repeat(8) { index ->
+                val text = "持续流式片段" + "。".repeat(index + 1)
+                fixture.source.emit("A", DshLiveEvent.Streaming(text))
+                withTimeout(5_000) { fixture.native.state.first { it.streamingText == text } }
+                assertFalse(fixture.composer.state.value.runStateStale)
+                delay(60)
+            }
+            assertTrue((System.nanoTime() - started) / 1_000_000 >= 300)
+            assertFalse(sawStale)
+            // 停止注入活动后才允许 watchdog 进入静默降级。
+            assertTrue(fixture.awaitComposer { it.runStateStale }.generationRunning)
+        } finally {
+            observer.cancel()
             fixture.close()
         }
     }
