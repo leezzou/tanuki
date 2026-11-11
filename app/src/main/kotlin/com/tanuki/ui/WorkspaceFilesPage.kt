@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -93,6 +94,9 @@ internal fun WorkspaceFilesPage(
     var location by rememberSaveable { mutableStateOf(FileLocation.WORKSPACE) }
     val files = remember(manager, location) { manager.inLocation(location) }
     val canBrowse = location != FileLocation.PHONE || phoneStorageGranted
+    val context = LocalContext.current
+    // 偏好存储只保存当前文件的路径和显示位置，不保存文件内容。
+    val readerStore = remember(context) { PreferencesReaderStateStore(context) }
     var directory by rememberSaveable(location) { mutableStateOf("") }
     var entries by remember(files) { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var selected by remember(files) { mutableStateOf(emptySet<String>()) }
@@ -104,7 +108,14 @@ internal fun WorkspaceFilesPage(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var feedback by remember { mutableStateOf<String?>(null) }
-    var openedEntry by remember(files) { mutableStateOf<WorkspaceFileManager.Entry?>(null) }
+    // 阅读页不再依赖 files 对象：配置变更会重建 files，旧的 remember(files) 会把页面退回列表。
+    var openedEntry by rememberSaveable(stateSaver = WorkspaceEntrySaver) {
+        mutableStateOf<WorkspaceFileManager.Entry?>(null)
+    }
+    var readerView by rememberSaveable(stateSaver = ReaderViewStateSaver) {
+        mutableStateOf(ReaderViewState())
+    }
+    var readerRestored by rememberSaveable { mutableStateOf(false) }
     var action by remember { mutableStateOf<String?>(null) }
     var actionEntries by remember { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var name by remember { mutableStateOf("") }
@@ -165,6 +176,43 @@ internal fun WorkspaceFilesPage(
     }
     fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机工具路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
+    fun openReader(entry: WorkspaceFileManager.Entry) {
+        // 重新打开同一路径才恢复旧偏移；打开新文件从默认位置开始。
+        val saved = readerStore.load()?.takeIf { it.location == location && it.path == entry.path }
+        readerView = saved?.view ?: ReaderViewState()
+        openedEntry = entry
+    }
+    fun closeReader() {
+        onFullscreen(false)
+        openedEntry = null
+        readerStore.clear()
+    }
+    // Bundle 恢复优先；进程被回收后从偏好存储恢复上次文件与位置。
+    LaunchedEffect(Unit) {
+        if (!readerRestored) {
+            readerRestored = true
+            if (openedEntry == null) {
+                readerStore.load()?.takeIf { saved ->
+                    saved.location == location && (saved.location != FileLocation.PHONE || phoneStorageGranted)
+                }?.let { saved ->
+                    readerView = saved.view
+                    openedEntry = WorkspaceFileManager.Entry(
+                        path = saved.path,
+                        name = saved.name,
+                        directory = false,
+                        bytes = 0L,
+                        linked = saved.linked,
+                    )
+                }
+            }
+        }
+    }
+    // 刚打开文件时先落一次路径，之后滚动/编码/行号变化再更新偏移。
+    LaunchedEffect(openedEntry?.path, readerView) {
+        openedEntry?.let { entry ->
+            readerStore.save(ReaderSessionState(entry.path, entry.name, entry.linked, location, readerView))
+        }
+    }
     LaunchedEffect(files, runtimeRunning, phoneStorageGranted) {
         error = null; selected = emptySet()
         if (!canBrowse) { entries = emptyList(); busy = false; return@LaunchedEffect }
@@ -223,13 +271,22 @@ internal fun WorkspaceFilesPage(
                 actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
                 canEdit = location.writable && !runtimeRunning && !entry.linked,
                 previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
-                onClose = { onFullscreen(false); openedEntry = null },
+                initialReaderState = readerView,
+                onReaderStateChange = { next ->
+                    // 关闭阅读页后旧组合仍可能回调一次；不能让它把已清理的状态写回去。
+                    if (openedEntry?.path == entry.path) {
+                        readerView = next
+                        // 直接落盘，避免 Activity 在防抖窗口内重建时只更新内存状态。
+                        readerStore.save(ReaderSessionState(entry.path, entry.name, entry.linked, location, next))
+                    }
+                },
+                onClose = { closeReader() },
                 onExport = { onExportFile(files, entry.path, entry.name) },
                 onEdit = { runTask {
                     val editable = files.preview(entry.path)
                     check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
                     begin("编辑文本", listOf(entry)); content = editable.text
-                    draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
+                    draftOriginal = content; draftRevision = editable.revision.orEmpty(); closeReader()
                 } })
             // 编辑动作会离开查看器；传输浮层保持在当前页面，并按操作栏高度避让。
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
@@ -403,7 +460,7 @@ internal fun WorkspaceFilesPage(
                         Column(Modifier.fillMaxWidth().heightIn(min = TanukiFileVisuals.ROW_MIN_HEIGHT_DP.dp)
                             .combinedClickable(enabled = !busy,
                                 onClick = { if (selected.isNotEmpty()) toggle(entry.path) else if (entry.directory) navigate(entry.path)
-                                    else openedEntry = entry },
+                                    else openReader(entry) },
                                 onLongClick = { toggle(entry.path) }).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (selected.isNotEmpty()) Checkbox(checked = entry.path in selected, onCheckedChange = { toggle(entry.path) })
