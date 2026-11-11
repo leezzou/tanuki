@@ -398,16 +398,31 @@ class MainActivity : ComponentActivity() {
                 val nativeClient = remember { DshNativeClient(endpointProvider = nativeEndpointProvider) }
                 val nativeController = remember {
                     val admin = DshSessionAdminClient(DshAdminTransportAdapter(nativeClient::call))
-                    DshNativeController(nativeClient, lifecycleScope, renameRemote = { sessionId, title ->
-                        // 与会话管理页相同：本地安全/试用模式禁止写入；远程使用远端权限。
-                        if (!manager.remoteHost.ui.value.status.connected &&
-                            manager.state.value.recovery.mode != RecoveryMode.NORMAL
-                        ) {
-                            Result.failure(IllegalStateException("安全模式下不能重命名会话"))
-                        } else {
-                            admin.renameSession(sessionId, title)
-                        }
-                    })
+                    DshNativeController(
+                        client = nativeClient,
+                        scope = lifecycleScope,
+                        renameRemote = { sessionId, title ->
+                            // 与会话管理页相同：本地安全/试用模式禁止写入；远程使用远端权限。
+                            if (!manager.remoteHost.ui.value.status.connected &&
+                                manager.state.value.recovery.mode != RecoveryMode.NORMAL
+                            ) {
+                                Result.failure(IllegalStateException("安全模式下不能重命名会话"))
+                            } else {
+                                admin.renameSession(sessionId, title)
+                            }
+                        },
+                        createRemote = {
+                            // 一键新建复用官方 session/create；安全模式下不伪造本地会话。
+                            if (!manager.remoteHost.ui.value.status.connected &&
+                                manager.state.value.recovery.mode != RecoveryMode.NORMAL
+                            ) {
+                                Result.failure(IllegalStateException("安全模式下不能新建会话"))
+                            } else {
+                                admin.createSession()
+                            }
+                        },
+                        sessionSync = (application as TanukiApp).dshSessions
+                    )
                 }
                 val approvalController = remember {
                     DshApprovalController(

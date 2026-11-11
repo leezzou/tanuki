@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
@@ -146,12 +147,30 @@ class DshSessionManagerController(
     private val source: DshSessionAdminSource,
     private val readStore: DshReadStore,
     private val scope: CoroutineScope,
-    private val pinStore: DshSessionPinStore = NoopDshSessionPinStore
+    private val pinStore: DshSessionPinStore = NoopDshSessionPinStore,
+    /** 与聊天页共享的会话变更广播；收到另一侧变更后自动重读官方列表。 */
+    private val sessionSync: DshSessionSync? = null
 ) {
     private val _state = MutableStateFlow(
         DshSessionManagerState(pinnedIds = runCatching { pinStore.pinnedIds() }.getOrDefault(emptySet()))
     )
     val state: StateFlow<DshSessionManagerState> = _state.asStateFlow()
+
+    /** 页面不可见（close/onStop）时不响应外部变更，避免后台重复读取。 */
+    private var acceptExternalChanges = false
+
+    init {
+        sessionSync?.let { sync ->
+            scope.launch {
+                // 初始版本只代表总线创建，不触发额外请求。
+                sync.changes.drop(1).collect { change ->
+                    if (change.origin !== this@DshSessionManagerController && acceptExternalChanges) {
+                        refresh()
+                    }
+                }
+            }
+        }
+    }
 
     companion object {
         /** 单次批量归档上限；超过时拒绝并保留选择，不能静默截断。 */
@@ -179,6 +198,7 @@ class DshSessionManagerController(
     }
 
     fun refresh() {
+        acceptExternalChanges = true
         // 写操作进行中不叠加列表刷新，避免旧读取覆盖操作后的新列表。
         if (_state.value.busy) return
         val token = ++listGeneration
@@ -336,6 +356,8 @@ class DshSessionManagerController(
                     }
                     readStore.markRead(id, System.currentTimeMillis())
                     loadAfterAction(selectedId = id, notice = notice)
+                    // 列表已按官方响应更新后再广播，聊天页读到的是同一份新列表。
+                    sessionSync?.publish(this@DshSessionManagerController)
                 },
                 onFailure = { failAction(it) }
             )
@@ -351,7 +373,10 @@ class DshSessionManagerController(
         }
         actionJob = scope.launch {
             source.renameSession(sessionId, clean).fold(
-                onSuccess = { loadAfterAction(selectedId = sessionId, notice = "已重命名") },
+                onSuccess = {
+                    loadAfterAction(selectedId = sessionId, notice = "已重命名")
+                    sessionSync?.publish(this@DshSessionManagerController)
+                },
                 onFailure = { failAction(it) }
             )
         }
@@ -372,6 +397,7 @@ class DshSessionManagerController(
                         notice = if (stopActivity) "已停止运行并归档" else "已归档",
                         excludeIds = archived.toSet()
                     )
+                    sessionSync?.publish(this@DshSessionManagerController)
                 },
                 onFailure = { failAction(it) }
             )
@@ -415,6 +441,7 @@ class DshSessionManagerController(
                 "已归档 ${archived.size} 个会话，${failures.size} 个失败"
             }
             loadAfterAction(selectedId = null, notice = notice, excludeIds = archived)
+            sessionSync?.publish(this@DshSessionManagerController)
             _state.update { it.copy(batchDone = 0, batchTotal = 0) }
             if (failures.isNotEmpty()) {
                 val summary = failures.take(3).joinToString("；")
@@ -595,6 +622,7 @@ class DshSessionManagerController(
 
     /** 服务停止时清空列表与选中状态，保留安全模式与本机置顶；Cookie 在 close() 中一并丢弃。 */
     fun clearForStopped() {
+        acceptExternalChanges = false
         close()
         endpointIdentity = null
         _state.value = DshSessionManagerState(
@@ -604,6 +632,7 @@ class DshSessionManagerController(
     }
 
     fun close() {
+        acceptExternalChanges = false
         listGeneration++
         searchGeneration++
         modelGeneration++

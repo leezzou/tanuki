@@ -12,7 +12,7 @@
 
 | 矩阵 ID | 状态 | 本 PR 证据 / 边界 |
 |---|---|---|
-| SESS-01/02 | ◐ | 会话列表、切换、运行状态、通知目标；历史读取最近 120 条 + follow 快照；无搜索/新建/重命名/归档/向前分页 |
+| SESS-01/02 | ◐ | 会话列表、切换、运行状态、通知目标；历史读取最近 120 条 + follow 快照与向前分页；聊天页可一键新建；搜索/归档在会话管理页 |
 | SESS-12 | ◐ | 45 审批面板显示其他会话待处理计数；无完整未读模型 |
 | SESS-17 | ✅ | 通知点击目标强制重读/重连；失败保留 pending 给官方回退 |
 | CHAT-01 | ✅ | append-origin 用户/助手文本；过滤 replace/注入 |
@@ -114,8 +114,8 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | SESS-01 | 会话列表 | 侧栏按工作区分组显示标题、更新时间、运行/待处理/未读状态 | `原生部分`：`DshNativePage` 顶部横向会话条，仅标题、运行中/已结束、时间 | P1 · `DshNativePage.kt`/`DshNativeApi.kt` · 现状 android_agent-33/PR #26；会话管理实现 44 · A-SESS-01、A-SESS-03 |
 | SESS-02 | 选择会话并读历史 | 打开会话即加载 follow 快照与历史页，支持向前分页 | `原生部分`：选中后读 `session/projections` + `session/page`（首屏 120 条）；滚到顶部按 50 条向前分页，两段锚定与内存窗口见 [原生界面](NATIVE-UI.md)。2026-11-11 android_agent-62 实现，设备未验证 | —（当前缺口为真实设备历史/手势验收） · `DshNativeController.kt`/`DshNativePage.kt` · A-SESS-01、A-CHAT-01 |
 | SESS-03 | 历史向前分页 | `loadOlder()`/轮次跳转，保持实时事件可见 | `原生部分`：`loadOlder()` 已实现（每页 50 条、保持可见位置、按 seq 去重排序、无更多时明确提示）；轮次跳转未实现 | P1 · 轮次跳转 · `DshNativeApi.kt`/`DshNativeController.kt` · A-SESS-01 |
-| SESS-04 | 新建会话/空白会话复用 | New Session 优先当前/最近工作区，复用空白会话与草稿 | `仅官方`：原生页不创建会话 | P0 · 44 会话管理（创建）+ 46 输入（composer） · A-SESS-02、A-INPUT-02 |
-| SESS-05 | 重命名会话 | 行菜单/双击标题，预填当前标题，可固定自动标题 | `仅官方` | P1 · `session/rename` · 44 会话管理 · A-SESS-02 |
+| SESS-04 | 新建会话/空白会话复用 | New Session 优先当前/最近工作区，复用空白会话与草稿 | `原生部分`：聊天页顶部/空态一次点击调用官方 `session/create` 并进入；创建成功后聊天列表与会话管理页自动同步。空白会话复用与工作区选择未实现。2026-11-11 android_agent-74，设备未验证 | P1 · 空白会话复用 · `DshNativeController.kt`/`DshSessionSync.kt` · A-SESS-02、A-INPUT-02 |
+| SESS-05 | 重命名会话 | 行菜单/双击标题，预填当前标题，可固定自动标题 | `原生部分`：聊天页标题和会话管理页均可重命名并自动同步；固定自动标题未实现。2026-11-11 android_agent-74，设备未验证 | P2 · 固定自动标题 · `DshNativeController.kt`/`DshSessionManagerController.kt` · A-SESS-02 |
 | SESS-06 | 分叉会话 | 从最近已完成轮次或指定 `atSeq` 创建子会话，不自动导航 | `仅官方` | P1 · `session/fork` · 44 会话管理 · A-SESS-02 |
 | SESS-07 | 归档/取消归档 | 静止会话直接归档；运行中会话先列出工作并确认“停止并归档”；支持撤销 | `仅官方` | P1 · `workspace/archiveSession`、`unarchiveSession` · 44 会话管理 · A-SESS-02 |
 | SESS-08 | 置顶/手动排序 | 置顶、拖拽、最近更新/手动排序；顺序本地保存 | `仅官方`：原生会话条顺序固定 | P2 · `workspace/pinSession`、`insertSessionBefore` · 44 会话管理（排序/置顶，待确认） · A-SESS-02 |
