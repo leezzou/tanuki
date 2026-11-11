@@ -1,5 +1,6 @@
 package com.tanuki.ui.design
 
+import androidx.compose.ui.graphics.toArgb
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,6 +42,31 @@ class TanukiPlatformThemeTest {
             if (folder.contains("-v")) assertEquals(lightIcons, items["android:windowLightNavigationBar"])
             else assertTrue("$folder 不应声明 API 27 属性", "android:windowLightNavigationBar" !in items)
         }
+    }
+
+    @Test fun `Material按钮选中控件与反色链接的实际配对可读`() {
+        for (dark in listOf(false, true)) {
+            val scheme = tanukiDesignColorScheme(dark)
+            fun argb(color: androidx.compose.ui.graphics.Color): Long = color.toArgb().toLong() and 0xFFFFFFFFL
+            for ((foreground, background) in listOf(
+                scheme.onPrimary to scheme.primary,
+                scheme.onPrimaryContainer to scheme.primaryContainer,
+                scheme.onTertiary to scheme.tertiary,
+                scheme.onTertiaryContainer to scheme.tertiaryContainer,
+                scheme.inversePrimary to scheme.inverseSurface,
+            )) {
+                assertTrue("dark=$dark Material配对不足4.5:1",
+                    TanukiColorMath.contrastRatio(argb(foreground), argb(background)) >= 4.5)
+            }
+            assertEquals(TanukiColorTokens.Light.primary,
+                if (dark) argb(scheme.inversePrimary) else argb(scheme.primary))
+        }
+    }
+
+    @Test fun `图标资源与强调及可读蓝角色一致`() {
+        val colors = values("values", "colors.xml", "color")
+        assertEquals(TanukiColorMath.fromArgb(TanukiColorTokens.Light.accent).toHex(), colors["tanuki_icon_accent"])
+        assertEquals(TanukiColorMath.fromArgb(TanukiColorTokens.Light.primary).toHex(), colors["tanuki_icon_accent_text"])
     }
 
     @Test fun `深色表面避免纯白卡片和纯黑画布`() {

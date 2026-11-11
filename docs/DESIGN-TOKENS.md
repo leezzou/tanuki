@@ -7,7 +7,7 @@
 - JVM 回归：`app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt`、`app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt`。
 - 相关文档：[原生界面实现边界](NATIVE-UI.md)、[原生界面行为规格](NATIVE-UI-BEHAVIOR-SPEC.md)、[代码规范](code-standards.md)。
 
-当前配色由 android_agent-87 在 `main=7cfe1446effa76d1e7901f839d6a22996778d013` 上实现，android_agent-73 从含#89动效的 `main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935` 落库；第2节配色取值表与落地说明逐行一致，保留主线动效工厂/时长及reduced-motion结构。当前集成验证见 [主题落库交接](DEVELOPMENT-HISTORY.md#20261111-1819-sky-theme-landing)，下文历史验证均不代表本次设备验收。
+当前配色由 android_agent-101 基于 `main=3c56167b94efeff47a20bd609b389708ba080ce5` 调整为饱和靛蓝，白灰基底保留，取代旧天蓝方案。角色以第2节为准，实际验证及待验范围见[本轮交接](handoffs/20261112-0015-indigo-theme.md)。旧主题落库事实保留在[历史记录](DEVELOPMENT-HISTORY.md#20261111-1819-sky-theme-landing)，不能作为本轮验收。圆角、卡片、导航与动效章节描述现存实现，后续可按真实体验调整，并非不可推翻的设计目标。
 
 ## 1. 设计原则
 
@@ -24,12 +24,12 @@
 
 角色令牌直接指定 sRGB 值（下表省略不透明 alpha FF），不再由旧暖色中性阶梯取样；`TanukiColorMath` 继续支持 OKLCH、色域映射、WCAG 和透明合成。备用 OKLCH 中性色阶设为零彩度，避免暖色残留。
 
-- 装饰天蓝：浅色 #0EA5E9、深色 #38BDF8；仅用于选中、进度、状态点、图标着色、细描边与小面积浅底。白字主按钮两种主题均为 #0369A1，按下色 #075985。
-- 文字：浅色链接/可点击文字 #0369A1，深色 #7DD3FC。信息图标需 ≥3:1，浅色用深天蓝，深色用亮天蓝；纯装饰色不参加文字阈值。
-- 弱灰：#8C929A / #6F767F 仅禁用、占位、装饰。说明色 #6B7280 在白底通过，但在 #F5F6F7 上为 4.47:1、在 #E6F4FE 上为 4.31:1，因此 `descriptionOn(background)` 在这些底色上改用 #5A6068；路径采用分组底也可读的说明色。
+- 强调靛蓝：浅色 #4D6BFE、深色 #899BFF；用于选中、进度、状态点、细描边与小面积浅底。白字与 #4D6BFE 对比度仅 4.33:1，主按钮两种主题均用更深同色相 #3D56D6（6.00:1），按下色 #3348B8（7.61:1）；Material 与胶囊主按钮实际接通按下色。
+- 文字：浅色链接/可点击文字 #3D56D6，深色 #A6B3FF。信息图标需 ≥3:1，浅色用深靛蓝，深色用亮靛蓝。强调色也纳入非文字 ≥3:1 审计，不以“装饰”豁免进度或状态可辨认要求。
+- 弱灰：#8C929A / #6F767F 仅禁用、占位、装饰。说明色 #6B7280 在白底通过，但在 #F5F6F7 上为 4.47:1、在 #EEF0FF 上不足 4.5:1，因此 `descriptionOn(background)` 在这些底色上改用 #5A6068；路径采用分组底也可读的说明色。
 - 次按钮：浅色纯白底、#ECEDEF 描边、#111315 文字；深色使用 #1A1D21、#24282D、#F2F4F6。普通 tonal 次按钮也遵守此规则；Ghost 保留透明底。
 - 成功/警告/危险只用于语义；深色单独取亮度。浅色危险实底 #DC2626 配白字；白底危险文字 #B91C1C。成功/警告实色配深色文字，浅底标签使用各自容器文字色。
-- Material `primary` 供文字和选中控件，`onPrimary` 与之配对；白字按钮通过 `TanukiButton` / `TanukiPillButton` 读取独立 `primaryFill/onPrimary`，不把深色亮天蓝当白字底。Material 表面不叠加天蓝 tonal tint。
+- Material `primary` 供文字和选中控件，`onPrimary` 与之配对；白字按钮通过 `TanukiButton` / `TanukiPillButton` 读取独立 `primaryFill/onPrimary`，不把深色亮靛蓝当白字底。Material 表面不叠加蓝色 tonal tint。焦点边框与输入光标继承可读 primary；底部导航显式焦点使用同一角色。反色表面的 inversePrimary 使用另一主题的可读蓝，避免把容器浅底当链接。
 
 ### 2.2 当前完整取值表
 
@@ -50,14 +50,14 @@
 | `outline` | `#ECEDEF` | `#24282D` | 灰描边 |
 | `outlineStrong` | `#ECEDEF` | `#24282D` | 灰描边；不作为信息图标 |
 | `hairline` | `#ECEDEF` | `#24282D` | 分隔线 |
-| `primary` | `#0369A1` | `#7DD3FC` | 链接与可点击文字 |
-| `accent` | `#0EA5E9` | `#38BDF8` | 仅装饰、选中、进度、状态点、细描边 |
-| `accentIcon` | `#0369A1` | `#38BDF8` | 信息图标，至少 3:1 |
-| `primaryFill` | `#0369A1` | `#0369A1` | 白字主按钮实底 |
-| `primaryPressed` | `#075985` | `#075985` | 主按钮按下色 |
+| `primary` | `#3D56D6` | `#A6B3FF` | 链接与可点击文字 |
+| `accent` | `#4D6BFE` | `#899BFF` | 选中、进度、状态点、细描边，至少 3:1 |
+| `accentIcon` | `#3D56D6` | `#899BFF` | 信息图标，至少 3:1 |
+| `primaryFill` | `#3D56D6` | `#3D56D6` | 白字主按钮实底 |
+| `primaryPressed` | `#3348B8` | `#3348B8` | 主按钮按下色 |
 | `onPrimary` | `#FFFFFF` | `#FFFFFF` | 白字主按钮前景 |
-| `primaryContainer` | `#E6F4FE` | `#0B2B3A` | 选中态浅底 |
-| `onPrimaryContainer` | `#0369A1` | `#7DD3FC` | 选中态文字 |
+| `primaryContainer` | `#EEF0FF` | `#232B50` | 选中态浅底 |
+| `onPrimaryContainer` | `#3D56D6` | `#A6B3FF` | 选中态文字 |
 | `success` | `#16A34A` | `#4ADE80` | 语义状态实色/容器与配对前景 |
 | `onSuccess` | `#052E16` | `#052E16` | 语义状态实色/容器与配对前景 |
 | `successContainer` | `#F0FDF4` | `#102A1B` | 语义状态实色/容器与配对前景 |
@@ -70,16 +70,16 @@
 | `onDanger` | `#FFFFFF` | `#450A0A` | 语义状态实色/容器与配对前景 |
 | `dangerContainer` | `#FEF2F2` | `#32181B` | 语义状态实色/容器与配对前景 |
 | `onDangerContainer` | `#B91C1C` | `#FCA5A5` | 语义状态实色/容器与配对前景 |
-| `info` | `#0369A1` | `#7DD3FC` | 语义状态实色/容器与配对前景 |
+| `info` | `#3D56D6` | `#A6B3FF` | 语义状态实色/容器与配对前景 |
 | `onInfo` | `#FFFFFF` | `#0E1012` | 语义状态实色/容器与配对前景 |
-| `infoContainer` | `#E6F4FE` | `#0B2B3A` | 语义状态实色/容器与配对前景 |
-| `onInfoContainer` | `#0369A1` | `#7DD3FC` | 语义状态实色/容器与配对前景 |
+| `infoContainer` | `#EEF0FF` | `#232B50` | 语义状态实色/容器与配对前景 |
+| `onInfoContainer` | `#3D56D6` | `#A6B3FF` | 语义状态实色/容器与配对前景 |
 | `neutralStatus` | `#5A6068` | `#A8AFB8` | 语义状态实色/容器与配对前景 |
 | `onNeutralStatus` | `#FFFFFF` | `#0E1012` | 语义状态实色/容器与配对前景 |
 | `neutralStatusContainer` | `#F5F6F7` | `#16181B` | 语义状态实色/容器与配对前景 |
 | `onNeutralStatusContainer` | `#5A6068` | `#A8AFB8` | 语义状态实色/容器与配对前景 |
 
-`TanukiStatusTone` 的五类语义不变；Info 的点用装饰强调色，标签用可读的容器文字色。状态含义同时由文字表达。卡片以设备密度换算的 1px 灰描边分层，内容卡阴影为 0。状态栏/系统导航栏与 canvas 同色，浅色深字、深色浅字；导航栏深色图标按平台能力从 API 27 起通过专用资源启用，API 26 不支持此能力且未设备验证。底部导航选中标签用可读天蓝、图标用图标用途色。
+`TanukiStatusTone` 的五类语义不变；Info 的点用装饰强调色，标签用可读的容器文字色。状态含义同时由文字表达。卡片以设备密度换算的 1px 灰描边分层，内容卡阴影为 0。状态栏/系统导航栏与 canvas 同色，浅色深字、深色浅字；导航栏深色图标按平台能力从 API 27 起通过专用资源启用，API 26 不支持此能力且未设备验证。底部导航选中标签用可读靛蓝、图标用图标用途色。
 
 ### 2.3 全仓硬编码收敛清单
 
@@ -95,7 +95,7 @@
 | `main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 删除固定 #4C8DFF，所有生产链接传递当前主题文字色 |
 | `main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt`、`WorkspaceDocxPreview.kt`、`WorkspaceVideoPlayer.kt` | 加载/错误/边框/留白改令牌；文档纸张见保留边界 |
 | `main/kotlin/com/tanuki/MainActivity.kt`、`main/res/values{,-v27,-v29,-night,-night-v27,-night-v29}/themes.xml`、`main/res/values{,-night}/colors.xml` | 系统栏、首帧窗口同背景；图标色集中资源 |
-| `main/res/drawable/ic_tanuki.xml` | 原路径不变，原绿/棕/米色改白灰与天蓝叶片 |
+| `main/res/drawable/ic_tanuki.xml` | 原路径不变，原绿/棕/米色改白灰与靛蓝强调 |
 | `main/kotlin/com/tanuki/ui/{WorkspaceStorageControls,SetupGuide,WorkspaceFileViewer,OnboardingScreen,DshPlanCard,AgentBrowserPage,TanukiUi,DshNativePage,ApplicationUpdateCard,RemoteHostSettings,SetupScreens,RuntimeComponents,DshApprovalPanel,DshVersionManagerDialog,SourceSpeedControls,DshGoalDock,DshQuestionCard,TanukiAccessibility}.kt` | Material 按钮导入统一颜色入口；普通提示/装饰底回归灰白 |
 | `test/kotlin/com/tanuki/{DshMarkdownTest,TanukiPageVisualsTest}.kt`、`test/kotlin/com/tanuki/ui/design/{TanukiDesignTokensTest,TanukiPlatformThemeTest}.kt` | 用途回归、明暗链接、方案取值与平台资源断言 |
 
@@ -317,11 +317,13 @@ Host 回归 `TanukiListMotionTest` / `DshMessageMotionTest` 覆盖排序时间�
 
 ## 9. 当前用途对比度校验
 
-`TanukiContrastAudit` 每主题 45 项，共 90 项；正文、说明、链接、按钮及状态标签 ≥4.5:1，大字与信息图标 ≥3:1。装饰天蓝、禁用灰和细分隔线不参与可读文字断言；测试明确证明装饰天蓝配白字不合格，不会通过降低阈值掩盖问题。
+`TanukiContrastAudit` 每主题 55 项，共 110 项；正文、说明、链接、按钮及状态标签 ≥4.5:1，大字、信息图标、强调/进度及焦点 ≥3:1。禁用灰和细分隔线不作为可读文字；强调色不能直接作白字按钮背景。另以 JVM 验证实际 Material 主色/容器/信息色/反色链接配对、资源一致性和按下/停用态。
 
-白字主按钮 #0369A1 为 5.93:1。#6B7280 在灰底的不足通过 `descriptionOn` 回退解决。玻璃 chrome 以实际底色和 fillAlpha 压在 canvas 上审计；任意网页或原文图片的像素对比度不在该模型的保证范围。
+白字主按钮 #3D56D6 为 6.00:1，按下态 #3348B8 为 7.61:1。浅色链接/选中底为 5.30:1，暗色强调/选中底为 5.35:1，暗色链接/选中底为 6.86:1。#6B7280 在灰底的不足通过 `descriptionOn` 回退解决。玻璃 chrome 以实际底色和 fillAlpha 压在 canvas 上审计；任意网页或原文图片的像素对比度不在该模型的保证范围。
 
-原补丁在7cfe1446基线的主源码、Android 测试源码及 JVM 测试源码编译通过；该会话定向 JVM 共 58 项（设计令牌 23、平台主题 3、Material 主题 4、页面映射 12、Markdown 16），0 failures / errors / skipped；90 项用途审计全部通过。正文配对最低约 4.52:1，图标/大字最低约 5.29:1；主按钮 5.93:1、按下态 7.56:1、浅/深链接在卡片上分别 5.93/10.14:1。最终同命令重跑 BUILD SUCCESSFUL（5m52s），lint 为 0 errors / 103 warnings / 1 hint；此前 API27 资源属性位置错误已修复，失败原因保留于交接和测试报告。设备仍未验证。下节为旧接入工作的历史验证，不作为本轮通过依据。
+本轮（android_agent-101，3c56167b基线）产品/Android测试/JVM源码编译通过；定向JVM实核62项/5类，0失败/错误/跳过，110项用途审计全过，正文最低4.52:1、非文字最低3.82:1。Host线性sRGB矩阵近似模拟protan/deutan/tritan，在白色/选中底及深色表面/选中底上，链接最低4.56:1、强调最低3.31:1；状态保留文字标签和朗读名称。设备像素、实际焦点/选中、个体色觉感受及TalkBack尚未验证，由独立QA对照最终SHA；不把Host数学审计当设备验收。最终lint及完整命令见[本轮交接](handoffs/20261112-0015-indigo-theme.md)。
+
+历史：旧天蓝补丁在7cfe1446基线的主源码、Android 测试源码及 JVM 测试源码编译通过；该会话定向 JVM 共 58 项（设计令牌 23、平台主题 3、Material 主题 4、页面映射 12、Markdown 16），0 failures / errors / skipped；90 项用途审计全部通过。正文配对最低约 4.52:1，图标/大字最低约 5.29:1；主按钮 5.93:1、按下态 7.56:1、浅/深链接在卡片上分别 5.93/10.14:1。最终同命令重跑 BUILD SUCCESSFUL（5m52s），lint 为 0 errors / 103 warnings / 1 hint；此前 API27 资源属性位置错误已修复，失败原因保留于交接和测试报告。设备仍未验证。下节为旧接入工作的历史验证，不作为本轮通过依据。
 
 ## 10. 验证与未验证
 

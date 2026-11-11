@@ -30,7 +30,7 @@ internal enum class TanukiColorFamily(
     Success(150.0, 0.11),
     Warning(75.0, 0.13),
     Danger(27.0, 0.15),
-    Info(245.0, 0.12),
+    Info(271.0, 0.20),
 }
 
 /** 某一色相在完整明度阶梯上的 sRGB 结果。 */
@@ -111,13 +111,13 @@ internal data class TanukiColorTokens(
     val outline: Long,
     val outlineStrong: Long,
     val hairline: Long,
-    /** 可读强调文字；浅色深天蓝、深色浅天蓝，普通文字必须达到 4.5:1。 */
+    /** 可读强调文字；浅色深靛蓝、深色浅靛蓝，普通文字必须达到 4.5:1。 */
     val primary: Long,
-    /** 装饰天蓝仅用于选中、进度、状态点和细描边，不用于正文或白字背景。 */
+    /** 强调靛蓝用于选中、进度、状态点和细描边；正文与白字背景使用独立角色。 */
     val accent: Long,
-    /** 图标需达到 3:1；浅色使用深天蓝，避免装饰天蓝在白底不足 3:1。 */
+    /** 图标需达到 3:1；按明暗主题选择靛蓝，保证信息图标可辨认。 */
     val accentIcon: Long,
-    /** 白字主按钮独立于主题文字色；两种主题均用深天蓝。 */
+    /** 白字主按钮独立于主题文字色；两种主题均用深靛蓝。 */
     val primaryFill: Long,
     val primaryPressed: Long,
     val onPrimary: Long,
@@ -165,7 +165,7 @@ internal data class TanukiColorTokens(
     }
 
     companion object {
-        /** 浅色主题使用纯白/中性灰，天蓝只点缀操作与状态。 */
+        /** 浅色主题使用纯白/中性灰，靛蓝只强调操作与状态。 */
         val Light: TanukiColorTokens = TanukiColorTokens(
             isDark = false,
             canvas = 0xFFFFFFFF,
@@ -183,14 +183,14 @@ internal data class TanukiColorTokens(
             outline = 0xFFECEDEF,
             outlineStrong = 0xFFECEDEF,
             hairline = 0xFFECEDEF,
-            primary = 0xFF0369A1,
-            accent = 0xFF0EA5E9,
-            accentIcon = 0xFF0369A1,
-            primaryFill = 0xFF0369A1,
-            primaryPressed = 0xFF075985,
+            primary = 0xFF3D56D6,
+            accent = 0xFF4D6BFE,
+            accentIcon = 0xFF3D56D6,
+            primaryFill = 0xFF3D56D6,
+            primaryPressed = 0xFF3348B8,
             onPrimary = 0xFFFFFFFF,
-            primaryContainer = 0xFFE6F4FE,
-            onPrimaryContainer = 0xFF0369A1,
+            primaryContainer = 0xFFEEF0FF,
+            onPrimaryContainer = 0xFF3D56D6,
             // 成功/警告实色仅用于语义图形；深色前景保证实色标签的文字对比度。
             success = 0xFF16A34A,
             onSuccess = 0xFF052E16,
@@ -204,10 +204,10 @@ internal data class TanukiColorTokens(
             onDanger = 0xFFFFFFFF,
             dangerContainer = 0xFFFEF2F2,
             onDangerContainer = 0xFFB91C1C,
-            info = 0xFF0369A1,
+            info = 0xFF3D56D6,
             onInfo = 0xFFFFFFFF,
-            infoContainer = 0xFFE6F4FE,
-            onInfoContainer = 0xFF0369A1,
+            infoContainer = 0xFFEEF0FF,
+            onInfoContainer = 0xFF3D56D6,
             neutralStatus = 0xFF5A6068,
             onNeutralStatus = 0xFFFFFFFF,
             neutralStatusContainer = 0xFFF5F6F7,
@@ -232,14 +232,14 @@ internal data class TanukiColorTokens(
             outline = 0xFF24282D,
             outlineStrong = 0xFF24282D,
             hairline = 0xFF24282D,
-            primary = 0xFF7DD3FC,
-            accent = 0xFF38BDF8,
-            accentIcon = 0xFF38BDF8,
-            primaryFill = 0xFF0369A1,
-            primaryPressed = 0xFF075985,
+            primary = 0xFFA6B3FF,
+            accent = 0xFF899BFF,
+            accentIcon = 0xFF899BFF,
+            primaryFill = 0xFF3D56D6,
+            primaryPressed = 0xFF3348B8,
             onPrimary = 0xFFFFFFFF,
-            primaryContainer = 0xFF0B2B3A,
-            onPrimaryContainer = 0xFF7DD3FC,
+            primaryContainer = 0xFF232B50,
+            onPrimaryContainer = 0xFFA6B3FF,
             success = 0xFF4ADE80,
             onSuccess = 0xFF052E16,
             successContainer = 0xFF102A1B,
@@ -252,10 +252,10 @@ internal data class TanukiColorTokens(
             onDanger = 0xFF450A0A,
             dangerContainer = 0xFF32181B,
             onDangerContainer = 0xFFFCA5A5,
-            info = 0xFF7DD3FC,
+            info = 0xFFA6B3FF,
             onInfo = 0xFF0E1012,
-            infoContainer = 0xFF0B2B3A,
-            onInfoContainer = 0xFF7DD3FC,
+            infoContainer = 0xFF232B50,
+            onInfoContainer = 0xFFA6B3FF,
             neutralStatus = 0xFFA8AFB8,
             onNeutralStatus = 0xFF0E1012,
             neutralStatusContainer = 0xFF16181B,
@@ -280,7 +280,7 @@ internal data class TanukiContrastCheck(
 
 /**
  * 用途审计：正文、链接、按钮与标签 ≥4.5:1，大字及有信息含义的图标 ≥3:1。
- * 装饰天蓝、弱灰停用内容及细分隔线不作为可读文字或图标，不参与阈值断言。
+ * 弱灰停用内容及细分隔线不作为可读文字或图标；强调色需通过非文字阈值。
  */
 internal object TanukiContrastAudit {
     const val BODY_MINIMUM: Double = 4.5
@@ -301,6 +301,8 @@ internal object TanukiContrastAudit {
             body("说明/$name", tokens.descriptionOn(bg), bg)
             body("链接/$name", tokens.primary, bg)
             add(TanukiContrastCheck("图标/$name", tokens.accentIcon, bg, LARGE_MINIMUM))
+            add(TanukiContrastCheck("强调与进度/$name", tokens.accent, bg, LARGE_MINIMUM))
+            add(TanukiContrastCheck("焦点/$name", tokens.primary, bg, LARGE_MINIMUM))
             add(TanukiContrastCheck("大字/$name", tokens.textPrimary, bg, LARGE_MINIMUM))
         }
         val chrome = TanukiColorMath.composite(tokens.chromeBase, TanukiElevation.chrome.fillAlpha, tokens.canvas)

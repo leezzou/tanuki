@@ -241,7 +241,7 @@ private fun TanukiColorTokens.toMaterialColorScheme(): ColorScheme {
         surfaceTint = Color.Transparent,
         inverseSurface = Color(textPrimary),
         inverseOnSurface = Color(surface),
-        inversePrimary = Color(primaryContainer),
+        inversePrimary = Color(if (isDark) TanukiColorTokens.Light.primary else TanukiColorTokens.Dark.primary),
         outline = Color(outlineStrong),
         outlineVariant = Color(outline),
         scrim = Color(scrim),

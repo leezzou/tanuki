@@ -173,7 +173,7 @@ internal fun GlassNavigationBar(
                                 interactionSource = sources[index], indication = null,
                                 role = Role.Tab, onClick = { select(index) },
                             )
-                            .then(if (focused) Modifier.border(1.5.dp, colors.onSurface, lensShape) else Modifier)
+                            .then(if (focused) Modifier.border(1.5.dp, colors.primary, lensShape) else Modifier)
                             .padding(horizontal = 2.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),

@@ -98,8 +98,8 @@ class TanukiPageVisualsTest {
                     "$theme $tone 容器正文对比度 ${rate(role.content, role.container)}",
                     TanukiContrast.passesNormalText(role.content, role.container),
                 )
-                // 信息状态点是装饰天蓝；状态含义同时由通过正文阈值的标签表达。
-                if (tone != TanukiStatusTone.Info) assertTrue(
+                // 每种状态点都需可辨认；状态含义同时由通过正文阈值的标签表达。
+                assertTrue(
                     "$theme $tone 状态点对比度 ${rate(role.dot, tokens.canvas)}",
                     TanukiContrast.passesLargeText(role.dot, tokens.canvas),
                 )
