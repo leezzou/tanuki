@@ -255,7 +255,7 @@ private fun EnvironmentStep(
 ) {
     Text("准备运行环境", style = MaterialTheme.typography.headlineMedium)
     Text(
-        "先检查这台手机是否满足最低要求。满足后点“一键准备”，应用会下载、解压并校验必要组件；期间可以离开此页。",
+        "先检查手机是否满足要求。缺少运行环境时，点“一键准备”安装；已有环境会检查或启动，期间可离开此页。",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -476,13 +476,13 @@ private fun InterfaceStep(nativeSelected: Boolean, onSelect: (Boolean) -> Unit) 
         )
         InterfaceOption(
             title = "原生界面",
-            detail = "更贴近手机操作的会话列表与消息视图；高级功能仍会回到网页。",
+            detail = "更贴近手机操作的对话列表与消息视图；高级功能仍会回到网页。",
             selected = nativeSelected,
             onClick = { onSelect(true) },
         )
     }
     Text(
-        "稍后可在 设置 → 网页与兼容性 中修改。接口不可用时会自动回到官方界面，不会中断正在运行的任务。",
+        "稍后可在 设置 → 引擎与更新 → 网页与兼容性 → 使用手机界面 中切换。\n手机界面不可用时会显示网页界面，任务会继续运行。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

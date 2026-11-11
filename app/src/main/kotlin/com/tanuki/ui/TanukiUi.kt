@@ -814,7 +814,7 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         }
         HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
         TanukiDetails("运行诊断") {
-        Fact("DSH 进程", s.service.label)
+        Fact("助手", s.service.label)
         Fact("本机 Web 健康", if (s.webHealthy) "就绪" else "未就绪")
         Fact("网页认证", s.web.label)
         Fact("健康检查", s.health.label)
@@ -1108,7 +1108,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                 TanukiIcon(TanukiGlyph.Terminal, tint = MaterialTheme.colorScheme.primary)
                 Text(when {
                     remoteActive -> "远程 DSH 已连接"
-                    s.service != ServiceState.RUNNING -> "工作空间尚未启动"
+                    s.service != ServiceState.RUNNING -> "助手尚未启动"
                     s.web == WebState.RENDER_ERROR -> "网页渲染已中断"
                     else -> "先准备兼容的网页内核"
                 }, style = MaterialTheme.typography.titleLarge)
@@ -1118,8 +1118,8 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                     Fact("主机密钥", s.remote.fingerprint)
                     Caption("远程 token 只通过本机 SSH 隧道传输；本地运行时保持原状。")
                 } else {
-                    Fact("DSH 进程", s.service.label)
-                    Fact("本机 Web 服务", if (s.webHealthy) "就绪" else "未就绪")
+                    Fact("助手", s.service.label)
+                    Fact("对话连接", if (s.webHealthy) "就绪" else "未就绪")
                     Fact("启动模式", s.recovery.mode.label)
                     s.recovery.lastFailure?.let {
             Fact("最近失败", FailureCatalog.fromRuntimeFailure(it, s.recovery, s.error, s.recovery.lastFailureAtMillis).reason)
@@ -1127,7 +1127,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                 }
                 Caption("网页状态：${s.web.label}")
                 if (!remoteActive && s.service != ServiceState.RUNNING) Button(onClick = { c.command(if (s.environment == EnvironmentState.READY) "START" else "INIT") },
-                    enabled = !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { Text(if (s.environment == EnvironmentState.READY) "启动 DSH" else "下载并准备环境") }
+                    enabled = !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { Text(if (s.environment == EnvironmentState.READY) "启动助手" else "准备运行环境") }
                 if (remoteActive) OutlinedButton(onClick = { c.disconnectRemoteHost() }) { Text("断开远程并切回本地") }
                 if (s.web == WebState.RENDER_ERROR) OutlinedButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING || remoteActive) { Text("恢复网页连接") }
                 if (s.remote.error.isNotBlank()) Caption(s.remote.error)
@@ -1320,7 +1320,7 @@ internal fun StatusPill(text: String, active: Boolean) {
 @Composable
 private fun StopButton(c: TanukiUiCallbacks, enabled: Boolean) {
     TextButton(onClick = { c.command("STOP") }, enabled=enabled, modifier=Modifier.heightIn(min=48.dp),contentPadding = PaddingValues(horizontal = 12.dp)) {
-        TanukiIcon(TanukiGlyph.Stop, "停止 DSH 服务", modifier = Modifier.size(17.dp))
+        TanukiIcon(TanukiGlyph.Stop, "停止助手", modifier = Modifier.size(17.dp))
         Spacer(Modifier.width(4.dp)); Text("停止")
     }
 }

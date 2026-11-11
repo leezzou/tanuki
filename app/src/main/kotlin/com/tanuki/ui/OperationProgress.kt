@@ -94,7 +94,7 @@ internal fun OperationProgressEntry(
                     runtime == null -> status
                     failed -> "$title，上次操作没有完成"
                     fraction != null -> "$title，$status"
-                    else -> "$title，正在准备"
+                    else -> "$title，$status"
                 }
             }
             .padding(horizontal = 16.dp, vertical = 6.dp),
@@ -256,7 +256,7 @@ private fun OperationProgressDrawer(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
-                if (state.active) {
+                if (state.active && state.stage == OperationStage.DOWNLOAD) {
                     Text(
                         "百分比只代表当前阶段；下载完成后仍需解压、校验和安装。",
                         style = MaterialTheme.typography.bodySmall,

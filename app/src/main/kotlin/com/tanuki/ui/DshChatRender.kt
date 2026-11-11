@@ -411,14 +411,14 @@ object DshErrorPresenter {
             lower.contains("401") || lower.contains("unauthorized") || detail.contains("认证") ->
                 DshErrorInfo(DshErrorKind.AUTH, "连接认证已失效", "切换到官方界面重新连接后再试。", detail)
             lower.contains("agent-busy") || lower.contains("busy") || detail.contains("正在处理") ->
-                DshErrorInfo(DshErrorKind.BUSY, "DSH 正在处理其他消息", "等待当前回合结束后再重试。", detail)
+                DshErrorInfo(DshErrorKind.BUSY, "助手正在处理其他消息", "等待本次回复结束后再重试。", detail)
             lower.contains("timeout") || lower.contains("timed out") || detail.contains("超时") ->
-                DshErrorInfo(DshErrorKind.TIMEOUT, "连接超时", "检查 DSH 服务后点刷新重试。", detail)
+                DshErrorInfo(DshErrorKind.TIMEOUT, "连接超时", "检查助手是否在运行，再点刷新重试。", detail)
             lower.contains("network") || lower.contains("connect") || lower.contains("socket") ||
                 lower.contains("eof") || lower.contains("websocket") || detail.contains("网络") ->
-                DshErrorInfo(DshErrorKind.NETWORK, "网络连接中断", "检查 DSH 服务状态后重试。", detail)
+                DshErrorInfo(DshErrorKind.NETWORK, "网络连接中断", "检查助手是否在运行后重试。", detail)
             lower.contains("json") || lower.contains("格式") || lower.contains("响应") ->
-                DshErrorInfo(DshErrorKind.PROTOCOL, "官方响应格式异常", "可复制错误信息，或切换官方界面查看。", detail)
+                DshErrorInfo(DshErrorKind.PROTOCOL, "暂时无法读取回复", "可复制错误信息，或切换网页界面查看。", detail)
             lower.contains("cancel") || detail.contains("取消") ->
                 DshErrorInfo(DshErrorKind.CANCELLED, "操作已取消", "如仍需要结果，请重新发送。", detail)
             else -> DshErrorInfo(DshErrorKind.UNKNOWN, "操作未完成", "可复制错误信息，或切换官方界面处理。", detail)

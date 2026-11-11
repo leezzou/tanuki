@@ -236,7 +236,7 @@ class DshComposerController(
         if (items.isEmpty()) return
         val sessionId = _state.value.sessionId
         if (sessionId == null) {
-            _state.update { it.copy(error = "请先选择会话") }
+            _state.update { it.copy(error = "请先选择对话") }
             return
         }
         var accepted = 0
@@ -362,7 +362,7 @@ class DshComposerController(
     fun send() {
         val current = _state.value
         val sessionId = current.sessionId ?: run {
-            _state.update { it.copy(error = "请先选择会话") }
+            _state.update { it.copy(error = "请先选择对话") }
             return
         }
         if (current.sending) return
@@ -526,7 +526,7 @@ class DshComposerController(
                     runStateStale = false,
                     stopping = false,
                     stopOutcome = if (awaitingStop) DshStopOutcome.STOPPED else state.stopOutcome,
-                    notice = if (awaitingStop) "已停止当前回合" else state.notice
+                    notice = if (awaitingStop) "已结束本次回复" else state.notice
                 )
             }
         }
@@ -541,12 +541,12 @@ class DshComposerController(
     fun requestStop() {
         val current = _state.value
         val sessionId = current.sessionId ?: run {
-            _state.update { it.copy(error = "请先选择会话") }
+            _state.update { it.copy(error = "请先选择对话") }
             return
         }
         if (current.stopping) return
         if (!current.generationRunning && !current.sending) {
-            _state.update { it.copy(notice = "当前没有运行中的回合") }
+            _state.update { it.copy(notice = "当前没有正在进行的回复") }
             return
         }
         val requestGeneration = generation
@@ -584,7 +584,7 @@ class DshComposerController(
                             // accepted 后先保持“正在停止”，超时再降级为“仍在收尾”。
                             stopping = true,
                             stopOutcome = DshStopOutcome.REQUESTED,
-                            notice = "正在停止，等待官方确认"
+                            notice = "正在结束本次回复"
                         )
                     }
                     scheduleStopTimeout(sessionId, requestGeneration)
@@ -593,7 +593,7 @@ class DshComposerController(
                         it.copy(
                             stopping = false,
                             stopOutcome = DshStopOutcome.STOPPED,
-                            notice = "已停止当前回合"
+                            notice = "已结束本次回复"
                         )
                     }
                 }
@@ -610,7 +610,7 @@ class DshComposerController(
                         stopping = false,
                         stopOutcome = if (stillActive) DshStopOutcome.FAILED else DshStopOutcome.STOPPED,
                         error = if (stillActive) "停止失败：${messageOf(error)}" else it.error,
-                        notice = if (stillActive) it.notice else "回合已结束"
+                        notice = if (stillActive) it.notice else "本次回复已结束"
                     )
                 }
             }
@@ -634,7 +634,7 @@ class DshComposerController(
                     // 只进入 UI 降级，不推测回合结束；停止入口和 requestStop 仍然可用。
                     state.copy(
                         runStateStale = true,
-                        notice = "长时间未收到运行事件，可继续发送；停止仍可用"
+                        notice = "回复较久没有更新，可继续发送或结束本次回复"
                     )
                 } else state
             }
@@ -649,7 +649,7 @@ class DshComposerController(
             if (requestGeneration != generation || sessionId != _state.value.sessionId) return@launch
             _state.update { state ->
                 if (state.stopping && state.stopOutcome == DshStopOutcome.REQUESTED) {
-                    state.copy(stopping = false, notice = "停止请求已发送，仍在收尾")
+                    state.copy(stopping = false, notice = "正在结束本次回复，仍在收尾")
                 } else state
             }
         }
@@ -824,9 +824,9 @@ class DshComposerController(
             error.code.contains("too-large", ignoreCase = true) ||
                 error.code.contains("too_large", ignoreCase = true) -> "附件超过官方大小限制"
             error.code.contains("media", ignoreCase = true) ||
-                error.code.contains("type", ignoreCase = true) -> "官方接口不支持该附件类型"
-            error.code.contains("not-found", ignoreCase = true) -> "会话或附件不存在"
-            else -> "官方接口返回 ${error.code}"
+                error.code.contains("type", ignoreCase = true) -> "助手暂不支持这类附件"
+            error.code.contains("not-found", ignoreCase = true) -> "对话或附件不存在"
+            else -> "助手暂时无法完成操作，请稍后重试"
         }
         is DshCommandException -> Redact.text(error.message ?: "斜杠命令执行失败").take(240)
         is IllegalArgumentException -> Redact.text(error.message ?: "输入内容无效").take(240)

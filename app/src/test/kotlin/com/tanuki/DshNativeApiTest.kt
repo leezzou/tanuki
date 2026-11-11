@@ -55,6 +55,19 @@ class DshNativeApiTest {
         assertEquals("", sessions.single { it.id == "s5" }.title)
     }
 
+    @Test fun sessionWorkspaceUsesOfficialSummaryAndFallsBackWithoutGuessing() {
+        val items = JSONArray()
+            .put(session("known", "项目", 10L, null).put("cwd", "/workspaces/示例项目"))
+            .put(session("missing", "项目", 9L, null))
+        listOf(JSONObject.NULL, "", "   ", "null", " NULL ", 42).forEachIndexed { index, cwd ->
+            items.put(session("invalid$index", "项目", index.toLong(), null).put("cwd", cwd))
+        }
+        val sessions = DshApiProtocol.parseSessionList(responseOk("rpc-cwd", JSONObject().put("items", items)))
+        assertEquals("/workspaces/示例项目", sessions.single { it.id == "known" }.displayWorkspace)
+        assertTrue(sessions.filter { it.id != "known" }.all { it.displayWorkspace == "工作区" })
+        assertNull(sessions.single { it.id == "missing" }.cwd)
+    }
+
     @Test fun projectionCutOnlyAcceptsSequencedValues() {
         val sequenced = responseOk(
             "rpc-1",
