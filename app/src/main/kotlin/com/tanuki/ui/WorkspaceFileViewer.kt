@@ -237,17 +237,21 @@ internal fun WorkspaceFileViewer(
                     }
                 }
             }
+            // 操作栏固定 48dp；传输胶囊通过 FileViewerLayout 叠加同一高度避让，改动时需同步。
             if (!fullscreen) HorizontalDivider()
             if (!fullscreen) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-                TextButton(onClick = onExport, enabled = !opening && !loading && info != null, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = onExport, enabled = !opening && !loading && info != null,
+                    modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
                     TanukiIcon(TanukiGlyph.Download); Spacer(Modifier.width(8.dp)); Text("导出此文件")
                 }
-                TextButton(onClick = ::openWith, enabled = !opening && !loading && info != null, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = ::openWith, enabled = !opening && !loading && info != null,
+                    modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
                     Icon(Icons.Default.ExitToApp, null); Spacer(Modifier.width(8.dp)); Text("使用其他应用打开")
                 }
                 // 外部文件即使内置预览失败（如提供方不支持随机读），也保留显式复制入口。
                 onCopyToWorkspace?.let { action ->
-                    TextButton(onClick = action, enabled = !opening && !loading, modifier = Modifier.heightIn(min = 48.dp)) {
+                    TextButton(onClick = action, enabled = !opening && !loading,
+                        modifier = Modifier.heightIn(min = FileViewerLayout.ActionBarHeight)) {
                         Text("复制到工作区")
                     }
                 }

@@ -201,8 +201,9 @@ internal fun WorkspaceFilesPage(
                 onEdit = {},
                 onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
                 onReselect = onReselectExternal)
-            // 查看器和列表共用同一个传输浮层；从查看器导出后仍能看到进度并取消。
-            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+            // 查看器和列表共用同一个传输浮层；查看器操作栏可见时胶囊需额外上移避让。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
+                viewerActionBarVisible = !fullscreen)
         }
         return
     }
@@ -221,8 +222,9 @@ internal fun WorkspaceFilesPage(
                     begin("编辑文本", listOf(entry)); content = editable.text
                     draftOriginal = content; draftRevision = editable.revision.orEmpty(); openedEntry = null
                 } })
-            // 编辑动作会离开查看器；传输浮层保持在当前页面，不因分支切换丢失。
-            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer)
+            // 编辑动作会离开查看器；传输浮层保持在当前页面，并按操作栏高度避让。
+            FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
+                viewerActionBarVisible = !fullscreen)
         }
         return
     }
@@ -531,6 +533,7 @@ private fun FileTransferOverlay(
     bottomInset: Dp,
     onCancelTransfer: (Long) -> Unit,
     snackbarHostState: SnackbarHostState? = null,
+    viewerActionBarVisible: Boolean = false,
 ) {
     val items by transfers.collectAsState()
     val summary = FileTransferPresentation.summary(items)
@@ -554,7 +557,10 @@ private fun FileTransferOverlay(
                 onOpen = { sheet = true },
                 onCancel = { items.forEach { item -> onCancelTransfer(item.id) } },
                 modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = bottomInset + 12.dp),
+                    .padding(
+                        end = 16.dp,
+                        bottom = FileViewerLayout.transferPillBottomPadding(bottomInset, viewerActionBarVisible),
+                    ),
             )
         }
     }
