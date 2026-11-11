@@ -51,7 +51,7 @@ class DshChatRenderTest {
         assertEquals("思考中", DshChatRenderPolicy.activity(true, true))
         assertEquals("等你回答", DshChatRenderPolicy.activity(true, true, true))
         assertEquals("就绪", DshChatRenderPolicy.activity(false, true))
-        assertEquals("生成中 · 可直接插话", DshChatRenderPolicy.composerPlaceholder(true))
+        assertEquals("补充消息，发送后排队处理", DshChatRenderPolicy.composerPlaceholder(true))
     }
 
     @Test fun toolGroupsKeepMessageBoundariesAndRestorePrependedMember() {

@@ -231,6 +231,7 @@ fun DshNativePage(
                     composerFailure = composerFailure,
                     composerPendingText = composerPendingText,
                     composerSending = composerState.sending,
+                    composerSendAttempt = composerState.sendAttempt,
                     composerRetryEnabled = composerFailure?.let {
                         DshComposerDraftPolicy.matches(it, composerState.text, composerState.attachments.size)
                     } == true,
@@ -426,6 +427,7 @@ private fun MessageList(
     composerFailure: DshFailedPrompt?,
     composerPendingText: String,
     composerSending: Boolean,
+    composerSendAttempt: Long,
     composerRetryEnabled: Boolean,
     composerRetryHint: String?,
     onRetryComposer: () -> Unit,
@@ -506,6 +508,10 @@ private fun MessageList(
                 return Offset.Zero
             }
         }
+    }
+    // 发送尝试序号不随回执消失，快速发送也能恢复跟随；普通流式更新不触发。
+    LaunchedEffect(state.selectedId, composerSendAttempt) {
+        if (composerSendAttempt > 0L) follow.reattach()
     }
     // 回到底部才恢复跟随；上翻过程中不会自动拉回。
     LaunchedEffect(listState, state.selectedId) {

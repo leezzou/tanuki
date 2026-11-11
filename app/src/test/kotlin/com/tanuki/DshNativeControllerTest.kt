@@ -129,6 +129,55 @@ class DshNativeControllerTest {
     }
 
 
+    @Test fun composerAcceptanceReconcilesInPlaceWithoutRestartingLiveOrClearingHistory() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        var holdPage = false
+        var reads = 0
+        var liveStarts = 0
+        val tool = toolItem("kept-tool", DshToolStatus.RUNNING, 2)
+        val source = object : DshChatSource by FakeSource(listOf(session("A"), session("B"))) {
+            override suspend fun messages(sessionId: String): Result<DshSessionPage> {
+                reads++
+                if (holdPage) gate.await()
+                return Result.success(DshSessionPage(listOf(
+                    DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                ), false))
+            }
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                liveStarts++
+                emit(DshLiveEvent.Connected)
+                emit(DshLiveEvent.Snapshot(listOf(
+                    DshMessage(0, DshMessageRole.USER, "已加载的更早历史", 0L),
+                    DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                ), true, "正在生成的前缀", listOf(tool)))
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val controller = controller(source)
+        controller.refresh()
+        val before = awaitState(controller) { !it.loading && it.live && it.streamingText.isNotEmpty() }
+        holdPage = true
+        controller.onPromptAccepted("A")
+        assertTrue(controller.state.value.loading)
+        assertEquals(before.messages, controller.state.value.messages)
+        assertEquals(before.tools, controller.state.value.tools)
+        assertEquals(before.streamingText, controller.state.value.streamingText)
+        assertEquals(1, liveStarts)
+        gate.complete(Unit)
+        val reconciled = awaitState(controller) { !it.loading }
+        assertEquals(before.messages, reconciled.messages)
+        assertTrue(reconciled.hasMore)
+        assertEquals(before.tools, reconciled.tools)
+        assertEquals(1, liveStarts)
+        controller.select("B")
+        awaitSelection(controller, "B")
+        val readsBeforeStaleReceipt = reads
+        controller.onPromptAccepted("A")
+        assertEquals(readsBeforeStaleReceipt, reads)
+        assertEquals("B", controller.state.value.selectedId)
+        controller.close()
+    }
+
     @Test fun sendKeepsPendingBubbleUntilOfficialMessageAndClearsOnSuccess() = runBlocking {
         val source = FakeSource(listOf(session("A")))
         val controller = controller(source)

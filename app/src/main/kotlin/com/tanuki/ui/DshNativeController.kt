@@ -314,6 +314,12 @@ class DshNativeController(
         pageJob = scope.launch { loadMessages(sessionId, token) }
     }
 
+    /** 输入栏已受理：原位补读官方历史，不清空分页、流式前缀或重启当前 follow。 */
+    fun onPromptAccepted(sessionId: String) {
+        if (_state.value.selectedId != sessionId) return
+        refreshMessages(sessionId, generation)
+    }
+
     /** 发送失败返回 false；成功只表示官方已接受，不代表回合已完成。 */
     suspend fun send(text: String): Boolean {
         val current = _state.value

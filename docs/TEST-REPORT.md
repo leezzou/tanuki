@@ -36,6 +36,13 @@
 - 完整命令 BUILD SUCCESSFUL（19m20s），退出0，47个任务实际执行；lint XML实核 **0 errors / 117 warnings / 2 hints**，本轮改动文件无lint告警。源码复扫无旧天蓝主题色值；DOCX/XLSX格式颜色不改。公开候选扫描0 findings；单一交接见[本轮记录](handoffs/20261112-0015-indigo-theme.md)。
 - 未执行完整本地JVM、Android仪器、设备安装/像素验收、TalkBack/个体色觉设备验收或真实运行链路；不生成设备/发布APK，不将跳过原生构建的Host结果当Android运行通过。后续独立QA须绑定最终SHA，对照深浅按钮/链接/选中/焦点/进度和系统首帧。API Key/真实模型/真机暂停项保留；不合并、tag或发布。
 
+## 原生聊天第一阶段（2026-11-12，android_agent-104，Host）
+
+- 基线：远端 main 与起始 HEAD 实核 `3c56167b94efeff47a20bd609b389708ba080ce5`，独立分支 `ao/tanuki-chat/chat-flow`。实现忙碌时排队/插话与独立停止、主动发送恢复跟随、accepted 原位补读而非清空历史重建 follow。
+- 产品、Android 测试及 JVM 测试源码 compile 通过。最终七类 JVM XML 独立核验 **140 tests / 7 XML / 0 failures / 0 errors / 0 skipped**：ComposerController 33、ChatRender 24、ChatFollowState 5、NativeComposerBinding 8、NativeController 36、NativePaging 16、ChatWindow 18。最终命令退出 0，BUILD SUCCESSFUL（5m38s）；lint XML 独立核验 **0 errors / 117 warnings / 2 hints**，与基线数量一致。
+- 中间失败如实保留：首轮在产品编译后继续添加 onPromptAccepted，测试读到新源码而依赖旧编译产物，测试源码编译失败；固定源码离线复跑因四个 lint runtime 依赖未缓存失败；联网复跑 140 项仅 watchdog 等待旧“已发送”文案超时，实际忙碌发送应为队列受理提示，只同步该断言后最终 140 项全过。各次失败不计通过。
+- 最终命令及环境详见[本轮唯一交接](handoffs/20261112-0003-native-chat-flow.md)。仅 Host 验证，使用 `-x buildNativeRuntime`，未生成可安装验收包；未执行 Android 仪器、设备/键盘/触屏/大字号、真实 DSH/模型/审批/提问端到端或真机。官方提问契约已查证但本阶段未接线；API Key 保存暂停，不读凭据，不合并、发布或触发审查。
+
 ## 0.1.14 / code19 最终 REBUILD（16c07591b）
 
 - 收到新的RBEBUILD后，实际fetch最终main `16c07591b7ba170a77fdc0720b201a77e5477db3`，在原发布分支上git merge --no-commit origin/main；唯一冲突为OperationProgressLayoutTest，完整保留main的加强版本，并按字节确认一致。旧0910cc1候选由本轮替代，PR #105继续更新；默认版本0.1.14/code19。
