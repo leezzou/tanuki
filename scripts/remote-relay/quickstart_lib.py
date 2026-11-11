@@ -15,7 +15,6 @@ quickstart.sh 只负责终端交互、进程编排和 trap 清理；下面这些
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import os
 import shlex
 import socket
@@ -24,8 +23,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
+import discovery
 import protocol as p
 
 HERE = Path(__file__).resolve().parent
@@ -92,11 +92,15 @@ def agent_command(
     state_dir: Path,
     cert_pin: str,
     pairing_relay: str = "",
+    name: str = "",
+    dsh_port: int = discovery.DEFAULT_DSH_PORT,
+    no_mdns: bool = False,
 ) -> List[str]:
-    """拼装 host_agent.py 参数，确保钉扎不会漏传。"""
+    """拼装 host_agent.py 参数，确保钉扎/发现参数不会漏传。"""
     if not cert_pin.startswith(PIN_PREFIX):
         raise QuickstartError("缺少 --cert-pin，拒绝启动主机端 agent")
     validate_port(ssh_port, "SSH 端口")
+    validate_port(dsh_port, "DSH 端口")
     if not str(relay).strip():
         raise QuickstartError("中继连接地址不能为空")
     try:
@@ -114,6 +118,8 @@ def agent_command(
         str(ssh_host),
         "--ssh-port",
         str(ssh_port),
+        "--dsh-port",
+        str(dsh_port),
         "--state-dir",
         str(state_dir),
         "--cert-pin",
@@ -122,6 +128,10 @@ def agent_command(
     if pairing_relay:
         # 连接地址与手机可达地址可能不同（例如主机连 127.0.0.1、手机走公网地址）。
         command += ["--pairing-relay", str(pairing_relay)]
+    if name:
+        command += ["--name", str(name)]
+    if no_mdns:
+        command.append("--no-mdns")
     return command
 
 
@@ -194,42 +204,9 @@ def wait_port(host: str, port: int, timeout: float = 10.0, interval: float = 0.1
         time.sleep(interval)
 
 
-def _usable_ipv4(text: str) -> bool:
-    try:
-        address = ipaddress.ip_address(text)
-    except ValueError:
-        return False
-    return (
-        address.version == 4
-        and not address.is_loopback
-        and not address.is_link_local
-        and not address.is_unspecified
-    )
-
-
 def detect_lan_ip(run=subprocess.run) -> str:
-    """尽力探测本机非回环 IPv4；失败返回空串，交给调用方提示 --public-host。
-
-    只调用本机固定命令（macOS ipconfig / Linux hostname），不访问外网，
-    因此结果只是“局域网可用”的最好猜测，跨网络仍需用户显式传公网地址。
-    """
-    candidates: Sequence[Sequence[str]] = (
-        ("ipconfig", "getifaddr", "en0"),
-        ("ipconfig", "getifaddr", "en1"),
-        ("hostname", "-I"),
-    )
-    for args in candidates:
-        try:
-            completed = run(list(args), capture_output=True, text=True, timeout=2)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if completed.returncode != 0:
-            continue
-        for token in str(completed.stdout).split():
-            # hostname -I 可能返回多个地址（含 IPv6），只取第一个可用 IPv4。
-            if _usable_ipv4(token):
-                return token
-    return ""
+    """兼容包装：局域网探测实现集中在 discovery.py，避免两套逻辑分叉。"""
+    return discovery.detect_lan_ip(run)
 
 
 def plan_text(
@@ -244,6 +221,9 @@ def plan_text(
     ssh_port: int,
     pairing_file: Path,
     cert_pin: Optional[str],
+    name: str = "",
+    dsh_port: int = discovery.DEFAULT_DSH_PORT,
+    no_mdns: bool = False,
 ) -> str:
     """`--print-only` 的输出：展示解析后的参数与将要执行的命令，不启动进程。"""
     cert_exists = Path(cert).is_file()
@@ -258,6 +238,9 @@ def plan_text(
         "port={}".format(port),
         "public_endpoint={}".format(endpoint),
         "ssh_target={}:{}".format(ssh_host, ssh_port),
+        "display_name={}".format(discovery.sanitize_name(name or discovery.default_display_name())),
+        "dsh_port={}".format(dsh_port),
+        "mdns={}".format("off（--no-mdns）" if no_mdns else "on（{}）".format(discovery.SERVICE_TYPE)),
         "pairing_file={}".format(pairing_file),
         "cert_pin={}".format(cert_pin if cert_pin else "（证书不存在，生成后自动计算）"),
     ]
@@ -271,6 +254,9 @@ def plan_text(
             state_dir,
             cert_pin or "sha256-<自动计算>",
             endpoint,
+            name=name,
+            dsh_port=dsh_port,
+            no_mdns=no_mdns,
         )
     )
     lines.append("relay_command=" + relay_cmd)
@@ -306,6 +292,9 @@ def _run_agent(args: argparse.Namespace) -> int:
         Path(args.state_dir),
         args.cert_pin,
         args.pairing_relay or "",
+        name=args.name,
+        dsh_port=args.dsh_port,
+        no_mdns=args.no_mdns,
     )
     os.execvp(command[0], command)
     return 1
@@ -333,6 +322,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     agent.add_argument("--state-dir", required=True)
     agent.add_argument("--cert-pin", required=True)
     agent.add_argument("--pairing-relay", default="")
+    agent.add_argument("--name", default="")
+    agent.add_argument("--dsh-port", type=int, default=discovery.DEFAULT_DSH_PORT)
+    agent.add_argument("--no-mdns", action="store_true")
 
     pairing = sub.add_parser("read-pairing", help="读取配对文件")
     pairing.add_argument("--path", required=True)
@@ -357,6 +349,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     sub.add_parser("detect-lan-ip", help="尽力探测本机局域网 IPv4")
 
+    display = sub.add_parser("display-name", help="生成/清洗局域网显示名")
+    display.add_argument("--name", default="")
+
     plan = sub.add_parser("plan", help="打印将执行的参数与命令（不启动）")
     plan.add_argument("--python", default=sys.executable)
     plan.add_argument("--state-dir", required=True)
@@ -367,6 +362,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     plan.add_argument("--public-host", default="127.0.0.1")
     plan.add_argument("--ssh-host", default="127.0.0.1")
     plan.add_argument("--ssh-port", type=int, default=22)
+    plan.add_argument("--name", default="")
+    plan.add_argument("--dsh-port", type=int, default=discovery.DEFAULT_DSH_PORT)
+    plan.add_argument("--no-mdns", action="store_true")
     plan.add_argument("--pairing-file", required=True)
     plan.add_argument("--cert-pin", default="")
 
@@ -399,6 +397,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(format_endpoint(args.host, args.port))
         elif args.command == "detect-lan-ip":
             print(detect_lan_ip())
+        elif args.command == "display-name":
+            print(discovery.sanitize_name(args.name or discovery.default_display_name()))
         elif args.command == "plan":
             pin = ""
             if args.cert_pin:
@@ -418,6 +418,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     args.ssh_port,
                     Path(args.pairing_file),
                     pin or None,
+                    name=args.name,
+                    dsh_port=args.dsh_port,
+                    no_mdns=args.no_mdns,
                 )
             )
     except QuickstartError as error:

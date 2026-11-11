@@ -13,6 +13,7 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 
 - 直连模式：远程主机可从 Android 设备直接访问 SSH 端口。
 - 中继模式：手机和主机都能访问同一个 TLS 中继端口；主机端运行 `scripts/remote-relay/host_agent.py`，主机只需出站访问中继，不需要公网 IP 或入站端口。
+- 局域网发现：手机和主机在同一 Wi-Fi/热点或同一允许组播的 VLAN；路由器未启用 AP/客户端隔离或 mDNS 屏蔽，主机防火墙放行 UDP 5353 和组播 `224.0.0.251`。发现只用于展示，仍需配对 token 和 SSH 主机密钥确认。
 - 远程 DSH 已启动，并只监听远程 `127.0.0.1:<port>`；本切片不会远程启动或停止 DSH。
 - 远程 SSH 支持密码、RSA 或 ECDSA 公钥认证。Ed25519 私钥/主机密钥需要额外 BouncyCastle，当前版本会明确失败，留待后续。
 - 首次连接需要用户核对主机公钥指纹；远程 DSH token 是可选项，按远程实际启动参数填写。
@@ -55,6 +56,12 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 5. 首次连接仍展示远程 SSH 主机密钥 `SHA256:` 指纹，确认后才发送认证信息；之后按 `relay:<hostId>` 比对。中继证书钉扎失败/主机密钥变化都会拒绝，不降级明文。
 6. 中继模式与直连模式共用同一个 loopback origin、Cookie 隔离、失败回退本地和“断开远程并切回本地”流程。
 
+### 2.4 局域网发现（主机端）
+
+主机端 quickstart/host_agent 默认广播 `_tanuki-remote._tcp.local`，TXT 带显示名、SSH/DSH 端口、hostId、协议版本和指纹摘要，**不广播 token**。手机与主机需在同一 Wi-Fi/热点，且路由器未启用 AP/客户端隔离或 mDNS 屏蔽；主机防火墙放行 UDP 5353/组播 `224.0.0.251`。`--name` 改显示名，`--dsh-port` 改 TXT 中的 DSH 端口，`--no-mdns` 关闭广播。广播失败只记日志，不影响中继/配对链接。
+
+完整契约和“列表看不到 / 能看到但连不上”的排查见 [无公网 IP 远程连接 3.4](REMOTE-CONNECT.md#34-局域网自动发现mdns)。
+
 本地运行时不会被删除或重建。远程连接期间本地 DSH 可以继续运行；切换只改变管理 WebView 的 origin，不会迁移远程会话、项目或凭据到本地。
 
 ## 3. 连接与回退
@@ -94,6 +101,7 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 | 6 位配对码（与主机端共享向量） | `app/src/main/kotlin/com/tanuki/runtime/RemotePairingCode.kt`、`scripts/remote-relay/protocol.py`、`host_agent.py` |
 | JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteWizardTest.kt`、`RemoteHostTest.kt`、`DshRemoteIsolationTest.kt`、`RemoteRelayTest.kt` |
 | Python 参考中继/主机端/自测 | `scripts/remote-relay/` |
+| 局域网发现/mDNS 编解码/自测 | `scripts/remote-relay/discovery.py`、`test_mdns.py` |
 | 设备回归（仅编译，未运行） | `app/src/androidTest/kotlin/com/tanuki/DshCookieIsolationTest.kt`、`RemoteHostKeystoreTest.kt` |
 
 ## 6. 验证与未验证
@@ -101,8 +109,9 @@ WebRTC/TURN、远程 DSH 启停和多台远程主机同时连接尚未实现；�
 已执行（JVM）：本轮新增 `RemoteWizardTest` 41 项，覆盖六步状态机（不可跳步、返回保留草稿、指纹必须显式勾选、失败停在阶段、重试重置、主机密钥变化不可重试、阶段只前进）、host/端口/用户名/密码/私钥/口令/token/配对链接/名称校验、DNS/拒绝/超时/认证/转发/DSH/主机密钥变化的阶段映射与文案不泄露、命名连接新增/编辑/删除/活动标记/密文无明文、公开重连/失败重试恢复来源 profile ID、新手工配置不继承旧来源、活动凭据归属与 known_hosts 主机身份分离（同主机不同账号删除仍清理）、删除连接按来源清理活动副本但保留隧道、编辑目标后删除仍清理旧副本、同服务双 profile 不误删、迟到私钥读取按请求版本丢弃、失败重试绑定本次尝试配置、IPv6 向导配置可被下游再次校验、配对链接 + 6 位码校验与共享向量、主机 chip 状态映射、控制器测试连接全阶段完成且不切 origin、未知主机停在指纹、DSH 失败关闭隧道。既有 `RemoteHostTest`、`RemoteRelayTest`、`DshRemoteIsolationTest` 全部通过；完整 JVM 928 tests / 101 文件 / 0 失败，lint 0 errors。配置校验、IPv4/IPv6/域名规范化、token URL 只落 loopback、状态机切换/本地停止保持远程/失败回退、首次指纹确认后才建立信任、主机密钥变化拒绝、加密存储往返/篡改回退/清除、HTTP 探测 200/302/401/500 与连接拒绝、Cookie 分区、活动端点认证/重试策略仍由既有回归覆盖。本轮完整结果见 PR [#57](https://github.com/leezzou/tanuki/pull/57) 与交接记录；历史验证见 [测试报告](TEST-REPORT.md)。
 
 本轮配对交互回归（android_agent-66，JVM）：新增剪贴板自动填充与链接算码一致、剪贴板为空/非链接/无效链接的粘贴回退、手动编辑链接不被悄悄覆盖并支持显式替换、自动码回填与手动校对不一致提示、配对确认步骤只在链接方式出现、链接过期/房间不存在/电脑离线/证书钉扎不匹配/中继端口不可达五类中文原因与下一步、钉扎不匹配不可重试。定向 `RemoteWizardTest` 46 项、`RemoteRelayTest` 22 项、`RemoteHostTest` 27 项通过；完整 JVM 1052 tests / 108 结果文件 / 0 failures / 0 errors / 0 skipped。本轮未验证项见 [交接](handoffs/20261111-1024-mobile-pairing-auto.md)。
+本轮主机端发现回归：`test_mdns.py` 20 项、`test_quickstart.py` 20 项、`test_remote_relay.py` 9 项通过；真实同网段手机发现与路由器组播策略未验证。
 
-未验证：真实 Android 设备到真实 sshd/中继的端到端、真实剪贴板自动读取与确认页布局（深色/大字体）、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、真实公网中继/证书、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。新增 Cookie 隔离/Keystore 设备回归仅编译，未运行；设备/真实主机验收需要独立 QA 会话和明确目标。
+未验证：真实 Android 设备到真实 sshd/中继的端到端、真实 mDNS 发现列表与 AP 隔离/组播屏蔽、真实剪贴板自动读取与确认页布局（深色/大字体）、JSch 在 Android Keystore/后台线程的实际表现、真实远程 DSH token 登录、真实公网中继/证书、弱网/断线重连、真机与模拟器 UI 操作、Ed25519。新增 Cookie 隔离/Keystore 设备回归仅编译，未运行；设备/真实主机验收需要独立 QA 会话和明确目标。
 
 ## 7. 后续切片
 
