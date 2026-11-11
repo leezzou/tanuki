@@ -2,6 +2,15 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## QA-12 文本多字节分页边界（2026-11-11，android_agent-76，Host 验证）
+
+- 基线：fetch 后 `origin/main=6b0b0b3fe4e327fb62fd30ddcbd979f2737ab446`，分支 `ao/paging-boundary/page-char-boundary`。修复 GBK `.cpp` 首字节在 65535 而 Android 返回 65536、第二页乱码的问题。
+- 算法：64 KiB 读取窗口和 4 MiB 截断统一向前最多退 3 字节，逐个按选定编码严格解码并完成 flush，取最长合法前缀。文本与下一页游标使用同一前缀；未消费字节由下一页重读。已知非空来源读不到数据时明确失败，不能虚增游标。空文件停止、跨页单字符能推进、上限内放不下字符时结束空尾页。
+- 四组回归均穷举字符内部切点：GBK 双字节 1 个、GB18030 四字节 3 个、UTF-8 三字节 2 个、UTF-8 四字节 3 个。每个切点覆盖下一页只有单字符与带“边界标记：第二页”两类样本，断言预期游标、严格递增、两页无 U+FFFD、文本相等及重编码后逐字节相等；JVM 还覆盖已知/未知大小顺序流，共 54 个跨页场景。
+- 最终实际执行：`source scripts/ao-worktree-env.sh; ./gradlew --console=plain -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest`，BUILD SUCCESSFUL（14m31s）。**1243 tests / 124 个结果文件 / 0 failures / 0 errors / 0 skipped**，其中 `TextFileReaderTest` **27/27**；lint **0 errors / 109 warnings / 1 hint**；app 与 AndroidTest APK 均构建通过，未跳过原生运行时任务。第一轮离线验证因缺 `jsch:2.28.8` 失败，联网解析后通过；补齐 flush 前的一次候选验证主动中断，不算最终结果。
+- `TextFilePagingBoundaryTest` 新增四项 Android 专项测试，覆盖同样的 18 个文件场景。宿主 JVM 在旧实现上也能保留残字节，不能宣称 Host 已复现 Android 缺陷；需要独立 QA 在最终 SHA 上运行 Android 测试并复测真实查看器下一段/上一段、中文与行号。
+- 未验证：Android 仪器执行、真实查看器/SAF 提供方、真机和低 API。本会话未安装、未连接或操作设备；debug 编译不等于设备验收，未合并、未发布。完整交接见 [本次记录](handoffs/20261111-1456-text-page-boundary.md)。
+
 ## PR #73 普通 merge 对齐 #74/#75（2026-11-11，android_agent-69，非设备）
 
 - 起点：PR head `b2416b6977359e7dcb441eeb1d91cf10c5dc0c11`，工作区干净；fetch 后 `origin/main=6e1e83347b264b588c97fe380214c955bd7ba9c0`，包含已合并的聊天停靠条 #74 与文件导入/复制移动 #75。
