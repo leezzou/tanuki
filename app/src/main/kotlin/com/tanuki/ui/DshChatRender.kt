@@ -6,6 +6,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.Locale
@@ -81,6 +83,20 @@ object DshChatRenderPolicy {
         if (totalItems <= 0) return false
         if (lastVisibleIndex < totalItems - 1) return false
         return lastItemEndOffset <= viewportEndOffset + tolerance
+    }
+}
+
+/**
+ * 页面唯一的运行态接线：先切会话再写官方状态，沿用输入栏已有停止确认与代次保护。
+ * 只收集会话/运行态变化，避免无关页面更新用旧 idle 干扰尚在途的发送回执。
+ */
+internal suspend fun bindDshComposerRunState(
+    nativeState: StateFlow<DshNativeState>,
+    composer: DshComposerController
+) {
+    nativeState.map { it.selectedId to it.running }.distinctUntilChanged().collect { (sessionId, running) ->
+        composer.setSession(sessionId)
+        composer.setGenerationRunning(running)
     }
 }
 

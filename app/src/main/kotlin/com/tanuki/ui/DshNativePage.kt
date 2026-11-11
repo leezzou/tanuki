@@ -118,6 +118,9 @@ fun DshNativePage(
     val state by controller.state.collectAsState()
     val composerState by composer.state.collectAsState()
     val scope = rememberCoroutineScope()
+    LaunchedEffect(controller, composer) {
+        bindDshComposerRunState(controller.state, composer)
+    }
     val sendTracker = remember(composer) { DshComposerSendTracker() }
     var fallbackFailure by remember { mutableStateOf<DshFailedPrompt?>(null) }
     var composerPendingText by remember { mutableStateOf("") }
