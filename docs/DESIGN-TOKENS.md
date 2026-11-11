@@ -211,7 +211,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 动效·面板 | `AnimatedVisibility` 默认弹簧 | `TanukiExpandVisibility` + `TanukiMotion.expand` | 300ms；移除动画时 0 |
 | 动效·状态切换 | 无/默认 | `Crossfade` + `TanukiMotion.toggle` | 160ms；移除动画时 0 |
 | 动效·按压 | Material 默认 | `TanukiPressable` + `TanukiMotion.pressIn` | 100ms |
-| 详情内二级确认 | 页面内 `TanukiBottomSheet` | 窗口级 `AlertDialog`（重命名/归档/完全权限） | 详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `Box` 会被遮住（PR #70 评审 P1） |
+| 详情内二级确认 | 本轮初版用页面内 `TanukiBottomSheet` | 窗口级 `AlertDialog`（重命名/归档/完全权限） | 详情是 Material3 `ModalBottomSheet` 的独立窗口，页面内 `Box` 会被遮住（PR #70 评审 P1） |
 
 ### 8.2 截图自查清单（静态核对，设备未验证）
 

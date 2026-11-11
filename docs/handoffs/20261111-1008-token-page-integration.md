@@ -74,7 +74,7 @@
 ## 下一步
 
 1. 独立审查本 PR（绑定当前 head），重点看 `DshSessionManagerPage.kt` 的弹层改造与 `TanukiDesignTheme.kt` 的 Shapes 修正。
-2. 独立 Android QA 在明确设备上安装 workspacecheck 包，按 `docs/DESIGN-TOKENS.md` 第 8 节页面清单逐页截图：浅色/深色、1.3x/2x 字体、360dp 窄屏；重点确认文件页权限 chip、传输胶囊、会话筛选条与六个弹层。
+2. 独立 Android QA 在明确设备上安装 workspacecheck 包，按 `docs/DESIGN-TOKENS.md` 第 8 节页面清单逐页截图：浅色/深色、1.3x/2x 字体、360dp 窄屏；重点确认文件页权限 chip、传输胶囊、会话筛选条、列表层弹层，以及详情内三条窗口级确认。
 3. 若设备结果与静态自查不一致，按页面回改令牌映射，不要回退到硬编码色值。
 4. 获得明确合并授权后再合并；本 PR 不发布。
 
@@ -84,7 +84,7 @@
 - 关键决策及理由：
   - 主题只保留一套颜色来源（`TanukiDesignTheme`），避免 `TanukiTheme` 与新令牌并存导致同页两种色值。
   - 文件行继续用 `combinedClickable`，不用 `TanukiPressable`，避免吞掉长按多选。
-  - 会话详情保留系统 `ModalBottomSheet`，因为它是窗口级交互（拖拽、返回键、输入法），换成自绘骨架会改变行为；六个短确认框改用 `TanukiBottomSheet` 以获得令牌动效。
+  - 会话详情保留系统 `ModalBottomSheet`，因为它是窗口级交互（拖拽、返回键、输入法），换成自绘骨架会改变行为；列表层的新建/批量确认改用页面内 `TanukiBottomSheet` 以获得令牌动效，详情内三条确认保留窗口级 `AlertDialog` 以免被详情窗口遮住。
   - 通用 `Shapes.large` 改为全圆角，避免普通卡片继承“只有上圆角”的弹层形状。
 - 失败尝试与避免重复踩坑的结论：
   - 首次全量 JVM 出现 `NpmAdaptiveWorkerPoolTest` 时序失败，重跑通过；不要据此改产品代码。
