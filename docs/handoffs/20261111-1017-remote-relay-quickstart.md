@@ -3,7 +3,7 @@
 - Agent/会话标识：android_agent-65（AO worker，DSH）
 - 时间：2026-11-11 10:17 CST
 - 状态：已完成（已合并 origin/main=7d58e90；PR #64 待最终 CI 与独立审查；未合并到 main、未发布）
-- 前一记录：[查看器传输胶囊避让](20261111-0538-viewer-transfer-capsule-inset.md)（结论已合并；本任务与其无代码依赖）
+- 前一记录：[查看器传输胶囊历史验证](../TEST-REPORT.md)（结论已合并；本任务与其无代码依赖）
 
 > 普通 PR 只新增本记录，未修改 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。
 

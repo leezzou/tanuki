@@ -14,6 +14,17 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 
 本轮执行结果见 [发布交接](handoffs/20261111-1643-release-0.1.13.md)。下文均保留各自原版本、原 SHA 与历史验证范围。
 
+## 查看器与安装任务的历史验证归档（PR #60/#82）
+
+以下从已完成、被后续方案替代的交接迁入，属于各自旧基线的历史证据，不是 PR #88 或当前 main 的新验证。现行规则见 [文件与查看器](WORKSPACE-STORAGE.md) 和 [组件进度与重试](COMPONENTS.md)；当前实现的验证/设备缺口见 [更新页与安装期只读 follow-up](handoffs/20261111-1635-update-readonly-followup.md)。
+
+- **PR #60 固定高度避让**：基线 `f338bdb4194ab697647122de164b0a502b219c6c`，实现 `a8e9667`，后合入 `62e4c30b`。当时使用导航 inset + 48dp 操作栏 + 12dp 间距，修复原定位重叠36dp；现已由实测操作栏高度和统一导航视口方案扩展。定向 `FileViewerLayoutTest` 3项通过；第一次断言误把24+48+12写成72，改为84后通过，实现未变。旧全量 JVM/lint 30分01秒通过：1047项/108结果文件，0失败/错误/跳过；lint 0错误/104警告/1提示。head `b64a27f` 的 GitHub runs 42928990235、42928997485 四项检查通过；均不能证明新 head 的设备触控通过。
+- **PR #82 初次重开**：基线 `eaf58ce37b6fc4da654f51c225924e546f97ead2`；保留 main 的 `WorkspaceImportEvent`、命名/打开、复制移动与分类错误，不恢复旧整文件。产品/仪器源码 compile + 定向 JVM 11分11秒79项通过；另跑文件进度5项和实际快照/启动门禁17项，1分38秒通过，首轮合计101项，均0失败/错误/跳过。原过滤项 `FileTransfersTest` 无匹配类，未计覆盖；实际类为 `FileTransferProgressTest`。
+- **PR #82 合入 #80**：普通 merge 对齐 `20c9c8291d965c8fe2e1388a269678ac15064e1e`，保留横屏阅读、结果恢复和空间清理。产品/仪器源码 compile + `FileOperationOutcomeTest`、`FileViewerLayoutTest`、`OperationProgressLayoutTest`、`FileEmptyStateTest`，1分57秒共24项通过（9/9/2/4），0失败/错误/跳过；不能把首轮101项当作合并后全套重跑。
+- **PR #82 版本路由修复**：原失败重放只保存安装主体，改选版本会漂移到新目标；生产 `operationRetryAction` 改为用 `FailureRetry` 恢复原组件、force、version，再走安装入口。真实组件清单中的 Node/Ubuntu 安装/重装四种情况，在旧实现上8项中4失败（Node期望24.22.2、实际26.13.0；Ubuntu期望24.04.5、实际26.04.1，2分06秒）。修复后产品/仪器源码 compile + `OperationRetryTest`、`FailureRecoveryFollowupTest`、`OperationProgressPresentationTest`，2分05秒共31项（8/11/12）通过，0失败/错误/跳过。现行UI改选会先失效旧编号；保留的原路由用于仍有效的原操作，不把该历史策略冒充当前选择失效策略。
+
+历史复现命令共用 `source scripts/ao-worktree-env.sh`、`./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`：PR #60 全量尾参为 `:app:testModernDebugUnitTest :app:lintModernDebug`；PR #82 的 compile 尾参为 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest`，再按上述实际类重复传 `--tests com.tanuki.<类名>`。离线组另用 `--offline --max-workers=2 --console=plain`。未安装或操作设备；未完成的 PDF/文本/图片/全屏视频操作栏点击、任务取消/失败重试、空态导入/完成打开、手机复制移动、窄屏/深色/大字体/TalkBack 统一留在专题与当前交接，不随旧记录删除。
+
 ## QA-12 文本多字节分页边界（2026-11-11，android_agent-76，Host 验证）
 
 - 基线：fetch 后 `origin/main=6b0b0b3fe4e327fb62fd30ddcbd979f2737ab446`，分支 `ao/paging-boundary/page-char-boundary`。修复 GBK `.cpp` 首字节在 65535 而 Android 返回 65536、第二页乱码的问题。
