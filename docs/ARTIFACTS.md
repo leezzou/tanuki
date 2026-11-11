@@ -1,15 +1,18 @@
 # Tanuki 构建产物：从哪里取包
 
-**当前 workspacecheck 候选为 v0.1.12/code14（基于最终 `main=f338bdb`，含 #48/#51/#57/#58/#59）**：包名 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34，六附件在 `artifacts/releases/0.1.12/`；APK SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、12,295,334 字节、证书 `371dc301...`，最终以该目录的 `RELEASE-SHA256SUMS`、`app-update.json` 和交接记录为准。发布 PR #61 待合并；**未创建 tag/Release、未上传附件。** 已发布版本仍为 v0.1.11/code13（Pre-release，tag `v0.1.11`）：APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节、证书 `371dc301...`。上一 Pre-release 0.1.9/code11（tag `5c680b9`）APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节；0.1.8/code10 及更早目录保持历史原样。
+**当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
 
-- **0.1.12/code14 workspacecheck 候选（发布 PR #61 待合并）**：`artifacts/releases/0.1.12/Tanuki-0.1.12-workspacecheck-arm64-release.apk`，SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、12,295,334 字节；同目录含 `app-update.json`、完整源码 ZIP、原生对应源码 TAR 与校验。
+0.1.13 包含基线已合并的原生聊天历史分页/停靠条、设计令牌接入、首次启动引导、文件导入与复制移动、统一失败出口、局域网发现与远程页、横屏阅读/复制反馈、QA-10 会话同步/QA-07 阅读状态、文本完整字符分页、全局安装进度浮层与文件空态（#62/#67/#68/#70/#71/#73/#74/#75/#76/#79/#80/#82/#83）；#84 为动效盘点与方案文档，不宣称方案已实现。本轮仅更新发布版本与必要文档，不改产品逻辑。
+
+**本轮未验证：** JVM 全套、lint、Android 仪器执行、设备安装/升级、模拟器/真机 UI、真实 PRoot/DSH/sshd/中继、弱网、真实模型/账号；按用户要求不等待 QA，先出候选包。历史测试记录不作为本版已测依据。API Key 保存与真机/真实模型验收继续暂停。
+
+- **0.1.13/code18 workspacecheck 候选**：`artifacts/releases/0.1.13/Tanuki-0.1.13-workspacecheck-arm64-release.apk`；大小/SHA 以生成清单为准，同目录共六附件；设备 QA 未验证。
 - **0.1.11/code13 已发布（Pre-release，tag `v0.1.11`）**：`artifacts/releases/0.1.11/Tanuki-0.1.11-workspacecheck-arm64-release.apk`，SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节、证书 `371dc301...`；同目录含 `app-update.json`、完整源码 ZIP、原生对应源码 TAR 与校验。
 - **0.1.10/code12 历史本地候选（未发布）**：`artifacts/releases/0.1.10/Tanuki-0.1.10-workspacecheck-arm64-release.apk`，SHA-256 `66cacc393fe5e7633df2079dd278ef21dd2f7731eb6f977f30a97f2638e1563d`、`11,485,978` 字节；仅作历史核对，不是当前发布附件。
-- GitHub 发布：`v0.1.11` **Pre-release** 已发布，含 `artifacts/releases/0.1.11/` 全部 **6 个附件**（`app-update.json`、完整源码、原生对应源码及散列）；0.1.12 尚未上传，未覆盖 0.1.11/更早附件。
+- GitHub 发布：`v0.1.11` **Pre-release** 已发布，含 `artifacts/releases/0.1.11/` 全部 **6 个附件**（`app-update.json`、完整源码、原生对应源码及散列）；0.1.13 尚未上传，未覆盖 0.1.11/更早附件。
 - 当前是同一开发证书的 `com.tanuki.modern.workspacecheck` 包，ARM64、non-debuggable、minSdk26/targetSdk34；不是正式签名，也没有由 Agent 自动发布。后续发布须重新确认版本并核对 code 严格递增。
-- 根目录不再放 APK/ZIP。`archive/` 中的旧 0.1.0 和已撤回、未发布的旧候选 0.1.2/code3 **不要拿来安装或发布**；0.1.9 取 `releases/0.1.9/`，0.1.11 取 `releases/0.1.11/`，0.1.12 候选取 `releases/0.1.12/`，不能只按版本名称猜测当前附件。
+- 根目录不再放 APK/ZIP。`archive/` 中的旧 0.1.0 和已撤回、未发布的旧候选 0.1.2/code3 **不要拿来安装或发布**；0.1.9 取 `releases/0.1.9/`，0.1.11 取 `releases/0.1.11/`，0.1.13 候选取 `releases/0.1.13/`，不能只按版本名称猜测当前附件。
 
-0.1.12 候选基于最终 `main=f338bdb`，包含 0.1.11 之后合并的原生聊天渲染、输入胶囊、审批抽屉与提问卡、会话管理设置、文件页瘦身、SSH 六步向导、文本编码识别、设计令牌；完整 JVM **1044 tests / 107 结果文件**、lint **0 errors / 101 warnings / 1 hint**。0.1.11 已发布，包含其之前合并的原生聊天/输入栏/审批接线、交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等；#40 `DshTransport` 已随 0.1.11 包含（合并点 `1f7222d0`）；临时 `DshHttpAdminTransport` 适配器切换留作后续清理。0.1.10 为历史本地候选，不是已发布版本。行为和权限说明见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)。源码准备区文件名随 `scripts/package-source.py --version` 变化，不代表已发布；0.1.9 已交付源码快照取 `releases/0.1.9/Tanuki-0.1.9-source.zip`，0.1.11 已发布源码在 `releases/0.1.11/`，0.1.12 候选源码在 `releases/0.1.12/`。发布目录是否齐全以实际六附件及`RELEASE-SHA256SUMS`为准，验证范围见[测试现状](TEST-REPORT.md)。2026-11-04的PR #2组合包仍在 `artifacts/builds/workspacecheck/pr2-upload-browser/Tanuki-pr2-upload-browser-debug.apk`，是历史0.1.3/5开发debug包，不是本次release。
 
 ## 目录约定
 
@@ -30,7 +33,7 @@ artifacts/
 │   ├── 0.1.9/                 # 已发布 Pre-release（code11，6 个附件）
 │   ├── 0.1.10/                # 历史本地候选（code12，未发布）
 │   ├── 0.1.11/                # 已发布 Pre-release（code13，6 个附件）
-│   └── 0.1.12/                # workspacecheck 候选（code14，6 个附件，未发布）
+│   └── 0.1.13/                # workspacecheck 候选（code18，6 个附件，未发布）
 ├── sources/
 │   ├── Tanuki-<版本>-source.zip # 最近一次源码打包副本，按实际版本命名
 │   └── native/                # 原生对应源码和同目录校验清单
@@ -54,7 +57,7 @@ artifacts/
 ```bash
 (cd artifacts && shasum -a 256 -c SOURCE-SHA256SUMS)
 (cd artifacts/sources/native && shasum -a 256 -c native-source-SHA256SUMS)
-(cd artifacts/releases/0.1.12 && shasum -a 256 -c RELEASE-SHA256SUMS && shasum -a 256 -c native-source-SHA256SUMS)
+(cd artifacts/releases/0.1.13 && shasum -a 256 -c RELEASE-SHA256SUMS && shasum -a 256 -c native-source-SHA256SUMS)
 (cd artifacts/releases/0.1.11 && shasum -a 256 -c RELEASE-SHA256SUMS)
 (cd artifacts/archive && shasum -a 256 -c ARCHIVE-SHA256SUMS)
 ```
@@ -68,4 +71,4 @@ artifacts/
 - 只改文档/脚本时不重编 APK；下一次交付前重打源码并刷新散列，已发布的 0.1.11 及更早附件不回写。
 - `artifacts/` 全部是被Git忽略的生成产物；本说明的源码为 `docs/ARTIFACTS.md`。既有历史包和校验保持原样，不因本次版本入口更新而删除或改写。
 
-0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布 PR #61 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
+0.1.13 基于 `main=9f5a2fe3` 准备，未合并/未发布；旧版附件保持原样。

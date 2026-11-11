@@ -2,6 +2,18 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 0.1.13 发布候选（2026-11-11，android_agent-81，非设备）
+
+**当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
+
+0.1.13 包含基线已合并的原生聊天历史分页/停靠条、设计令牌接入、首次启动引导、文件导入与复制移动、统一失败出口、局域网发现与远程页、横屏阅读/复制反馈、QA-10 会话同步/QA-07 阅读状态、文本完整字符分页、全局安装进度浮层与文件空态（#62/#67/#68/#70/#71/#73/#74/#75/#76/#79/#80/#82/#83）；#84 为动效盘点与方案文档，不宣称方案已实现。本轮仅更新发布版本与必要文档，不改产品逻辑。
+
+**本轮未验证：** JVM 全套、lint、Android 仪器执行、设备安装/升级、模拟器/真机 UI、真实 PRoot/DSH/sshd/中继、弱网、真实模型/账号；按用户要求不等待 QA，先出候选包。历史测试记录不作为本版已测依据。API Key 保存与真机/真实模型验收继续暂停。
+
+本轮实际执行 `prepare-app-release.py --version 0.1.13 --version-code 18 --channel workspacecheck` 成功（release 构建 8m50s，含原生运行时及 lintVital）；APK 实核包名/版本/minSdk26/non-debuggable/ARM64 与证书 `371dc301...`，**12,950,514 字节**、SHA-256 `888859f1c2afd7f440b6b4f08a2e169d59df188ce29a48466ad1bfa981b3c7a3`；六附件齐全，两份校验清单通过。交接严格检查及公开检查通过（0 findings）。
+
+本轮执行结果见 [发布交接](handoffs/20261111-1643-release-0.1.13.md)。下文均保留各自原版本、原 SHA 与历史验证范围。
+
 ## QA-12 文本多字节分页边界（2026-11-11，android_agent-76，Host 验证）
 
 - 基线：fetch 后 `origin/main=6b0b0b3fe4e327fb62fd30ddcbd979f2737ab446`，分支 `ao/paging-boundary/page-char-boundary`。修复 GBK `.cpp` 首字节在 65535 而 Android 返回 65536、第二页乱码的问题。
