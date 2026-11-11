@@ -16,6 +16,17 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 复审修复后验证：`compileModernDebugKotlin`、`compileModernDebugAndroidTestKotlin`、`lintModernDebug` → BUILD SUCCESSFUL（6m07s），lint 0 errors / 104 warnings；新增仪器用例仅编译，当前无可用测试设备，未运行。
 - 复审 P2 修复（搜索态批量操作）：第二行原以搜索分支优先，搜索中选中文件后批量操作被遮住；关闭搜索又会清空 query，导致“全选”失去过滤。现把选择态提到搜索之前，保留 query 并在操作行显示“筛选：…”，`全选` 仍只作用于 `shown` 匹配结果。新增 Compose 仪器回归 `searchSelectionKeepsBatchActionsAndSelectsOnlyMatches`：搜索 `hello`→选择→断言已选 1、筛选保留、全选后仍为 1、取消选择后 query 仍为 `hello`；仅编译，无可用设备未运行。
 
+## 0.1.12 发布准备验证（2026-11-11，android_agent-60，非设备）
+
+- 范围：`0.1.12/code14` workspacecheck 候选准备，最终基线 `main=f338bdb`（已含 #51/#48/#57/#58/#59）；同步版本/发布/取包/更新/状态文档，新增发布交接；不改产品代码/协议，只改 `app/build.gradle.kts` 的版本默认值。
+- 实际执行：
+  - `./gradlew -PtestBuildType=debug -PtanukiVersionName=0.1.12 -PtanukiVersionCode=14 -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` → BUILD SUCCESSFUL（45m38s）；**1044 tests / 107 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 101 warnings / 1 hint**（JDK17、Android SDK、macOS ARM64）。
+  - `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-0325-release-0.1.12.md` → 通过。
+  - `python3 scripts/check-publication.py --git` → 通过，0 findings。
+  - `python3 scripts/package-source.py` → 生成最终 `artifacts/sources/Tanuki-0.1.12-source.zip` 与 `SOURCE-SHA256SUMS`。
+  - `python3 scripts/prepare-app-release.py --version 0.1.12 --version-code 14 --channel workspacecheck` → BUILD SUCCESSFUL；APK 实核 `com.tanuki.modern.workspacecheck`、0.1.12/code14、minSdk26、证书 `371dc301...`、ARM64 四个原生库；`artifacts/releases/0.1.12/` 六附件生成并用 `RELEASE-SHA256SUMS` 校验通过。APK **12,295,334 字节**、SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、证书 `371dc301...`。
+- 未执行：设备/模拟器安装与升级覆盖、真实 PRoot DSH 的 `/connect`/聊天/审批/会话、真机 PRoot、真实 sshd/中继、弱网/断线、深色/大字体/低 API；Android 仪器测试、`assembleModernDebug`。0.1.11 的 794 tests 与更早附件均为历史，不冒充本轮结果。
+
 ## 文本编码识别与兜底验证（2026-11-10，android_agent-57，非设备）
 
 - 范围：修复 `.txt`/`.cpp` 等文本文件因 UTF-8 解码失败而打不开的问题；只改文本读取/解码与查看器显示层，不改 content:// 直开和共享状态文件。基线 `origin/main=4f2a3717`；先 fetch 发现远端已前进到 `326726c`（仅文档），按用户指定 SHA 建 `ao/text-decoding/text-encoding`。
