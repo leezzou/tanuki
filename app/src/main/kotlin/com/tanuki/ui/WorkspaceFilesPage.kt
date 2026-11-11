@@ -738,7 +738,7 @@ internal fun WorkspaceFilesPage(
                                 animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
                                 label = "fileState",
                             ) { kind ->
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
                                     FileListState(
                                         kind = kind,
                                         query = query,
@@ -752,6 +752,8 @@ internal fun WorkspaceFilesPage(
                                         onImport = onImport,
                                         onCreateFolder = { begin("新建文件夹") },
                                         canCreateFolder = !runtimeRunning,
+                                        transfers = transfers,
+                                        onCancelTransfer = onCancelTransfer,
                                     )
                                 }
                             }
@@ -933,12 +935,12 @@ private fun FileListState(
     onImport: () -> Unit,
     onCreateFolder: () -> Unit,
     canCreateFolder: Boolean,
+    transfers: StateFlow<List<FileTransferProgress>>,
+    onCancelTransfer: (Long) -> Unit,
 ) {
     val modifier = Modifier.fillMaxWidth()
         .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset)
     val copy = TanukiFileVisuals.emptyCopy(query = query, hasEntries = hasEntries, writable = writable)
-    // 可写位置的空目录把“导入文件”作为主操作；运行中仍可导入，只隐藏会改现有内容的“新建文件夹”。
-    val importFirst = writable && query.isEmpty() && !hasEntries
     when (kind) {
         TanukiStateKind.LOADING -> TanukiStateView(
             kind = kind,
@@ -955,21 +957,58 @@ private fun FileListState(
             actionLabel = "重试",
             onAction = onReload,
         )
-        TanukiStateKind.EMPTY -> TanukiStateView(
-            kind = kind,
-            modifier = modifier,
-            subject = "文件",
-            title = copy.title,
-            detail = if (importFirst) "导入文件会按源文件名创建新项目，不覆盖已有项目。" else copy.detail,
-            actionLabel = if (importFirst) "导入文件" else copy.actionLabel,
-            onAction = if (importFirst) onImport else when {
-                query.isNotEmpty() -> onClearQuery
-                hasEntries -> onShowHidden
-                else -> onReload
-            },
-            secondaryActionLabel = if (importFirst && canCreateFolder) "新建文件夹" else null,
-            onSecondaryAction = if (importFirst && canCreateFolder) onCreateFolder else null,
-        )
+        TanukiStateKind.EMPTY -> {
+            // 只在空态内订阅导入进度；main 的完成事件继续负责刷新列表与“打开”反馈。
+            val transferItems by transfers.collectAsState()
+            val importItems = FileTransferPresentation.imports(transferItems)
+            var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+            LaunchedEffect(importItems.isNotEmpty()) {
+                while (importItems.isNotEmpty()) {
+                    delay(1000)
+                    now = SystemClock.elapsedRealtime()
+                }
+            }
+            if (importItems.isNotEmpty()) {
+                TanukiStateView(
+                    kind = TanukiStateKind.LOADING,
+                    modifier = modifier,
+                    title = "正在导入文件",
+                    detail = "文件正在复制到 /workspaces，完成后会刷新文件列表。",
+                ) {
+                    importItems.forEach { item ->
+                        key(item.id) {
+                            TransferRow(item = item, now = now, onCancel = { onCancelTransfer(item.id) })
+                        }
+                    }
+                }
+            } else {
+                val actions = TanukiFileVisuals.emptyActions(query, hasEntries, writable)
+                TanukiStateView(
+                    kind = kind,
+                    modifier = modifier,
+                    subject = "文件",
+                    title = copy.title,
+                    detail = if (actions.primary == FileEmptyCommand.IMPORT)
+                        "导入文件会按源文件名创建新项目，不覆盖已有项目。" else copy.detail,
+                    icon = Icons.Default.FolderOpen,
+                    actionLabel = actions.primaryLabel,
+                    actionFilled = actions.primary == FileEmptyCommand.IMPORT,
+                    onAction = {
+                        dispatchFileEmptyCommand(actions.primary, onImport, onCreateFolder,
+                            onClearQuery, onShowHidden, onReload)
+                    },
+                    secondaryActionLabel = actions.secondaryLabel,
+                    secondaryAsButton = actions.secondary != null,
+                    secondaryActionEnabled = canCreateFolder,
+                    onSecondaryAction = actions.secondary?.let { secondary ->
+                        {
+                            dispatchFileEmptyCommand(secondary, onImport, onCreateFolder,
+                                onClearQuery, onShowHidden, onReload)
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -1246,7 +1285,7 @@ private fun TransferSheet(
 }
 
 @Composable
-private fun TransferRow(
+internal fun TransferRow(
     item: FileTransferProgress,
     now: Long,
     onCancel: () -> Unit,
@@ -1264,14 +1303,8 @@ private fun TransferRow(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (percent != null) LinearProgressIndicator(
-            progress = { percent / 100f },
-            modifier = progressModifier,
-            trackColor = MaterialTheme.colorScheme.primaryContainer,
-        ) else LinearProgressIndicator(
-            modifier = progressModifier,
-            trackColor = MaterialTheme.colorScheme.primaryContainer,
-        )
+        // 与安装入口共用连续进度条，百分比仍来自真实传输字节。
+        OperationProgressBar(fraction = percent?.let { it / 100f }, modifier = progressModifier)
         Text(FileTransferPresentation.sizeText(item.received, item.total),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -16,6 +16,35 @@ internal data class TanukiFileEmptyCopy(
     val actionLabel: String,
 )
 
+/** 文件空态能触发的真实动作；界面只负责把命令接到对应回调。 */
+internal enum class FileEmptyCommand { IMPORT, CREATE_FOLDER, CLEAR_QUERY, SHOW_HIDDEN, RELOAD }
+
+/** 空态主/次按钮的文案与命令；没有次级按钮时为 null。 */
+internal data class FileEmptyActions(
+    val primaryLabel: String,
+    val primary: FileEmptyCommand,
+    val secondaryLabel: String? = null,
+    val secondary: FileEmptyCommand? = null,
+)
+
+/** 把空态命令分派给页面回调；单独抽出来让 JVM 回归可以验证按钮接线。 */
+internal fun dispatchFileEmptyCommand(
+    command: FileEmptyCommand,
+    onImport: () -> Unit,
+    onCreateFolder: () -> Unit,
+    onClearQuery: () -> Unit,
+    onShowHidden: () -> Unit,
+    onReload: () -> Unit,
+) {
+    when (command) {
+        FileEmptyCommand.IMPORT -> onImport()
+        FileEmptyCommand.CREATE_FOLDER -> onCreateFolder()
+        FileEmptyCommand.CLEAR_QUERY -> onClearQuery()
+        FileEmptyCommand.SHOW_HIDDEN -> onShowHidden()
+        FileEmptyCommand.RELOAD -> onReload()
+    }
+}
+
 /**
  * 文件页的视觉映射。
  *
@@ -48,14 +77,32 @@ internal object TanukiFileVisuals {
         )
         writable -> TanukiFileEmptyCopy(
             title = "暂无文件",
-            detail = "从右上角菜单新建文件夹、文本文件或导入项目。",
-            actionLabel = "刷新",
+            detail = "从手机导入文件，或新建文件夹开始整理。",
+            actionLabel = "从手机导入",
         )
         else -> TanukiFileEmptyCopy(
             title = "暂无文件",
-            detail = "此位置暂无内容。",
+            detail = "此位置暂无内容，可以刷新后重试。",
             actionLabel = "刷新",
         )
+    }
+
+    /**
+     * 空态按钮。
+     *
+     * 只有“可写目录且确实为空”同时给出导入与新建文件夹；搜索、隐藏文件、
+     * 只读位置仍只保留一个真实可执行的动作，不显示无法完成的假按钮。
+     */
+    fun emptyActions(query: String, hasEntries: Boolean, writable: Boolean): FileEmptyActions = when {
+        query.isNotEmpty() -> FileEmptyActions("清除搜索", FileEmptyCommand.CLEAR_QUERY)
+        hasEntries -> FileEmptyActions("显示隐藏文件", FileEmptyCommand.SHOW_HIDDEN)
+        writable -> FileEmptyActions(
+            primaryLabel = "从手机导入",
+            primary = FileEmptyCommand.IMPORT,
+            secondaryLabel = "新建文件夹",
+            secondary = FileEmptyCommand.CREATE_FOLDER,
+        )
+        else -> FileEmptyActions("刷新", FileEmptyCommand.RELOAD)
     }
 
     /**

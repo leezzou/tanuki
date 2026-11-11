@@ -1,141 +1,286 @@
 package com.tanuki.ui
 
 import android.os.SystemClock
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.tanuki.runtime.*
-import com.tanuki.storage.ImportProgress
+import com.tanuki.runtime.FileTransferProgress
+import com.tanuki.runtime.Snapshot
+import com.tanuki.runtime.operationActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
-import java.util.Locale
 
-private data class ProgressItem(val id: String, val title: String, val fraction: Float?, val detail: String,
-    val timing: OperationTiming, val transferId: Long? = null)
-
-/** Outside every page's scroll area, including the DSH and browser tabs. */
+/**
+ * 全局进度入口。
+ *
+ * 只在操作进行中或确实失败时出现一条细进度条，不再向文件页、远程页等页面注入
+ * 常驻卡片；点击整条入口才展开抽屉，抽屉里再放阶段、耗时、取消和重试。
+ */
 @Composable
-internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileTransferProgress>>, onCancel: () -> Unit,
-    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier, showFileTransfers: Boolean = true,
-    showRuntimeOperation: Boolean = true) {
-    // 只有进度区订阅传输流；复制大文件时不会让整个页面跟着重组。
+internal fun OperationProgressEntry(
+    snapshot: Snapshot,
+    transfers: StateFlow<List<FileTransferProgress>>,
+    onCancel: () -> Unit,
+    onCancelTransfer: (Long) -> Unit = {},
+    onRetry: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+    showFileTransfers: Boolean = true,
+) {
+    // 只有入口自己订阅传输流；进度帧不会重组整页内容。
     val transferItems by transfers.collectAsState()
-    val items = buildList {
-        // 远程页与安装进度无关：只隐藏运行时/安装条目，文件传输仍按页面规则展示。
-        if (showRuntimeOperation && snapshot.operationActive) {
-            val download = snapshot.download
-            add(ProgressItem("runtime", snapshot.stage.ifBlank { "正在准备操作" }, snapshot.measuredFraction(), when {
-                snapshot.phasePercent != null -> "当前安装阶段 · 不代表整个安装已完成"
-                download != null -> transferDetail(download.received, download.total) +
-                    if (download.reused) " · 已校验缓存" else " · ${download.source}"
-                snapshot.bytes > 0 -> transferDetail(snapshot.bytes, snapshot.total)
-                else -> "正在执行，完成后会自动更新"
-            }, snapshot.timing))
-        }
-        // 文件页把传输进度收进右下角浮层；其余页面继续使用顶部进度区。
-        if (showFileTransfers) transferItems.forEach {
-            add(ProgressItem("file-${it.id}", it.label,
-                ImportProgress.fraction(it.received, it.total),
-                transferDetail(it.received, it.total), it.timing, it.id))
+    val visibleTransfers = if (showFileTransfers) transferItems else emptyList()
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    val ticking = snapshot.operationActive || visibleTransfers.isNotEmpty()
+    LaunchedEffect(ticking) {
+        while (ticking) {
+            delay(1000)
+            now = SystemClock.elapsedRealtime()
         }
     }
-    if (items.isEmpty()) return
-    var details by remember { mutableStateOf(false) }
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(26.dp),
-        shadowElevation = 1.dp,
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(items.first().title, Modifier.weight(1f).padding(top = 10.dp),
-                    style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                TextButton(onClick = { details = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(if (items.size > 1) "进度 · ${items.size}" else "查看进度")
+    // 运行时没有 startedAt 时用入口首次出现的时间兜底，不把页面停留时长算成安装耗时。
+    val appearedAt = remember(snapshot.operationActive) { SystemClock.elapsedRealtime() }
+    val runtime = remember(snapshot, now, appearedAt) { operationProgress(snapshot, now, appearedAt) }
+    val summary = FileTransferPresentation.summary(visibleTransfers)
+    if (runtime == null && summary == null) return
+    val fraction = if (runtime != null) runtime.fraction else summary?.percent?.let { it / 100f }
+    val failed = runtime?.mode == OperationProgressMode.FAILED
+    val status = when {
+        failed -> "查看详情"
+        runtime != null -> runtime.percent?.let { "$it%" } ?: runtime.statusText
+        else -> summary?.let { it.percent?.let { p -> "传输中 $p%" } ?: "传输中" }.orEmpty()
+    }
+    val title = runtime?.failureTitle ?: runtime?.stage?.label ?: "文件"
+    var expanded by remember { mutableStateOf(false) }
+    Surface(modifier = modifier, shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 2.dp) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable { expanded = true }
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = "操作进度"
+                stateDescription = when {
+                    runtime == null -> status
+                    failed -> "$title，上次操作没有完成"
+                    fraction != null -> "$title，$status"
+                    else -> "$title，正在准备"
                 }
             }
-            ProgressBody(items.first(), compact = true)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        OperationProgressBar(
+            fraction = if (failed) null else fraction,
+            failed = failed,
+            modifier = Modifier.weight(1f),
+        )
+        Text(status, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    }
+    if (expanded) OperationProgressDrawer(
+        runtime = runtime,
+        transfers = visibleTransfers,
+        now = now,
+        onDismiss = { expanded = false },
+        onCancel = onCancel,
+        onCancelTransfer = onCancelTransfer,
+        onRetry = onRetry,
+    )
+}
+
+/**
+ * 连续进度条：确定进度只画当前阶段比例，未知总量画不定进度。
+ *
+ * 不使用带间隙/终点的默认分段样式，避免看起来像“一段快满、其余空白”的坏进度。
+ */
+@Composable
+internal fun OperationProgressBar(
+    fraction: Float?,
+    modifier: Modifier = Modifier,
+    failed: Boolean = false,
+    height: Dp = 4.dp,
+) {
+    val trackColor = MaterialTheme.colorScheme.primaryContainer
+    val barColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    BoxWithConstraints(
+        modifier
+            .then(if (failed) Modifier else if (fraction != null) Modifier.progressSemantics(fraction.coerceIn(0f, 1f))
+                else Modifier.progressSemantics())
+            .height(height)
+            .clip(CircleShape)
+            .background(trackColor),
+    ) {
+        when {
+            failed -> Box(Modifier.fillMaxSize().background(barColor))
+            fraction != null -> Box(
+                Modifier.fillMaxHeight()
+                    .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                    .background(barColor),
+            )
+            fraction == null && com.tanuki.ui.design.TanukiDesign.tokens.reducedMotion -> {
+                // 移除动画时保留不定进度的静态提示，文案仍说明正在准备，不假装是百分比。
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.35f).background(barColor))
+            }
+            else -> {
+                val transition = rememberInfiniteTransition(label = "不定进度")
+                val progress by transition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 1400, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart,
+                    ),
+                    label = "不定进度位置",
+                )
+                val barWidth = maxWidth * 0.35f
+                Box(
+                    Modifier.fillMaxHeight()
+                        .width(barWidth)
+                        .offset(x = (maxWidth + barWidth) * progress - barWidth)
+                        .background(barColor),
+                )
+            }
         }
     }
-    if (details) AlertDialog(onDismissRequest = { details = false }, title = { Text("当前操作进度") }, text = {
-        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            items.forEach { item ->
-                key(item.id) {
-                    Text(item.title, style = MaterialTheme.typography.titleMedium)
-                    ProgressBody(item, compact = false)
-                    // 文件复制可协作取消；取消只清理本次暂存，不弹出新页面。
-                    item.transferId?.let { id ->
-                        OutlinedButton(onClick = { onCancelTransfer(id) },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消此文件任务") }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OperationProgressDrawer(
+    runtime: OperationProgressText?,
+    transfers: List<FileTransferProgress>,
+    now: Long,
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit,
+    onCancelTransfer: (Long) -> Unit,
+    onRetry: (String) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState())
+                .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (runtime?.mode == OperationProgressMode.FAILED) "操作失败" else "操作进度",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, "关闭进度详情")
+                }
+            }
+            runtime?.let { state ->
+                Text(
+                    state.statusText,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = when (state.mode) {
+                        OperationProgressMode.FAILED -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                )
+                OperationProgressBar(
+                    fraction = state.fraction,
+                    failed = state.mode == OperationProgressMode.FAILED,
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = "当前阶段进度"
+                        stateDescription = when {
+                            state.mode == OperationProgressMode.FAILED -> "上次操作没有完成"
+                            state.fraction != null -> "当前阶段 ${state.percent}%"
+                            else -> "进行中，未提供可信总量"
+                        }
+                    },
+                )
+                Text(
+                    state.elapsedText + (state.remainingText?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("当前阶段：${state.stage.label}", style = MaterialTheme.typography.titleSmall)
+                Text(state.stageText, style = MaterialTheme.typography.bodyMedium)
+                if (state.detail.isNotBlank() && state.detail != state.stageText) Text(
+                    state.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state.mode == OperationProgressMode.FAILED) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.quietWarning?.let { warning ->
+                    Text(
+                        warning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (state.active) {
+                    Text(
+                        "百分比只代表当前阶段；下载完成后仍需解压、校验和安装。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.canCancel) OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text("取消当前操作") }
+                if (state.canRetry && state.retryCommand != null) Button(
+                    onClick = {
+                        onRetry(state.retryCommand)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text(if (state.retryCommand == "OPEN_COMPONENTS") "返回组件入口重试" else "重试") }
+            }
+            if (transfers.isNotEmpty()) {
+                if (runtime != null) HorizontalDivider()
+                Text("文件传输 · ${transfers.size} 项", style = MaterialTheme.typography.titleMedium)
+                transfers.forEach { item ->
+                    key(item.id) {
+                        TransferRow(item = item, now = now, onCancel = {
+                            onCancelTransfer(item.id)
+                        })
                     }
                 }
-            }
-            Text("有总量时显示当前阶段的真实进度；解析、解压或等待服务响应时显示持续动效，不估造整体百分比。",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (showRuntimeOperation && snapshot.operationActive && snapshot.service !in setOf(ServiceState.STARTING, ServiceState.STOPPING) &&
-                snapshot.update !in setOf(UpdateState.SWITCHING, UpdateState.RESTORING)) {
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消当前操作") }
-                Text("取消会等待当前请求或清理结束；不要反复点击安装。", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "文件进度按实际复制或下载的字节计算；总大小未知时使用不定进度。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-    }, confirmButton = { TextButton(onClick = { details = false }) { Text("收起") } })
-}
-
-@Composable
-private fun ProgressBody(item: ProgressItem, compact: Boolean) {
-    val appearedAt = remember(item.id) { SystemClock.elapsedRealtime() }
-    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(item.id) { while (true) { delay(1000); now = SystemClock.elapsedRealtime() } }
-    val start = item.timing.startedAtMillis.takeIf { it > 0 } ?: appearedAt
-    val last = item.timing.lastActivityAtMillis.takeIf { it > 0 } ?: start
-    val elapsed = ((now - start).coerceAtLeast(0) / 1000)
-    val quiet = ((now - last).coerceAtLeast(0) / 1000)
-    val percent = item.fraction?.let { (it * 100).toInt().coerceIn(0, 100) }
-    val progressModifier = Modifier.fillMaxWidth().semantics {
-        contentDescription = "操作进度"
-        stateDescription = if (percent == null) "进行中，无法估算百分比" else "当前阶段 $percent%"
     }
-    val colors = MaterialTheme.colorScheme
-    if (item.fraction != null) LinearProgressIndicator(
-        progress = { item.fraction },
-        modifier = progressModifier,
-        color = colors.primary,
-        trackColor = colors.primaryContainer,
-    )
-    else LinearProgressIndicator(
-        modifier = progressModifier,
-        color = colors.primary,
-        trackColor = colors.primaryContainer,
-    )
-    Text("已用 ${duration(elapsed)} · " + when (percent) {
-        null -> "进度暂不可估算"
-        100 -> "当前阶段 100%，继续处理"
-        else -> "当前阶段 $percent%"
-    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text(item.detail, style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (compact) 2 else Int.MAX_VALUE,
-        overflow = TextOverflow.Ellipsis)
-    if (quiet >= 60) Text(if (compact) "${duration(quiet)}没有新进展，点“查看进度”了解状态"
-        else "已 ${duration(quiet)}未收到新进展。网络、解压或安装脚本可能仍在等待；请检查网络，必要时在任务入口取消后重试。计时和动效不代表后台一定正常。",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
 }
-
-private fun duration(seconds: Long): String = if (seconds >= 3600) "${seconds / 3600}时${seconds % 3600 / 60}分${seconds % 60}秒"
-    else if (seconds >= 60) "${seconds / 60}分${seconds % 60}秒" else "${seconds}秒"
-private fun bytes(value: Long): String = when {
-    value >= 1024L * 1024 -> String.format(Locale.ROOT, "%.1f MB", value / 1048576.0)
-    value >= 1024 -> String.format(Locale.ROOT, "%.1f KB", value / 1024.0)
-    else -> "$value B"
-}
-private fun transferDetail(received: Long, total: Long): String = if (total > 0) "${bytes(received)} / ${bytes(total)}"
-    else if (received > 0) "已传输 ${bytes(received)} · 总大小未知" else "正在连接或准备文件 · 总大小未知"

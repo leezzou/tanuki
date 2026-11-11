@@ -32,6 +32,7 @@ class UpdateManager(
             // 锁顺序固定为先环境 mutation、后 versionGate；本检查只取 versionGate，不与启动/安装抢占。
             manager.versionGate.withLock {
                 val startedAt = System.currentTimeMillis()
+                val retryId = manager.beginOperationRetry(::check)
                 manager.state.update { it.copy(update = UpdateState.CHECKING, stage = "获取官方 DSH 版本列表", error = "", failure = null, download = null, bytes = 0, total = -1, phasePercent = null) }
                 try {
                     val connection = URL("https://registry.npmjs.org/@deepseek-ai%2Fdsh").openConnection() as HttpURLConnection
@@ -57,10 +58,16 @@ class UpdateManager(
                     manager.paths.atomic("releases.json", metadata.toString())
                     manager.state.update { it.copy(candidate = candidate, stage = "官方版本列表已更新", update = if (candidate == it.dsh) UpdateState.CURRENT else UpdateState.AVAILABLE) }
                     manager.event("官方 npm 版本检查完成：$candidate")
+                    manager.completeOperationRetry(retryId)
                 } catch (cancelled: CancellationException) {
                     manager.state.update { it.copy(update = UpdateState.UNCHECKED, stage = "版本检查已取消，可重新获取") }
+                    manager.recordOperationFailure(retryId, cancelled = true)
                     throw cancelled
-                } catch (t: Throwable) { manager.fail(t, "dsh-check"); manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") } }
+                } catch (t: Throwable) {
+                    manager.fail(t, "dsh-check")
+                    manager.state.update { it.copy(update = UpdateState.CHECK_FAILED, stage = "官方版本获取失败，可重试") }
+                    manager.recordOperationFailure(retryId)
+                }
             }
         }
     }
@@ -75,6 +82,7 @@ class UpdateManager(
     fun install(release: Release, reinstall: Boolean = false) {
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
+            val retryId = manager.beginOperationRetry { install(release, reinstall) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING) && !manager.hasLiveChild) { "请确认停止服务后再安装，可能中断任务" }
                 check(manager.state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先处理上次更新恢复" }
@@ -120,13 +128,17 @@ class UpdateManager(
                 File(manager.paths.state, "update-transaction").delete()
                 manager.state.update { it.copy(update = UpdateState.SUCCESS,stage="DSH ${release.version} 安装与本机启动检查完成",error="",failure=null) }
                 manager.event("DSH 安装与本机 Web 健康检查通过；官方网页需重新认证。模型和数据迁移兼容性仍需人工验收")
+                manager.completeOperationRetry(retryId)
             } catch (t: Throwable) {
                 manager.fail(t)
                 manager.components.refresh()
                 val journal = manager.paths.read("update-transaction")
                 val switched = journal?.let { runCatching { JSONObject(it).optString("phase") == "switching" }.getOrDefault(true) } ?: false
                 manager.state.update { it.copy(update = if (switched) UpdateState.RECOVERY_REQUIRED else UpdateState.FAILED) }
-                if (!switched) File(manager.paths.state, "update-transaction").delete()
+                if (!switched) {
+                    File(manager.paths.state, "update-transaction").delete()
+                    manager.recordOperationFailure(retryId, cancelled = t is CancellationException)
+                } else manager.completeOperationRetry(retryId)
             }
         }
     }
@@ -135,6 +147,7 @@ class UpdateManager(
         if(job?.isActive==true || !keepForeground())return
         val previousUpdate=manager.state.value.update
         job=manager.scope.launch {
+            val retryId = manager.beginOperationRetry { stage(release) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.STARTING,ServiceState.STOPPING) && !manager.hasLiveChild) { "请先停止 DSH" }
                 manager.mutation.withLock {
@@ -150,9 +163,12 @@ class UpdateManager(
                 }
                 manager.state.update { it.copy(update=if(previousUpdate==UpdateState.RECOVERY_REQUIRED)previousUpdate else UpdateState.AVAILABLE,stage="DSH ${release.version} 备用程序已安装，未切换数据版本",error="",failure=null) }
                 manager.event("备用 DSH ${release.version} 安装与隔离启动检查完成；正式数据未切换")
+                manager.completeOperationRetry(retryId)
             } catch(t:Throwable) {
                 manager.fail(t);manager.components.refresh()
                 manager.state.update { it.copy(update=if(previousUpdate==UpdateState.RECOVERY_REQUIRED)previousUpdate else UpdateState.FAILED) }
+                if (previousUpdate != UpdateState.RECOVERY_REQUIRED) manager.recordOperationFailure(retryId, cancelled = t is CancellationException)
+                else manager.completeOperationRetry(retryId)
             }
         }
     }
@@ -188,6 +204,7 @@ class UpdateManager(
     fun resumeInterrupted() {
         if(job?.isActive==true || !keepForeground())return
         job=manager.scope.launch {
+            manager.state.update { it.copy(failedOperation = null) }
             try {
                 val journal=JSONObject(manager.paths.read("update-transaction") ?: error("没有中断的更新事务"))
                 check(journal.optString("phase")=="switching") { "此事务不在切换阶段，可重新选择版本" }
@@ -206,7 +223,7 @@ class UpdateManager(
     fun restore() {
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
-            manager.state.update { it.copy(update=UpdateState.RESTORING) }
+            manager.state.update { it.copy(update=UpdateState.RESTORING,failedOperation=null) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING)) { "请先停止服务" }
                 manager.mutation.withLock {

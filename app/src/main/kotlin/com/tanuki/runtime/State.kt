@@ -37,6 +37,7 @@ data class Snapshot(
     val phasePercent: Int? = null,
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
+    val failedOperation: FailedOperation? = null,
     val remote: RemoteHostStatus = RemoteHostStatus(),
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),
     /** 最近一次失败的统一展示模型；原始异常仍在 error 字段，恢复后清空。 */

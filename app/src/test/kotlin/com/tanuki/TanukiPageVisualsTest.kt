@@ -157,11 +157,11 @@ class TanukiPageVisualsTest {
         val writableEmpty = TanukiFileVisuals.emptyCopy(query = "", hasEntries = false, writable = true)
         assertEquals("暂无文件", writableEmpty.title)
         assertTrue(writableEmpty.detail.contains("新建文件夹"))
-        assertEquals("刷新", writableEmpty.actionLabel)
+        assertEquals("从手机导入", writableEmpty.actionLabel)
 
         val readOnlyEmpty = TanukiFileVisuals.emptyCopy(query = "", hasEntries = false, writable = false)
         assertEquals("暂无文件", readOnlyEmpty.title)
-        assertEquals("此位置暂无内容。", readOnlyEmpty.detail)
+        assertTrue(readOnlyEmpty.detail.contains("刷新"))
         for (copy in listOf(searching, hiddenOnly, writableEmpty, readOnlyEmpty)) {
             assertTrue("空态标题不能为空", copy.title.isNotBlank())
             assertTrue("空态说明不能为空", copy.detail.isNotBlank())
