@@ -3,6 +3,7 @@ package com.tanuki.ui
 import com.tanuki.runtime.Redact
 import com.tanuki.web.DshApiException
 import com.tanuki.web.DshChatSource
+import com.tanuki.web.DshCoordination
 import com.tanuki.web.DshLiveEvent
 import com.tanuki.web.DshMessage
 import com.tanuki.web.DshMessageRole
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
+import java.io.IOException
 
 /**
  * 原生页状态；会话、历史、发送与审批都直接来自官方 DSH，不维护第二套聊天库。
@@ -55,7 +57,14 @@ data class DshNativeState(
     /** 与文本消息按 seq 交错渲染的工具调用卡片；来自同一官方 session/page 或 follow 事件。 */
     val tools: List<DshToolItem> = emptyList(),
     /** 最近一次发送失败的原文与原因；保留在页面上供复制、重试或回填输入框。 */
-    val failedPrompt: DshFailedPrompt? = null
+    val failedPrompt: DshFailedPrompt? = null,
+    /** 真实目标事件投影出的目标条状态；没有真实数据时为 null（整条隐藏）。 */
+    val goal: GoalDockState? = null,
+    /** 真实待办事件/待办工具调用投影出的待办条状态；没有真实数据时为 null（整条隐藏）。 */
+    val todos: TodoDockState? = null,
+    /** 两类投影独立比较序号；清除后仍保留序号，防止旧页重新显示已移除的条。 */
+    val lastGoalSeq: Int? = null,
+    val lastTodoSeq: Int? = null
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
 }
@@ -75,7 +84,8 @@ data class DshFailedPrompt(
  */
 class DshNativeController(
     private val client: DshChatSource,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val renameRemote: (suspend (String, String) -> Result<String>)? = null
 ) {
     private val _state = MutableStateFlow(DshNativeState())
     val state: StateFlow<DshNativeState> = _state.asStateFlow()
@@ -143,6 +153,34 @@ class DshNativeController(
         }
     }
 
+    val canRenameSession: Boolean get() = renameRemote != null
+
+    /** 重命名复用官方接口；失败保留原标题，切换会话后不再发布旧请求结果。 */
+    suspend fun renameSession(sessionId: String, title: String): Result<Unit> {
+        val rename = renameRemote ?: return Result.failure(IOException("当前无法重命名会话"))
+        val clean = title.trim()
+        if (clean.isEmpty() || clean.length > 200 || clean.any { it.code < 0x20 || it.code == 0x7f }) {
+            return Result.failure(IllegalArgumentException("标题不能为空、不能超过 200 字或包含控制字符"))
+        }
+        if (_state.value.selectedId != sessionId) return Result.failure(IOException("会话已切换，请重新打开标题"))
+        val token = generation
+        return rename(sessionId, clean).fold(
+            onSuccess = { officialTitle ->
+                if (token != generation) {
+                    Result.failure(IOException("会话已切换，请刷新查看标题"))
+                } else {
+                    _state.update { state ->
+                        state.copy(sessions = state.sessions.map { session ->
+                            if (session.id == sessionId) session.copy(title = officialTitle) else session
+                        })
+                    }
+                    Result.success(Unit)
+                }
+            },
+            onFailure = { Result.failure(IOException(messageOf(it))) }
+        )
+    }
+
     /** 通知点击：优先选择已加载列表中的目标；未加载/不在列表时刷新后再选中。 */
     fun openSession(sessionId: String) {
         if (sessionId.isBlank() || sessionId.length > 128 ||
@@ -183,6 +221,10 @@ class DshNativeController(
                 olderError = null,
                 historyRevision = 0,
                 releasedOlder = 0,
+                goal = null,
+                todos = null,
+                lastGoalSeq = null,
+                lastTodoSeq = null,
                 loading = true,
                 running = session?.running ?: it.running,
                 stopping = false,
@@ -369,7 +411,7 @@ class DshNativeController(
                         tools = DshToolMerge.merge(state.tools, event.tools, maxTools = null),
                         hasMore = state.hasMore || event.hasMore,
                         streamingText = event.liveText
-                    )
+                    ).withCoordination(event.coordination)
                 }
             }
             is DshLiveEvent.Message -> {
@@ -404,6 +446,7 @@ class DshNativeController(
                 }
             }
             is DshLiveEvent.Failure -> _state.update { it.copy(liveError = event.message) }
+            is DshLiveEvent.Coordination -> _state.update { it.withCoordination(event.update) }
         }
     }
 
@@ -473,8 +516,8 @@ class DshNativeController(
             _state.update { state ->
                 val currentMax = state.messages.filterNot { it.pending }.maxOfOrNull { it.seq } ?: -1
                 val pageMax = page.messages.maxOfOrNull { it.seq } ?: -1
-                // 实时快照可能比这次 HTTP 历史更新；旧页不能覆盖它。
-                if (state.messages.isEmpty() || pageMax >= currentMax) {
+                // 文本与停靠条各用自己的序号；文本旧页也可能携带较新的目标/待办投影。
+                val reconciled = if (state.messages.isEmpty() || pageMax >= currentMax) {
                     val pageMin = page.messages.minOfOrNull { it.seq }
                     val loadedOldest = DshChatWindowPolicy.oldestSeq(state.messages, state.tools)
                     // 只有这一页真正接到已加载窗口的起点时，它的 hasMore 才代表“还有更早历史”；
@@ -499,6 +542,7 @@ class DshNativeController(
                 } else {
                     state.copy(loading = false)
                 }
+                reconciled.withCoordination(page.coordination)
             }
         }.onFailure { error ->
             // 实时快照已到达时，历史页失败不覆盖已显示的消息。
@@ -592,6 +636,31 @@ class DshNativeController(
                 historyRevision = state.historyRevision + 1
             )
         }
+    }
+
+    /**
+     * 历史页、快照和增量统一按各类投影序号合并，包括清除投影；重放与旧页不能回退状态。
+     * 字段缺失、未知目标状态或解析失败不改变已有状态，也不推进该类序号。
+     */
+    private fun DshNativeState.withCoordination(update: DshCoordination): DshNativeState {
+        var merged = this
+        update.goal?.let { projection ->
+            if (lastGoalSeq == null || projection.seq > lastGoalSeq) {
+                val mapped = DshDockStateMapper.goal(projection)
+                if (projection.clearsDock || mapped != null) {
+                    merged = merged.copy(goal = mapped, lastGoalSeq = projection.seq)
+                }
+            }
+        }
+        update.todos?.let { projection ->
+            if (lastTodoSeq == null || projection.seq > lastTodoSeq) {
+                val mapped = DshDockStateMapper.todo(projection)
+                if (projection.items.isEmpty() || mapped != null) {
+                    merged = merged.copy(todos = mapped, lastTodoSeq = projection.seq)
+                }
+            }
+        }
+        return merged
     }
 
     /**

@@ -2,6 +2,13 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## PR #73 普通 merge 对齐 #74/#75（2026-11-11，android_agent-69，非设备）
+
+- 起点：PR head `b2416b6977359e7dcb441eeb1d91cf10c5dc0c11`，工作区干净；fetch 后 `origin/main=6e1e83347b264b588c97fe380214c955bd7ba9c0`，包含已合并的聊天停靠条 #74 与文件导入/复制移动 #75。
+- 按要求执行普通 `git merge --no-commit origin/main`，没有 rebase 或强推；唯一文本冲突在本报告顶部，保留双方验证记录。产品源码自动合并，文件页/存储实现保留 main，错误模型、错误条、恢复卡和中文文案保留 PR 实现，不额外改逻辑。
+- 合并后实际执行：`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew -PtestBuildType=debug :app:testModernDebugUnitTest :app:lintModernDebug --offline` 串行通过，4m21s。**1237 tests / 124 个结果文件 / 0 skipped / 0 failures / 0 errors**；lint **0 errors / 99 warnings**。错误分类 8 项、恢复跟进 11 项、命名 8 项、传输 20 项、聊天协调 10 项、停靠条集成 5 项均执行通过。下方 1179/1188 等属于各自原分支的历史结果，不作为当前合并结果。
+- 设备由独立 QA 独占，本轮不启动/操作模拟器、真机或 adb 安装；没有设备执行或发布产物。
+
 ## 错误出口评审与中文失败文案跟进（2026-11-11，android_agent-69，非设备）
 
 - 起点：PR [#73](https://github.com/leezzou/tanuki/pull/73) 的完整 head `cde1644c98d4e6b10d6fc8295fd506fd87376c05`；provider 为 OPEN/MERGEABLE，本地与 fetch 后远端一致，开始时工作区干净。
@@ -19,6 +26,19 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 - 本轮已执行：`:app:compileModernDebugKotlin` 通过；组件对齐后的完整 `:app:testModernDebugUnitTest` 1168 项通过，0 skipped / failures / errors。
 - 最终源码检查：补齐详情弹层的显式关闭按钮后，`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --offline` 串行执行通过；JVM **1168 tests / 119 个结果文件 / 0 skipped / 0 failures / 0 errors**，lint 通过。已取消的中间 lint 不计通过。
 - 未执行：Android 设备/模拟器点击、底部弹层手势、遮挡、深色、大字体、360dp、TalkBack；本轮未安装 APK，编译/JVM/lint 不能替代设备验收。
+
+## 文件导入命名与手机存储复制/移动验证（2026-11-11，android_agent-70，非设备）
+
+- PR [#75](https://github.com/leezzou/tanuki/pull/75)，分支 `ao/file-import-move/p0-file-import-move`。初始 fetch 基线 `732cb79`，普通 merge 集成 `main=8ba7b4b` 后继续验证，保留已推送历史，不强推；不合并、不发布。
+- 覆盖审计 P0 #4/#5 与 R4.1/R4.2/R4.3：导入按源文件名/时间戳建立独立项目，重名 ` (2)`/` (3)` 且保留扩展名；导入完成刷新、Snackbar「打开」与一次性提示；顶部一级「＋ 导入」、更多菜单与空态；手机条目/批量复制移动、目标目录选择、写权限确认、冲突三选/全部应用、真实进度与可取消。
+- 实际执行（macOS ARM64、项目 JDK17、Android SDK）：
+  - `./gradlew :app:testModernDebugUnitTest --tests com.tanuki.ImportNamingTest --tests com.tanuki.TransferEngineTest --console=plain` → BUILD SUCCESSFUL；**28 tests / 0 failures / 0 errors / 0 skipped**。
+  - 最终 `./gradlew -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:testModernDebugUnitTest :app:lintModernDebug :app:assembleModernDebug :app:assembleModernDebugAndroidTest --console=plain` → BUILD SUCCESSFUL（18m36s）；**1188 tests / 120 个报告文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 109 warnings / 1 hint**；workspacecheck 应用 APK 与 Android 测试 APK 均构建成功，仪器测试未运行。
+- 开发验证包 `com.tanuki.modern.workspacecheck`，沿用 0.1.12/code14；17,247,521 字节，SHA-256 `4fde01ef31fc2f2d71f05c37a106ef9ebb2b43c42389312e342dc065ffe5c413`。未安装或交付发布附件，输出元数据不能替代设备验收。
+- 新增回归实测名称清洗/重名/真实目录发布/悬空链接/Unicode/扩展名；流式未知大小读取；移动前后源存在性、目录递归、容量拒绝、源同大小同时间戳改写/目录新增、摘要损坏、取消无半成品、删源失败保留副本；真实批量保留两者/替换/跳过/全部应用/部分失败进度。仪器测试新增导入完成反馈与打开用例，并同步菜单路径，仅编译不计设备通过。
+- 过程失败保留：早期完整 JVM 曾出现既有 NPM 线程池时序失败（期望 8、实际 9），单独与完整复跑通过；早期 1098、main 集成后 1174 均为过程数字，最终代码用上述 1188 项结果。
+- 未执行设备/模拟器安装、Android 仪器测试、真实 SAF 提供方/系统授权撤销/SD-USB 只读卷、复制移动实际进度取消、深色/大字体/360dp/TalkBack；当前 head 独立 Review 与 QA 待编排。宿主结果不替代设备验收。
+- 边界：目录、链接及不同类型冲突不替换；移动没有跨应用文件锁，检测源变化后拒绝发布或停止删源并保留副本；发布后新出现文件不递归删除。目录拒绝超过 128 层、链接与特殊文件；现有 SAF 导入 512 MiB/64 MiB 磁盘余量保留。`content://` 查看继续直读，不强制复制。
 
 ## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
 

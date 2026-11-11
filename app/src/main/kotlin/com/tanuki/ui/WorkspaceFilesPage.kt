@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -40,10 +43,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.FileTransferProgress
+import com.tanuki.storage.ConflictBatch
 import com.tanuki.storage.FileLocation
 import com.tanuki.storage.OpenDocument
+import com.tanuki.storage.TransferConflictPolicy
+import com.tanuki.storage.WorkspaceConflict
 import com.tanuki.storage.WorkspaceDocument
 import com.tanuki.storage.WorkspaceFileManager
+import com.tanuki.storage.WorkspaceTransferMode
+import com.tanuki.storage.WorkspaceTransferReport
 import com.tanuki.ui.design.TanukiGlassPill
 import com.tanuki.ui.design.TanukiMotion as TanukiMotionTokens
 import com.tanuki.ui.design.TanukiPathText
@@ -55,6 +63,7 @@ import com.tanuki.ui.design.TanukiStatusChip
 import com.tanuki.ui.design.TanukiStatusDot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -67,6 +76,19 @@ import java.util.Date
 
 /** 页面单独预览时可用的空传输流；真实页面由宿主注入。 */
 private val EMPTY_FILE_TRANSFERS: StateFlow<List<FileTransferProgress>> = MutableStateFlow(emptyList())
+
+/** 导入完成后由宿主投递的一次性事件；用 id 去重，避免重组或旋转重复提示。 */
+data class WorkspaceImportEvent(val id: String, val projectName: String, val fileCount: Int)
+
+/** 手机存储到工作区的一次批量传输状态；决定冲突期间不会启动复制。 */
+private data class PhoneTransfer(
+    val mode: WorkspaceTransferMode,
+    val entries: List<WorkspaceFileManager.Entry>,
+    val target: String = "",
+    val conflicts: List<WorkspaceConflict> = emptyList(),
+    val decisions: Map<String, TransferConflictPolicy> = emptyMap(),
+    val picking: Boolean = true,
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -86,6 +108,16 @@ internal fun WorkspaceFilesPage(
     onRequestPhoneWrite: () -> Unit = {}, onRevokePhoneWrite: () -> Unit = {},
     transfers: StateFlow<List<FileTransferProgress>> = EMPTY_FILE_TRANSFERS,
     onCancelTransfer: (Long) -> Unit = {},
+    importEvent: WorkspaceImportEvent? = null,
+    phoneMoveGranted: Boolean = false,
+    onRequestPhoneMovePermission: () -> Unit = {},
+    onTransferToWorkspace: suspend (
+        List<String>,
+        String,
+        WorkspaceTransferMode,
+        Map<String, TransferConflictPolicy>,
+        (String) -> Unit,
+    ) -> WorkspaceTransferReport = { _, _, _, _, _ -> error("文件传输尚未连接，请返回后重试") },
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
 ) {
@@ -117,8 +149,19 @@ internal fun WorkspaceFilesPage(
     var locations by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var permissionSheet by remember { mutableStateOf(false) }
+    var handledImportId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingOpenProject by rememberSaveable { mutableStateOf<String?>(null) }
+    var recentImportName by rememberSaveable { mutableStateOf<String?>(null) }
+    var feedbackTarget by remember { mutableStateOf<String?>(null) }
+    var transferPhase by remember { mutableStateOf<String?>(null) }
+    var transferStartedAt by remember { mutableLongStateOf(0L) }
+    var phoneTransferActive by remember { mutableStateOf(false) }
+    // 手机存储发起复制/移动时默认落到用户最近停留的工作区目录。
+    var lastWorkspaceDirectory by rememberSaveable { mutableStateOf("") }
+    var phoneTransfer by remember { mutableStateOf<PhoneTransfer?>(null) }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val workspaceFiles = remember(manager) { manager.inLocation(FileLocation.WORKSPACE) }
     // chip 的只读/可写是“当前是否可操作”，DSH 运行或手机写入撤销都会立即反映。
     val access = remember(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable) {
         FileAccessPresentation.state(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable)
@@ -128,11 +171,18 @@ internal fun WorkspaceFilesPage(
     val notice = if (action == null) error ?: feedback else null
     LaunchedEffect(notice) {
         notice?.let {
-            snackbarHostState.showSnackbar(
+            val target = if (error == null) feedbackTarget else null
+            val result = snackbarHostState.showSnackbar(
                 message = it,
+                actionLabel = if (target != null) "打开" else null,
                 withDismissAction = true,
-                duration = if (error != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                duration = if (error != null || target != null) SnackbarDuration.Long else SnackbarDuration.Short,
             )
+            if (result == SnackbarResult.ActionPerformed && target != null) {
+                openedEntry = null; onCloseExternal(); onFullscreen(false)
+                searching = false; query = ""; location = FileLocation.WORKSPACE
+                pendingOpenProject = target
+            }
         }
     }
     LaunchedEffect(searching) { if (searching) runCatching { searchFocus.requestFocus() } }
@@ -142,7 +192,7 @@ internal fun WorkspaceFilesPage(
     }
     fun runTask(block: suspend () -> Unit) {
         if (busy) return
-        busy = true; error = null; feedback = null
+        busy = true; error = null; feedback = null; feedbackTarget = null
         scope.launch {
             try { block() }
             catch (e: CancellationException) { throw e }
@@ -165,14 +215,104 @@ internal fun WorkspaceFilesPage(
     }
     fun copyPath(path: String) { clipboard.setText(AnnotatedString(files.guestPath(path))); feedback = if (location == FileLocation.PHONE) "已复制手机工具路径" else "已复制 Agent 可用的路径" }
     fun toggle(path: String) { selected = if (path in selected) selected - path else selected + path }
-    LaunchedEffect(files, runtimeRunning, phoneStorageGranted) {
-        error = null; selected = emptySet()
+    // 先预检目标目录的同名冲突，用户逐项选择后再启动传输；取消或失败都不会产生半成品。
+    fun startPhoneTransfer(draft: PhoneTransfer, scanConflicts: Boolean) {
+        if (busy) return
+        busy = true; error = null; feedback = null; feedbackTarget = null
+        scope.launch {
+            try {
+                var current = draft
+                if (scanConflicts) {
+                    val conflicts = files.workspaceConflicts(draft.entries.map { it.path }, draft.target)
+                    current = draft.copy(picking = false, conflicts = conflicts)
+                    if (conflicts.isNotEmpty()) { phoneTransfer = current; return@launch }
+                }
+                phoneTransferActive = true
+                transferStartedAt = SystemClock.elapsedRealtime()
+                transferPhase = "正在准备传输"
+                val outcome = onTransferToWorkspace(
+                    current.entries.map { it.path }, current.target, current.mode, current.decisions,
+                ) { phase -> scope.launch { if (phoneTransferActive) transferPhase = phase } }
+                feedbackTarget = current.target.takeIf { outcome.results.any { !it.skipped && it.error == null } }
+                selected = emptySet()
+                entries = runCatching { files.list(directory) }.getOrDefault(entries)
+                val summary = transferSummary(outcome, current.mode)
+                val failed = outcome.results.filter { it.error != null }
+                if (failed.isEmpty()) feedback = summary else error = "$summary；${failed.first().error}"
+                phoneTransfer = null
+            } catch (e: CancellationException) {
+                // 取消会清理暂存并保留源文件；列表回到稳定状态，不把取消当失败提示。
+                withContext(NonCancellable) { runCatching { entries = files.list(directory) } }
+                phoneTransfer = null
+                feedback = "传输已取消；已完成项保留，未完成项的源文件保留。"
+                throw e
+            } catch (e: Exception) {
+                phoneTransfer = null
+                report(e)
+            } finally { busy = false; phoneTransferActive = false; transferPhase = null }
+        }
+    }
+    fun decidePhoneConflict(
+        draft: PhoneTransfer,
+        conflict: WorkspaceConflict,
+        policy: TransferConflictPolicy,
+        applyAll: Boolean,
+    ) {
+        val names = draft.conflicts.map { it.name }
+        val replaceable = draft.conflicts.filter { it.replaceable }.map { it.name }.toSet()
+        val next = draft.copy(decisions = ConflictBatch.apply(
+            draft.decisions, names, conflict.name, policy, applyAll, replaceable,
+        ))
+        if (ConflictBatch.next(names, next.decisions) == null) {
+            phoneTransfer = null
+            startPhoneTransfer(next, scanConflicts = false)
+        } else phoneTransfer = next
+    }
+    LaunchedEffect(files, runtimeRunning, phoneStorageGranted, phoneMoveGranted, phoneTransferActive) {
+        if (phoneTransferActive) return@LaunchedEffect
+        selected = emptySet()
         if (!canBrowse) { entries = emptyList(); busy = false; return@LaunchedEffect }
         busy = true
         try { entries = files.list(directory) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { report(e) }
         finally { busy = false }
+    }
+    // 记住工作区当前位置，手机存储发起复制/移动时默认落到这里。
+    LaunchedEffect(location, directory, entries) {
+        if (location == FileLocation.WORKSPACE) lastWorkspaceDirectory = directory
+    }
+    // 导入完成：刷新列表并给出可操作的 Snackbar；点“打开”进入新项目目录。
+    LaunchedEffect(importEvent?.id) {
+        val event = importEvent ?: return@LaunchedEffect
+        if (event.id == handledImportId) return@LaunchedEffect
+        handledImportId = event.id
+        recentImportName = event.projectName
+        if (location != FileLocation.WORKSPACE) {
+            location = FileLocation.WORKSPACE
+            directory = ""
+        } else {
+            entries = runCatching { files.list(directory) }.getOrDefault(entries)
+        }
+        val result = snackbarHostState.showSnackbar(
+            message = "已导入 ${event.fileCount} 个文件到「${event.projectName}」",
+            actionLabel = "打开",
+            withDismissAction = true,
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            openedEntry = null; onCloseExternal(); onFullscreen(false)
+            searching = false; query = ""; location = FileLocation.WORKSPACE
+            pendingOpenProject = event.projectName
+        }
+    }
+    LaunchedEffect(files, pendingOpenProject, busy) {
+        val name = pendingOpenProject ?: return@LaunchedEffect
+        // 列表刷新期间 runTask 会拒绝新任务；等 busy 结束后再执行“打开”，避免动作丢失。
+        if (location != FileLocation.WORKSPACE || busy) return@LaunchedEffect
+        pendingOpenProject = null
+        recentImportName = null
+        navigate(name)
     }
     BackHandler(enabled = action == null && openedEntry == null && (selected.isNotEmpty() || searching || directory.isNotEmpty())) {
         when { selected.isNotEmpty() -> selected = emptySet(); searching -> { searching = false; query = "" }
@@ -212,7 +352,7 @@ internal fun WorkspaceFilesPage(
                 onReselect = onReselectExternal)
             // 查看器和列表共用同一个传输浮层；查看器操作栏可见时胶囊需额外上移避让。
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
-                viewerActionBarVisible = !fullscreen)
+                viewerActionBarVisible = !fullscreen, snackbarHostState = snackbarHostState)
         }
         return
     }
@@ -233,16 +373,16 @@ internal fun WorkspaceFilesPage(
                 } })
             // 编辑动作会离开查看器；传输浮层保持在当前页面，并按操作栏高度避让。
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
-                viewerActionBarVisible = !fullscreen)
+                viewerActionBarVisible = !fullscreen, snackbarHostState = snackbarHostState)
         }
         return
     }
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize().imePadding()) {
             Column(Modifier.fillMaxSize()) {
-                // 顶部主操作固定 56dp：位置、权限 chip 与四个图标入口都不参与列表测量。
+                // 顶部只保留位置、一级导入、更多和权限；低频浏览操作放进更多菜单。
                 Row(
-                    Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(Modifier.weight(1f).padding(start = 2.dp)) {
@@ -266,22 +406,46 @@ internal fun WorkspaceFilesPage(
                             FileLocation.entries.forEach { area ->
                                 DropdownMenuItem(
                                     text = { Text(area.title + if (!area.writable) " · 只读" else "") },
-                                    onClick = { locations = false; directory = ""; query = ""; location = area },
+                                    onClick = { locations = false; directory = ""; query = ""; error = null; feedback = null; location = area },
                                 )
                             }
                         }
                     }
-                    IconButton(
-                        onClick = { searching = !searching; query = "" },
-                        enabled = !busy && canBrowse,
-                        modifier = Modifier.size(48.dp),
-                    ) { Icon(if (searching) Icons.Default.Close else Icons.Default.Search,
-                        if (searching) "关闭搜索" else "搜索当前文件夹") }
-                    IconButton(onClick = { navigate(directory) }, enabled = !busy && canBrowse,
-                        modifier = Modifier.size(48.dp)) { TanukiIcon(TanukiGlyph.Refresh, "刷新文件") }
+                    TanukiPillButton(
+                        text = "＋ 导入", onClick = onImport, enabled = !busy,
+                        tone = TanukiPillButtonTone.Filled,
+                        modifier = Modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
+                    )
                     Box {
-                        IconButton(onClick = { sortMenu = true }, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Default.Menu, "排序与显示")
+                        IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.MoreVert, "文件操作")
+                        }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem(text = { Text(if (searching) "关闭搜索" else "搜索当前文件夹") },
+                                enabled = canBrowse, onClick = { menu = false; searching = !searching; query = "" })
+                            DropdownMenuItem(text = { Text("刷新文件") }, enabled = canBrowse,
+                                onClick = { menu = false; navigate(directory) })
+                            DropdownMenuItem(text = { Text("排序与显示") },
+                                onClick = { menu = false; sortMenu = true })
+                            HorizontalDivider()
+                            if (location.writable) {
+                                listOf("新建文件夹", "新建文本文件").forEach { label ->
+                                    DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning,
+                                        onClick = { begin(label) })
+                                }
+                                DropdownMenuItem(text = { Text("导出整个工作区") },
+                                    onClick = { menu = false; onExport() })
+                            }
+                            DropdownMenuItem(text = { Text("打开手机/其他应用文件") },
+                                onClick = { menu = false; onOpenExternal() })
+                            DropdownMenuItem(text = {
+                                Column {
+                                    Text("导入为新项目")
+                                    Text("会创建一个新文件夹，不覆盖现有项目", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }, onClick = { menu = false; onImport() })
+                            DropdownMenuItem(text = { Text("复制当前目录路径") },
+                                onClick = { menu = false; copyPath(directory) })
                         }
                         DropdownMenu(sortMenu, { sortMenu = false }) {
                             listOf("名称", "最近修改", "文件大小").forEachIndexed { index, label ->
@@ -295,29 +459,20 @@ internal fun WorkspaceFilesPage(
                                 onClick = { hidden = !hidden; sortMenu = false })
                         }
                     }
-                    Box {
-                        IconButton(onClick = { menu = true }, enabled = !busy, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Default.MoreVert, "文件操作")
-                        }
-                        DropdownMenu(menu, { menu = false }) {
-                            if (location.writable) {
-                                listOf("新建文件夹", "新建文本文件").forEach { label ->
-                                    DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning,
-                                        onClick = { begin(label) })
-                                }
-                                DropdownMenuItem(text = { Text("导出整个工作区") },
-                                    onClick = { menu = false; onExport() })
-                            }
-                            DropdownMenuItem(text = { Text("打开手机/其他应用文件") },
-                                onClick = { menu = false; onOpenExternal() })
-                            DropdownMenuItem(text = { Text("导入文件到工作区") },
-                                onClick = { menu = false; onImport() })
-                            DropdownMenuItem(text = { Text("复制当前目录路径") },
-                                onClick = { menu = false; copyPath(directory) })
-                        }
-                    }
                     PermissionChip(access, onClick = { permissionSheet = true })
                 }
+                recentImportName?.let { project ->
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("刚刚导入：$project", style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = {
+                            searching = false; query = ""; location = FileLocation.WORKSPACE
+                            pendingOpenProject = project
+                        }, enabled = !busy) { Text("打开") }
+                        TextButton(onClick = { recentImportName = null }) { Text("忽略") }
+                    }
+                }
+                transferPhase?.let { phase -> TransferStatusLine(phase, transferStartedAt) }
                 // 第二行只承载一种上下文：批量选择优先于搜索，保证选中后操作可达且不丢过滤条件。
                 when {
                     selected.isNotEmpty() -> Row(
@@ -337,6 +492,26 @@ internal fun WorkspaceFilesPage(
                             TextButton(
                                 onClick = { begin(label, entries.filter { it.path in selected }) },
                                 enabled = !busy && !runtimeRunning,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text(label) }
+                        }
+                        if (location == FileLocation.PHONE) listOf(
+                            "复制到工作区" to WorkspaceTransferMode.COPY,
+                            "移动到工作区" to WorkspaceTransferMode.MOVE,
+                        ).forEach { (label, mode) ->
+                            TextButton(
+                                onClick = {
+                                    phoneTransfer = PhoneTransfer(
+                                        mode,
+                                        entries.filter { it.path in selected },
+                                        target = lastWorkspaceDirectory,
+                                    )
+                                },
+                                enabled = !busy && !runtimeRunning && selected.isNotEmpty() &&
+                                    entries.filter { it.path in selected }.all {
+                                        it.path.contains('/') && !it.linked &&
+                                            (mode == WorkspaceTransferMode.COPY || !phoneMoveGranted || it.deletable)
+                                    },
                                 modifier = Modifier.heightIn(min = 48.dp),
                             ) { Text(label) }
                         }
@@ -420,6 +595,16 @@ internal fun WorkspaceFilesPage(
                                         if (!entry.directory) DropdownMenuItem(text = { Text("导出此文件") }, onClick = { expanded = false; onExportFile(files, entry.path, entry.name) })
                                         DropdownMenuItem(text = { Text("选择") }, onClick = { expanded = false; toggle(entry.path) })
                                         if (location.writable) listOf("重命名", "复制", "移动", "删除").forEach { label -> DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning, onClick = { expanded = false; begin(label, listOf(entry)) }) }
+                                        if (location == FileLocation.PHONE) listOf(
+                                            "复制到工作区" to WorkspaceTransferMode.COPY,
+                                            "移动到工作区" to WorkspaceTransferMode.MOVE,
+                                        ).forEach { (label, mode) ->
+                                            DropdownMenuItem(text = { Text(label) }, enabled = !runtimeRunning && entry.path.contains('/') && !entry.linked &&
+                                                (mode == WorkspaceTransferMode.COPY || !phoneMoveGranted || entry.deletable), onClick = {
+                                                expanded = false
+                                                phoneTransfer = PhoneTransfer(mode, listOf(entry), target = lastWorkspaceDirectory)
+                                            })
+                                        }
                                     }
                                 }
                             }
@@ -471,6 +656,9 @@ internal fun WorkspaceFilesPage(
                                         onReload = { navigate(directory) },
                                         onShowHidden = { hidden = true },
                                         onClearQuery = { query = "" },
+                                        onImport = onImport,
+                                        onCreateFolder = { begin("新建文件夹") },
+                                        canCreateFolder = !runtimeRunning,
                                     )
                                 }
                             }
@@ -519,8 +707,15 @@ internal fun WorkspaceFilesPage(
         onRevokeWrite = { permissionSheet = false; onRevokePhoneWrite() },
         onStopDsh = { permissionSheet = false; onStop() },
     )
-    if (destinationPicker) DirectoryPicker(files, action.orEmpty(), directory, actionEntries.map { it.path }, busy,
-        onDismiss = { if (!busy) { destinationPicker = false; action = null } }, onChoose = { target ->
+    if (destinationPicker) DirectoryPicker(
+        target = files,
+        operation = action.orEmpty(),
+        initial = directory,
+        sources = actionEntries.map { it.path },
+        busy = busy,
+        destinationLabel = "文件夹",
+        onDismiss = { if (!busy) { destinationPicker = false; action = null } },
+        onChoose = { target ->
             runTask {
                 val failed = mutableListOf<String>(); var completed = 0
                 for (entry in actionEntries) {
@@ -567,6 +762,39 @@ internal fun WorkspaceFilesPage(
             } }) { Text(if (busy) "处理中…" else if (kind == "删除") "确认删除" else "保存") }
         })
     }
+    // 手机存储到工作区：先选目标目录，再逐项处理同名冲突，最后才启动复制/移动。
+    phoneTransfer?.takeIf { it.picking }?.let { draft ->
+        if (draft.mode == WorkspaceTransferMode.MOVE && !phoneMoveGranted) AlertDialog(
+            onDismissRequest = { phoneTransfer = null },
+            title = { Text("移动需要手机存储写权限") },
+            text = { Text("移动会在工作区副本复制并校验成功后删除手机源文件。请先授予系统写权限；这不会授权 DSH 修改手机文件。") },
+            dismissButton = { TextButton(onClick = { phoneTransfer = null }) { Text("取消") } },
+            confirmButton = { TextButton(onClick = onRequestPhoneMovePermission) { Text("授权手机存储写入") } },
+        ) else DirectoryPicker(
+            target = workspaceFiles,
+            operation = if (draft.mode == WorkspaceTransferMode.MOVE) "移动" else "复制",
+            initial = draft.target,
+            sources = emptyList(),
+            busy = busy,
+            destinationLabel = "工作区",
+            onDismiss = { if (!busy) phoneTransfer = null },
+            onChoose = { target ->
+                val next = draft.copy(target = target, picking = false)
+                phoneTransfer = null
+                startPhoneTransfer(next, scanConflicts = true)
+            },
+        )
+    }
+    phoneTransfer?.takeIf { !it.picking }?.let { draft ->
+        val conflict = draft.conflicts.firstOrNull { it.name !in draft.decisions }
+        if (conflict != null) ConflictDialog(
+            conflict = conflict,
+            remaining = draft.conflicts.count { it.name !in draft.decisions },
+            busy = busy,
+            onChoose = { policy, applyAll -> decidePhoneConflict(draft, conflict, policy, applyAll) },
+            onDismiss = { if (!busy) phoneTransfer = null },
+        )
+    }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("放弃未保存的内容？") },
         text = { Text("原文件没有改变，当前草稿将丢失。") }, dismissButton = { TextButton(onClick = { discard = false }) { Text("继续编辑") } },
         confirmButton = { TextButton(onClick = { discard = false; action = null }) { Text("放弃草稿") } })
@@ -589,10 +817,15 @@ private fun FileListState(
     onReload: () -> Unit,
     onShowHidden: () -> Unit,
     onClearQuery: () -> Unit,
+    onImport: () -> Unit,
+    onCreateFolder: () -> Unit,
+    canCreateFolder: Boolean,
 ) {
     val modifier = Modifier.fillMaxWidth()
         .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 24.dp + bottomInset)
     val copy = TanukiFileVisuals.emptyCopy(query = query, hasEntries = hasEntries, writable = writable)
+    // 可写位置的空目录把“导入文件”作为主操作；运行中仍可导入，只隐藏会改现有内容的“新建文件夹”。
+    val importFirst = writable && query.isEmpty() && !hasEntries
     when (kind) {
         TanukiStateKind.LOADING -> TanukiStateView(
             kind = kind,
@@ -614,15 +847,31 @@ private fun FileListState(
             modifier = modifier,
             subject = "文件",
             title = copy.title,
-            detail = copy.detail,
-            actionLabel = copy.actionLabel,
-            onAction = when {
+            detail = if (importFirst) "导入文件会按源文件名创建新项目，不覆盖已有项目。" else copy.detail,
+            actionLabel = if (importFirst) "导入文件" else copy.actionLabel,
+            onAction = if (importFirst) onImport else when {
                 query.isNotEmpty() -> onClearQuery
                 hasEntries -> onShowHidden
                 else -> onReload
             },
+            secondaryActionLabel = if (importFirst && canCreateFolder) "新建文件夹" else null,
+            onSecondaryAction = if (importFirst && canCreateFolder) onCreateFolder else null,
         )
     }
+}
+
+/** 阶段与耗时独立重组；未知大小不显示百分比。 */
+@Composable
+private fun TransferStatusLine(phase: String, startedAt: Long) {
+    var elapsed by remember(startedAt) { mutableLongStateOf(0L) }
+    LaunchedEffect(startedAt) {
+        while (true) {
+            elapsed = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0) / 1000
+            delay(1000)
+        }
+    }
+    Text("$phase · 已用 $elapsed 秒", Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 /** 传输浮层独立订阅进度；列表页只接收稳定布局，不参与每个进度帧的重组。 */
@@ -639,7 +888,7 @@ private fun FileTransferOverlay(
     var sheet by remember { mutableStateOf(false) }
     LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) sheet = false }
     Box(Modifier.fillMaxSize()) {
-        // 查看器内没有 SnackbarHost，避免和查看器自己的错误行重复；列表页仍由此统一呈现提示。
+        // 查看器与列表共用同一个提示宿主，导入完成后都可直接打开目标目录。
         snackbarHostState?.let { host ->
             SnackbarHost(
                 host,
@@ -760,6 +1009,11 @@ private fun PermissionSheet(
             if (location == FileLocation.PHONE && phoneStorageGranted &&
                 !state.canGrantPhoneWrite && !state.canRevokePhoneWrite && !state.needsStorageGrant) {
                 Text("授权只在本次 DSH 运行期间有效；停止 DSH 后自动恢复只读。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (location == FileLocation.PHONE) {
+                Text("文件页对手机存储只读；如需放入工作区，请使用条目的「复制到工作区」或「移动到工作区」。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -930,22 +1184,34 @@ private fun FileEntryLabel(entry: WorkspaceFileManager.Entry, tile: Boolean) {
 }
 
 @Composable
-private fun DirectoryPicker(files: WorkspaceFileManager, operation: String, initial: String, sources: List<String>, busy: Boolean,
-                            onDismiss: () -> Unit, onChoose: (String) -> Unit) {
+private fun DirectoryPicker(
+    target: WorkspaceFileManager,
+    operation: String,
+    initial: String,
+    sources: List<String>,
+    busy: Boolean,
+    destinationLabel: String,
+    onDismiss: () -> Unit,
+    onChoose: (String) -> Unit,
+) {
     var current by remember { mutableStateOf(initial) }
     var folders by remember { mutableStateOf(emptyList<WorkspaceFileManager.Entry>()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(current) {
         loading = true; error = null
-        try { folders = files.list(current).filter { it.directory && sources.none { path -> it.path == path || it.path.startsWith("$path/") } } }
+        try { folders = target.list(current).filter { it.directory && sources.none { path -> it.path == path || it.path.startsWith("$path/") } } }
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { folders = emptyList(); error = "无法打开此目录，请返回上一级" }
         finally { loading = false }
     }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("${operation}到文件夹") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("${operation}到$destinationLabel") }, text = {
         Column(Modifier.heightIn(max = 400.dp)) {
-            TanukiPathText(files.guestPath(current))
+            TanukiPathText(
+                if (target.location == FileLocation.WORKSPACE) {
+                    if (current.isEmpty()) "工作区 / 根目录" else "工作区 / $current"
+                } else target.guestPath(current),
+            )
             if (current.isNotEmpty()) TextButton(onClick = { current = current.substringBeforeLast('/', "") }, enabled = !loading && !busy) { Text("返回上一级") }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -957,11 +1223,87 @@ private fun DirectoryPicker(files: WorkspaceFileManager, operation: String, init
                 } }
                 if (!loading && folders.isEmpty() && error == null) item { Text("没有可进入的子文件夹", Modifier.padding(vertical = 16.dp)) }
             }
-            Text("选择当前位置；同名条目会跳过，不会覆盖。", style = MaterialTheme.typography.bodySmall)
+            Text(if (target.location == FileLocation.WORKSPACE && sources.isEmpty()) {
+                if (operation == "移动") "复制并校验成功后删除手机源文件；同名文件会先询问如何处理。"
+                else "同名文件会先询问保留两者、替换或跳过。"
+            } else "选择当前位置；同名条目不会覆盖。", style = MaterialTheme.typography.bodySmall)
         }
     }, dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } }, confirmButton = {
         TextButton(onClick = { onChoose(current) }, enabled = !loading && !busy && error == null && sources.none { current == it || current.startsWith("$it/") }) { Text(if (busy) "处理中…" else "${operation}到这里") }
     })
+}
+
+/** 同名冲突三选；目录不能整体替换，避免误删已有内容。 */
+@Composable
+private fun ConflictDialog(
+    conflict: WorkspaceConflict,
+    remaining: Int,
+    busy: Boolean,
+    onChoose: (TransferConflictPolicy, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var policy by remember(conflict.name) { mutableStateOf(TransferConflictPolicy.KEEP_BOTH) }
+    var applyAll by remember(conflict.name) { mutableStateOf(false) }
+    val options = if (!conflict.replaceable) listOf(
+        TransferConflictPolicy.KEEP_BOTH to "保留两者（新文件夹自动改名）",
+        TransferConflictPolicy.SKIP to "跳过",
+    ) else listOf(
+        TransferConflictPolicy.KEEP_BOTH to "保留两者（新文件自动改名）",
+        TransferConflictPolicy.REPLACE to "替换同名文件",
+        TransferConflictPolicy.SKIP to "跳过",
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("已有同名${if (conflict.directory) "文件夹" else "文件"}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "工作区中已存在「${conflict.name}」。" +
+                        if (remaining > 1) "还有 ${remaining - 1} 个冲突。" else "",
+                )
+                options.forEach { (value, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                            selected = policy == value, enabled = !busy, role = Role.RadioButton,
+                        ) { policy = value },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = policy == value, onClick = null, enabled = !busy)
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+                if (!conflict.replaceable) {
+                    Text("只有同类型的普通文件可替换；文件夹或链接请选择保留两者或跳过。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                    value = applyAll, enabled = !busy, role = Role.Checkbox,
+                ) { applyAll = it }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = applyAll, onCheckedChange = null, enabled = !busy)
+                    Spacer(Modifier.width(8.dp))
+                    Text("全部应用到这个批次")
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } },
+        confirmButton = {
+            TextButton(onClick = { onChoose(policy, applyAll) }, enabled = !busy) { Text("继续") }
+        },
+    )
+}
+
+/** 批量传输结果用用户能读懂的话汇总，失败项列出文件名。 */
+private fun transferSummary(report: WorkspaceTransferReport, mode: WorkspaceTransferMode): String {
+    val done = report.results.count { it.error == null && !it.skipped }
+    val skipped = report.results.count { it.skipped }
+    val place = if (report.targetDirectory.isEmpty()) "工作区根目录" else "工作区「${report.targetDirectory}」"
+    val action = if (mode == WorkspaceTransferMode.MOVE) "移动" else "复制"
+    val parts = mutableListOf("已${action} $done 项到$place")
+    if (skipped > 0) parts += "跳过 $skipped 个同名文件"
+    val failed = report.results.filter { it.error != null }
+    if (failed.isNotEmpty()) parts += "未完成 ${failed.size} 项：${failed.take(3).joinToString("、") { it.sourceName }}"
+    return parts.joinToString("；")
 }
 
 /** 文件大小格式化委托给可 JVM 回归的纯函数。 */

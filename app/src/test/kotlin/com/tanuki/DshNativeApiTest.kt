@@ -36,8 +36,23 @@ class DshNativeApiTest {
         assertEquals(listOf("s1", "s2"), sessions.map { it.id })
         assertEquals("修复登录", sessions[0].title)
         assertEquals(12, sessions[0].asOfSeq)
-        assertEquals("会话 s2", sessions[1].displayTitle)
+        assertEquals("新对话", sessions[1].displayTitle)
         assertTrue(sessions[0].running)
+    }
+
+    @Test fun absentNullAndMalformedSessionTitlesNeverRenderNull() {
+        val items = JSONArray()
+        listOf(JSONObject.NULL, "", "   ", "null", " NULL ", 42).forEachIndexed { index, title ->
+            val item = session("s$index", "", index.toLong(), null)
+            item.getJSONObject("projections").getJSONObject("values").put("title", title)
+            items.put(item)
+        }
+        items.put(JSONObject().put("sessionId", "missing").put("updatedAt", 9L))
+        val sessions = DshApiProtocol.parseSessionList(responseOk("rpc-titles", JSONObject().put("items", items)))
+        assertEquals(7, sessions.size)
+        assertTrue(sessions.all { it.displayTitle == "新对话" })
+        assertEquals("", sessions.single { it.id == "s0" }.title)
+        assertEquals("", sessions.single { it.id == "s5" }.title)
     }
 
     @Test fun projectionCutOnlyAcceptsSequencedValues() {

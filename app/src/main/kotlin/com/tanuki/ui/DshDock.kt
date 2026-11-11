@@ -110,6 +110,23 @@ data class DshDockRenderPlan(
     }
 }
 
+/**
+ * 页面底部纵向布局契约。
+ *
+ * 页面必须保持“消息区 `weight(1f)` → [DshDockColumn] → 输入栏”的顺序，并且不要把
+ * 停靠容器再包进 `animateContentSize`/`AnimatedVisibility`。这样停靠条高度变化只会
+ * 压缩消息区，输入栏顶部位置始终由窗口高度与自身高度决定，不会被停靠条推动或跳变。
+ */
+object DshDockPlacement {
+    /** 输入栏顶部位置（px）：与停靠条高度无关。 */
+    fun composerTopPx(totalPx: Int, composerPx: Int): Int =
+        (totalPx - composerPx).coerceAtLeast(0)
+
+    /** 消息区高度（px）：总高扣除固定头部、停靠条和输入栏；停靠条变高只缩小这里。 */
+    fun messageViewportPx(totalPx: Int, fixedTopPx: Int, dockPx: Int, composerPx: Int): Int =
+        (totalPx - fixedTopPx - dockPx - composerPx).coerceAtLeast(0)
+}
+
 /** 停靠条高度动画时长；固定落在 200–300ms，系统移除动画时为 0。 */
 object DshDockMotion {
     const val MIN_HEIGHT_MS: Int = 200

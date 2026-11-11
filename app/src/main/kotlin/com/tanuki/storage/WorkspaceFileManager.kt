@@ -28,7 +28,7 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 
 /** 文件操作在 IO 线程串行执行；读取允许服务运行，修改已有内容仍要求服务停止。
- * 路径检查不构成恶意同 UID 代码的隔离；新建/复制/移动不覆盖同名文件，编辑检查原内容版本。
+ * 路径检查不构成恶意同 UID 代码的隔离；默认不覆盖同名条目，跨位置替换需显式选择并核对原目标版本。
  * 底层 IO 失败可能造成部分删除，调用方必须保留错误并刷新目录。
  */
 enum class FileLocation(val title: String, val guestPath: String, val writable: Boolean) {
@@ -42,16 +42,17 @@ class WorkspaceFileManager(
     private val requireIdle: () -> Unit = {},
     private val storage: WorkspaceStorage = WorkspaceStorage(paths),
     val location: FileLocation = FileLocation.WORKSPACE,
-    private val phoneRoots: () -> Map<String, File> = { emptyMap() }
+    private val phoneRoots: () -> Map<String, File> = { emptyMap() },
+    private val requirePhoneWrite: () -> Unit = { error("请先授予手机存储写权限，再移动文件") },
 ) {
-    data class Entry(val path: String, val name: String, val directory: Boolean, val bytes: Long, val linked: Boolean, val modified: Long = 0)
+    data class Entry(val path: String, val name: String, val directory: Boolean, val bytes: Long, val linked: Boolean, val modified: Long = 0, val deletable: Boolean = false)
     data class Preview(val text: String? = null, val image: Bitmap? = null, val revision: String? = null)
     enum class FileKind { TEXT, IMAGE, AUDIO, VIDEO, PDF, DOCX, DOC, XLSX, OTHER }
     data class FileInfo(val name: String, val mimeType: String, val bytes: Long, val kind: FileKind)
     data class TextPage(val text: String, val offset: Long, val nextOffset: Long, val totalBytes: Long,
                         val encoding: String, val hasMore: Boolean, val revision: String? = null,
                         val binary: Boolean = false)
-    fun inLocation(value: FileLocation) = WorkspaceFileManager(paths, mutation, requireIdle, storage, value, phoneRoots)
+    fun inLocation(value: FileLocation) = WorkspaceFileManager(paths, mutation, requireIdle, storage, value, phoneRoots, requirePhoneWrite)
     fun guestPath(relative: String): String {
         if (location == FileLocation.PHONE && relative.isNotEmpty()) {
             val key = relative.substringBefore('/')
@@ -177,7 +178,9 @@ class WorkspaceFileManager(
                 val name = path.fileName.toString()
                 entries[name] = Entry(child(name), name, stat.isDirectory,
                     if (stat.isSymbolicLink) runCatching { Files.size(payload(path)) }.getOrDefault(-1L) else stat.size(),
-                    stat.isSymbolicLink, stat.lastModifiedTime().toMillis())
+                    stat.isSymbolicLink, stat.lastModifiedTime().toMillis(),
+                    deletable = location == FileLocation.PHONE && !stat.isSymbolicLink && Files.isWritable(folder) &&
+                        (!stat.isDirectory || Files.isWritable(path)))
             }
         }
         // 实际挂载内容优先于镜像中的空挂载目录。
@@ -439,6 +442,73 @@ class WorkspaceFileManager(
             publish(stage.resolve("content"), target)
         } finally { removeTree(stage) }
     }
+    /** 只允许操作卷内条目，卷根不能被复制成项目或作为移动源。 */
+    private fun phoneSource(relative: String): Path {
+        check(location == FileLocation.PHONE && relative.contains('/') && relative.substringAfter('/').isNotEmpty()) {
+            "请选择手机卷内的文件或文件夹，不能操作整个存储卷"
+        }
+        return resolve(relative, true)
+    }
+
+    suspend fun workspaceConflicts(sources: List<String>, targetDirectory: String): List<WorkspaceConflict> = withContext(Dispatchers.IO) {
+        mutation.withLock {
+            val target = inLocation(FileLocation.WORKSPACE).directory(targetDirectory)
+            WorkspaceTransfer.conflicts(sources.map(::phoneSource), target)
+        }
+    }
+
+    /** 同一个环境事务锁内检查路径、权限、容量并执行；删源前再次复核授权。 */
+    suspend fun transferToWorkspace(
+        sources: List<String>,
+        targetDirectory: String,
+        mode: WorkspaceTransferMode,
+        decisions: Map<String, TransferConflictPolicy> = emptyMap(),
+        onPhase: (String) -> Unit = {},
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): WorkspaceTransferReport = withContext(Dispatchers.IO) {
+        mutation.withLock {
+            requireIdle()
+            if (mode == WorkspaceTransferMode.MOVE) requirePhoneWrite()
+            storage.requireCanStart()
+            val workspace = inLocation(FileLocation.WORKSPACE)
+            val folder = workspace.directory(targetDirectory)
+            val folderKey = Files.readAttributes(folder, BasicFileAttributes::class.java, noFollow).fileKey()
+            val resolved = sources.map { relative -> phoneSource(relative).also { inspectTree(it, rejectLinks = true) } }
+            if (mode == WorkspaceTransferMode.MOVE) check(resolved.all { Files.isWritable(it.parent) &&
+                (!Files.isDirectory(it, noFollow) || Files.isWritable(it)) }) { "所选条目不可删除，请改用复制到工作区" }
+            try {
+                WorkspaceTransfer.execute(
+                    resolved, folder, targetDirectory, mode, decisions,
+                    beforePublish = {
+                        requireIdle()
+                        check(workspace.directory(targetDirectory) == folder &&
+                            Files.readAttributes(folder, BasicFileAttributes::class.java, noFollow).fileKey() == folderKey) {
+                            "目标目录已被替换，操作已取消"
+                        }
+                        // 暂存已在工作区内，实际容量统计只计算一次；拒绝时还没有发布或删源。
+                        storage.requireCanCommitImport()
+                    },
+                    beforeDelete = { source ->
+                        requirePhoneWrite()
+                        val index = resolved.indexOf(source)
+                        check(index >= 0 && phoneSource(sources[index]) == source) { "手机存储卷已变化，源文件未删除" }
+                    },
+                    checkSpace = { bytes ->
+                        val available = (paths.base.usableSpace - WorkspaceCapacity.DISK_RESERVE).coerceAtLeast(0)
+                        check(available > 0 && (bytes < 0 || bytes <= available)) {
+                            "设备剩余空间不足，操作已取消；未完成的源文件保留"
+                        }
+                    },
+                    onPhase = onPhase,
+                    onProgress = onProgress,
+                )
+            } finally {
+                // 取消同样要回收暂存占用的统计；不能在已取消的协程里让刷新直接失效。
+                withContext(kotlinx.coroutines.NonCancellable) { storage.refresh() }
+            }
+        }
+    }
+
     suspend fun delete(relative: String) = io {
         val source = resolve(relative, true)
         inspectTree(source)

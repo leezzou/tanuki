@@ -10,7 +10,8 @@ sealed interface DshLiveEvent {
         val messages: List<DshMessage>,
         val hasMore: Boolean,
         val liveText: String,
-        val tools: List<DshToolItem> = emptyList()
+        val tools: List<DshToolItem> = emptyList(),
+        val coordination: DshCoordination = DshCoordination()
     ) : DshLiveEvent
     data class Timeline(val tools: List<DshToolItem>) : DshLiveEvent
     data class Message(val message: DshMessage) : DshLiveEvent
@@ -18,6 +19,8 @@ sealed interface DshLiveEvent {
     data class Finished(val committed: Boolean) : DshLiveEvent
     data class Running(val running: Boolean) : DshLiveEvent
     data class Failure(val message: String) : DshLiveEvent
+    /** 真实目标/待办事件增量；只含本次事件解析出的字段，空值不会清空已有状态。 */
+    data class Coordination(val update: DshCoordination) : DshLiveEvent
 }
 
 /**
