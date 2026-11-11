@@ -11,6 +11,13 @@ import com.tanuki.web.DshToolItem
  */
 data class DshChatAnchor(val key: String, val seq: Int)
 
+/** 时间线条目的稳定 key：LazyColumn、锚点与滚动恢复共用同一身份。 */
+fun DshTimelineItem.stableKey(): String = when (this) {
+    is DshTimelineItem.Text ->
+        if (message.pending) "pending-${message.seq}" else "message-${message.seq}"
+    is DshTimelineItem.Tool -> tool.key
+}
+
 /** 两段结构：历史段（含锚点行）向上增长，新消息段从锚点下方向下增长。 */
 data class DshChatSplit<T>(
     val history: List<T>,

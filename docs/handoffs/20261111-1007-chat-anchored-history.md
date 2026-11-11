@@ -27,11 +27,12 @@
   - `DshChatWindow.kt` 纯策略：锚点分段（历史段含锚点、新消息段在锚点下方）、用户手势脱离判定、头部插页后的索引恢复、每页 50 条的游标、只释放视口上方的内存窗口、按 seq 去重的消息账本与快照区间对账。
   - 控制器：`loadOlder()`、`onViewportTop()`、`historyRevision`/`releasedOlder` 状态；快照不再清空已加载的更早分页；同 seq 实时事件只保留一份；重连后第二次 `Connected` 主动对账历史；最近历史页的 `hasMore` 只在真正接到已加载窗口起点时才覆盖当前值。
   - 页面：`LazyColumn` 显式历史段 + 锚点行 + 新消息段；顶部「加载更早历史 / 正在加载 / 已到会话最早一条 / 失败原因 / 已释放 N 条」；未跟随时「N 条新消息」或「↓ 最新」胶囊；`nestedScroll` 只在用户输入时脱离跟随，程序贴底/恢复不误判。
+  - 会话级跟随状态：`DshChatFollowState` 按 `selectedId` 重建，nested scroll 监听通过 `rememberUpdatedState` 读取当前实例；修复评审指出的 A→B 切换后手势仍读写 A 状态、B 永远贴底的问题。
   - 协议：`DshChatSource.messagesBefore(sessionId, beforeSeq, maxMessages)`；`DshNativeClient` 复用官方 `session/page`，`throughSeq=beforeSeq`、单页上限 200。
   - 文档：INTERFACES 增加历史分页契约；NATIVE-UI 增加本轮结构说明；NATIVE-PARITY 更新 SESS-02/SESS-03 现状与 A-SESS-01 落地证据。
-- 已验证：定向 81 tests 与完整 JVM 1074 tests/110 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
+- 已验证：定向 85 tests 与完整 JVM 1078 tests/111 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
 - 待验证：设备/模拟器上的手势、流式滚动、顶部加载、深色/大字体、真实 DSH 历史分页；独立 Codex High 审查；合并与发布。
-- 关键源码：`app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt`（新增）、`DshNativeController.kt`、`DshNativePage.kt`、`app/src/main/kotlin/com/tanuki/web/DshLive.kt`、`DshNativeApi.kt`。
+- 关键源码：`app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt`（新增）、`DshChatFollowState.kt`（新增）、`DshNativeController.kt`、`DshNativePage.kt`、`app/src/main/kotlin/com/tanuki/web/DshLive.kt`、`DshNativeApi.kt`。
 
 ## 本次改动
 
@@ -39,11 +40,13 @@
 |---|---|
 | `app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt` | 新增纯策略：`DshChatAnchorPolicy`（两段切分、未读计数、恢复索引、用户手势脱离）、`DshChatWindowPolicy`（500 条内存预算、只释放视口上方、工具同步释放、分页游标）、`DshMessageLedger`（seq 去重排序、占位保留、快照区间对账）。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshNativeController.kt` | 增加 `loadingOlder`/`olderError`/`historyRevision`/`releasedOlder`；实现 `loadOlder()`、`applyOlderPage()`、`onViewportTop()`、`trimWindow()`；历史页与快照改用消息账本；重连后对账；分页失败/重复页/空页处理。 |
-| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 消息列表改为历史段 + 锚点 + 新消息段；顶部加载入口与边界提示；未跟随胶囊；按行 key + 偏移恢复视口；`nestedScroll` 用户手势脱离；移除 80/40/400 渲染窗口与旧「官方仅返回最近一页」文案。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt` | 消息列表改为历史段 + 锚点 + 新消息段；顶部加载入口与边界提示；未跟随胶囊；按行 key + 偏移恢复视口；`nestedScroll` 用户手势脱离；跟随状态改为按会话重建并经 `rememberUpdatedState` 读取；移除 80/40/400 渲染窗口与旧「官方仅返回最近一页」文案。 |
+| `app/src/main/kotlin/com/tanuki/ui/DshChatFollowState.kt` | 新增会话级跟随状态（`StateFlow` 快照）：上翻冻结锚点、回底恢复、切换会话互不影响；供页面与回归共用。 |
 | `app/src/main/kotlin/com/tanuki/web/DshLive.kt` | `DshChatSource` 增加 `messagesBefore`，作为向前分页的唯一数据入口。 |
 | `app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt` | `messages()` 与 `messagesBefore()` 共用 `pageThrough()`；首屏 120 条、分页单页上限 200；未新增官方方法或端点。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 移除旧的渲染窗口与拖动跟随策略，保留底部判定与其余渲染策略；窗口/锚定策略迁入 `DshChatWindow.kt`。 |
 | `app/src/test/kotlin/com/tanuki/DshChatWindowTest.kt` | 新增 16 项纯策略回归：锚点切分、分页前插不改变下方段、索引恢复、未读计数、手势脱离、预算边界、只释放视口上方、工具同步释放、seq 去重、占位、快照对账与幂等。 |
+| `app/src/test/kotlin/com/tanuki/DshChatFollowStateTest.kt` | 新增 4 项会话级回归：A→B 状态隔离、上翻后流式/新消息不恢复跟随、空列表不变、本地占位可作锚点。 |
 | `app/src/test/kotlin/com/tanuki/DshNativePagingTest.kt` | 新增 13 项控制器回归：分页插入排序/去重、`beforeSeq` 与每页 50、失败保留、空页停止、重复页防循环、窗口释放边界、同 seq 只插一次、重连对账、快照不删更早分页、快照先到时 `hasMore` 不被窄页覆盖。 |
 | `app/src/test/kotlin/com/tanuki/DshNativeApiTest.kt` | 新增 1 项协议回归：`messagesBefore` 以 `beforeSeq` 作 `throughSeq`、`maxMessages=50`。 |
 | `app/src/test/kotlin/com/tanuki/DshChatRenderTest.kt` | 删除已迁出的渲染窗口/拖动跟随即测试；保留并继续覆盖底部判定。 |
@@ -58,13 +61,20 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `git rev-parse origin/main` | `62e4c30b4a61636867cfc94736e44fa159f50b9f` | 基线核对 |
-| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest'` | 通过（定向 81 tests / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
-| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1074 tests / 110 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
+| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatFollowStateTest' --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest'` | 通过（定向 85 tests / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
+| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1078 tests / 111 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
 | `./gradlew ... :app:lintModernDebug` | 通过：0 errors / 104 warnings / 1 hint | 无新增 lint 错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1007-chat-anchored-history.md` | 通过 | 普通 PR 模式，不改共享状态 |
 | `python3 scripts/check-publication.py --git` | 739 public files / 735 index entries / 0 findings | 上传前检查 |
 | `git diff --check` | 通过 | 无空白错误 |
 | 设备 / 模拟器 / 真实 DSH | 未执行 | 设备由独立 QA 独占；下方手工步骤待 QA 执行 |
+
+### 评审修复（PR #62，thread `PRRT_kwDOVgRm4s62AmPB`）
+
+- 评论：`DshNativePage.kt:306` 的无 key `remember` 会保留首次会话的 `following`/`anchor` 状态委托；A→B 切换后手势仍读写 A，B 永远贴底、没有胶囊也不触发顶部自动分页。
+- 根因：`following`/`anchor` 用 `remember(selectedId)` 创建，会话切换时返回新的状态对象；无 key 的 `remember` 捕获的是首次创建时的委托实例。
+- 修复：新增会话级 `DshChatFollowState`（`StateFlow<DshChatFollowSnapshot>`），页面按 `selectedId` 重建；nested scroll 监听按会话重建并通过 `rememberUpdatedState` 读取当前实例，不再捕获任一会话的状态委托。
+- 回归：`DshChatFollowStateTest` 覆盖 A→B 隔离、上翻后流式/新消息不恢复跟随、回底清锚点、空列表与占位锚点。Compose 真实手势与渲染仍需设备验证。
 
 - 已知既有不稳定项：`NpmAdaptiveWorkerPoolTest.downshiftRetiresExcessWorkersAfterCurrentTaskAndKeepsQueueDraining` 在本轮完整套件中失败 2 次（断言 `retiredWorkers expected 8 but was 9`），单独复跑和最终完整套件均通过。该测试属于 NPM 并发池，本轮未改动；失败源于“活跃数瞬时低于目标时调度器补员后又退休”的时序竞争，不是聊天列表改动。
 - 未测试、超时、失败和暂未复现的情况：设备手势与帧率、真实 DSH 的 `session/page` 分页返回、深色/大字体、无障碍、低端机长历史内存峰值均未验证。
@@ -85,7 +95,7 @@
 
 ## 下一步
 
-1. PR 已创建（见“产物与校验”）；等待 GitHub CI、独立审查与独立 QA。
+1. PR 已创建（见“产物与校验”）；评审 thread 已按会话级状态修复，等待新 head 的 GitHub CI、复审与独立 QA。
 2. QA 按上方手工步骤验证；若真实 DSH 的 `session/page` 不支持 `throughSeq` 向前读取，控制器会因“无新增行”停止续页并显示“已到会话最早一条”，需要在设备上确认官方实际返回后调整游标。
 3. 处理 review comment 后推送新提交；最新 SHA 重新验证，旧审查结论不沿用。
 
@@ -106,6 +116,6 @@
 ## 产物与校验
 
 - 本轮不生成 APK、源码 ZIP 或发布附件；不覆盖安装、不发布、不合并。
-- PR [#62](https://github.com/leezzou/tanuki/pull/62)，目标 `main`；实现提交 `adffdb2`，补充提交 `42e1f3d`/`72c7b67`；`72c7b67` 的 4 个 GitHub check 全部 pass（Android 5m59s/6m5s，Host 42s/47s）；其后仅文档提交，最新 head 的检查以 GitHub PR 为准。
+- PR [#62](https://github.com/leezzou/tanuki/pull/62)，目标 `main`；实现提交 `adffdb2`，补充提交 `42e1f3d`/`72c7b67` 与会话级跟随状态评审修复提交；`72c7b67` 的 4 个 GitHub check 全部 pass，评审修复后的 head 检查以 GitHub PR 为准。
 - 提交前已运行 `check-handoff.py --pr`、`check-publication.py --git`、`git diff --check`。
 - 普通 PR 不刷新 `AGENT-STATE.md`/`CURRENT.json`/`TEST-REPORT.md`；只新增本记录。

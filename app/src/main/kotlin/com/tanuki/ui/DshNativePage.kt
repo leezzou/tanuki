@@ -281,14 +281,18 @@ private fun MessageList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    var following by remember(state.selectedId) { mutableStateOf(true) }
-    var anchor by remember(state.selectedId) { mutableStateOf<DshChatAnchor?>(null) }
+    // 跟随状态按会话重建；长生命周期监听通过 currentFollow 读取当前会话实例，不能捕获旧状态委托。
+    val follow = remember(state.selectedId) { DshChatFollowState() }
+    val followSnapshot by follow.state.collectAsState()
+    val following = followSnapshot.following
+    val anchor = followSnapshot.anchor
     // 头部插页/释放前的视口行；revision 变化后按该行恢复，索引变化不会带动内容跳动。
     var restore by remember(state.selectedId) { mutableStateOf<DshViewportRestore?>(null) }
     var restoring by remember(state.selectedId) { mutableStateOf(false) }
     val currentTimeline by rememberUpdatedState(timeline)
     val currentByKey by rememberUpdatedState(byKey)
     val currentAnchor by rememberUpdatedState(anchor)
+    val currentFollow by rememberUpdatedState(follow)
 
     // 两段结构：历史段（含锚点行）向上增长，新消息段从锚点下方向下增长。
     val split = remember(timeline, anchor) {
@@ -301,20 +305,18 @@ private fun MessageList(
     val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
 
     // 用户一动手就脱离跟随：拖动/惯性都会经过 nested scroll，程序滚动不会误触发。
-    val detachOnUserScroll = remember {
+    // 监听按会话重建，并始终通过 currentFollow 读写当前会话的状态。
+    val detachOnUserScroll = remember(state.selectedId) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val detach = DshChatAnchorPolicy.shouldDetachOnUserScroll(
                     userInput = source == NestedScrollSource.UserInput,
                     delta = available.y,
                     atBottom = listState.isAtBottom(),
-                    following = following
+                    following = currentFollow.snapshot.following
                 )
-                if (detach) {
-                    // 冻结当前最后一行作为锚点；之后的新内容只进入下方段。
-                    anchor = currentTimeline.lastOrNull()?.let { DshChatAnchor(it.stableKey(), it.seq) }
-                    following = false
-                }
+                // 冻结当前最后一行作为锚点；之后的新内容只进入下方段。
+                if (detach) currentFollow.detach(currentTimeline)
                 return Offset.Zero
             }
         }
@@ -323,10 +325,7 @@ private fun MessageList(
     LaunchedEffect(listState, state.selectedId) {
         snapshotFlow { listState.isAtBottom() }
             .collect { bottom ->
-                if (bottom && !following && !restoring) {
-                    following = true
-                    anchor = null
-                }
+                if (bottom && !following && !restoring) follow.reattach()
             }
     }
     // 跟随只负责贴底；用户手势进行中且已离开底部时让出手势，避免一帧抢滚动。
@@ -477,8 +476,7 @@ private fun MessageList(
         if (!following) {
             FilledTonalButton(
                 onClick = {
-                    following = true
-                    anchor = null
+                    follow.reattach()
                     scope.launch { listState.scrollToBottom() }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
@@ -497,13 +495,6 @@ private data class DshViewportRestore(val key: String, val offset: Int)
 
 private const val ANCHOR_ITEM_KEY = "chat-anchor"
 private const val HISTORY_TOP_KEY = "history-top"
-
-/** 时间线条目的稳定 key：LazyColumn 与滚动恢复共用同一身份。 */
-private fun DshTimelineItem.stableKey(): String = when (this) {
-    is DshTimelineItem.Text ->
-        if (message.pending) "pending-${message.seq}" else "message-${message.seq}"
-    is DshTimelineItem.Tool -> tool.key
-}
 
 /** 文本与工具按官方 seq 交错；本地发送占位始终排在最后。 */
 private fun buildTimeline(messages: List<DshMessage>, tools: List<DshToolItem>): List<DshTimelineItem> =
