@@ -1175,6 +1175,29 @@
     "noticeFiles": []
   },
   {
+    "group": "com.google.zxing",
+    "name": "core",
+    "version": "3.4.1",
+    "filename": "core-3.4.1.jar",
+    "sha256": "acfa30338c26267b6cab665509c2251bb96e8350bfcad89d59b949ba77011f8d",
+    "licenses": [],
+    "noticeFiles": []
+  },
+  {
+    "group": "com.journeyapps",
+    "name": "zxing-android-embedded",
+    "version": "4.3.0",
+    "filename": "zxing-android-embedded-4.3.0.aar",
+    "sha256": "4ab03353127c34e55cbb80fbc9a34031decbcfb1ec5e8f991944d2d494621a33",
+    "licenses": [
+      {
+        "name": "The Apache License, Version 2.0",
+        "url": "https://github.com/journeyapps/zxing-android-embedded/blob/master/COPYING"
+      }
+    ],
+    "noticeFiles": []
+  },
+  {
     "group": "commons-codec",
     "name": "commons-codec",
     "version": "1.17.1",

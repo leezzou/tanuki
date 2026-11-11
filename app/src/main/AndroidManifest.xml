@@ -6,11 +6,17 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 13+ 局域网发现需要附近设备权限；发现信息不用于推断位置。 -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+    <!-- 接收 mDNS 组播需要多播锁；普通权限，不会弹窗。 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 扫码相机是可选能力；没有相机的设备仍可通过发现和粘贴连接。 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- 仅查询真正处理APK的系统安装器，不申请全量应用可见性。 -->
     <queries>
         <intent>

@@ -5,6 +5,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+/** 新入口和异步返回统一使用此门禁；向导只接收自己实际提交的配置结果。 */
+internal class RemoteWizardAttemptGuard {
+    private var submittedConfig: RemoteHostConfig? = null
+
+    fun submit(config: RemoteHostConfig, remoteBusy: Boolean, pendingFingerprint: String?, action: (RemoteHostConfig) -> Boolean): Boolean {
+        if (!canOpen(remoteBusy, pendingFingerprint)) return false
+        if (!action(config)) {
+            submittedConfig = null
+            return false
+        }
+        submittedConfig = config
+        return true
+    }
+
+    fun accepts(config: RemoteHostConfig?): Boolean = config != null && config == submittedConfig
+
+    companion object {
+        fun canOpen(remoteBusy: Boolean, pendingFingerprint: String?): Boolean = !remoteBusy && pendingFingerprint == null
+    }
+}
+
 /** 连接方式；三种方式最终都落到同一个严格 SSH 校验流程。 */
 enum class RemoteConnectionMethod(
     val title: String,
@@ -457,6 +478,31 @@ class RemoteHostWizard(
         }
     }
 
+    /**
+     * 从局域网发现列表点选一台电脑：直接以“局域网”方式进入主机与账号步骤。
+     *
+     * 发现信息只用来预填地址、SSH/DSH 端口和展示名；认证方式、密码/私钥仍由用户填写，
+     * 首次连接仍会停在现有 SSH 主机密钥确认步骤。地址或端口非法时不修改草稿。
+     */
+    fun startFromLanDiscovery(
+        host: String,
+        sshPort: Int,
+        dshPort: Int,
+        displayName: String
+    ): Boolean {
+        if (_state.value.busy || sshPort !in 1..65535 || dshPort !in 1..65535) return false
+        if (RemoteWizardValidation.host(host) != null) return false
+        keyReadRequest++
+        // 发现新电脑不能继承之前草稿中的密码、私钥、信任状态或编辑归属。
+        _state.value = RemoteWizardState(
+            step = RemoteWizardStep.HOST_ACCOUNT,
+            method = RemoteConnectionMethod.LAN,
+            draft = RemoteHostDraft(host = host.trim(), sshPort = sshPort.toString(), remoteDshPort = dshPort.toString()),
+            name = displayName.trim().ifBlank { host.trim() }
+        )
+        return true
+    }
+
     fun updateDraft(transform: (RemoteHostDraft) -> RemoteHostDraft) {
         _state.update {
             it.copy(
@@ -527,6 +573,18 @@ class RemoteHostWizard(
         val parsed = result.getOrNull()
         if (parsed == null) {
             val reason = result.exceptionOrNull()?.message ?: "格式不符"
+            // 无效剪贴板也必须尊重扫码/手动输入；不能先破坏草稿再判断是否允许覆盖。
+            val existing = current.draft.relayUri.trim()
+            if (existing.isNotEmpty() && existing != current.autoFilledLink) {
+                _state.update {
+                    it.copy(
+                        clipboardStatus = PairingClipboardStatus.KEPT_EXISTING,
+                        clipboardMessage = "剪贴板里的旧链接不可用，已保留当前填写的配对链接。",
+                        pendingClipboardLink = ""
+                    )
+                }
+                return false
+            }
             _state.update {
                 it.copy(
                     draft = it.draft.copy(relayUri = raw, pairingCode = ""),

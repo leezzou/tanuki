@@ -32,11 +32,13 @@ import com.tanuki.runtime.RemoteWizardField
 import com.tanuki.runtime.RemoteWizardStep
 import com.tanuki.runtime.RemoteWizardValidation
 import com.tanuki.runtime.SshTunnel
+import com.tanuki.runtime.RemoteWizardAttemptGuard
 import com.tanuki.runtime.StagedSshTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
@@ -95,6 +97,44 @@ class RemoteWizardTest {
         wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
         assertTrue(wizard.next())
         assertEquals(RemoteWizardStep.HOST_ACCOUNT, wizard.state.value.step)
+    }
+
+    @Test
+    fun lanDiscoveryPrefillsHostAccountWithoutMethodStep() {
+        val wizard = RemoteHostWizard()
+        assertTrue(wizard.startFromLanDiscovery("192.168.1.20", 2222, 3080, "书房 Mac"))
+
+        val state = wizard.state.value
+        assertEquals(RemoteWizardStep.HOST_ACCOUNT, state.step)
+        assertEquals(RemoteConnectionMethod.LAN, state.method)
+        assertEquals("192.168.1.20", state.draft.host)
+        assertEquals("2222", state.draft.sshPort)
+        assertEquals("3080", state.draft.remoteDshPort)
+        assertEquals("书房 Mac", state.name)
+        assertTrue(state.fieldErrors.isEmpty())
+    }
+
+    @Test
+    fun discoveredComputerDoesNotReuseSavedCredentialsOrProfile() {
+        val wizard = RemoteHostWizard(config(auth = RemoteAuthType.PASSWORD, password = "synthetic-password"), "旧电脑", "old-profile")
+        assertTrue(wizard.startFromLanDiscovery("192.168.1.20", 22, 3080, "新电脑"))
+        val state = wizard.state.value
+        assertEquals("", state.draft.password)
+        assertEquals("", state.draft.privateKey)
+        assertNull(state.editingProfileId)
+        assertNull(state.hostKeyFingerprint)
+        assertFalse(state.tested)
+        assertFalse(state.pairingAcknowledged)
+    }
+
+    @Test
+    fun lanDiscoveryRejectsInvalidAddressOrPortWithoutChangingDraft() {
+        val wizard = RemoteHostWizard()
+        assertFalse(wizard.startFromLanDiscovery("ssh://bad.example", 22, 3080, "坏主机"))
+        assertFalse(wizard.startFromLanDiscovery("192.168.1.20", 0, 3080, "坏主机"))
+        assertFalse(wizard.startFromLanDiscovery("192.168.1.20", 22, 70000, "坏主机"))
+        assertEquals(RemoteWizardStep.METHOD, wizard.state.value.step)
+        assertEquals("", wizard.state.value.draft.host)
     }
 
     @Test
@@ -395,6 +435,31 @@ class RemoteWizardTest {
         assertEquals(second.toUri(), wizard.state.value.draft.relayUri)
         assertEquals(RemotePairingCode.of(second), wizard.state.value.draft.pairingCode)
         assertEquals("", wizard.state.value.pendingClipboardLink)
+    }
+
+    @Test
+    fun invalidOldClipboardCannotReplaceScannedLinkOrManualInput() {
+        val pairing = pairingForWizard()
+        listOf(pairing.toUri(), "用户正在填写的链接").forEach { existing ->
+            val wizard = RemoteHostWizard()
+            wizard.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+            wizard.next()
+            // 扫码与显式输入都通过此入口写入；后到的旧剪贴板不得改写链接、码或校验状态。
+            wizard.updateRelayLink(existing)
+            val before = wizard.state.value
+            assertFalse(wizard.applyClipboardPairing("tanuki-relay://v1?relay=old", before.clipboardVisit))
+            val after = wizard.state.value
+            assertEquals(before.draft, after.draft)
+            assertEquals(before.fieldErrors, after.fieldErrors)
+            assertEquals(PairingClipboardStatus.KEPT_EXISTING, after.clipboardStatus)
+            assertEquals("", after.pendingClipboardLink)
+            if (existing == pairing.toUri()) {
+                assertEquals(RemotePairingCode.of(pairing), after.draft.pairingCode)
+                wizard.updateDraft { it.copy(user = "tanuki") }
+                assertTrue(wizard.next())
+                assertEquals(RemoteWizardStep.PAIRING_CONFIRM, wizard.state.value.step)
+            }
+        }
     }
 
     @Test
@@ -1171,6 +1236,91 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun delayedSavedAttemptCannotOpenOrCompleteAnotherWizard() = runBlocking {
+        for (outcome in listOf("fingerprint", "success", "failure")) {
+            val fixture = Fixture()
+            val first = config(host = "a.example.test")
+            if (outcome != "fingerprint") fixture.storage.trustFingerprint(first.host, 22, "SHA256:staged")
+            val release = CompletableDeferred<Unit>()
+            val transport = StagedFakeTransport(
+                beforeHandshake = { release.await() },
+                stages = if (outcome == "failure") listOf(RemoteConnectionStage.TCP, RemoteConnectionStage.SSH_HANDSHAKE, RemoteConnectionStage.AUTHENTICATION) else RemoteConnectionStage.testStages,
+                openError = if (outcome == "failure") IOException("Auth fail") else null
+            )
+            val controller = controller(fixture, transport)
+            val second = readyToTestWizard(startTest = false)
+            val guard = RemoteWizardAttemptGuard()
+            controller.test(first)
+            assertTrue(controller.ui.value.busy)
+            assertFalse(RemoteWizardAttemptGuard.canOpen(controller.ui.value.busy, controller.ui.value.pendingFingerprint))
+            var submitted = false
+            assertFalse(guard.submit(second.buildConfig()!!, controller.ui.value.busy, controller.ui.value.pendingFingerprint) {
+                submitted = true
+                second.beginTest()
+                controller.test(it)
+            })
+            assertFalse(submitted)
+            release.complete(Unit)
+            withTimeout(3000) { while (controller.ui.value.busy) delay(1) }
+            val result = controller.ui.value
+            assertEquals(first, result.attemptConfig)
+            assertFalse(guard.accepts(result.attemptConfig))
+            // 与界面相同的归属门禁：A 的三类结果都不能推进 B 或让 B 可以保存。
+            if (guard.accepts(result.attemptConfig)) {
+                result.pendingFingerprint?.let(second::onHostKeyRequired)
+                result.stage?.let(second::onStage)
+                result.failure?.let(second::onFailure)
+                if (result.attemptSucceeded) second.onTestSucceeded(result.localPort)
+            }
+            assertEquals(RemoteWizardStep.AUTHENTICATION, second.state.value.step)
+            assertFalse(second.state.value.busy)
+            assertFalse(second.state.value.tested)
+            assertNull(second.state.value.hostKeyFingerprint)
+            assertNull(second.state.value.failure)
+            when (outcome) {
+                "fingerprint" -> {
+                    assertNotNull(result.pendingFingerprint)
+                    assertFalse(RemoteWizardAttemptGuard.canOpen(result.busy, result.pendingFingerprint))
+                }
+                "success" -> assertTrue(result.attemptSucceeded)
+                "failure" -> assertEquals(RemoteFailureKind.AUTHENTICATION, result.failure?.kind)
+            }
+        }
+    }
+
+    @Test
+    fun controllerRejectsSecondTestEvenBeforeBusyUiRecomposes() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val controller = controller(Fixture(), StagedFakeTransport(beforeHandshake = { release.await() }))
+        val first = config(host = "a.example.test")
+        assertTrue(controller.test(first))
+        val second = readyToTestWizard()
+        val guard = RemoteWizardAttemptGuard()
+        // 模拟一帧陈旧 UI：前端仍报空闲，但控制器已在处理 A。
+        assertFalse(guard.submit(second.buildConfig()!!, false, null, controller::test))
+        second.onFailure(RemoteConnectionErrors.validation("当前另有连接正在进行，请完成后重新测试"))
+        release.complete(Unit)
+        withTimeout(3000) { while (controller.ui.value.busy) delay(1) }
+        assertEquals(first, controller.ui.value.attemptConfig)
+        assertFalse(guard.accepts(controller.ui.value.attemptConfig))
+        assertFalse(second.state.value.busy)
+        assertFalse(second.state.value.tested)
+        assertNull(second.state.value.hostKeyFingerprint)
+        assertEquals(RemoteFailureKind.VALIDATION, second.state.value.failure?.kind)
+    }
+
+    @Test
+    fun wizardOnlyAcceptsItsSubmittedConfiguration() {
+        val guard = RemoteWizardAttemptGuard()
+        val own = config(host = "b.example.test")
+        assertFalse(guard.accepts(own))
+        assertTrue(guard.submit(own, false, null) { assertEquals(own, it); true })
+        assertTrue(guard.accepts(own))
+        assertFalse(guard.accepts(config(host = "a.example.test")))
+        assertFalse(guard.accepts(null))
+    }
+
+    @Test
     fun wizardLeavesBusyAfterControllerSuccessAndShowsFailureStage() = runBlocking {
         // 成功：控制器 attemptSucceeded/localPort 驱动向导离开 TEST，而不是永久 busy。
         val successFixture = Fixture()
@@ -1248,7 +1398,7 @@ class RemoteWizardTest {
         assertNull(profileStore.load(id))
     }
 
-    private fun readyToTestWizard(): RemoteHostWizard {
+    private fun readyToTestWizard(startTest: Boolean = true): RemoteHostWizard {
         val wizard = RemoteHostWizard()
         wizard.selectMethod(RemoteConnectionMethod.DIRECT_SSH)
         wizard.next()
@@ -1256,8 +1406,8 @@ class RemoteWizardTest {
         wizard.next()
         wizard.setAuth(RemoteAuthType.PASSWORD)
         wizard.updateDraft { it.copy(password = "synthetic-password") }
-        wizard.next()
-        assertEquals(RemoteWizardStep.TEST, wizard.state.value.step)
+        if (startTest) wizard.next()
+        assertEquals(if (startTest) RemoteWizardStep.TEST else RemoteWizardStep.AUTHENTICATION, wizard.state.value.step)
         return wizard
     }
 
@@ -1309,7 +1459,8 @@ class RemoteWizardTest {
         private val openError: Throwable? = null,
         /** 只让指定主机的 open 失败，用于“A 成功、B 失败”的重试归属回归。 */
         private val openErrorHost: String? = null,
-        private val tunnel: FakeTunnel = FakeTunnel()
+        private val tunnel: FakeTunnel = FakeTunnel(),
+        private val beforeHandshake: suspend () -> Unit = {}
     ) : StagedSshTransport {
         var probeCalls = 0
         var openCalls = 0
@@ -1321,6 +1472,7 @@ class RemoteWizardTest {
             onStage: (RemoteConnectionStage) -> Unit
         ): HostKeyProbe {
             probeCalls++
+            beforeHandshake()
             onStage(RemoteConnectionStage.TCP)
             onStage(RemoteConnectionStage.SSH_HANDSHAKE)
             return HostKeyProbe(fingerprint)
@@ -1335,6 +1487,7 @@ class RemoteWizardTest {
             onStage: (RemoteConnectionStage) -> Unit
         ): SshTunnel {
             openCalls++
+            beforeHandshake()
             assertEquals(fingerprint, expectedFingerprint)
             stages.forEach(onStage)
             openError?.let {
