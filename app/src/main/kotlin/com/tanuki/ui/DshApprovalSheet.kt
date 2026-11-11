@@ -17,10 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -147,19 +145,17 @@ fun DshApprovalSheet(
     onForgetRemembered: ((DshRememberedChoice) -> Unit)? = null,
     onDismissNotice: () -> Unit = {}
 ) {
-    if (!visible) return
     val hasContent = state.shouldShowPanel()
-    LaunchedEffect(hasContent) {
-        if (!hasContent) onDismiss()
+    LaunchedEffect(visible, hasContent) {
+        if (visible && !hasContent) onDismiss()
     }
-    if (!hasContent) return
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scroll = rememberScrollState()
     val pendingNow = state.pendingFor(sessionId).size
     var arrival by remember { mutableStateOf(DshApprovalArrivalState(pendingNow)) }
     // 只负责“检测新增 + 更新基线”；不要在这里 delay，否则数量变化会取消隐藏计时。
-    LaunchedEffect(pendingNow) {
-        arrival = DshApprovalArrivalPolicy.onCount(arrival, pendingNow)
+    LaunchedEffect(visible, sessionId, pendingNow) {
+        arrival = if (visible) DshApprovalArrivalPolicy.onCount(arrival, pendingNow)
+            else DshApprovalArrivalState(pendingNow)
     }
     // 隐藏计时绑定 token：新增会重置 3 秒；数量减少不会取消已显示的提示。
     LaunchedEffect(arrival.token) {
@@ -168,7 +164,10 @@ fun DshApprovalSheet(
             arrival = DshApprovalArrivalPolicy.hidden(arrival)
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    TanukiModalSheet(
+        value = if (visible && hasContent) Triple(state, sessionId, sessionTitle) else null,
+        onDismissRequest = onDismiss,
+    ) { shown ->
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
             // 固定预留槽：提示切换不参与滚动内容排版，审批卡和按钮位置不会上下跳。
             Box(Modifier.fillMaxWidth().height(40.dp)) {
@@ -191,14 +190,14 @@ fun DshApprovalSheet(
                 Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(scroll)
             ) {
                 DshApprovalPanel(
-                    state = state,
-                    sessionId = sessionId,
-                    onAnswer = onAnswer,
-                    onRetry = onRetry,
-                    onClearRemembered = onClearRemembered,
-                    sessionTitle = sessionTitle,
-                    onForgetRemembered = onForgetRemembered,
-                    onDismissNotice = onDismissNotice,
+                    state = shown.first,
+                    sessionId = shown.second,
+                    onAnswer = { id, outcome, remember -> if (visible && hasContent) onAnswer(id, outcome, remember) },
+                    onRetry = { if (visible && hasContent) onRetry() },
+                    onClearRemembered = { if (visible && hasContent) onClearRemembered() },
+                    sessionTitle = shown.third,
+                    onForgetRemembered = onForgetRemembered?.let { action -> { if (visible && hasContent) action(it) } },
+                    onDismissNotice = { if (visible && hasContent) onDismissNotice() },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 )
             }

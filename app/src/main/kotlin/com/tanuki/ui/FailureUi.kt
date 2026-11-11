@@ -148,14 +148,18 @@ internal fun FailureDetailSheet(
     onDismiss: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    var copied by remember(failure?.stableKey) { mutableStateOf(false) }
+    var presentation by remember { mutableStateOf(TanukiOverlayState<AppFailure>()) }
+    presentation = presentation.update(failure)
+    val displayed = presentation.shown
+    var copied by remember(displayed?.stableKey) { mutableStateOf(false) }
     TanukiBottomSheet(
         visible = failure != null,
         onDismissRequest = onDismiss,
-        title = failure?.title.orEmpty(),
-        subtitle = failure?.reason,
+        title = displayed?.title.orEmpty(),
+        subtitle = displayed?.reason,
+        onHidden = { presentation = presentation.hidden() },
     ) {
-        failure?.let { shown ->
+        displayed?.let { shown ->
             Column(
                 Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
@@ -164,8 +168,10 @@ internal fun FailureDetailSheet(
                 TanukiPillButton(
                     text = if (copied) "已复制" else "复制错误信息",
                     onClick = {
-                        clipboard.setText(AnnotatedString(shown.copyText(versionName)))
-                        copied = true
+                        if (failure != null) {
+                            clipboard.setText(AnnotatedString(shown.copyText(versionName)))
+                            copied = true
+                        }
                     },
                     tone = TanukiPillButtonTone.Tonal,
                     modifier = Modifier.fillMaxWidth()
@@ -173,14 +179,14 @@ internal fun FailureDetailSheet(
                 shown.secondaryAction?.let { secondary ->
                     TanukiPillButton(
                         text = secondary.label,
-                        onClick = { onAction(secondary.kind); onDismiss() },
+                        onClick = { if (failure != null) { onAction(secondary.kind); onDismiss() } },
                         tone = TanukiPillButtonTone.Outline,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
                 TanukiPillButton(
                     text = shown.primaryAction.label,
-                    onClick = { onAction(shown.primaryAction.kind); onDismiss() },
+                    onClick = { if (failure != null) { onAction(shown.primaryAction.kind); onDismiss() } },
                     tone = TanukiPillButtonTone.Filled,
                     modifier = Modifier.fillMaxWidth()
                 )

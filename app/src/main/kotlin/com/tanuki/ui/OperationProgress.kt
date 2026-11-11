@@ -70,7 +70,7 @@ internal fun OperationProgressEntry(
     val appearedAt = remember(snapshot.operationActive) { SystemClock.elapsedRealtime() }
     val runtime = remember(snapshot, now, appearedAt) { operationProgress(snapshot, now, appearedAt) }
     val summary = FileTransferPresentation.summary(visibleTransfers)
-    if (runtime == null && summary == null) return
+    val hasContent = runtime != null || summary != null
     val fraction = if (runtime != null) runtime.fraction else summary?.percent?.let { it / 100f }
     val failed = runtime?.mode == OperationProgressMode.FAILED
     val status = when {
@@ -80,7 +80,7 @@ internal fun OperationProgressEntry(
     }
     val title = runtime?.failureTitle ?: runtime?.stage?.label ?: "文件"
     var expanded by remember { mutableStateOf(false) }
-    Surface(modifier = modifier, shape = MaterialTheme.shapes.extraLarge,
+    if (hasContent) Surface(modifier = modifier, shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 2.dp) {
     Row(
         Modifier
@@ -114,7 +114,9 @@ internal fun OperationProgressEntry(
             tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     }
-    if (expanded) OperationProgressDrawer(
+    LaunchedEffect(hasContent) { if (!hasContent) expanded = false }
+    OperationProgressDrawer(
+        visible = expanded && hasContent,
         runtime = runtime,
         transfers = visibleTransfers,
         now = now,
@@ -184,6 +186,7 @@ internal fun OperationProgressBar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OperationProgressDrawer(
+    visible: Boolean,
     runtime: OperationProgressText?,
     transfers: List<FileTransferProgress>,
     now: Long,
@@ -192,8 +195,11 @@ private fun OperationProgressDrawer(
     onCancelTransfer: (Long) -> Unit,
     onRetry: (String) -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    TanukiModalSheet(
+        value = if (visible) runtime to transfers else null, onDismissRequest = onDismiss,
+    ) { shown ->
+        val runtime = shown.first
+        val transfers = shown.second
         Column(
             Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState())
                 .navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 28.dp),

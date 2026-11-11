@@ -10,31 +10,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 
 /** 窄屏抽屉是否打开；供页面内的二级返回处理器让位。 */
-private val LocalTanukiDrawerOpen = staticCompositionLocalOf { false }
+internal val LocalTanukiDrawerOpen = staticCompositionLocalOf { false }
 
 /**
  * 自适应外壳：同一套导航与内容在宽屏和窄屏复用。
  *
  * - 宽屏（>=840dp）：左侧导航栏 + 右侧内容，不启用抽屉；
- * - 窄屏：内容全宽，导航以 ModalNavigationDrawer 打开；返回键先关抽屉。
+ * - 窄屏：内容全宽，导航以 TanukiDrawer 打开；返回键先关抽屉。
  *
  * [navigation] 与 [content] 只写一份。窄屏时内容通过 [content] 的
  * `openNavigation` 打开抽屉；宽屏时该回调为空操作，页面无需分支。
@@ -48,7 +41,6 @@ fun TanukiAdaptiveShell(
     metrics: TanukiLayoutMetrics = rememberTanukiLayoutMetrics(),
     navigationWidth: Dp = 280.dp,
 ) {
-    val scope = rememberCoroutineScope()
     if (metrics.twoPane) {
         Row(modifier.fillMaxSize()) {
             Surface(
@@ -67,30 +59,12 @@ fun TanukiAdaptiveShell(
             }
         }
     } else {
-        val drawerState = rememberDrawerState(DrawerValue.Closed)
-        // 窄屏抽屉最多占 90% 宽度，360dp/320dp 下不会横向溢出。
-        val drawerWidth = TanukiLayoutPolicy.drawerWidthDp(metrics.widthDp).dp
-        ModalNavigationDrawer(
-            drawerState = drawerState,
+        TanukiDrawer(
             modifier = modifier.fillMaxSize(),
-            drawerContent = {
-                ModalDrawerSheet(modifier = Modifier.fillMaxHeight().width(drawerWidth)) {
-                    navigation { scope.launch { drawerState.close() } }
-                }
-            },
-        ) {
-            CompositionLocalProvider(LocalTanukiDrawerOpen provides drawerState.isOpen) {
-                content(
-                    Modifier.fillMaxSize(),
-                    { scope.launch { drawerState.open() } },
-                )
-            }
-        }
-        // 必须在 content 之后组合：Compose 让最后注册的 BackHandler 优先，
-        // 这样详情页打开抽屉后，返回只关抽屉，不会先关详情。
-        BackHandler(enabled = drawerState.isOpen) {
-            scope.launch { drawerState.close() }
-        }
+            drawerWidth = TanukiLayoutPolicy.drawerWidthDp(metrics.widthDp).dp,
+            navigation = navigation,
+            content = content,
+        )
     }
 }
 

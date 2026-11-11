@@ -2,6 +2,14 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 动效 C 批弹层与抽屉（2026-11-11，android_agent-91，Host）
+
+- 起始远端 main/HEAD 实核 `37358849742b2ad3e2b24bc539395ec20801f413`，分支 `ao/motion/batch-c`。自绘 sheet/抽屉打开 280ms enter、关闭 240ms exit，遮罩 160ms standard，均单一所有者；系统 sheet/对话框/下拉菜单保留平台动画。审批、权限、传输/全局进度、会话详情/主机选择、错误详情和浏览器菜单关闭后保留最后展示模型至退出完成。DshNativePage、DshComposerBar、共享状态/印章无修改。
+- JDK17/SDK36，`source scripts/ao-worktree-env.sh` 后使用 `--console=plain --max-workers=2 --offline -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`，执行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`；完整六个过滤表达式与命令见 [C 批交接](handoffs/20261111-1900-motion-batch-c.md)。阶段完整执行 BUILD SUCCESSFUL（5m07s）；最后遮罩/交互边界修改后的源码绑定复验 **BUILD SUCCESSFUL（7m17s）/ 退出 0**，产品/Android 测试源码 compile、定向 JVM 与 lint 全部通过。
+- XML 实核 **115 项 / 11 类 / 0 failures / 0 errors / 0 skipped**：新动效 6、工厂 5、审批 51、会话控制器 37、传输展示 5、失败恢复 11。覆盖真实动画 spec 时长/曲线采样、reduced 在 0ns 已终态、快照关闭保留/结束清理与快速重开、遮罩单次 alpha 及系统窗口无外层动画、抽屉释放目标；返回优先另有结构断言。
+- 最终 lint **0 errors / 105 warnings / 2 hints**。尝试使用 Material MotionScheme 时曾因其为 Kotlin internal 编译失败（1m06s），已移除尝试，新增自绘 TanukiDrawer 并复用 Material 表面；不反射、不绕过依赖可见性。其余构建提示含既有弃用/API、SDK XML 与 analytics 目录不可写。
+- 未执行完整 JVM、Android 仪器、设备安装/Compose 实际挂载与快速打断、拖拽/RTL/返回焦点、系统移除动画开关、IME/TalkBack/大字体/深浅色或帧率、真实 PRoot/模型链路；Android 测试源码 compile 不等于设备 QA，跳过原生构建的产物不得安装或发布。独立最新 SHA 审查与 Android QA 待安排，API Key/真实模型/真机暂停项保留。
+
 ## 动效 B 批页面转场（2026-11-11，android_agent-90，Host）
 
 - 起始基线 fetch 实核 `226c3f95e0b71b8e4a34b13f8302ec68abce5314`，分支 `ao/motion/batch-b`；保留本地改动无冲突快进新 main `824c6c9be855389708e2b3d5886f5670cbc6695e` 后刷新验证。编排已批准文件/浏览器最小接线，主目的地、设置、文件列表/查看器、浏览器原生二级、窄屏 TwoPane 共用转场组件；业务页旧入场已清零。WebView 只用原生背景遮罩，旧内容立即卸载，原 BackHandler 和返回目标不改。

@@ -214,6 +214,21 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 回归 `TanukiPageTransitionsTest` 使用 Compose 实际动画 spec 的时间采样验证主目的地矩阵、层级曲线/方向、RTL、进入/返回方向互逆、0ns 即终态及 WebView 零位移；不把 JVM 策略验证称为 Android 视觉、WebView/Surface 或帧率验收。
 
+### 6.3 C 批弹层与抽屉所有权
+
+`TanukiMotionSpecs.sheet(opening)` 与 `scrim()` 复用 A 批令牌。自绘 `TanukiBottomSheet` 的遮罩与面板共享一个父 Transition，退出结束后才通知 `onHidden`；面板不再叠加 alpha 或高度补间。拖动仍直接跟手，释放回位用 settle，关闭时停止未完成的回位。
+
+| 表面 | 打开 | 关闭 / 回位 | 遮罩 / reduced-motion |
+|---|---|---|---|
+| 自绘 TanukiBottomSheet | 全高位移 280ms enter | 全高位移 240ms exit；拖拽回位 settle | 遮罩唯一 alpha：160ms standard；有限动画 0ms，settle snap |
+| TanukiAdaptiveShell 窄屏抽屉 | 按钮 280ms enter | 导航/返回/遮罩点击 240ms exit；拖拽释放按目标打开 280ms / 关闭 240ms | 遮罩唯一 alpha：160ms standard，与位移同时启停，拖拽期间直接跟手；reduced 立即 snap，打开途中返回也先关抽屉 |
+| 系统 ModalBottomSheet | Material 3 窗口默认 | 系统 hide 完成后卸载展示内容 | 平台独占位移/遮罩；不伪造固定毫秒，移除动画关闭立即卸载，打开遵循平台缩放 |
+| AlertDialog / Dialog / DropdownMenu | 系统默认 | 系统默认 | 不包自绘 scale/fade，保留窗口焦点、返回与系统无障碍设置 |
+
+`TanukiModalSheet` 位于 `ui/TanukiMotionFeedback.kt`，为审批、权限、传输/全局进度、会话详情/主机选择和浏览器菜单提供常驻宿主。调用方传当前模型，关闭时传 null；`TanukiOverlayState` 保留最后 UI 快照到 hide 结束，快速重开取消旧 hide 并重定向。错误详情使用同一快照策略和自绘 `onHidden`。退出快照不接收触摸/无障碍操作；打开期间可正常操作，业务许可与状态更新不等待动画。未接线的 `RemoteHostSwitchSheet` 保持平台默认；TanukiDrawer 为本批新增的单一位移宿主，复用 Material 表面；当前源码没有 TanukiDialog 定义，不新增同义系统窗口。
+
+Host 回归 `TanukiOverlayMotionTest` 采样实际 spec 时长/曲线、0ns 终态、退出快照保留/清理与快速重开，另检查自绘遮罩单次 alpha 和系统窗口不叠外层动画。它不替代 Compose 挂载、系统设置、返回焦点、拖拽、TalkBack、IME、帧率和深浅色设备 QA；详见 [C 批交接](handoffs/20261111-1900-motion-batch-c.md)。
+
 ## 7. 基础组件
 
 除三态外，组件位于 `com.tanuki.ui.design`，当前为模块内 `internal`，由同一 App 模块的页面直接使用。

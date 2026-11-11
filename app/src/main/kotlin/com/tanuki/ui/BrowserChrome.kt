@@ -19,24 +19,26 @@ import androidx.compose.ui.unit.dp
 
 internal data class BrowserMenuItem(val title: String, val icon: ImageVector, val enabled: Boolean = true)
 
-/** Thumb-reachable, two-level actions. Preferences are not mixed into a long overflow menu. */
+/** 拇指可达的两级菜单；系统窗口独占位移和遮罩动画。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun BrowserMenuSheet(tools: Boolean, loaded: Boolean,
+internal fun BrowserMenuSheet(page: String?, loaded: Boolean,
     onChoose: (String) -> Unit, onBack: () -> Unit, onDismiss: () -> Unit) {
-    val entries = if (tools) listOf(
-        BrowserMenuItem("页内查找", Icons.Default.Search, loaded),
-        BrowserMenuItem("网页缩放", Icons.Default.ZoomIn, loaded),
-        BrowserMenuItem("截取网页画面", Icons.Default.Screenshot, loaded),
-        BrowserMenuItem("页面显示模式", Icons.Default.Devices))
-    else listOf(
-        BrowserMenuItem("收藏夹", Icons.Default.Bookmarks),
-        BrowserMenuItem("历史记录", Icons.Default.History),
-        BrowserMenuItem("下载与截图", Icons.Default.Download),
-        BrowserMenuItem("收藏当前页", Icons.Default.BookmarkAdd, loaded),
-        BrowserMenuItem("工具箱", Icons.Default.Construction),
-        BrowserMenuItem("浏览器设置", Icons.Default.Settings))
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    TanukiModalSheet(value = page?.let { it to loaded }, onDismissRequest = onDismiss) { shown ->
+        val tools = shown.first == "tools"
+        val loaded = shown.second
+        val entries = if (tools) listOf(
+            BrowserMenuItem("页内查找", Icons.Default.Search, loaded),
+            BrowserMenuItem("网页缩放", Icons.Default.ZoomIn, loaded),
+            BrowserMenuItem("截取网页画面", Icons.Default.Screenshot, loaded),
+            BrowserMenuItem("页面显示模式", Icons.Default.Devices))
+        else listOf(
+            BrowserMenuItem("收藏夹", Icons.Default.Bookmarks),
+            BrowserMenuItem("历史记录", Icons.Default.History),
+            BrowserMenuItem("下载与截图", Icons.Default.Download),
+            BrowserMenuItem("收藏当前页", Icons.Default.BookmarkAdd, loaded),
+            BrowserMenuItem("工具箱", Icons.Default.Construction),
+            BrowserMenuItem("浏览器设置", Icons.Default.Settings))
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (tools) IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回浏览器菜单") }
             Text(if (tools) "工具箱" else "浏览器", Modifier.weight(1f).padding(start = 12.dp), style = MaterialTheme.typography.titleMedium)

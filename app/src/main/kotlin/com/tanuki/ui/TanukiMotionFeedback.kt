@@ -9,6 +9,9 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -38,6 +41,56 @@ import androidx.compose.ui.unit.dp
 import com.tanuki.ui.design.TanukiDesign
 import com.tanuki.ui.design.TanukiMotionSpecs
 import kotlinx.coroutines.delay
+
+/**
+ * 系统窗口只有 Material 一个动画所有者；宿主常驻，关闭时先 hide 再释放展示快照。
+ * 调用方必须传当前模型（关闭时为 null），不能在外层用 if 移除本宿主。
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun <T : Any> TanukiModalSheet(
+    value: T?,
+    onDismissRequest: () -> Unit,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.(T) -> Unit,
+) {
+    var presentation by remember { mutableStateOf(TanukiOverlayState<T>()) }
+    presentation = presentation.update(value)
+    val shown = presentation.shown ?: return
+    val reduced = TanukiDesign.motion.reducedMotion
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var closing by remember { mutableStateOf(false) }
+    LaunchedEffect(presentation.open, reduced) {
+        if (!presentation.open) {
+            closing = true
+            // 移除动画直接卸载；正常关闭仍由系统窗口完成位移及遮罩。
+            if (!reduced) sheetState.hide()
+            presentation = presentation.hidden()
+        } else if (closing) {
+            closing = false
+            // 快速重开重定向正在退出的系统动画，不排队等待旧 hide。
+            sheetState.show()
+        }
+    }
+    if (reduced && !presentation.open) return
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+    ) {
+        Column(Modifier.tanukiOverlayInput(presentation.open)) {
+            content(shown)
+        }
+    }
+}
+
+/** 离场快照不接受旧操作；入场与可见期间始终允许交互。 */
+internal fun Modifier.tanukiOverlayInput(enabled: Boolean): Modifier = if (enabled) this else
+    clearAndSetSemantics {}.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+            }
+        }
+    }
 
 /** 固定键位内仅淡化/缩放图标；不移动键位、不补间内容尺寸。 */
 @Composable
