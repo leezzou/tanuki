@@ -227,10 +227,22 @@ class WorkspaceStorage(private val paths: Paths) {
         check(!sample.lowDisk) { "导入后设备剩余空间不足，已保留原有项目" }
     }
 
-    /** 调用方持有环境事务锁；运行中导入只提交独立的新项目，不覆盖已有文件。 */
-    suspend fun importFiles(names: List<String>, onProgress: (Long) -> Unit = {}, openSource: (Int) -> InputStream): File = withContext(Dispatchers.IO) {
+    /**
+     * 调用方持有环境事务锁；运行中导入只提交独立的新项目，不覆盖已有文件。
+     * 项目名默认取源文件名（单文件去扩展名）或时间戳；重名追加 (2)、(3)，
+     * 同一批出现同名文件时也只在项目内改名，不让整批失败。
+     */
+    suspend fun importFiles(
+        names: List<String>,
+        projectName: String? = null,
+        expectedSizes: List<Long?>? = null,
+        onProgress: (Long) -> Unit = {},
+        openSource: (Int) -> InputStream,
+    ): File = withContext(Dispatchers.IO) {
+        require(expectedSizes == null || expectedSizes.size == names.size) { "导入名称与大小数量不一致" }
         val token = java.util.UUID.randomUUID().toString()
         val stage = File(paths.workspaces, ".import-$token")
+        val desiredName = ImportNaming.projectName(names, projectName)
         val allowance = beginImport(names.size)
         var recorded = false
         var stageOwned = false
@@ -249,25 +261,21 @@ class WorkspaceStorage(private val paths: Paths) {
             stageOwned = true
             names.forEachIndexed { index, display ->
                 currentCoroutineContext().ensureActive()
-                val name = File(display).name
-                require(name !in setOf("", ".", "..") && !name.contains('\u0000') && !File(stage, name).exists()) { "导入文件名重复或不安全" }
+                val name = ImportNaming.uniqueFileName(display) { candidate ->
+                    Files.exists(File(stage, candidate).toPath(), LinkOption.NOFOLLOW_LINKS)
+                }
                 allowance.beforeWrite(0)
-                openSource(index).use { input -> File(stage, name).outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        allowance.beforeWrite(count)
-                        output.write(buffer, 0, count)
-                        received += count
-                        onProgress(received)
-                    }
-                } }
+                val base = received
+                openSource(index).use { input ->
+                    StreamingTransfer.copyFileVerified(
+                        input, expectedSizes?.get(index)?.takeIf { it >= 0 }, File(stage, name).toPath(),
+                        beforeWrite = allowance::beforeWrite,
+                    ) { count, _ -> received = base + count; onProgress(received) }
+                }
             }
             requireCanCommitImport()
-            val destination = File(paths.workspaces, "import-$token")
-            check(!destination.exists() && stage.renameTo(destination)) { "无法提交项目导入，原有项目已保留" }
+            currentCoroutineContext().ensureActive()
+            val destination = ImportNaming.publishProject(stage.toPath(), paths.workspaces.toPath(), desiredName).toFile()
             committed = true
             destination
         } catch (error: Throwable) { originalFailure = error; throw error }

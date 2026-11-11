@@ -95,3 +95,10 @@
 - 复审验证首轮失败保留：产品/仪器源码编译与 debug 组装通过；1184 项中 1 项新回归失败。原因是已信任主机跳过 `probeHostKey`，测试假传输只在该入口延迟，导致“仍忙碌”断言提前完成；把同一延迟信号应用到认证入口，并显式核对三种终态后重新冻结测试重跑。不是沿用失败结果计通过。
 
 - 复审修复最终命令：`./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:assembleModernDebug :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`，BUILD SUCCESSFUL（4m02s）；没有更改依赖/许可清单，没有设备执行。提交前重跑 `check-handoff.py --pr`、`check-publication.py --git` 与源码候选校验。修复与文档收尾统一一次提交/推送，再解决两条原线程。
+
+## 按要求同步 main（仅合并，不运行验证）
+
+- 本次起点为 PR #76 head `cd6f1db7d14df3bc5e2e16ffc1ff0672b2111eb3`，工作树干净；实际 fetch 后 main 为 `6b0b0b3fe4e327fb62fd30ddcbd979f2737ab446`，普通 merge，无 rebase/强推。
+- 仅两个文本冲突：`TanukiUi.kt` 保留 main 的存储导航/错误恢复接线，同时保留本 PR 的远程页独立滚动与下拉刷新入口；移除旧远程页分支。`TEST-REPORT.md` 整份取 main，`AGENT-STATE.md`/`CURRENT.json` 没有添加本分支改写。文件页/主题/存储实现沿用 main；NSD 与两项已修复 P2 保留。
+- 按编排方最新提速要求，本轮没有构建、没有运行测试或 lint，也未操作设备；上文 1184 项属于合并前结果，不能作为本次集成后验证。推送后 CI 由编排方观察，独立审查须绑定新 head。
+- 沿用本任务唯一交接；旧广播/配对记录仍有独有协议与未验事项，未做跨 PR 清理。不合并 PR、不发布。

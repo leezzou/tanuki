@@ -50,6 +50,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -652,8 +653,8 @@ fun DshComposerBar(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick = { insertToken("@") }) { Text("@") }
-                TextButton(onClick = { insertToken("/") }) { Text("/") }
+                OutlinedButton(onClick = { insertToken("@") }, shape = RoundedCornerShape(50)) { Text("@ 引用") }
+                OutlinedButton(onClick = { insertToken("/") }, shape = RoundedCornerShape(50)) { Text("/ 命令") }
                 // 运行态静默降级：只额外开放发送，不夺走主键上的停止能力。
                 if (state.runStateStale && state.generationRunning && !state.stopping) {
                     TextButton(onClick = ::submit, enabled = state.canSend) { Text("继续发送") }

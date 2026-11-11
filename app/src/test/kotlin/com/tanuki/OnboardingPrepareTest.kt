@@ -112,11 +112,14 @@ class OnboardingPrepareTest {
         assertTrue(state.detail.contains("复用"))
     }
 
-    @Test fun rawFailureTextIsBoundedForUnknownErrors() {
-        val reason = OnboardingFailure.describe("x".repeat(500))
+    @Test fun unknownFailureKeepsRawTextOnlyInTechnicalDetail() {
+        val raw = "java.io.IOException: unexpected runtime failure"
+        val state = OnboardingPrepare.from(EnvironmentState.FAILED, "准备失败", error = raw)
+        val reason = state.failure.orEmpty()
         assertTrue(reason.length < 260)
         assertTrue(reason.contains("重试"))
-        assertNotNull(reason)
+        assertFalse(reason.contains("IOException"))
+        assertEquals(raw, state.detail)
     }
 
     @Test fun onlyPreparationRequestsNotificationOnAndroid13() {

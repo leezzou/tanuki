@@ -28,6 +28,7 @@ import com.tanuki.storage.WorkspaceFileManager
 import com.tanuki.ui.TanukiTheme
 import com.tanuki.ui.AgentBrowserPage
 import com.tanuki.ui.WorkspaceFilesPage
+import com.tanuki.ui.WorkspaceImportEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -220,8 +221,8 @@ class FilesBrowserPresentationTest {
             assertEquals("edited on Android", File(folder, "inbox/hello.txt").readText())
             click("hello.txt的操作"); click("选择"); find("已选 1")
             screenshot("files-selection.png")
-            click("取消选择"); click("排序与显示"); click("显示隐藏文件"); find(".hidden.txt")
-            click("排序与显示"); click("切换为网格"); find("hello.txt")
+            click("取消选择"); click("文件操作"); click("排序与显示"); click("显示隐藏文件"); find(".hidden.txt")
+            click("文件操作"); click("排序与显示"); click("切换为网格"); find("hello.txt")
             screenshot("files-grid.png")
             click("工作区"); find("Ubuntu 文件 · 只读"); screenshot("files-locations.png")
             instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
@@ -396,8 +397,9 @@ class FilesBrowserPresentationTest {
             disabledCreate.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             instrumentation.waitForIdleSync()
             assertFalse("禁用入口收到点击动作后也不能打开新建编辑器", nodes().any { it.isEditable && it.isVisibleToUser })
-            find("导入文件到工作区")
-            click("导入文件到工作区"); await { imports == 1 }
+            find("导入为新项目")
+            click("导入为新项目"); await { imports == 1 }
+            click("＋ 导入"); await { imports == 2 }
             click("文件操作"); click("导出整个工作区"); await { exports == 1 }
             find("hello.txt")
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
@@ -459,7 +461,7 @@ class FilesBrowserPresentationTest {
                 }
             }
             click(folder.name)
-            click("搜索当前文件夹")
+            click("文件操作"); click("搜索当前文件夹")
             input("hello")
             find("hello.txt")
             click("hello.txt的操作"); click("选择")
@@ -505,7 +507,7 @@ class FilesBrowserPresentationTest {
             find("浏览手机文件"); click("授权访问手机文件")
             find("内部共享存储"); click("内部共享存储"); click("hello.txt")
             find("original text"); find("导出此文件"); click("关闭文件")
-            click("文件操作"); find("导入文件到工作区")
+            click("文件操作"); find("导入为新项目")
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
     @Test fun audioFileOpensWithNativePlaybackControls() {
@@ -531,7 +533,7 @@ class FilesBrowserPresentationTest {
         try {
             click("文件"); click(folder.name)
             find("显示 6002 项 · 共 6003 项")
-            click("搜索当前文件夹"); input("entry5999"); input("missing"); input("entry5999")
+            click("文件操作"); click("搜索当前文件夹"); input("entry5999"); input("missing"); input("entry5999")
             find("显示 1 项 · 共 6003 项"); find("entry5999.txt")
             click("返回上一级"); find(folder.name)
             assertFalse("切换目录后不能保留旧目录的筛选结果", nodes().any { it.text?.toString() == "entry5999.txt" })
@@ -565,11 +567,38 @@ class FilesBrowserPresentationTest {
             assertTrue("滚动后应能看到文件条目", visibleBefore.isNotEmpty())
             // 同目录新增文件后刷新：列表内容变化会触发重新筛选/排序。
             File(folder, "scroll-new.txt").writeText("new")
-            click("刷新文件")
+            click("文件操作"); click("刷新文件")
             val total = folder.listFiles().orEmpty().size
             find("显示 ${total - 1} 项 · 共 $total 项")
             assertTrue("刷新后仍应停留在原滚动位置", nodes().any { it.isVisibleToUser && it.text?.toString() in visibleBefore })
             assertFalse("刷新不能把列表拉回顶部", nodes().any { it.isVisibleToUser && it.text?.toString() == "scroll000.txt" })
+        } finally { ui { activity.finish() }; folder.deleteRecursively() }
+    }
+
+    /** 完成事件更新列表并保留“打开”出口；只操作本用例的合成目录。 */
+    @Test fun importCompletionRefreshesListAndOpensItsProject() {
+        val folder = fixture()
+        val activity = launch()
+        val event = mutableStateOf<WorkspaceImportEvent?>(null)
+        var importClicks = 0
+        try {
+            ui {
+                activity.setContent {
+                    TanukiTheme {
+                        WorkspaceFilesPage(WorkspaceFileManager(runtime.paths), { importClicks++ }, {},
+                            Modifier.fillMaxSize().safeDrawingPadding(), importEvent = event.value)
+                    }
+                }
+            }
+            find("＋ 导入")
+            click("＋ 导入"); await { importClicks == 1 }
+            click(folder.name); click("inbox")
+            ui { event.value = WorkspaceImportEvent("synthetic-import", folder.name, 1) }
+            find("已导入 1 个文件到「${folder.name}」")
+            find("刚刚导入：${folder.name}")
+            click("打开")
+            find("hello.txt")
+            assertEquals("original text", File(folder, "hello.txt").readText())
         } finally { ui { activity.finish() }; folder.deleteRecursively() }
     }
 }
