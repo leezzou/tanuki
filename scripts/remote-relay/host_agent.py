@@ -239,6 +239,11 @@ def write_pairing(path: Path, uri: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Tanuki 远程主机端中继 agent")
     parser.add_argument("--relay", required=True, help="中继 host:port（TLS）")
+    parser.add_argument(
+        "--pairing-relay",
+        default="",
+        help="配对链接中展示的中继 host:port；默认与 --relay 相同。连接地址与手机可达地址不同时使用",
+    )
     parser.add_argument("--ssh-host", default="127.0.0.1", help="本机 sshd 地址；默认 127.0.0.1")
     parser.add_argument("--ssh-port", type=int, default=22, help="本机 sshd 端口；默认 22")
     parser.add_argument("--state-dir", default=str(Path.home() / ".tanuki-relay"), help="保存 host-id 与配对文件的目录")
@@ -257,6 +262,10 @@ def main() -> int:
     host, port = p.split_endpoint(args.relay)
     if not 1 <= port <= 65535:
         parser.error("--relay 端口无效")
+    try:
+        pairing_host, pairing_port = p.split_endpoint(args.pairing_relay) if args.pairing_relay else (host, port)
+    except ValueError as error:
+        parser.error("--pairing-relay 无效：{}".format(error))
     if not 1 <= args.ssh_port <= 65535:
         parser.error("--ssh-port 必须在 1-65535")
     if args.cert_pin and not args.cert_pin.startswith("sha256-"):
@@ -276,7 +285,8 @@ def main() -> int:
     args.host_id = host_id
 
     pairing_path = Path(args.pairing_out).expanduser() if args.pairing_out else state_dir / "pairing.txt"
-    uri = p.build_pairing_uri(host, port, room, token, host_id, args.cert_pin)
+    # 连接地址与手机可达地址可以不同：主机连 127.0.0.1，手机走局域网/公网地址。
+    uri = p.build_pairing_uri(pairing_host, pairing_port, room, token, host_id, args.cert_pin)
     code = p.pairing_code(uri)
     write_pairing(pairing_path, uri)
     logging.info("pairing file written: %s", pairing_path)

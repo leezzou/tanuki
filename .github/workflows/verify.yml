@@ -65,6 +65,8 @@ jobs:
         run: node scripts/test-chat-session-open.mjs
       - name: Test remote relay reference
         run: python3 scripts/remote-relay/test_remote_relay.py
+      - name: Test remote relay quickstart
+        run: python3 scripts/remote-relay/test_quickstart.py
       - name: Check native parity matrix
         run: python3 scripts/check-native-parity.py
       # 交接门禁放在最后，前面的独立协议/客户端回归仍会完整执行并留下结果。
