@@ -25,11 +25,11 @@
 - 基线：`origin/main=62e4c30b4a61636867cfc94736e44fa159f50b9f`（已 fetch 核对）；分支 `ao/chat-anchoring/anchored-list`，从会话根分支 `ao/chat-anchoring/root` 创建的兄弟分支；PR [#62](https://github.com/leezzou/tanuki/pull/62)，实现提交 `adffdb2`。
 - 已实现：
   - `DshChatWindow.kt` 纯策略：锚点分段（历史段含锚点、新消息段在锚点下方）、用户手势脱离判定、头部插页后的索引恢复、每页 50 条的游标、只释放视口上方的内存窗口、按 seq 去重的消息账本与快照区间对账。
-  - 控制器：`loadOlder()`、`onViewportTop()`、`historyRevision`/`releasedOlder` 状态；快照不再清空已加载的更早分页；同 seq 实时事件只保留一份；重连后第二次 `Connected` 主动对账历史。
+  - 控制器：`loadOlder()`、`onViewportTop()`、`historyRevision`/`releasedOlder` 状态；快照不再清空已加载的更早分页；同 seq 实时事件只保留一份；重连后第二次 `Connected` 主动对账历史；最近历史页的 `hasMore` 只在真正接到已加载窗口起点时才覆盖当前值。
   - 页面：`LazyColumn` 显式历史段 + 锚点行 + 新消息段；顶部「加载更早历史 / 正在加载 / 已到会话最早一条 / 失败原因 / 已释放 N 条」；未跟随时「N 条新消息」或「↓ 最新」胶囊；`nestedScroll` 只在用户输入时脱离跟随，程序贴底/恢复不误判。
   - 协议：`DshChatSource.messagesBefore(sessionId, beforeSeq, maxMessages)`；`DshNativeClient` 复用官方 `session/page`，`throughSeq=beforeSeq`、单页上限 200。
   - 文档：INTERFACES 增加历史分页契约；NATIVE-UI 增加本轮结构说明；NATIVE-PARITY 更新 SESS-02/SESS-03 现状与 A-SESS-01 落地证据。
-- 已验证：定向 79 tests 与完整 JVM 1072 tests/110 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
+- 已验证：定向 81 tests 与完整 JVM 1074 tests/110 文件全部通过；lint 0 errors/104 warnings/1 hint；`check-publication.py --git` 0 findings；`git diff --check` 通过。
 - 待验证：设备/模拟器上的手势、流式滚动、顶部加载、深色/大字体、真实 DSH 历史分页；独立 Codex High 审查；合并与发布。
 - 关键源码：`app/src/main/kotlin/com/tanuki/ui/DshChatWindow.kt`（新增）、`DshNativeController.kt`、`DshNativePage.kt`、`app/src/main/kotlin/com/tanuki/web/DshLive.kt`、`DshNativeApi.kt`。
 
@@ -44,7 +44,7 @@
 | `app/src/main/kotlin/com/tanuki/web/DshNativeApi.kt` | `messages()` 与 `messagesBefore()` 共用 `pageThrough()`；首屏 120 条、分页单页上限 200；未新增官方方法或端点。 |
 | `app/src/main/kotlin/com/tanuki/ui/DshChatRender.kt` | 移除旧的渲染窗口与拖动跟随策略，保留底部判定与其余渲染策略；窗口/锚定策略迁入 `DshChatWindow.kt`。 |
 | `app/src/test/kotlin/com/tanuki/DshChatWindowTest.kt` | 新增 16 项纯策略回归：锚点切分、分页前插不改变下方段、索引恢复、未读计数、手势脱离、预算边界、只释放视口上方、工具同步释放、seq 去重、占位、快照对账与幂等。 |
-| `app/src/test/kotlin/com/tanuki/DshNativePagingTest.kt` | 新增 11 项控制器回归：分页插入排序/去重、`beforeSeq` 与每页 50、失败保留、空页停止、重复页防循环、窗口释放边界、同 seq 只插一次、重连对账、快照不删更早分页。 |
+| `app/src/test/kotlin/com/tanuki/DshNativePagingTest.kt` | 新增 13 项控制器回归：分页插入排序/去重、`beforeSeq` 与每页 50、失败保留、空页停止、重复页防循环、窗口释放边界、同 seq 只插一次、重连对账、快照不删更早分页、快照先到时 `hasMore` 不被窄页覆盖。 |
 | `app/src/test/kotlin/com/tanuki/DshNativeApiTest.kt` | 新增 1 项协议回归：`messagesBefore` 以 `beforeSeq` 作 `throughSeq`、`maxMessages=50`。 |
 | `app/src/test/kotlin/com/tanuki/DshChatRenderTest.kt` | 删除已迁出的渲染窗口/拖动跟随即测试；保留并继续覆盖底部判定。 |
 | `app/src/test/kotlin/com/tanuki/DshNativeControllerTest.kt` | 为测试数据源补 `messagesBefore`；流式落盘用例改为断言同一条消息只出现一次（空快照不再清空 HTTP 历史页）。 |
@@ -58,8 +58,8 @@
 | 实际命令 / 操作 | 环境与结果 | 证据与限制 |
 |---|---|---|
 | `git rev-parse origin/main` | `62e4c30b4a61636867cfc94736e44fa159f50b9f` | 基线核对 |
-| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest'` | 通过（定向 79 tests / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
-| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1072 tests / 110 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
+| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshChatWindowTest' --tests 'com.tanuki.DshNativePagingTest' --tests 'com.tanuki.DshChatRenderTest' --tests 'com.tanuki.DshNativeControllerTest' --tests 'com.tanuki.DshNativeApiTest'` | 通过（定向 81 tests / 0 failed） | `-PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`；JVM，未涉及设备 |
+| `./gradlew ... :app:testModernDebugUnitTest`（完整） | 通过：1074 tests / 110 个结果文件 / 0 failures / 0 errors / 0 skipped | 同一 Gradle 配置；首次完整运行 1071 tests 也通过 |
 | `./gradlew ... :app:lintModernDebug` | 通过：0 errors / 104 warnings / 1 hint | 无新增 lint 错误 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1007-chat-anchored-history.md` | 通过 | 普通 PR 模式，不改共享状态 |
 | `python3 scripts/check-publication.py --git` | 739 public files / 735 index entries / 0 findings | 上传前检查 |

@@ -174,6 +174,36 @@ class DshNativePagingTest {
         assertEquals(0, state.historyRevision)
     }
 
+    @Test fun historyPageHasMoreSurvivesSnapshotThatArrivedFirst() {
+        val source = pagedSource(
+            page = page(listOf(message(1), message(2), message(3)), hasMore = true),
+            // 首连快照先到且自称没有更早历史；随后 HTTP 历史页明确说还有。
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(listOf(message(2)), hasMore = false, liveText = "")
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { !it.loading && it.messages.size == 3 }
+        assertTrue(state.hasMore)
+    }
+
+    @Test fun narrowHistoryPageDoesNotClearSnapshotHasMore() {
+        val source = pagedSource(
+            page = page(listOf(message(3)), hasMore = false),
+            liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Snapshot(listOf(message(2)), hasMore = true, liveText = "")
+            )
+        )
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitState(controller) { !it.loading && it.messages.size == 2 }
+        // 这一页比已加载窗口更新、没有接到起点，不能把“还有更早历史”清成 false。
+        assertTrue(state.hasMore)
+    }
+
     @Test fun sameSeqFromSnapshotAndLiveIsInsertedOnce() {
         val source = pagedSource(
             page = page(emptyList(), hasMore = false),

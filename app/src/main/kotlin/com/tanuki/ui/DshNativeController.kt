@@ -474,6 +474,12 @@ class DshNativeController(
                 val pageMax = page.messages.maxOfOrNull { it.seq } ?: -1
                 // 实时快照可能比这次 HTTP 历史更新；旧页不能覆盖它。
                 if (state.messages.isEmpty() || pageMax >= currentMax) {
+                    val pageMin = page.messages.minOfOrNull { it.seq }
+                    val loadedOldest = DshChatWindowPolicy.oldestSeq(state.messages, state.tools)
+                    // 只有这一页真正接到已加载窗口的起点时，它的 hasMore 才代表“还有更早历史”；
+                    // 快照先到且更窄时不能被最近一页的 hasMore 覆盖。
+                    val pageReachesLoadedStart =
+                        pageMin != null && (loadedOldest == null || pageMin <= loadedOldest)
                     state.copy(
                         loading = false,
                         // 首次用页面铺底；刷新/重连只做对账，不删除已加载的更早分页。
@@ -486,7 +492,7 @@ class DshNativeController(
                             state.tools,
                             page.timeline.filterIsInstance<DshTimelineItem.Tool>().map { it.tool }
                         ),
-                        hasMore = if (state.messages.isEmpty()) page.hasMore else state.hasMore
+                        hasMore = if (pageReachesLoadedStart) page.hasMore else state.hasMore
                     )
                 } else {
                     state.copy(loading = false)
