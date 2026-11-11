@@ -2,6 +2,31 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## PR #73 普通 merge 对齐 #74/#75（2026-11-11，android_agent-69，非设备）
+
+- 起点：PR head `b2416b6977359e7dcb441eeb1d91cf10c5dc0c11`，工作区干净；fetch 后 `origin/main=6e1e83347b264b588c97fe380214c955bd7ba9c0`，包含已合并的聊天停靠条 #74 与文件导入/复制移动 #75。
+- 按要求执行普通 `git merge --no-commit origin/main`，没有 rebase 或强推；唯一文本冲突在本报告顶部，保留双方验证记录。产品源码自动合并，文件页/存储实现保留 main，错误模型、错误条、恢复卡和中文文案保留 PR 实现，不额外改逻辑。
+- 合并后实际执行：`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew -PtestBuildType=debug :app:testModernDebugUnitTest :app:lintModernDebug --offline` 串行通过，4m21s。**1237 tests / 124 个结果文件 / 0 skipped / 0 failures / 0 errors**；lint **0 errors / 99 warnings**。错误分类 8 项、恢复跟进 11 项、命名 8 项、传输 20 项、聊天协调 10 项、停靠条集成 5 项均执行通过。下方 1179/1188 等属于各自原分支的历史结果，不作为当前合并结果。
+- 设备由独立 QA 独占，本轮不启动/操作模拟器、真机或 adb 安装；没有设备执行或发布产物。
+
+## 错误出口评审与中文失败文案跟进（2026-11-11，android_agent-69，非设备）
+
+- 起点：PR [#73](https://github.com/leezzou/tanuki/pull/73) 的完整 head `cde1644c98d4e6b10d6fc8295fd506fd87376c05`；provider 为 OPEN/MERGEABLE，本地与 fetch 后远端一致，开始时工作区干净。
+- 修复：进程重建/直接写 `error` 的统一展示兜底；当前操作与组件标识优先于旧更新状态/阶段；重试保留原命令、重装标志及目标版本；兼容性错误打开本组件版本选择器；安装引导透传存储导航；版本列表检查失败/空列表先重新获取。断网、超时、域名解析和未知错误主文案中文化，原文只进随错误重置、默认折叠的“技术细节”，含首次启动引导。
+- 新增 `FailureRecoveryFollowupTest` 11 项 JVM 回归，调用实际展示兜底及 UI 动作分发；更新 `OnboardingPrepareTest`，校验未知原文只保留在技术详情。原有回归保留。
+- 新增 `SetupPresentationTest` 三条仪器回归：引导存储导航、组件兼容性版本选择、异常默认隐藏到技术细节；已编译通过，本轮未执行设备测试。
+- 最终验证：`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew -PtestBuildType=debug :app:testModernDebugUnitTest :app:lintModernDebug :app:compileModernDebugAndroidTestKotlin --offline` 串行通过（5m02s）；**1179 tests / 120 个结果文件 / 0 skipped / 0 failures / 0 errors**，其中新增类 11 项全部执行；lint **0 errors / 98 warnings**；仪器测试源码编译通过，**未运行**。下方 1168 项属于上一轮结果。
+- 失败记录：受限启动无法写入 `~/.gradle` 缓存锁；按相同命令获准访问共享缓存。首次未指定 `testBuildType`，仓库默认 probe，导致 Debug 仪器编译任务未注册，任务图阶段退出；未把该尝试算成源码或测试通过。
+- 设备边界：`emulator-5554 / Pixel_7_API_34_arm64` 由 android_agent-71 独占 QA。本轮未启动/操作任何模拟器、真机或 adb 安装；本地验证不替代设备截图、点击及手势验收。
+
+## 错误出口组件对齐（2026-11-11，android_agent-69，非设备）
+
+- 范围：PR [#73](https://github.com/leezzou/tanuki/pull/73) 沿用 main 已接入的 `TanukiDesignTheme`；错误块和顶栏读取设计令牌，主次行动与恢复卡使用 `TanukiPillButton`，错误详情使用 `TanukiBottomSheet`。错误模型、状态机、分类、动作映射和测试源码均未修改。
+- 基线：重新 fetch 后 `origin/main=8ba7b4b3ecdc82c17a200dca77ef9420924d76b1`（含 #68/#70/#71/#72），`git merge origin/main` 返回 `Already up to date`。全局错误条、组件卡内嵌错误块及 DSH 页恢复卡调用点均保留。
+- 本轮已执行：`:app:compileModernDebugKotlin` 通过；组件对齐后的完整 `:app:testModernDebugUnitTest` 1168 项通过，0 skipped / failures / errors。
+- 最终源码检查：补齐详情弹层的显式关闭按钮后，`JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:testModernDebugUnitTest :app:lintModernDebug --offline` 串行执行通过；JVM **1168 tests / 119 个结果文件 / 0 skipped / 0 failures / 0 errors**，lint 通过。已取消的中间 lint 不计通过。
+- 未执行：Android 设备/模拟器点击、底部弹层手势、遮挡、深色、大字体、360dp、TalkBack；本轮未安装 APK，编译/JVM/lint 不能替代设备验收。
+
 ## 文件导入命名与手机存储复制/移动验证（2026-11-11，android_agent-70，非设备）
 
 - PR [#75](https://github.com/leezzou/tanuki/pull/75)，分支 `ao/file-import-move/p0-file-import-move`。初始 fetch 基线 `732cb79`，普通 merge 集成 `main=8ba7b4b` 后继续验证，保留已推送历史，不强推；不合并、不发布。

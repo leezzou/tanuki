@@ -147,6 +147,8 @@ data class TanukiUiCallbacks(
     val appSettings: () -> Unit,
     val notifications: () -> Unit,
     val connectDsh: () -> Unit,
+    /** 生产入口继续走确认框与前台服务，并携带失败时的目标版本。 */
+    val retryFailure: (FailureRetry) -> Unit = { command(it.command) },
     val selectSource: (RuntimeComponent, String) -> Unit = { _, _ -> },
     val reinstallDsh: (Release) -> Unit = { },
     val uninstallDsh: (Release?) -> Unit = { },
@@ -288,6 +290,47 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
     }
     fun openSettings() { settingsReturn = tab.takeUnless { it == 4 } ?: 0; settingsSection = null; tab = 4 }
     fun settingsBack() { if (settingsSection != null) settingsSection = null else tab = settingsReturn }
+    fun openStorageSettings() {
+        settingsReturn = tab.takeUnless { it == 4 } ?: 0
+        settingsSection = "存储与空间"
+        tab = 4
+    }
+
+    // 全局错误条只认一份统一模型；运行失败优先，应用更新失败在其后。
+    val runtimeFailure = s.displayFailure()
+    val appUpdateFailure = com.tanuki.update.AppUpdateFailure.from(model.appUpdate)
+    val activeFailure = runtimeFailure ?: appUpdateFailure
+    var dismissedFailureKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var failureDetail by remember { mutableStateOf<AppFailure?>(null) }
+    LaunchedEffect(activeFailure?.stableKey) { if (activeFailure == null) dismissedFailureKey = null }
+    val visibleFailure = activeFailure.afterDismiss(dismissedFailureKey)
+
+    fun runFailureAction(failure: AppFailure, kind: FailureActionKind) {
+        if (failure.componentId == "app" && kind == FailureActionKind.RETRY) {
+            if (model.appUpdate.candidate != null) callbacks.downloadAppUpdate() else callbacks.checkAppUpdates()
+            return
+        }
+        performFailureAction(failure, kind, callbacks, ::openStorageSettings,
+            onViewVersions = {
+                settingsReturn = tab.takeUnless { it == 4 } ?: 0
+                settingsSection = "组件维护与诊断"
+                tab = 4
+            },
+            versionsAvailable = model.versions.isNotEmpty(),
+            onSwitchSource = {
+                val component = when (failure.componentId) {
+                    "ubuntu" -> RuntimeComponent.UBUNTU
+                    "node" -> RuntimeComponent.NODE
+                    else -> null
+                }
+                if (component != null) {
+                    val sources = if (component == RuntimeComponent.UBUNTU) model.ubuntuSources else model.nodeSources
+                    val current = if (component == RuntimeComponent.UBUNTU) model.components.ubuntuSource else model.components.nodeSource
+                    val next = sources.firstOrNull { it.id != current } ?: sources.firstOrNull()
+                    if (next != null) callbacks.selectSource(component, next.id)
+                }
+            })
+    }
     BackHandler(tab != 0 && tab != 1 && tab != 4) {
         if (tab == 3 && activeFullscreen) browserFullscreen = false else tab = 0
     }
@@ -340,6 +383,18 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                                 TextButton(onClick = { navigate(3) }) { Text("查看请求") }
                             }
                         }
+                        visibleFailure?.let { failure ->
+                            GlobalFailureBar(
+                                failure = failure,
+                                onOpen = { failureDetail = failure },
+                                onDismiss = { dismissedFailureKey = failure.stableKey },
+                                modifier = when {
+                                    tab == 3 && activeFullscreen -> Modifier.displayCutoutPadding().statusBarsPadding()
+                                    tab == 3 || (tab == 1 && !browserControl.requestPending) -> Modifier.statusBarsPadding()
+                                    else -> Modifier
+                                }
+                            )
+                        }
                         if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
                             onCancelTransfer = callbacks.cancelTransfer,
                             showFileTransfers = tab != 2,
@@ -372,6 +427,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 when (tab) {
                     1 -> DshPage(model, callbacks, browserView, pageModifier, home = { tab = 0 },
                         fullscreen = activeFullscreen, onFullscreen = { fullscreen = it }, settings = ::openSettings, bottomInset = bottomInset,
+                        onOpenStorage = ::openStorageSettings,
                         native = nativeActive, nativePage = nativeDshPage, fallback = model.nativeDshFallback,
                         openBrowserWindow = {
                             if (callbacks.openBrowserOverlay != null) callbacks.openBrowserOverlay.invoke()
@@ -396,9 +452,9 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                                                 callbacks.onboardingDismissUpgrade else callbacks.onboardingDismissBanner,
                                         )
                                     }
-                                    Overview(model, callbacks, openDsh = { tab = 1 })
+                                    Overview(model, callbacks, openDsh = { tab = 1 }, onOpenStorage = ::openStorageSettings)
                                 }
-                                else SettingsPage(model, callbacks, settingsSection) { settingsSection = it }
+                                else SettingsPage(model, callbacks, settingsSection, ::openStorageSettings) { settingsSection = it }
                             }
                         }
                     }
@@ -413,6 +469,13 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                 if (enabled) { floatingBrowser = false; browserFullscreen = true; tab = 3 }
             }, null, 0.dp) })
     }
+    val shownFailure = failureDetail
+    FailureDetailSheet(
+        failure = shownFailure,
+        versionName = model.versionName,
+        onAction = { kind -> shownFailure?.let { runFailureAction(it, kind) } },
+        onDismiss = { failureDetail = null }
+    )
 }
 
 @Composable
@@ -438,16 +501,39 @@ private fun TanukiHeader(tab: Int, title: String, c: TanukiUiCallbacks, stoppabl
 }
 
 @Composable
-private fun Overview(model: TanukiUiModel, c: TanukiUiCallbacks, openDsh: () -> Unit) = SetupOverview(model,c,openDsh)
+private fun Overview(model: TanukiUiModel, c: TanukiUiCallbacks, openDsh: () -> Unit, onOpenStorage: () -> Unit) =
+    SetupOverview(model,c,openDsh,onOpenStorage)
 
 @Composable
-internal fun OperationCard(s: Snapshot, c: TanukiUiCallbacks) {
-    // Active work is always visible in the fixed banner, not hidden below a long setup page.
-    if (s.error.isNotBlank()) TanukiCard {
-        Text("需要留意", style = MaterialTheme.typography.titleMedium)
-        if (s.stage.isNotBlank()) Text(s.stage, style = MaterialTheme.typography.bodyMedium)
-        TanukiDetails("查看错误信息") { SelectableCopy(s.error, error = true) }
-    }
+internal fun OperationCard(s: Snapshot, c: TanukiUiCallbacks, onOpenStorage: () -> Unit = {}) {
+    // 组件卡、更新卡和运行恢复卡各自负责对应错误；这里只收留没有专属位置的失败。
+    val failure = s.displayFailure()?.takeIf {
+        s.failure == null || it.componentId !in setOf("ubuntu", "node", "dsh", "app") || it.domain == FailureDomain.FILE || it.domain == FailureDomain.UNKNOWN
+    } ?: return
+    InlineFailureBlock(
+        failure = failure,
+        onAction = { kind ->
+            performFailureAction(failure, kind, c, onOpenStorage, c.checkUpdates, versionsAvailable = false)
+        }
+    )
+}
+
+/** 组件卡错误动作：重试、换源、清理与查看存储都落到现有入口。 */
+private fun componentFailureAction(
+    failure: AppFailure,
+    component: RuntimeComponent,
+    sources: List<RuntimeSource>,
+    currentSource: String,
+    c: TanukiUiCallbacks,
+    onOpenStorage: () -> Unit,
+    onViewVersions: () -> Unit
+): (FailureActionKind) -> Unit = { kind ->
+    performFailureAction(failure, kind, c, onOpenStorage, onViewVersions,
+        onSwitchSource = {
+            // 选一个不是当前源的镜像；切源后仍由用户点安装，避免静默重装。
+            val next = sources.firstOrNull { it.id != currentSource } ?: sources.firstOrNull()
+            if (next != null) c.selectSource(component, next.id)
+        })
 }
 
 @Composable
@@ -476,12 +562,14 @@ internal fun WebViewCard(support: WebViewSupport, idle: Boolean, c: TanukiUiCall
 private val DSH_VERSION = Regex("[0-9]+\\.[0-9]+\\.[0-9]+.*")
 
 @Composable
-internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guideStep:Int?=null) {
+internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guideStep:Int?=null, onOpenStorage: () -> Unit = {}) {
     val s = model.snapshot
     val comps = model.components
     val guided=guideStep!=null
     val automatic=ComponentSourceOption("auto","自动择优","先测速再使用最快可用源，下载失败后自动换源")
     var showVersions by rememberSaveable { mutableStateOf(false) }
+    var ubuntuVersionRequest by remember { mutableIntStateOf(0) }
+    var nodeVersionRequest by remember { mutableIntStateOf(0) }
     var showInstalledDsh by rememberSaveable { mutableStateOf(false) }
     var selectedVersion by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = model.versions.firstOrNull { it.version == selectedVersion }
@@ -489,6 +577,10 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         ?: model.versions.firstOrNull { it.version == RuntimeManager.DSH }
         ?: model.versions.firstOrNull { it.version == s.candidate } ?: model.versions.firstOrNull()
     val actionsEnabled = s.tanukiIdle && s.update != UpdateState.RECOVERY_REQUIRED
+    val activeFailure = s.displayFailure()
+    val ubuntuFailure = activeFailure?.takeIf { it.componentId == "ubuntu" }
+    val nodeFailure = activeFailure?.takeIf { it.componentId == "node" }
+    val dshFailure = activeFailure?.takeIf { it.componentId == "dsh" }
     val download = s.download
     val ubuntuProgress = download?.takeIf { it.component.equals("ubuntu", ignoreCase = true) }
         ?.let { ComponentProgressModel(s.stage, it.source, it.received, it.total, it.bytesPerSecond,it.reused) }
@@ -513,13 +605,17 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             dependencyHint = "官方 ARM64 精简基础镜像，不含桌面；Node、DSH、项目和配置独立保留",
             progress = ubuntuProgress,
             versions=RuntimeCatalog.ubuntu.map { ComponentVersionOption(it.version,"Ubuntu Base ${it.version} LTS","ARM64 · ${it.size/(1024*1024)} MB · 精简基础镜像") },
-            selectedVersion=comps.selectedUbuntuVersion,guided=guided),
+            selectedVersion=comps.selectedUbuntuVersion,guided=guided,failure=ubuntuFailure),
         onSource = { id -> c.selectSource(RuntimeComponent.UBUNTU, id) },
         onInstall = { c.command("UBUNTU_INSTALL") },
         onReinstall = { c.command("UBUNTU_REINSTALL") },
         onUninstall = { c.command("UBUNTU_UNINSTALL") },
         onCancel = { c.command("CANCEL") },
+        versionPickerRequest = ubuntuVersionRequest,
         onVersion={ c.selectVersion(RuntimeComponent.UBUNTU,it) },
+        onFailureAction = ubuntuFailure?.let { failure ->
+            componentFailureAction(failure, RuntimeComponent.UBUNTU, model.ubuntuSources, comps.ubuntuSource, c, onOpenStorage) { ubuntuVersionRequest++ }
+        } ?: {},
         sourceControls={ SourceSpeedControls("Ubuntu",model.ubuntuSources.map { ComponentSourceOption(it.id,it.title,it.detail) },comps.ubuntuSource,
             model.ubuntuSpeed,actionsEnabled,!s.tanukiBusy && !model.nodeSpeed.running,
             {c.testSources(RuntimeComponent.UBUNTU)},{c.cancelSourceTests(RuntimeComponent.UBUNTU)},{c.selectSource(RuntimeComponent.UBUNTU,it)},automatic=comps.ubuntuAutomatic,
@@ -533,14 +629,18 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             dependencyHint = if (!comps.ubuntuInstalled) "请先安装 Ubuntu 才能安装 Node；已安装 Node 可独立卸载" else "",
             progress = nodeProgress,
             versions=RuntimeCatalog.node.map { ComponentVersionOption(it.version,"v${it.version}${if(it.lts) " · LTS" else " · 非 LTS"}","ARM64 · ${it.size/(1024*1024)} MB") },
-            selectedVersion=comps.selectedNodeVersion,guided=guided,
+            selectedVersion=comps.selectedNodeVersion,guided=guided,failure=nodeFailure,
             selectionNotice=if(model.nodeRequirement.isBlank())"安装前验证 Node.js、pnpm 和已安装 DSH 的兼容性。" else "当前 DSH 要求 Node.js ${model.nodeRequirement}；不兼容的版本将保留当前安装。"),
         onSource = { id -> c.selectSource(RuntimeComponent.NODE, id) },
         onInstall = { c.command("NODE_INSTALL") },
         onReinstall = { c.command("NODE_REINSTALL") },
         onUninstall = { c.command("NODE_UNINSTALL") },
         onCancel = { c.command("CANCEL") },
+        versionPickerRequest = nodeVersionRequest,
         onVersion={ c.selectVersion(RuntimeComponent.NODE,it) },
+        onFailureAction = nodeFailure?.let { failure ->
+            componentFailureAction(failure, RuntimeComponent.NODE, model.nodeSources, comps.nodeSource, c, onOpenStorage) { nodeVersionRequest++ }
+        } ?: {},
         sourceControls={ SourceSpeedControls("Node.js",model.nodeSources.map { ComponentSourceOption(it.id,it.title,it.detail) },comps.nodeSource,
             model.nodeSpeed,actionsEnabled,!s.tanukiBusy && !model.ubuntuSpeed.running,
             {c.testSources(RuntimeComponent.NODE)},{c.cancelSourceTests(RuntimeComponent.NODE)},{c.selectSource(RuntimeComponent.NODE,it)},automatic=comps.nodeAutomatic,
@@ -551,7 +651,13 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         append(if (comps.dshInstalled) s.dsh else "官方开发引擎")
         model.dshUpdateCheck.badgeText()?.let { append(" · $it") }
     }
-    if(guideStep==null || guideStep==3)ComponentDisclosure("DSH",dshSummary,comps.dshInstalled,dshSwitching,guided=guided) {
+    if(guideStep==null || guideStep==3)ComponentDisclosure("DSH",dshSummary,comps.dshInstalled,dshSwitching,guided=guided,
+        failure=dshFailure,
+        onFailureAction={ kind ->
+            val failure=dshFailure
+            if (failure != null) performFailureAction(failure, kind, c, onOpenStorage,
+                onViewVersions = { showVersions = true }, versionsAvailable = model.versions.isNotEmpty())
+        }) {
         val dshProgress=download?.takeIf { it.component.equals("dsh",ignoreCase=true) }
         if(dshProgress!=null) {
             ComponentDownloadProgress(ComponentProgressModel(s.stage,dshProgress.source,dshProgress.received,dshProgress.total,dshProgress.bytesPerSecond,dshProgress.reused))
@@ -678,7 +784,9 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
         Fact("健康检查", s.health.label)
         Fact("DSH 沙箱探测", s.confinement.label)
         Fact("启动模式", s.recovery.mode.label)
-        s.recovery.lastFailure?.let { Fact("最近失败", it.label) }
+        s.recovery.lastFailure?.let {
+            Fact("最近失败", FailureCatalog.fromRuntimeFailure(it, s.recovery, s.error, s.recovery.lastFailureAtMillis).reason)
+        }
         Caption("模型上下文会发送至你选择的 API 服务商。工具执行在 DSH 中逐次确认；停止后的任务不会自动重放。")
         ActionRow("重启 DSH", "可能中断当前任务", enabled = s.environment == EnvironmentState.READY && !s.tanukiBusy && s.update != UpdateState.RECOVERY_REQUIRED) { c.command("RESTART") }
         ActionRow("固定健康检查", enabled = s.tanukiIdle && s.environment == EnvironmentState.READY) { c.command("HEALTH") }
@@ -692,13 +800,16 @@ internal fun EnvironmentSection(model: TanukiUiModel, c: TanukiUiCallbacks, guid
             // 热/低电时只减少界面展示行数，不影响落盘日志或正在执行的任务。
             SelectableCopy(logs.takeLast(model.deviceCondition.logLineLimit.coerceAtLeast(1)).joinToString("\n").ifBlank { "暂无日志" })
         }
-        if (s.error.isNotBlank()) SelectableCopy(s.error, error = true)
+        s.displayFailure()?.let { failure ->
+            Text(failure.reason, style = MaterialTheme.typography.bodyMedium)
+            FailureTechnicalDetails(failure.detail, failure.stableKey)
+        }
         }
     }
 }
 
 @Composable
-private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: String?, select: (String) -> Unit) {
+private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: String?, onOpenStorage: () -> Unit, select: (String) -> Unit) {
     val s = model.snapshot
     if (section == null) {
         val categories = listOf(
@@ -792,10 +903,13 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
     if (section == "应用更新") {
         ApplicationUpdateCard(model.appUpdate, model.versionName, model.appInstallAllowed,
             c.checkAppUpdates, c.downloadAppUpdate, c.installAppUpdate, c.cancelAppUpdate,
-            background = model.apkUpdateCheck)
+            background = model.apkUpdateCheck,
+            onCleanCache = { c.command("CACHE") },
+            onOpenStorage = onOpenStorage,
+            onOpenSettings = c.appSettings)
         return
     }
-    if (section == "组件维护与诊断") { EnvironmentSection(model, c); return }
+    if (section == "组件维护与诊断") { EnvironmentSection(model, c, onOpenStorage = onOpenStorage); return }
     if (section == "远程主机") { RemoteHostSettings(model, c); return }
     if (section == "项目与备份") SettingsGroup("项目与备份") {
         ActionRow("导入文件", "保存为新项目", enabled = s.tanukiIdle, onClick = c.importFiles)
@@ -906,6 +1020,7 @@ private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> 
 @Composable
 private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView, modifier: Modifier,
                     home: () -> Unit, fullscreen: Boolean, onFullscreen: (Boolean) -> Unit, settings: () -> Unit, bottomInset: Dp,
+                    onOpenStorage: () -> Unit,
                     native: Boolean, nativePage: @Composable (Modifier) -> Unit, fallback: String?,
                     openBrowserWindow: () -> Unit) {
     val s = model.snapshot
@@ -925,10 +1040,20 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
     Box(modifier.fillMaxSize().imePadding()) {
         // 原生页不持有 WebView；官方页仍是同一个 WebView 实例，切换界面不会重建或重启 DSH。
         if (native) {
-            nativePage(
-                Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInset)
-                    .then(if (fullscreen) Modifier.statusBarsPadding() else Modifier)
-            )
+            // 崩溃或启动失败时，恢复卡直接留在当前页，不必先返回工作台。
+            Column(Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInset)) {
+                if (s.displayFailure()?.domain == FailureDomain.RUNTIME || s.recovery.mode != RecoveryMode.NORMAL || s.recovery.lastFailure != null) {
+                    Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        RuntimeRecoveryCard(s, c, model.components, onOpenStorage)
+                    }
+                }
+                Box(Modifier.weight(1f)) {
+                    nativePage(
+                        Modifier.fillMaxSize()
+                            .then(if (fullscreen) Modifier.statusBarsPadding() else Modifier)
+                    )
+                }
+            }
         } else if (s.web != WebState.RENDER_ERROR) key(browser) {
             // 正常模式预留导航及其间隙；键盘或全屏隐藏导航时 bottomInset 为零。
             AndroidView(factory = { context ->
@@ -961,7 +1086,9 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                     Fact("DSH 进程", s.service.label)
                     Fact("本机 Web 服务", if (s.webHealthy) "就绪" else "未就绪")
                     Fact("启动模式", s.recovery.mode.label)
-                    s.recovery.lastFailure?.let { Fact("最近失败", it.label) }
+                    s.recovery.lastFailure?.let {
+            Fact("最近失败", FailureCatalog.fromRuntimeFailure(it, s.recovery, s.error, s.recovery.lastFailureAtMillis).reason)
+        }
                 }
                 Caption("网页状态：${s.web.label}")
                 if (!remoteActive && s.service != ServiceState.RUNNING) Button(onClick = { c.command(if (s.environment == EnvironmentState.READY) "START" else "INIT") },
@@ -969,9 +1096,9 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                 if (remoteActive) OutlinedButton(onClick = { c.disconnectRemoteHost() }) { Text("断开远程并切回本地") }
                 if (s.web == WebState.RENDER_ERROR) OutlinedButton(onClick = { c.command("RECONNECT") }, enabled = s.service == ServiceState.RUNNING || remoteActive) { Text("恢复网页连接") }
                 if (s.remote.error.isNotBlank()) Caption(s.remote.error)
-                if (s.error.isNotBlank()) TanukiDetails("查看失败信息") { SelectableCopy(s.error, error = true) }
             }
-            OperationCard(s, c)
+            RuntimeRecoveryCard(s, c, model.components, onOpenStorage)
+            OperationCard(s, c, onOpenStorage)
             if (model.support.state != WebViewSupportState.SUPPORTED) WebViewCard(model.support, s.tanukiIdle, c)
         }
         if (!native && fallback != null && s.service == ServiceState.RUNNING && model.nativeDshPreferred) Surface(
@@ -1072,9 +1199,10 @@ private fun DshUpdateStatus(state: DshUpdateCheckState, onCheck: () -> Unit) {
 }
 
 @Composable
-private fun ComponentDisclosure(title:String,version:String,installed:Boolean,forceExpanded:Boolean=false,guided:Boolean=false,content:@Composable ColumnScope.()->Unit) {
+private fun ComponentDisclosure(title:String,version:String,installed:Boolean,forceExpanded:Boolean=false,guided:Boolean=false,
+                                failure:AppFailure?=null,onFailureAction:(FailureActionKind)->Unit={},content:@Composable ColumnScope.()->Unit) {
     var expanded by rememberSaveable(title) { mutableStateOf(false) }
-    LaunchedEffect(forceExpanded) { if(forceExpanded)expanded=true }
+    LaunchedEffect(forceExpanded, failure?.stableKey) { if (forceExpanded || failure != null) expanded = true }
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
         animationSpec = tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle)),
@@ -1088,10 +1216,22 @@ private fun ComponentDisclosure(title:String,version:String,installed:Boolean,fo
                 Text(title,style=MaterialTheme.typography.titleMedium)
                 Text(version,style=MaterialTheme.typography.labelMedium,fontFamily=FontFamily.Monospace,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            StatusPill(if(installed)"已安装" else "未安装",installed)
+            StatusPill(when { failure!=null -> "安装没有完成"; installed -> "已安装"; else -> "未安装" },failure==null && installed)
             Box(Modifier.size(48.dp),contentAlignment=Alignment.Center) {
                 TanukiIcon(TanukiGlyph.Chevron,modifier=Modifier.size(20.dp).rotate(rotation),tint=MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        // 折叠状态下也保留错误原因与主行动，避免用户为了重试还要先展开卡片。
+        failure?.let {
+            InlineFailureBlock(
+                failure = it,
+                onAction = onFailureAction,
+                modifier = Modifier.padding(
+                    start = if (guided) 0.dp else TanukiSpace.XL_DP.dp,
+                    end = if (guided) 0.dp else TanukiSpace.XL_DP.dp,
+                    bottom = TanukiSpace.MD_DP.dp,
+                ),
+            )
         }
         TanukiExpandVisibility(visible = expanded || guided) {
             Column(
@@ -1175,7 +1315,7 @@ private fun ActionRow(title: String, detail: String? = null, enabled: Boolean = 
 }
 
 @Composable
-private fun TanukiDetails(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun TanukiDetails(title: String, content: @Composable ColumnScope.() -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     // 折叠箭头走反馈令牌，展开内容走结构令牌；系统移除动画时都立即完成。
     val rotation by animateFloatAsState(
@@ -1224,7 +1364,7 @@ private fun ToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Un
 }
 
 @Composable
-private fun SelectableCopy(text: String, error: Boolean = false) {
+internal fun SelectableCopy(text: String, error: Boolean = false) {
     SelectionContainer {
         Text(text, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
             color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
