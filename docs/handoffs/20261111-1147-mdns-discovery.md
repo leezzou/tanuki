@@ -2,7 +2,7 @@
 
 - Agent/会话标识：android_agent-65（AO worker，DSH）
 - 时间：2026-11-11 11:47 CST
-- 状态：进行中（PR 待创建；未合并、未发布）
+- 状态：已完成（PR #71 待 CI/独立审查；未合并、未发布）
 - 前一记录：[主机端一键 quickstart](20261111-1017-remote-relay-quickstart.md)（PR #64 已合并）
 
 > 普通 PR 只新增本记录，未修改 `docs/AGENT-STATE.md` 与 `docs/handoffs/CURRENT.json`。
@@ -19,7 +19,7 @@
 - 已实现：主机端 mDNS 广播（avahi/dns-sd 优先，Python 最小应答兜底）、TXT 契约、`--name/--dsh-port/--no-mdns`、quickstart 局域网提示与 `qrencode` 二维码/退化提示、文档与自测。
 - 已验证：`test_mdns.py` 20 项、`test_quickstart.py` 20 项、`test_remote_relay.py` 9 项通过；host_agent 默认 `dns-sd` 启动且 SIGTERM 退出 0、无 `dns-sd` 残留；quickstart 默认 mDNS 横幅正确、Ctrl+C 后无 `dns-sd` 残留；假 `qrencode` 成功路径与缺失退化路径均验证。
 - 待验证：PR 推送后的 GitHub CI；独立 Codex High 审查；真实手机发现列表、真实 avahi/路由器 AP 隔离/组播屏蔽、真实 `qrencode` 扫码。
-- 当前分支：`ao/relay-quickstart/mdns-qr`，基于 `origin/main=8d620ee`（#64 合并后），已 fast-forward 到 `origin/main=95704ff`（#66 docs-only）；工作区有未提交改动。
+- 当前分支：`ao/relay-quickstart/mdns-qr`，基于 `origin/main=8d620ee`（#64 合并后），已 fast-forward 到 `origin/main=95704ff`（#66 docs-only）；PR：<https://github.com/leezzou/tanuki/pull/71>。
 - 关键事实与可定位源码：`scripts/remote-relay/discovery.py`、`host_agent.py`、`quickstart.sh`、`quickstart_lib.py`、`test_mdns.py`、`docs/INTERFACES.md` 1.7、`docs/REMOTE-CONNECT.md` 3.4。
 
 ## 本次改动
@@ -64,7 +64,7 @@
 
 ## 下一步
 
-1. 运行 `check-publication.py --git` 与 `check-handoff.py --pr --record docs/handoffs/20261111-1147-mdns-discovery.md`，提交并推送 `ao/relay-quickstart/mdns-qr`，创建 PR（不合并、不发布）。
+1. PR #71 已创建；观察 CI，并请编排方安排独立 Codex High 审查当前 head（不合并、不发布）。
 2. 观察 CI；请编排方安排独立 Codex High 审查当前 head。
 3. 有真实同网段手机/路由器时，验证发现列表、AP 隔离、UDP 5353 和二维码扫码；记录设备、网络和失败现象。
 
@@ -77,7 +77,7 @@
 
 ## 产物与校验
 
-- PR：待创建（本分支 `ao/relay-quickstart/mdns-qr`）。
+- PR：<https://github.com/leezzou/tanuki/pull/71>（不合并、不发布）。
 - 新/旧 APK、源码 ZIP：本次未构建 APK、未生成源码 ZIP。
 - 是否覆盖安装 / 签名范围 / 未发布事项：无安装、无签名、无 tag/Release、未合并。
 - 清理过期记录：未删除；本记录为本次唯一记录，未改共享状态/印章。
