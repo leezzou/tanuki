@@ -78,6 +78,7 @@ class RuntimeManager(val context: Context) {
     val versionGate = DshVersionGate()
     private val stopMutex = Mutex()
     private var job: Job? = null
+    private val operationRetry = OperationRetry()
     private var serverJob: Job? = null
     private var workspaceMonitor: Job? = null
     private var workspaceRefresh: Job? = null
@@ -197,6 +198,30 @@ class RuntimeManager(val context: Context) {
     }
     internal fun phase(label: String, env: EnvironmentState) { state.update { it.copy(stage = label, environment = env, bytes = 0, total = -1, download = null, phasePercent = null) }; event(label) }
     fun cancel() { job?.cancel() }
+
+    @Synchronized internal fun beginOperationRetry(action: () -> Unit): Long {
+        val id = operationRetry.begin(action)
+        state.update { it.copy(failedOperation = null) }
+        return id
+    }
+
+    @Synchronized internal fun recordOperationFailure(id: Long, cancelled: Boolean = false) {
+        if (!operationRetry.fail(id)) return
+        val elapsed = operationRetry.elapsedMillis(id)
+        state.update { snapshot ->
+            snapshot.copy(failedOperation = FailedOperation(id, snapshot.stage,
+                if (cancelled) "" else snapshot.error, elapsed, cancelled))
+        }
+    }
+
+    internal fun completeOperationRetry(id: Long) = operationRetry.complete(id)
+
+    fun retryOperation(id: Long) {
+        if (hasActiveOperation || externalBusy() || state.value.operationActive || state.value.failedOperation?.retryId != id) return
+        // 与第一次执行共用前台服务入口；应用退到后台后，重试仍保持安装通知。
+        context.startForegroundService(android.content.Intent(context, RuntimeService::class.java).setAction("KEEPALIVE"))
+        operationRetry.retry(id)
+    }
     internal fun launchExclusive(label: String, retry: FailureRetry? = null, block: suspend () -> Unit) {
         synchronized(this) {
             if (job?.isActive == true) { event("已有环境操作正在进行"); return }
@@ -208,13 +233,16 @@ class RuntimeManager(val context: Context) {
                     return@launch
                 }
                 val before=state.value
+                val retryId = beginOperationRetry { launchExclusive(label, retry, block) }
                 state.update { it.copy(operation=label,operationRetry=retry,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
                     check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
                     paths.atomic("transaction", label)
                     block()
                     File(paths.state, "transaction").delete()
+                    completeOperationRetry(retryId)
                 } catch (e: CancellationException) {
+                    recordOperationFailure(retryId, cancelled = true)
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作已停止；当前安装状态已刷新",download=null,bytes=0,total=-1) }
@@ -222,6 +250,7 @@ class RuntimeManager(val context: Context) {
                     event("操作取消")
                 } catch (e: Throwable) {
                     fail(e)
+                    recordOperationFailure(retryId)
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作失败，请查看错误信息",download=null,bytes=0,total=-1) }
@@ -758,7 +787,7 @@ class RuntimeManager(val context: Context) {
             if (prepared != recoveryState.value) publishRecovery(prepared)
             val attempt = RunAttempt(prepared.mode)
             runtimeGeneration++
-            state.update { it.copy(service=ServiceState.STARTING,error="",recovery=prepared) }
+            state.update { it.copy(service=ServiceState.STARTING,error="",recovery=prepared,failedOperation=null) }
             serverJob = scope.launch {
                 mutation.withLock {
                     var completion: Deferred<CommandResult>? = null

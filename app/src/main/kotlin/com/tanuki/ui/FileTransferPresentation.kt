@@ -19,6 +19,9 @@ internal data class FileTransferSummary(
  * 剩余时间以单调时钟的已用时间估算，数据不足时返回 null。
  */
 internal object FileTransferPresentation {
+    fun imports(items: List<FileTransferProgress>): List<FileTransferProgress> =
+        items.filter { it.kind == com.tanuki.runtime.FileTransferKind.IMPORT }
+
     fun percent(received: Long, total: Long): Int? =
         if (total > 0) ((received.coerceIn(0, total).toDouble() / total) * 100).toInt().coerceIn(0, 100) else null
 

@@ -395,13 +395,6 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                                 }
                             )
                         }
-                        if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
-                            onCancelTransfer = callbacks.cancelTransfer,
-                            showFileTransfers = tab != 2,
-                            // 远程页只展示连接信息；与远程无关的安装/运行时进度留在工作台和 DSH 页。
-                            showRuntimeOperation = !(tab == 4 && settingsSection == "远程主机"),
-                            modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
-                                else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }
                 }, bottomBar = {
                     if (floatingNavigation) Column(
@@ -426,6 +419,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                     .padding(start = padding.calculateStartPadding(layoutDirection), top = padding.calculateTopPadding(),
                         end = padding.calculateEndPadding(layoutDirection), bottom = if (floatingNavigation) 0.dp else padding.calculateBottomPadding())
                     .consumeWindowInsets(padding)
+                Box(Modifier.fillMaxSize()) {
                 when (tab) {
                     1 -> DshPage(model, callbacks, browserView, pageModifier, home = { tab = 0 },
                         fullscreen = activeFullscreen, onFullscreen = { fullscreen = it }, settings = ::openSettings, bottomInset = bottomInset,
@@ -467,6 +461,25 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                             }
                         }
                     }
+                }
+                    // 浮层不参与 topBar/bottomBar 测量，任务开始或结束均不改变页面高度。
+                    OperationProgressEntry(
+                        snapshot = s,
+                        transfers = model.transfers,
+                        onCancel = { callbacks.command("CANCEL") },
+                        onCancelTransfer = callbacks.cancelTransfer,
+                        onRetry = { command ->
+                            if (command == "OPEN_COMPONENTS") {
+                                openSettings()
+                                settingsSection = "组件维护与诊断"
+                            } else callbacks.command(command)
+                        },
+                        showFileTransfers = tab != 2,
+                        modifier = Modifier.align(Alignment.BottomCenter).imePadding()
+                            .navigationBarsPadding().padding(horizontal = 24.dp)
+                            .padding(bottom = if (floatingNavigation) bottomInset + 4.dp else 16.dp)
+                            .widthIn(max = 360.dp),
+                    )
                 }
             }
         }
