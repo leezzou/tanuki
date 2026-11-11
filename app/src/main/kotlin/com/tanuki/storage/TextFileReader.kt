@@ -184,7 +184,21 @@ object TextFileReader {
         // 4 MiB 显示上限可能落在多字节字符中间；此时只显示完整字符，不能把残字节当 Latin-1。
         val reachesViewCap = limit == MAX_VIEW_BYTES && start + filled >= MAX_VIEW_BYTES &&
             (size == null || size > MAX_VIEW_BYTES)
-        val decoded = decodePage(buffer, filled, detected.encoding, atEof, atViewCap = reachesViewCap)
+        // 页满或显示上限切在字符中间时，先把切点回退到最后一个完整字符边界。
+        // 不能依赖平台解码器对“不完整尾字节”的消费差异：Android 与宿主 JVM 的处理并不一致。
+        var boundary = if (!atEof && filled > 0) {
+            completeCharacterBoundary(buffer, filled, detected.encoding)
+        } else {
+            filled
+        }
+        if (boundary == 0 && !reachesViewCap) boundary = filled
+        val decoded = decodePage(
+            buffer,
+            boundary,
+            detected.encoding,
+            atEof = atEof || boundary < filled,
+            atViewCap = reachesViewCap,
+        )
         val next = start + decoded.consumed
         val splitAtViewCap = reachesViewCap && !atEof && decoded.consumed < filled
         // 未知大小的顺序流读到 EOF 后必须停止分页，并把 EOF 处游标作为实际总大小；
@@ -194,6 +208,8 @@ object TextFileReader {
             size == null && eof -> false
             else -> next < limit
         }
+        // 声称还有内容却读不到字节时明确失败，不能原地翻页，也不能虚增游标跳过未读数据。
+        if (hasMore && next <= offset) throw IOException("文件已缩短或暂时无法读取，请重新打开")
         val total = size ?: if (eof) next else ExternalDocumentPolicy.UNKNOWN_SIZE
         return Page(decoded.text, offset, next, total, detected.encoding, hasMore, false)
     }
@@ -354,12 +370,17 @@ object TextFileReader {
             val decoder = charset.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
-            val result = decoder.decode(input, chars, atEof)
-            if (result.isError) {
-                null
+            if (atEof) {
+                // 完整输入使用包含 flush 的解码入口，缓存于解码器内部的残字节也必须报错。
+                decoder.decode(input).toString()
             } else {
-                chars.flip()
-                chars.toString()
+                val result = decoder.decode(input, chars, false)
+                if (result.isError) {
+                    null
+                } else {
+                    chars.flip()
+                    chars.toString()
+                }
             }
         } catch (_: CharacterCodingException) {
             null
@@ -367,8 +388,25 @@ object TextFileReader {
     }
 
     /**
-     * 解码当前页；界面解码一律使用替代字符，任何非法字节都不会变成用户可见的异常。
-     * 只消费到完整字符边界，下一页从剩余字节继续，跨页的多字节字符不会被拆坏。
+     * 从页尾向前找最后一个完整字符的结束位置。
+     *
+     * 分页与显示上限只能按字节切，页尾可能只剩多字节字符的一部分。这里不依赖
+     * 平台解码器在非 EOF 时如何处理残字节，而是从页尾向前最多试探 [MAX_CHAR_BYTES] - 1
+     * 个位置，取第一个能严格解码到末尾的前缀；都不合法时保持原长度，交给解码兜底。
+     */
+    private fun completeCharacterBoundary(bytes: ByteArray, count: Int, encoding: String): Int {
+        if (count <= 0) return 0
+        // 合法字符最多 4 字节，页尾不完整时残余只可能是 1–3 字节，无需继续向前退。
+        val floor = maxOf(0, count - (MAX_CHAR_BYTES - 1))
+        for (candidate in count downTo floor) {
+            if (decodeStrict(bytes, candidate, encoding, atEof = true) != null) return candidate
+        }
+        return count
+    }
+
+    /**
+     * 解码已回退到完整字符边界的当前页；界面解码一律使用替代字符，任何非法字节都不会变成用户可见的异常。
+     * 跨页切点由 [completeCharacterBoundary] 保证，这里只处理页内正常解码和 EOF 处的不完整序列。
      */
     private fun decodePage(
         bytes: ByteArray,
@@ -386,6 +424,7 @@ object TextFileReader {
                 .onMalformedInput(CodingErrorAction.REPLACE)
                 .onUnmappableCharacter(CodingErrorAction.REPLACE)
             decoder.decode(input, chars, atEof)
+            if (atEof) decoder.flush(chars)
         } catch (_: CharacterCodingException) {
             // 替代模式理论上不会走到这里；仍按 Latin-1 兜底，绝不把解码异常抛给界面。
             input.position(0)
@@ -415,6 +454,9 @@ object TextFileReader {
 
     private const val STRONG_SCORE = 0.90
     private const val WEAK_SCORE = 0.45
+
+    /** 标准字符集里单个字符最多占用的字节数；用于页尾边界回溯。 */
+    private const val MAX_CHAR_BYTES = 4
 
     /**
      * 候选编码的可读性评分：常用字、中日韩文字、假名和 ASCII 得分高，

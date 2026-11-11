@@ -105,6 +105,42 @@ class TextFileReaderTest {
         } finally { Files.delete(file) }
     }
 
+    @Test fun gbkDoubleByteCharacterStraddlesPageBoundary() {
+        assertCharacterStraddlesPageBoundary(
+            prefix = "简体中文源码注释：分页边界\n".repeat(64),
+            charset = Charset.forName("GBK"),
+            target = "边",
+            expectedEncoding = "GB18030",
+        )
+    }
+
+    @Test fun gb18030FourByteCharacterStraddlesPageBoundary() {
+        assertCharacterStraddlesPageBoundary(
+            prefix = "简体中文源码注释：四字节边界\n".repeat(64),
+            charset = Charset.forName("GB18030"),
+            target = String(Character.toChars(0x20000)),
+            expectedEncoding = "GB18030",
+        )
+    }
+
+    @Test fun utf8ThreeByteCharacterStraddlesPageBoundary() {
+        assertCharacterStraddlesPageBoundary(
+            prefix = "UTF-8 三字节边界注释\n".repeat(64),
+            charset = Charsets.UTF_8,
+            target = "中",
+            expectedEncoding = "UTF-8",
+        )
+    }
+
+    @Test fun utf8FourByteCharacterStraddlesPageBoundary() {
+        assertCharacterStraddlesPageBoundary(
+            prefix = "UTF-8 四字节边界注释\n".repeat(64),
+            charset = Charsets.UTF_8,
+            target = "🙂",
+            expectedEncoding = "UTF-8",
+        )
+    }
+
     @Test fun detectsGbkChineseWithoutUserVisibleDecodeError() {
         val file = Files.createTempFile("text-gbk", ".txt")
         try {
@@ -330,6 +366,23 @@ class TextFileReaderTest {
         assertEquals(longBytes.size.toLong(), finalTotal)
     }
 
+    @Test fun unreadableNonEmptySourceDoesNotInventProgress() {
+        for (readResult in listOf(0, -1)) {
+            val source = object : SeekableInput {
+                override val size = 1L
+                override fun seek(offset: Long) = Unit
+                override fun read(buffer: ByteArray, offset: Int, count: Int) = readResult
+                override fun close() = Unit
+            }
+            try {
+                TextFileReader.read(source, encoding = "UTF-8")
+                fail("未读到字节时不能返回可继续翻页的空页或跳过未读字节")
+            } catch (_: java.io.IOException) {
+                // 明确读取失败，调用方可提示重新打开，避免游标原地循环或跳过数据。
+            }
+        }
+    }
+
     @Test fun stopsAtFourMebibyteDisplayCap() {
         val file = Files.createTempFile("text-cap", ".txt")
         try {
@@ -384,6 +437,27 @@ class TextFileReaderTest {
                 "上限切在多字节字符内部也要保留截断提示",
                 TextPageLayout.isTruncated(end.nextOffset, end.totalBytes, end.hasMore),
             )
+        } finally { Files.delete(file) }
+    }
+
+    @Test fun viewCapInsideFirstCharacterStopsWithoutLooping() {
+        val file = Files.createTempFile("text-cap-empty-page", ".txt")
+        try {
+            for ((encoding, character) in listOf(
+                "GB18030" to "边",
+                "GB18030" to String(Character.toChars(0x20000)),
+                "UTF-8" to "中",
+                "UTF-8" to "🙂",
+            )) {
+                val charset = Charset.forName(encoding)
+                val start = TextFileReader.MAX_VIEW_BYTES - 1
+                Files.write(file, "a".repeat(start.toInt()).toByteArray() + character.toByteArray(charset))
+                val page = TextFileReader.read(file, start, encoding)
+                assertEquals("", page.text)
+                assertEquals(start, page.nextOffset)
+                assertFalse("上限内放不下完整字符时必须结束，不能返回可继续翻页的空页", page.hasMore)
+                assertTrue(TextPageLayout.isTruncated(page.nextOffset, page.totalBytes, page.hasMore))
+            }
         } finally { Files.delete(file) }
     }
 
@@ -463,6 +537,68 @@ class TextFileReaderTest {
             val latin1 = TextFileReader.read(file, encoding = "ISO-8859-1")
             assertEquals("café", latin1.text)
             assertEquals("ISO-8859-1", latin1.encoding)
+        } finally { Files.delete(file) }
+    }
+
+    /**
+     * 构造“目标字符横跨 64 KiB 分页边界”的样本，并断言两页在完整字符处切分。
+     *
+     * 目标字符的首字节落在页内，其余字节进入下一页；第一页游标必须回退到字符首字节，
+     * 而不是固定 65536。两页拼接必须等于原文，且不能出现替代字符。
+     */
+    private fun assertCharacterStraddlesPageBoundary(
+        prefix: String,
+        charset: Charset,
+        target: String,
+        expectedEncoding: String,
+    ) {
+        val prefixBytes = prefix.toByteArray(charset)
+        val targetBytes = target.toByteArray(charset)
+        assertTrue("目标字符必须为多字节", targetBytes.size >= 2)
+        val file = Files.createTempFile("text-boundary", ".cpp")
+        try {
+            // 穷举字符内部切点；无后缀时，下一页仅剩这一个跨页字符。
+            for (bytesOnFirstPage in 1 until targetBytes.size) {
+                val targetStart = TextFileReader.PAGE_BYTES - bytesOnFirstPage
+                val fillerLength = targetStart - prefixBytes.size
+                assertTrue("前缀不能越过目标字符起点", fillerLength > 0)
+                val filler = "a".repeat(fillerLength)
+                for (tail in listOf("", "边界标记：第二页\n")) {
+                    val original = prefix + filler + target + tail
+                    val bytes = original.toByteArray(charset)
+                    Files.write(file, bytes)
+                    val first = TextFileReader.read(file)
+                    assertEquals(expectedEncoding, first.encoding)
+                    assertEquals("首页必须在目标字符起点切分", targetStart.toLong(), first.nextOffset)
+                    assertTrue("有后续内容时游标必须前进且不为零", first.nextOffset > first.offset)
+                    assertEquals(prefix + filler, first.text)
+                    assertFalse(first.text.contains('\ufffd'))
+                    assertTrue(first.hasMore)
+
+                    val second = TextFileReader.read(file, first.nextOffset, first.encoding)
+                    assertEquals(first.nextOffset, second.offset)
+                    assertTrue(second.nextOffset > first.nextOffset)
+                    assertEquals(target + tail, second.text)
+                    assertFalse(second.text.contains('\ufffd'))
+                    assertFalse(second.hasMore)
+                    assertEquals(original, first.text + second.text)
+                    assertTrue("两页拼接必须逐字节还原原文", bytes.contentEquals((first.text + second.text).toByteArray(charset)))
+                    assertEquals(bytes.size.toLong(), second.nextOffset)
+                    // 顺序提供方每页重新打开，已知/未知大小都必须沿用完整字符游标。
+                    for (size in listOf(bytes.size.toLong(), null)) {
+                        fun streamPage(offset: Long) = TextFileReader.read(
+                            StreamSeekableInput(ByteArrayInputStream(bytes), size), offset, first.encoding,
+                        )
+                        val streamFirst = streamPage(0)
+                        val streamSecond = streamPage(streamFirst.nextOffset)
+                        assertEquals(first.nextOffset, streamFirst.nextOffset)
+                        assertEquals(first.text, streamFirst.text)
+                        assertEquals(second.text, streamSecond.text)
+                        assertEquals(second.nextOffset, streamSecond.nextOffset)
+                        assertFalse(streamSecond.hasMore)
+                    }
+                }
+            }
         } finally { Files.delete(file) }
     }
 
