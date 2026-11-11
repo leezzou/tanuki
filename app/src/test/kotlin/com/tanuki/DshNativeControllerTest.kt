@@ -160,7 +160,7 @@ class DshNativeControllerTest {
         awaitSelection(controller, "A")
         assertTrue(controller.stop())
         val state = controller.state.value
-        assertTrue(state.notice!!.contains("停止"))
+        assertEquals("正在结束本次回复", state.notice)
         assertFalse(state.stopping)
     }
 

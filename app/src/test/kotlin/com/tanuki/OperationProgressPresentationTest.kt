@@ -35,6 +35,45 @@ class OperationProgressPresentationTest {
         assertEquals(OperationStage.CHECK, operationStage("获取官方 DSH 版本列表", EnvironmentState.READY, UpdateState.CHECKING))
     }
 
+    @Test fun `启动不会把残留安装阶段和下载量当成当前进度`() {
+        val snapshot = Snapshot(
+            environment = EnvironmentState.READY,
+            service = ServiceState.STARTING,
+            stage = "环境已安装，健康状态待检查",
+            download = RuntimeDownloadProgress("old", "测试源", 1024, 1024, 64),
+            phasePercent = 100,
+            timing = OperationTiming(now - 90_000, now - 90_000),
+        )
+        val text = operationProgress(snapshot, now, now)!!
+        assertEquals(OperationStage.START, text.stage)
+        assertEquals("正在启动", text.statusText)
+        assertEquals("正在启动助手", text.stageText)
+        assertEquals(OperationProgressMode.INDETERMINATE, text.mode)
+        assertNull(text.percent)
+        assertNull(text.remainingText)
+        listOf(text.stageText, text.detail, text.quietWarning.orEmpty()).forEach { copy ->
+            assertFalse(listOf("下载", "解压", "安装", "网络").any { it in copy })
+        }
+        assertFalse(text.canCancel)
+    }
+
+    @Test fun `健康检查优先于已安装说明并保持不定进度`() {
+        listOf(
+            Snapshot(environment = EnvironmentState.READY, health = HealthState.CHECKING),
+            Snapshot(environment = EnvironmentState.CHECKING),
+        ).forEach { base ->
+            val text = operationProgress(base.copy(stage = "环境已安装，健康状态待检查",
+                timing = OperationTiming(now - 90_000, now - 90_000)), now, now)!!
+            assertEquals(OperationStage.CHECK, text.stage)
+            assertEquals("正在检查", text.statusText)
+            assertEquals("正在检查运行环境", text.detail)
+            assertNull(text.percent)
+            assertFalse(text.quietWarning.orEmpty().contains("网络"))
+        }
+        assertEquals(OperationStage.PREPARE,
+            operationStage("准备运行环境", EnvironmentState.READY, UpdateState.UNCHECKED))
+    }
+
     @Test fun `有可信总量时显示当前阶段真实百分比和剩余时间`() {
         val snapshot = Snapshot(
             environment = EnvironmentState.DOWNLOADING,
@@ -67,7 +106,7 @@ class OperationProgressPresentationTest {
         assertEquals(OperationStage.INSTALL, text.stage)
     }
 
-    @Test fun `未知总量只用不定进度和正在准备`() {
+    @Test fun `未知总量只用不定进度并显示真实动作`() {
         val snapshot = Snapshot(
             environment = EnvironmentState.DOWNLOADING,
             stage = "下载 DSH 依赖",
@@ -78,7 +117,7 @@ class OperationProgressPresentationTest {
         assertEquals(OperationProgressMode.INDETERMINATE, text.mode)
         assertNull(text.fraction)
         assertNull(text.percent)
-        assertEquals("正在准备", text.statusText)
+        assertEquals("正在下载", text.statusText)
         assertEquals("预计还需要几分钟", text.remainingText)
     }
 

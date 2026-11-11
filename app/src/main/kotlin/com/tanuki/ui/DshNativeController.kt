@@ -152,7 +152,7 @@ class DshNativeController(
                 val targetSession = target?.let { id ->
                     sessions.firstOrNull { it.id == id } ?: DshSession(
                         id = id,
-                        title = createdTitle ?: "通知会话 ${id.take(8)}",
+                        title = createdTitle ?: "通知中的对话",
                         updatedAt = 0L,
                         running = false,
                         blank = false,
@@ -197,7 +197,7 @@ class DshNativeController(
     fun createSession() {
         val create = createRemote
         if (create == null) {
-            _state.update { it.copy(actionError = "当前无法新建会话，请检查 DSH 是否在运行") }
+            _state.update { it.copy(actionError = "当前无法新建对话，请检查助手是否在运行") }
             return
         }
         if (_state.value.creating) return
@@ -206,7 +206,7 @@ class DshNativeController(
             create().fold(
                 onSuccess = { id ->
                     pendingSelection = id
-                    pendingCreatedTitle = "新会话"
+                    pendingCreatedTitle = "新对话"
                     refresh()
                     pageJob?.join()
                     // 列表读取失败时仍如实说“已创建”，不能声称已经进入。
@@ -214,14 +214,14 @@ class DshNativeController(
                     _state.update {
                         it.copy(
                             creating = false,
-                            notice = if (entered) "已创建并进入新会话" else "已创建会话",
+                            notice = if (entered) "已创建并进入新对话" else "已创建对话",
                         )
                     }
                     sessionSync?.publish(this@DshNativeController)
                 },
                 onFailure = { error ->
                     _state.update {
-                        it.copy(creating = false, actionError = "新建会话失败：${messageOf(error)}")
+                        it.copy(creating = false, actionError = "新建对话失败：${messageOf(error)}")
                     }
                 }
             )
@@ -230,17 +230,17 @@ class DshNativeController(
 
     /** 重命名复用官方接口；失败保留原标题，切换会话后不再发布旧请求结果。 */
     suspend fun renameSession(sessionId: String, title: String): Result<Unit> {
-        val rename = renameRemote ?: return Result.failure(IOException("当前无法重命名会话"))
+        val rename = renameRemote ?: return Result.failure(IOException("当前无法重命名对话"))
         val clean = title.trim()
         if (clean.isEmpty() || clean.length > 200 || clean.any { it.code < 0x20 || it.code == 0x7f }) {
             return Result.failure(IllegalArgumentException("标题不能为空、不能超过 200 字或包含控制字符"))
         }
-        if (_state.value.selectedId != sessionId) return Result.failure(IOException("会话已切换，请重新打开标题"))
+        if (_state.value.selectedId != sessionId) return Result.failure(IOException("对话已切换，请重新打开标题"))
         val token = generation
         return rename(sessionId, clean).fold(
             onSuccess = { officialTitle ->
                 if (token != generation) {
-                    Result.failure(IOException("会话已切换，请刷新查看标题"))
+                    Result.failure(IOException("对话已切换，请刷新查看标题"))
                 } else {
                     _state.update { state ->
                         state.copy(sessions = state.sessions.map { session ->
@@ -399,12 +399,12 @@ class DshNativeController(
         _state.update { it.copy(stopping = true, actionError = null, notice = null) }
         val ok = client.cancel(sessionId).fold(
             onSuccess = {
-                _state.update { it.copy(stopping = false, notice = "已请求停止当前回合") }
+                _state.update { it.copy(stopping = false, notice = "正在结束本次回复") }
                 scope.launch {
                     delay(4_000)
                     _state.update { state ->
                         if (state.running && state.selectedId == sessionId) {
-                            state.copy(notice = "停止请求已发送；若仍在运行可再次点击")
+                            state.copy(notice = "本次回复仍在收尾，可再次点击停止")
                         } else state
                     }
                 }

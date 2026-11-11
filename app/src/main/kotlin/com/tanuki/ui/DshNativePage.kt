@@ -173,8 +173,8 @@ fun DshNativePage(
         drawerState = drawer,
         drawerContent = {
             ModalDrawerSheet(drawerContainerColor = Color(TanukiDesign.tokens.colors.surface)) {
-                Text("会话", Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = controller::refresh, enabled = !state.loading) { Text("刷新会话") }
+                Text("对话", Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = controller::refresh, enabled = !state.loading) { Text("刷新对话") }
                 TextButton(onClick = onSwitchOfficial) { Text("打开官方界面") }
                 LazyColumn {
                     items(state.sessions, key = { it.id }) { session ->
@@ -213,8 +213,8 @@ fun DshNativePage(
             if (state.sessions.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(top = 8.dp)) {
                     EmptyNativeState(
-                        title = "官方 DSH 尚无会话",
-                        detail = "可以直接新建一个会话，也可以到官方界面创建。原生页不另建会话库。",
+                        title = "还没有对话",
+                        detail = "新建一个对话，开始与助手交流。",
                         onRefresh = controller::refresh,
                         onCreate = if (controller.canCreateSession) controller::createSession else null,
                     )
@@ -296,13 +296,13 @@ fun DshNativePage(
     renameTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { if (!renameBusy) renameTarget = null },
-            title = { Text("重命名会话") },
+            title = { Text("重命名对话") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = renameTitle,
                         onValueChange = { renameTitle = it.take(200); renameError = null },
-                        label = { Text("会话名称") },
+                        label = { Text("对话名称") },
                         singleLine = true,
                         enabled = !renameBusy,
                         isError = renameError != null,
@@ -362,11 +362,11 @@ private fun Header(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Surface(shape = CircleShape, color = Color(colors.surface), border = BorderStroke(1.dp, Color(colors.outline))) {
-            IconButton(onClick = onDrawer, modifier = Modifier.semantics { contentDescription = "打开会话抽屉" }) { Text("☰", color = Color(colors.textPrimary), fontSize = 20.sp) }
+            IconButton(onClick = onDrawer, modifier = Modifier.semantics { contentDescription = "打开对话列表" }) { Text("☰", color = Color(colors.textPrimary), fontSize = 20.sp) }
         }
         Surface(
             modifier = Modifier.weight(1f).heightIn(min = 48.dp)
-                .clickable(enabled = canRename, onClickLabel = "重命名会话", onClick = onRename),
+                .clickable(enabled = canRename, onClickLabel = "重命名对话", onClick = onRename),
             shape = RoundedCornerShape(24.dp), color = Color(colors.surface),
             border = BorderStroke(1.dp, Color(colors.outline)), shadowElevation = 1.dp
         ) {
@@ -376,8 +376,7 @@ private fun Header(
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.size(5.dp).background(Color(colors.accent), CircleShape))
-                    // 当前会话摘要没有工作目录字段，不从其他回合的命令猜测目录。
-                    Text("$activity · 目录未提供", fontSize = 11.sp, color = Color(colors.textSecondary),
+                    Text("$activity · ${state.selectedSession?.displayWorkspace ?: "工作区"}", fontSize = 11.sp, color = Color(colors.textSecondary),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -385,7 +384,7 @@ private fun Header(
         Surface(shape = CircleShape, color = Color(colors.surface), border = BorderStroke(1.dp, Color(colors.outline))) {
             IconButton(onClick = onCreate, enabled = canCreate && !state.loading && !state.creating) {
                 if (state.creating) CircularProgressIndicator(Modifier.size(18.dp), color = Color(colors.primary), strokeWidth = 2.dp)
-                else Icon(Icons.Default.Add, "新建会话", tint = Color(colors.textPrimary))
+                else Icon(Icons.Default.Add, "新建对话", tint = Color(colors.textPrimary))
             }
         }
     }
@@ -595,7 +594,7 @@ private fun MessageList(
                 item(key = "empty", contentType = "empty") {
                     EmptyNativeState(
                         title = "开始对话",
-                        detail = "这个会话还没有消息，在下面输入就能开始"
+                        detail = "这个对话还没有消息，在下面输入就能开始"
                     )
                 }
             }
@@ -727,7 +726,7 @@ private fun HistoryTopRow(state: DshNativeState, onLoadOlder: () -> Unit) {
             } else if (state.hasMore) {
                 TextButton(onClick = onLoadOlder) { Text("加载更早历史") }
             } else {
-                NativeCaption("已到会话最早一条")
+                NativeCaption("已到对话最早一条")
             }
         }
         state.olderError?.let { NativeCaption("更早历史加载失败：$it") }
@@ -767,7 +766,7 @@ private fun MessageCard(message: DshMessage, modifier: Modifier = Modifier) {
                 // 原生消息没有回合统计；小字可换行，避免窄屏把操作挤出屏幕。
                 TextButton(onClick = { details = true }, modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(horizontal = 2.dp)) {
-                    Text("耗时 / 步骤 / tokens 未提供 ›", fontSize = 11.sp, color = Color(colors.textSecondary))
+                    Text("耗时与用量暂无数据 ›", fontSize = 11.sp, color = Color(colors.textSecondary))
                 }
             }
         } else {
@@ -784,7 +783,7 @@ private fun MessageCard(message: DshMessage, modifier: Modifier = Modifier) {
     }
     if (details) AlertDialog(
         onDismissRequest = { details = false }, title = { Text("消息详情") },
-        text = { Text("消息时间：${timeLabel(message.time)}\n当前协议投影未提供回合耗时、步骤数和 token 用量。") },
+        text = { Text("消息时间：${timeLabel(message.time)}\n本次回复的耗时、步骤数与用量暂无数据。") },
         confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } }
     )
 }
@@ -923,7 +922,7 @@ private fun EmptyNativeState(
             NativeCaption(detail)
             onCreate?.let { create ->
                 TanukiPillButton(
-                    text = "＋ 新建会话",
+                    text = "＋ 新建对话",
                     onClick = create,
                     tone = TanukiPillButtonTone.Filled,
                 )
