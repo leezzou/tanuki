@@ -30,6 +30,8 @@ class TanukiApp : Application() {
     val chatNotifications by lazy {
         com.tanuki.notify.ChatNotificationCenter(this) { runtime.state.value.dsh }
     }
+    /** 聊天页与会话管理器共享的会话列表失效广播；只传变更信号，不复制会话数据。 */
+    val dshSessions by lazy { com.tanuki.ui.DshSessionSync() }
     var browserController: com.tanuki.browser.AgentBrowserController? = null
         private set
     fun acquireBrowser(): com.tanuki.browser.AgentBrowserController {

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +45,11 @@ import com.tanuki.storage.TextFileReader
 import com.tanuki.storage.WorkspaceFileManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 /** 文件在独立阅读页展示，分段读取避免将整个大文本放进内存。 */
@@ -64,6 +69,10 @@ internal fun WorkspaceFileViewer(
     onFullscreen: (Boolean) -> Unit = {},
     previewMaxDimension: Int = PdfRenderPolicy.MAX_DIMENSION,
     previewMaxPixels: Int = PdfRenderPolicy.MAX_PIXELS,
+    /** 首次组合（含进程重建）使用的阅读位置；Activity 重建优先由 rememberSaveable 覆盖。 */
+    initialReaderState: ReaderViewState = ReaderViewState(),
+    /** 编码、滚动偏移或行号开关变化时回调；由页面合并后写入偏好存储。 */
+    onReaderStateChange: (ReaderViewState) -> Unit = {},
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -206,6 +215,8 @@ internal fun WorkspaceFileViewer(
                         copiedPath = true
                     },
                     pathCopied = copiedPath,
+                    initialReaderState = initialReaderState,
+                    onReaderStateChange = onReaderStateChange,
                     onExport = onExport,
                     exportEnabled = !opening && !loading && info != null,
                     onCopyToWorkspace = onCopyToWorkspace,
@@ -307,11 +318,13 @@ private fun TextViewerContent(
     onOpenWith: () -> Unit,
     onCopyPath: () -> Unit,
     pathCopied: Boolean,
+    initialReaderState: ReaderViewState,
+    onReaderStateChange: (ReaderViewState) -> Unit,
     onExport: () -> Unit,
     exportEnabled: Boolean,
     onCopyToWorkspace: (() -> Unit)?,
 ) {
-    var requestedEncoding by rememberSaveable(document.key) { mutableStateOf("自动") }
+    var requestedEncoding by rememberSaveable(document.key) { mutableStateOf(initialReaderState.encoding) }
     // 自动识别只在第一段做一次，后续分段沿用同一编码，避免从文件中部重新猜测。
     var resolvedAutoEncoding by remember(document.key, requestedEncoding) { mutableStateOf<String?>(null) }
     var encodingHintDismissed by rememberSaveable(document.key, requestedEncoding) { mutableStateOf(false) }
@@ -327,10 +340,15 @@ private fun TextViewerContent(
     var matchIndex by remember { mutableIntStateOf(0) }
     var fontSize by rememberSaveable { mutableIntStateOf(16) }
     var wrap by rememberSaveable { mutableStateOf(true) }
-    var showLineNumbers by rememberSaveable { mutableStateOf(true) }
+    var showLineNumbers by rememberSaveable(document.key) { mutableStateOf(initialReaderState.showLineNumbers) }
     var encodingMenu by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
-    val vertical = rememberScrollState()
+    // 用户主动换编码/翻页时回到顶部；配置重建和进程恢复不重置已保存的位置。
+    var resetScroll by remember(document.key) { mutableStateOf(false) }
+    // 正文加载前滚动区最大值为 0，rememberScrollState 的初始值可能被夹到 0；
+    // 文本布局完成后再显式恢复到持久化偏移。
+    var pendingRestore by remember(document.key) { mutableIntStateOf(initialReaderState.scrollOffset) }
+    val vertical = rememberScrollState(initial = initialReaderState.scrollOffset)
     val horizontal = rememberScrollState()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     LaunchedEffect(document.key, requestedEncoding, pageIndex) {
@@ -349,12 +367,43 @@ private fun TextViewerContent(
             if (requestedEncoding == "自动" && pageIndex == 0 && !binaryPage) {
                 resolvedAutoEncoding = result.encoding
             }
-            matchIndex = 0; vertical.scrollTo(0); horizontal.scrollTo(0)
+            matchIndex = 0
+            if (resetScroll) {
+                vertical.scrollTo(0); horizontal.scrollTo(0)
+                pendingRestore = 0
+                resetScroll = false
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             error = e.message?.takeIf { it.any { char -> char in '\u4e00'..'\u9fff' } }
                 ?: "无法读取此文本分段，请重试或使用其他应用打开。"
         } finally { loading = false }
+    }
+    LaunchedEffect(page, layout) {
+        val target = pendingRestore
+        if (target <= 0 || page == null || layout == null) return@LaunchedEffect
+        val max = withTimeoutOrNull(1_500) {
+            snapshotFlow { vertical.maxValue }.first { it > 0 }
+        } ?: return@LaunchedEffect
+        vertical.scrollTo(target.coerceAtMost(max))
+        pendingRestore = 0
+    }
+    // 滚动状态放在非组合读取的槽里：离开页面时立即补一次，滚动过程中不触发重组。
+    val latestReaderState = remember(document.key) {
+        mutableStateOf(ReaderViewState(requestedEncoding, initialReaderState.scrollOffset, showLineNumbers))
+    }
+    val stateCallback by rememberUpdatedState(onReaderStateChange)
+    LaunchedEffect(document.key) {
+        snapshotFlow { ReaderViewState(requestedEncoding, vertical.value, showLineNumbers) }
+            .distinctUntilChanged()
+            .collectLatest { value ->
+                latestReaderState.value = value
+                delay(250)
+                stateCallback(value)
+            }
+    }
+    DisposableEffect(document.key) {
+        onDispose { stateCallback(latestReaderState.value) }
     }
     val binary = page?.let { it.binary || it.encoding == TextFileReader.BINARY_ENCODING } == true
     if (binary) {
@@ -554,10 +603,11 @@ private fun TextViewerContent(
                 status = status,
                 showPager = true,
                 previousEnabled = pageIndex > 0 && !loading,
-                onPrevious = { pageIndex-- },
+                onPrevious = { resetScroll = true; pageIndex-- },
                 nextEnabled = hasNext && !loading,
                 nextLabel = if (truncated) "已截断" else "下一段",
                 onNext = {
+                    resetScroll = true
                     page?.let { current ->
                         offsets = offsets.take(pageIndex + 1) + current.nextOffset
                         lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)
@@ -604,6 +654,7 @@ private fun TextViewerContent(
                             text = { Text(encodingLabel(encoding) + if (encoding == requestedEncoding) " ✓" else "") },
                             onClick = {
                                 requestedEncoding = encoding
+                                resetScroll = true
                                 encodingMenu = false
                                 encodingHintDismissed = false
                             },
@@ -640,8 +691,9 @@ private fun TextViewerContent(
             color = MaterialTheme.colorScheme.error,
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = { pageIndex-- }, enabled = pageIndex > 0 && !loading) { Text("上一段") }
+            TextButton(onClick = { resetScroll = true; pageIndex-- }, enabled = pageIndex > 0 && !loading) { Text("上一段") }
             TextButton(onClick = {
+                resetScroll = true
                 page?.let { current ->
                     offsets = offsets.take(pageIndex + 1) + current.nextOffset
                     lineStarts = lineStarts.take(pageIndex + 1) + TextPageLayout.nextStartLine(startLine, current.text)

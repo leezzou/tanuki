@@ -40,7 +40,8 @@ class DshSessionManagerActivity : ComponentActivity() {
             ),
             readStore = DshPreferencesReadStore(this),
             pinStore = DshPreferencesPinStore(this),
-            scope = lifecycleScope
+            scope = lifecycleScope,
+            sessionSync = (application as TanukiApp).dshSessions
         )
     }
 

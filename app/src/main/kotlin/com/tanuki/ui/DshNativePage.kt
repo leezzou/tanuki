@@ -24,11 +24,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -59,6 +62,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tanuki.ui.design.TanukiPillButton
+import com.tanuki.ui.design.TanukiPillButtonTone
 import com.tanuki.web.DshApprovalOutcome
 import com.tanuki.web.DshRememberedChoice
 import com.tanuki.web.DshMessage
@@ -146,7 +151,9 @@ fun DshNativePage(
             onRefresh = controller::refresh,
             onSwitchOfficial = onSwitchOfficial,
             canRename = controller.canRenameSession,
-            onRename = { renameTarget = state.selectedSession }
+            onRename = { renameTarget = state.selectedSession },
+            canCreate = controller.canCreateSession,
+            onCreate = controller::createSession,
         )
         state.error?.let { ErrorBanner("原生界面读取失败", it) }
         state.actionError?.let { ErrorBanner("操作未完成", it) }
@@ -162,8 +169,9 @@ fun DshNativePage(
             Box(Modifier.fillMaxSize().padding(top = 8.dp)) {
                 EmptyNativeState(
                     title = "官方 DSH 尚无会话",
-                    detail = "在官方界面创建任务后，这里会显示官方会话。原生页不另建会话库。",
-                    onRefresh = controller::refresh
+                    detail = "可以直接新建一个会话，也可以到官方界面创建。原生页不另建会话库。",
+                    onRefresh = controller::refresh,
+                    onCreate = if (controller.canCreateSession) controller::createSession else null,
                 )
             }
             return@Column
@@ -295,7 +303,9 @@ private fun Header(
     onRefresh: () -> Unit,
     onSwitchOfficial: () -> Unit,
     canRename: Boolean,
-    onRename: () -> Unit
+    onRename: () -> Unit,
+    canCreate: Boolean,
+    onCreate: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
@@ -331,6 +341,20 @@ private fun Header(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (canCreate) {
+            // 顶部直接入口：一次点击就调用官方创建并进入新会话，不再经过设置多级菜单。
+            TextButton(onClick = onCreate, enabled = !state.loading && !state.creating) {
+                if (state.creating) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.size(6.dp))
+                    Text("新建中…")
+                } else {
+                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(4.dp))
+                    Text("新建会话")
+                }
+            }
         }
         IconButton(onClick = onRefresh, enabled = !state.loading) {
             TanukiIcon(TanukiGlyph.Refresh, "刷新官方会话")
@@ -853,7 +877,12 @@ private fun NoticeBanner(text: String) {
 }
 
 @Composable
-private fun EmptyNativeState(title: String, detail: String, onRefresh: (() -> Unit)? = null) {
+private fun EmptyNativeState(
+    title: String,
+    detail: String,
+    onRefresh: (() -> Unit)? = null,
+    onCreate: (() -> Unit)? = null,
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = RoundedCornerShape(20.dp),
@@ -862,6 +891,13 @@ private fun EmptyNativeState(title: String, detail: String, onRefresh: (() -> Un
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             NativeCaption(detail)
+            onCreate?.let { create ->
+                TanukiPillButton(
+                    text = "＋ 新建会话",
+                    onClick = create,
+                    tone = TanukiPillButtonTone.Filled,
+                )
+            }
             onRefresh?.let { refresh -> TextButton(onClick = refresh) { Text("刷新") } }
         }
     }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
@@ -46,6 +47,8 @@ data class DshNativeState(
     /** 会话列表都读不到时置位；界面据此回退官方页面。 */
     val unavailableReason: String? = null,
     val sending: Boolean = false,
+    /** 一键新建会话正在进行；页面据此禁用重复点击并显示进度。 */
+    val creating: Boolean = false,
     val stopping: Boolean = false,
     val running: Boolean = false,
     val live: Boolean = false,
@@ -85,7 +88,11 @@ data class DshFailedPrompt(
 class DshNativeController(
     private val client: DshChatSource,
     private val scope: CoroutineScope,
-    private val renameRemote: (suspend (String, String) -> Result<String>)? = null
+    private val renameRemote: (suspend (String, String) -> Result<String>)? = null,
+    /** 官方 session/create；为空时页面不显示无法兑现的新建入口。 */
+    private val createRemote: (suspend () -> Result<String>)? = null,
+    /** 与原生会话管理器共享的列表失效广播；任一侧变更后另一侧自动回到官方列表。 */
+    private val sessionSync: DshSessionSync? = null
 ) {
     private val _state = MutableStateFlow(DshNativeState())
     val state: StateFlow<DshNativeState> = _state.asStateFlow()
@@ -103,24 +110,47 @@ class DshNativeController(
     private var viewportTopSeq: Int? = null
     /** 本次实时连接是否已经收到过 Connected；用于区分首连与断线重连。 */
     private var liveConnected = false
+    /** 新建后等待官方列表返回的临时标题；只在目标尚未出现在列表时使用。 */
+    private var pendingCreatedTitle: String? = null
+    /** 页面关闭后不再响应外部的会话变更，避免停止服务后重新拉起读取。 */
+    private var acceptExternalChanges = false
+    private var listSyncJob: Job? = null
+
+    init {
+        sessionSync?.let { sync ->
+            scope.launch {
+                // 跳过初始版本，只响应另一侧的显式变更。
+                sync.changes.drop(1).collect { change ->
+                    if (change.origin !== this@DshNativeController && acceptExternalChanges) syncSessionList()
+                }
+            }
+        }
+    }
+
+    /** 有官方写入通道时才展示新建入口，不能用本地占位会话伪造创建。 */
+    val canCreateSession: Boolean get() = createRemote != null
 
     fun refresh() {
+        acceptExternalChanges = true
         val token = ++generation
         val target = pendingSelection
+        listSyncJob?.cancel()
         pageJob?.cancel()
         liveJob?.cancel()
         resetStreaming()
         viewportTopSeq = null
         liveConnected = false
-        _state.value = DshNativeState(loading = true)
+        _state.value = DshNativeState(loading = true, creating = _state.value.creating)
         pageJob = scope.launch {
             val result = client.sessions()
             if (token != generation) return@launch
             result.onSuccess { sessions ->
+                val createdTitle = pendingCreatedTitle
+                pendingCreatedTitle = null
                 val targetSession = target?.let { id ->
                     sessions.firstOrNull { it.id == id } ?: DshSession(
                         id = id,
-                        title = "通知会话 ${id.take(8)}",
+                        title = createdTitle ?: "通知会话 ${id.take(8)}",
                         updatedAt = 0L,
                         running = false,
                         blank = false,
@@ -155,6 +185,47 @@ class DshNativeController(
 
     val canRenameSession: Boolean get() = renameRemote != null
 
+    /**
+     * 一键新建会话并立即选中。
+     *
+     * 先调用官方 `session/create`，成功后重新读取 `session/list`；列表暂时还没
+     * 返回新会话时用明确的“新会话”标题补位，避免出现字面 null 或旧列表。成功后
+     * 广播失效，原生会话管理器会同步刷新。
+     */
+    fun createSession() {
+        val create = createRemote
+        if (create == null) {
+            _state.update { it.copy(actionError = "当前无法新建会话，请检查 DSH 是否在运行") }
+            return
+        }
+        if (_state.value.creating) return
+        _state.update { it.copy(creating = true, actionError = null, notice = null) }
+        scope.launch {
+            create().fold(
+                onSuccess = { id ->
+                    pendingSelection = id
+                    pendingCreatedTitle = "新会话"
+                    refresh()
+                    pageJob?.join()
+                    // 列表读取失败时仍如实说“已创建”，不能声称已经进入。
+                    val entered = _state.value.selectedId == id
+                    _state.update {
+                        it.copy(
+                            creating = false,
+                            notice = if (entered) "已创建并进入新会话" else "已创建会话",
+                        )
+                    }
+                    sessionSync?.publish(this@DshNativeController)
+                },
+                onFailure = { error ->
+                    _state.update {
+                        it.copy(creating = false, actionError = "新建会话失败：${messageOf(error)}")
+                    }
+                }
+            )
+        }
+    }
+
     /** 重命名复用官方接口；失败保留原标题，切换会话后不再发布旧请求结果。 */
     suspend fun renameSession(sessionId: String, title: String): Result<Unit> {
         val rename = renameRemote ?: return Result.failure(IOException("当前无法重命名会话"))
@@ -174,6 +245,8 @@ class DshNativeController(
                             if (session.id == sessionId) session.copy(title = officialTitle) else session
                         })
                     }
+                    // 原生会话管理器与本页共用官方列表；重命名后也要让它自动失效。
+                    sessionSync?.publish(this@DshNativeController)
                     Result.success(Unit)
                 }
             },
@@ -344,6 +417,7 @@ class DshNativeController(
     }
 
     fun clear() {
+        acceptExternalChanges = false
         generation++
         pageJob?.cancel()
         liveJob?.cancel()
@@ -360,7 +434,35 @@ class DshNativeController(
 
     /** 服务停止或页面销毁时丢弃内存 Cookie 与实时 socket；仅切换界面不重启服务。 */
     fun close() {
+        acceptExternalChanges = false
+        listSyncJob?.cancel()
         clear()
+    }
+
+    /**
+     * 外部创建/重命名/归档后只更新会话条，不取消当前实时流或清空消息。
+     *
+     * 选中会话仍在列表中时保留原位；被归档时切到列表第一项并正常加载历史。
+     */
+    private fun syncSessionList() {
+        val token = generation
+        listSyncJob?.cancel()
+        listSyncJob = scope.launch {
+            client.sessions().onSuccess { sessions ->
+                if (token != generation) return@onSuccess
+                val selected = _state.value.selectedId
+                if (sessions.isEmpty()) {
+                    if (selected != null) _state.value = DshNativeState(sessions = emptyList())
+                } else if (selected == null || sessions.none { it.id == selected }) {
+                    // 原选中会话被归档或此前没有选中项时，切到官方列表第一项。
+                    _state.update { it.copy(sessions = sessions) }
+                    select(sessions.first().id)
+                } else {
+                    // 保留消息、正在进行的回复和错误提示，只替换会话列表。
+                    _state.update { it.copy(sessions = sessions) }
+                }
+            }
+        }
     }
 
     private fun startLive(sessionId: String, token: Int) {
