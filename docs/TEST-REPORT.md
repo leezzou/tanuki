@@ -2,20 +2,15 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
-## 动效 C 批弹层与抽屉（2026-11-11，android_agent-91，Host）
+## 动效 D 批列表变化（2026-11-11，android_agent-92，Host）
 
-- 起始远端 main/HEAD 实核 `37358849742b2ad3e2b24bc539395ec20801f413`，分支 `ao/motion/batch-c`。自绘 sheet/抽屉打开 280ms enter、关闭 240ms exit，遮罩 160ms standard，均单一所有者；系统 sheet/对话框/下拉菜单保留平台动画。审批、权限、传输/全局进度、会话详情/主机选择、错误详情和浏览器菜单关闭后保留最后展示模型至退出完成。DshNativePage、DshComposerBar、共享状态/印章无修改。
-- JDK17/SDK36，`source scripts/ao-worktree-env.sh` 后使用 `--console=plain --max-workers=2 --offline -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime`，执行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`；完整六个过滤表达式与命令见 [C 批交接](handoffs/20261111-1900-motion-batch-c.md)。阶段完整执行 BUILD SUCCESSFUL（5m07s）；最后遮罩/交互边界修改后的源码绑定复验 **BUILD SUCCESSFUL（7m17s）/ 退出 0**，产品/Android 测试源码 compile、定向 JVM 与 lint 全部通过。
-- XML 实核 **115 项 / 11 类 / 0 failures / 0 errors / 0 skipped**：新动效 6、工厂 5、审批 51、会话控制器 37、传输展示 5、失败恢复 11。覆盖真实动画 spec 时长/曲线采样、reduced 在 0ns 已终态、快照关闭保留/结束清理与快速重开、遮罩单次 alpha 及系统窗口无外层动画、抽屉释放目标；返回优先另有结构断言。
-- 首轮交付 lint **0 errors / 105 warnings / 2 hints**。尝试使用 Material MotionScheme 时曾因其为 Kotlin internal 编译失败（1m06s），已移除尝试，新增自绘 TanukiDrawer 并复用 Material 表面；不反射、不绕过依赖可见性。其余构建提示含既有弃用/API、SDK XML 与 analytics 目录不可写。
-- 未执行完整 JVM、Android 仪器、设备安装/Compose 实际挂载与快速打断、拖拽/RTL/返回焦点、系统移除动画开关、IME/TalkBack/大字体/深浅色或帧率、真实 PRoot/模型链路；Android 测试源码 compile 不等于设备 QA，跳过原生构建的产物不得安装或发布。独立最新 SHA 审查与 Android QA 待安排，API Key/真实模型/真机暂停项保留。
+- 起始远端 main / HEAD 实核 `37358849742b2ad3e2b24bc539395ec20801f413`，分支 `ao/motion/batch-d`。会话按 id、文件列表/网格按 path 接入 S-list；排序/增删/归档保持数据集身份，搜索/筛选/目录与主机切换重建行动画宿主并保留外部滚动状态。聊天仅新提交行 alpha，历史 placement 永远为 null，锚定与滚动逻辑未改。
+- 第一轮实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest`；七个 `--tests` 为 `com.tanuki.ui.TanukiListMotionTest`、`com.tanuki.ui.DshMessageMotionTest`、`com.tanuki.ui.design.TanukiMotionSpecsTest`、`com.tanuki.FileListPresentationTest`、`com.tanuki.DshChatWindowTest`、`com.tanuki.DshChatFollowStateTest`、`com.tanuki.DshChatRenderTest`。**BUILD SUCCESSFUL（4m1s）/ 退出 0**；XML 实核 **7 类71项（5/7/5/8/18/5/23），0 failures / 0 errors / 0 skipped**。
+- 新增13项覆盖实际文件排序、会话置顶与归档、240ms placement/160ms fade 时间采样、搜索异步提交及清空、目录/来源/隐藏筛选身份、首屏/加载/分页头插/窗口释放、工具组成员更新、占位/流式落盘替换，以及 reduced 全 null。补强一项验证正式消息先到、占位信号后清除时，不会反复补记抑制而漏掉后续新消息入场。宿主时间采样不代表 Android 实际帧行为。
+- 最终用相同配置、前三个任务与七类过滤，再追加 `--tests 'com.tanuki.DshNativePagingTest' :app:lintModernDebug` 完整重跑：**BUILD SUCCESSFUL（7m35s）/ 退出0**，产品/AndroidTest/JVM源码 compile 通过；XML实核 **8类88项（5/8/5/8/18/5/23/16），0 failures / 0 errors / 0 skipped**。lint **0 errors / 105 warnings / 2 hints**，公共策略与新增测试无告警。此前独立 lint 一轮亦成功（5m2s），不以首轮71项替代最终88项。
+- 编排者已批准并完成工具组的单点扩展：DshToolGroupCard 只增加默认 Modifier 参数并传给原根 Surface，历史/实时段复用同一新增行 alpha 策略，不改结构/展开/内容。初版接线后同套88项通过（5m55s），lint新增1条ModifierParameter警告；将Modifier移至第一个可选参数并同步调用点后，以上文完整八类命令最终重跑 **BUILD SUCCESSFUL（3m34s）/退出0**，产品/AndroidTest/JVM源码compile通过，**8类88项、0失败/错误/跳过**，lint **0 errors/105 warnings/2 hints**，新增警告消失。前述71项和7m35s结果只作为阶段证据。本地未执行完整 JVM、Android 仪器、设备安装/操作、实际 Compose 列表挂载/快速打断或帧率；未生成设备/发布 APK，跳过原生运行时的 Host 编译不作为可安装验收包。API Key/真实模型/真机暂停项保留。完整范围和后续见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
 
-### PR #98 P1 关闭取消修复
-
-- 从 PR 旧 head `89418428d7bbfac52bbb9d1471baf8a6d0aa86ef` 继续；旧 head 四项 CI 已全部通过。Material 拖拽柄不在内容 Column 内，可能取消 hide 并跳过清理；现将退出屏障覆盖整个 Surface，禁用系统手势、返回和遮罩点击。打开/关闭代次与 finally 清理防止取消后窗口残留，同时保护快速重开及重开后再次关闭的新代次；系统关闭回调也核对代次。
-- 新增 `TanukiOverlayExitTest` 的 4 项实际协程取消回归。产品/Android 测试源码编译及首轮 15 项定向 JVM 通过（1m45s）；扩大验证 **BUILD SUCCESSFUL（4m24s）**，XML 实核 **119 项 / 12 类 / 0 failures / 0 errors / 0 skipped**。完整命令见本批交接。Android 测试中间断言补完后的 compile/lint 复核 **BUILD SUCCESSFUL（2m19s）**，产品与 JVM 源码未再变化。
-- 最终 lint **0 errors / 116 warnings / 2 hints**；相较原离线报告增加的告警集中在构建工具/依赖更新提示（包括与产品同版的测试 BOM），新生命周期和回归源码无 lint 告警，不升级产品依赖、不抑制检查。首次新增测试依赖因 AndroidTest 未继承 BOM 解析失败（56s），补同版 BOM 后编译通过；扩大验证首次离线 lint 因四个 runtime 测试依赖未缓存失败（9s），联网补齐后通过。
-- 新增 `TanukiModalSheetInteractionTest` 两项真正挂载 Material 窗口的 Android 回归：退出中按住默认系统柄，检查正常退出未被打断、内容卸载与下层物理点击恢复；快速重开后旧清理不卸载新内容，且能再次关闭。使用独立 debug 测试 Activity、可控正常动画时钟与系统触摸注入；不启动 MainActivity/DSH，不改系统动画设置。**目前仅编译验证，未在 Android 执行**；独立 QA 已向编排请求，其他设备边界仍保留未验证。
+- PR #100 CI跟进：首轮head `e2b6417` 的两个Host checks成功；pull_request Android合并候选编译失败，WorkspaceFilesPage重复import TanukiDesign。最新main=`fde9e396c6e2d43bf8f63d03d982c850e9369562` 在文件顶部新增了同一import，与本批另一位置的新增被同时保留。本批移除自己的import、单次工厂访问改限定名；以373基线/fde9/main与修正本分支三方文本合并预检通过，结果恰好1条import。首轮push事件Android build/JVM/lint亦成功，失败仅在pull_request合并候选。修复后同套完整命令 **BUILD SUCCESSFUL（2m47s）/退出0**：产品/测试源码compile、**8类88项（0失败/错误/跳过）**，lint **0 errors/105 warnings/2 hints**。新head合并候选CI以PR Checks为准，不把文本合并或旧head通过当作新head CI通过。
 
 ## 动效 B 批页面转场（2026-11-11，android_agent-90，Host）
 

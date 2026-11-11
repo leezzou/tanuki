@@ -109,6 +109,22 @@ class FileTransferPresentationTest {
         assertNull(FileTransferPresentation.summary(emptyList()))
     }
 
+    @Test fun motionIdentityChangesOnlyWithTaskOrStageAndFractionKeepsBytePrecision() {
+        val start = transfer(received = 1, total = 1000)
+        val next = start.copy(received = 2, timing = OperationTiming(1_000, 2_000))
+        assertEquals(FileTransferPresentation.motionIdentity(listOf(start)),
+            FileTransferPresentation.motionIdentity(listOf(next)))
+        assertFalse(FileTransferPresentation.motionIdentity(listOf(start)) ==
+            FileTransferPresentation.motionIdentity(listOf(start.copy(id = 2))))
+        assertFalse(FileTransferPresentation.motionIdentity(listOf(start)) ==
+            FileTransferPresentation.motionIdentity(listOf(start.copy(label = "校验文件"))))
+        assertEquals(0.001f, FileTransferPresentation.fraction(1, 1000)!!, 0.000001f)
+        assertNull(FileTransferPresentation.fraction(10, -1))
+        assertNull(FileTransferPresentation.fraction(10, 0))
+        assertEquals(1f, FileTransferPresentation.fraction(200, 100)!!, 0f)
+        assertEquals(0f, FileTransferPresentation.fraction(-1, 100)!!, 0f)
+    }
+
     @Test fun sizeTextNeverInventsTotalAndFormatsBinaryUnits() {
         assertEquals("512 B", FileTransferPresentation.bytes(512))
         assertEquals("1.0 KB", FileTransferPresentation.bytes(1024))

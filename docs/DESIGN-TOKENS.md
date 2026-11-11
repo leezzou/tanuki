@@ -214,22 +214,15 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 回归 `TanukiPageTransitionsTest` 使用 Compose 实际动画 spec 的时间采样验证主目的地矩阵、层级曲线/方向、RTL、进入/返回方向互逆、0ns 即终态及 WebView 零位移；不把 JVM 策略验证称为 Android 视觉、WebView/Surface 或帧率验收。
 
-### 6.3 C 批弹层与抽屉所有权
+### 6.3 D 批列表与内容变化
 
-`TanukiMotionSpecs.sheet(opening)` 与 `scrim()` 复用 A 批令牌。自绘 `TanukiBottomSheet` 的遮罩与面板共享一个父 Transition，退出结束后才通知 `onHidden`；面板不再叠加 alpha 或高度补间。拖动仍直接跟手，释放回位用 settle，关闭时停止未完成的回位。
+会话管理行与文件列表/网格复用 `TanukiDesign.motion.list()`：同一稳定 key 数据集内，placement 为 240ms standard，新增淡入为 160ms enter，删除淡出为 140ms exit；reduced-motion 三个 spec 均为 null。分组标题不逐项入场，不给整列表加 `animateContentSize`。
 
-| 表面 | 打开 | 关闭 / 回位 | 遮罩 / reduced-motion |
-|---|---|---|---|
-| 自绘 TanukiBottomSheet | 全高位移 280ms enter | 全高位移 240ms exit；拖拽回位 settle | 遮罩唯一 alpha：160ms standard；有限动画 0ms，settle snap |
-| TanukiAdaptiveShell 窄屏抽屉 | 按钮 280ms enter | 导航/返回/遮罩点击 240ms exit；拖拽释放按目标打开 280ms / 关闭 240ms | 遮罩唯一 alpha：160ms standard，与位移同时启停，拖拽期间直接跟手；reduced 立即 snap，打开途中返回也先关抽屉 |
-| 系统 ModalBottomSheet | Material 3 窗口默认 | 系统 hide 完成后卸载展示内容 | 平台独占位移/遮罩；不伪造固定毫秒，移除动画关闭立即卸载，打开遵循平台缩放 |
-| AlertDialog / Dialog / DropdownMenu | 系统默认 | 系统默认 | 不包自绘 scale/fade，保留窗口焦点、返回与系统无障碍设置 |
+`ui/TanukiListMotion.kt` 固定数据集身份：排序/新增/删除/归档保持身份；搜索、筛选、目录/存储来源或主机变化重建 Lazy 动效宿主，滚动状态仍放在宿主外。文件异步过滤使用**当前显示结果**的筛选身份，新结果提交才切换；请求过滤期间与已过滤结果均关闭行动画，清空搜索同样不会给整批结果补入场。Compose 1.10.3 的 Lazy 动效节点卸载会 reset animator，宿主重建不继承上一个数据集的 placement/退出动画。
 
-`TanukiModalSheet` 位于 `ui/TanukiMotionFeedback.kt`，为审批、权限、传输/全局进度、会话详情/主机选择和浏览器菜单提供常驻宿主。调用方传当前模型，关闭时传 null；`TanukiOverlayState` 保留最后 UI 快照到 hide 结束，快速重开取消旧 hide 并重定向。关闭代次仅在打开/关闭边界递增；`finally` 即使遇到系统 hide 取消也会释放同一关闭代次的窗口，不吞掉取消，不清理快速重开或再次关闭的新代次。系统关闭回调也核对渲染代次，避免旧任务清空新模型。
+聊天历史与实时段均不使用 placement/退出动画；独立 `DshMessageMotionSnapshot` 按会话记录序号水位和新增行资格，只有新追加的已提交行允许 160ms alpha。首屏恢复、加载完成、历史 revision 变化（头插/窗口释放）、旧行重读、流式 delta、发送占位与流式落盘替换立即显示；工具组追加成员不重播。普通重组保留已入场行的 spec，不截断当前淡入。消息分组、渲染 key、锚定与自动/手动滚动逻辑保持原样。
 
-退出时关闭系统 sheet 手势、返回和遮罩点击，触摸/键盘/无障碍屏障覆盖整个 sheet Surface（包括 Material 自带的 clickable 拖拽柄），不能只覆盖内容 Column。打开期间正常交互，业务许可与状态更新不等待动画。错误详情仍使用快照策略和自绘 `onHidden`。未接线的 `RemoteHostSwitchSheet` 保持平台默认；TanukiDrawer 为本批新增的单一位移宿主，复用 Material 表面；当前源码没有 TanukiDialog 定义，不新增同义系统窗口。
-
-Host 回归 `TanukiOverlayMotionTest` 采样实际 spec 时长/曲线、0ns 终态、退出快照保留/清理与快速重开，另检查自绘遮罩单次 alpha 和系统窗口不叠外层动画；`TanukiOverlayExitTest` 实际取消关闭协程，验证同代次释放与新代次隔离。Android 回归 `TanukiModalSheetInteractionTest` 使用独立合成 Activity、正常时长的可控帧时钟和系统触摸注入，检查退出中按住系统拖拽柄仍卸载窗口、下层物理点击恢复，以及快速重开后能再次关闭。Android 源码编译不等于设备执行，实际执行及未覆盖的系统设置、返回焦点、RTL、TalkBack、IME、帧率与深浅色边界以 [C 批交接](handoffs/20261111-1900-motion-batch-c.md) 为准。
+Host 回归 `TanukiListMotionTest` / `DshMessageMotionTest` 覆盖排序时间采样、异步搜索/清空边界、目录/来源/筛选身份、分页/窗口释放、分组与占位对账和 reduced 全 null；它们不代表 Compose 实际挂载、Android 视觉、滚动手势或帧率已验收。适用独立设备 QA 仍须在 PR 最新 SHA 上执行。范围和实际验证见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
 
 ## 7. 基础组件
 

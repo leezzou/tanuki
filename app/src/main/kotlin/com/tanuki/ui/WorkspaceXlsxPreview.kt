@@ -82,7 +82,7 @@ internal fun XlsxTablePreview(document: OpenDocument, modifier: Modifier = Modif
         }
     }
     Column(modifier.fillMaxSize()) {
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (loading) ViewerLoadingLine()
         error?.let { message ->
             Text(message, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
             Text(
@@ -164,7 +164,7 @@ internal fun XlsxTablePreview(document: OpenDocument, modifier: Modifier = Modif
                     )
                 }
                 key(safeIndex) {
-                    XlsxSheetTable(sheet, scale, Modifier.weight(1f).fillMaxWidth())
+                    XlsxSheetTable(sheet, scale, Modifier.weight(1f).fillMaxWidth().viewerReveal(safeIndex))
                 }
                 Text(
                     "第 ${safeIndex + 1} / ${book.sheets.size} 张工作表 · 只读" +

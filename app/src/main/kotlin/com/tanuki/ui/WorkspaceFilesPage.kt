@@ -2,6 +2,14 @@ package com.tanuki.ui
 
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.platform.LocalDensity
+import com.tanuki.ui.design.TanukiDesign
+import com.tanuki.ui.design.TanukiMotionEasing
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -426,6 +434,9 @@ internal fun WorkspaceFilesPage(
     val sorting = FileListPresentation.isStale(display, displayRequest)
     // 同目录刷新先保留旧列表，换目录才清空；避免排序期间闪空并重置滚动位置。
     val shown = FileListPresentation.visible(display, displayRequest)
+    val listDataset = fileListMotionDataset(display, displayRequest)
+    val listMotion = listDataset.motion(com.tanuki.ui.design.TanukiDesign.motion,
+        filtering = query.isNotEmpty() || listDataset.query.isNotEmpty())
     // 滚动状态随目录保存，排序、筛选和进度更新不会把列表拉回顶部；旋转后仍可恢复。
     val listState = rememberSaveable(files, directory, saver = LazyListState.Saver) { LazyListState() }
     val gridState = rememberSaveable(files, directory, saver = LazyGridState.Saver) { LazyGridState() }
@@ -680,7 +691,7 @@ internal fun WorkspaceFilesPage(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                val row: @Composable (WorkspaceFileManager.Entry, Boolean) -> Unit = { entry, tile ->
+                val row: @Composable (WorkspaceFileManager.Entry, Boolean, Modifier) -> Unit = { entry, tile, itemModifier ->
                     var expanded by remember(entry.path) { mutableStateOf(false) }
                     // 选中态切换属于反馈类动效：走 toggle 令牌，系统移除动画时立即变色。
                     val rowColor by animateColorAsState(
@@ -690,6 +701,7 @@ internal fun WorkspaceFilesPage(
                         label = "fileSelection",
                     )
                     Surface(
+                        modifier = itemModifier,
                         color = rowColor,
                         shape = if (tile) TanukiShapeTokens.card else TanukiShapeTokens.control,
                     ) {
@@ -782,22 +794,37 @@ internal fun WorkspaceFilesPage(
                                     )
                                 }
                             }
-                        } else if (grid) LazyVerticalGrid(
-                            GridCells.Adaptive(160.dp),
-                            Modifier.fillMaxSize(),
-                            state = gridState,
-                            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 72.dp + bottomInset),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            gridItems(shown, key = { it.path }) { entry -> row(entry, true) }
-                        } else LazyColumn(
-                            Modifier.fillMaxSize(),
-                            state = listState,
-                            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 72.dp + bottomInset),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            items(shown, key = { it.path }) { entry -> row(entry, false) }
+                        } else key(files, listDataset) {
+                            // 换目录/筛选重建行动画宿主；列表与网格的滚动状态仍按目录保存在外层。
+                            if (grid) LazyVerticalGrid(
+                                GridCells.Adaptive(160.dp),
+                                Modifier.fillMaxSize(),
+                                state = gridState,
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 72.dp + bottomInset),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                gridItems(shown, key = { it.path }) { entry ->
+                                    row(entry, true, Modifier.animateItem(
+                                        placementSpec = listMotion.placement,
+                                        fadeInSpec = listMotion.fadeIn,
+                                        fadeOutSpec = listMotion.fadeOut,
+                                    ))
+                                }
+                            } else LazyColumn(
+                                Modifier.fillMaxSize(),
+                                state = listState,
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 72.dp + bottomInset),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                items(shown, key = { it.path }) { entry ->
+                                    row(entry, false, Modifier.animateItem(
+                                        placementSpec = listMotion.placement,
+                                        fadeInSpec = listMotion.fadeIn,
+                                        fadeOutSpec = listMotion.fadeOut,
+                                    ))
+                                }
+                            }
                         }
                     }
                     // 列表加载/排序只叠加 2dp 指示线，不占布局高度，也不会推动列表。
@@ -1071,18 +1098,43 @@ internal fun FileTransferOverlay(
     val hasProgress = runtimeOverlay != null || summary != null
     val progressBottom = FileViewerLayout.transferPillBottomPadding(bottomInset, viewerActionBarVisible, viewerActionBarHeight)
     var sheet by remember { mutableStateOf(false) }
-    LaunchedEffect(items.isEmpty(), runtimeOverlay != null) {
-        if (items.isEmpty() || runtimeOverlay != null) sheet = false
+    LaunchedEffect(runtimeOverlay != null) {
+        if (runtimeOverlay != null) sheet = false
     }
+    val motion = TanukiDesign.motion
+    val shift = with(LocalDensity.current) { 8.dp.roundToPx() }
+    var lastSummary by remember { mutableStateOf(summary) }
+    var lastIdentity by remember { mutableStateOf(FileTransferPresentation.motionIdentity(items)) }
+    SideEffect {
+        if (summary != null) {
+            lastSummary = summary
+            lastIdentity = FileTransferPresentation.motionIdentity(items)
+        }
+    }
+    val pillVisible = runtimeOverlay == null && summary != null
     Box(Modifier.fillMaxSize().imePadding()) {
         // 一次只放一个入口；运行时抽屉也包含文件任务，保留同一个导入/复制结果提示宿主。
         if (runtimeOverlay != null) {
             runtimeOverlay(Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).padding(bottom = progressBottom))
-        } else summary?.let {
-            TransferPill(summary = it, onOpen = { sheet = true },
-                onCancel = { items.forEach { item -> onCancelTransfer(item.id) } },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = progressBottom))
         }
+        val pillModifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = progressBottom)
+        val pillContent: @Composable () -> Unit = {
+            (summary ?: lastSummary)?.takeIf { runtimeOverlay == null }?.let {
+                TransferPill(summary = it, identity = if (summary != null) FileTransferPresentation.motionIdentity(items) else lastIdentity,
+                    enabled = pillVisible, onOpen = { if (pillVisible) sheet = true },
+                    onCancel = { if (pillVisible) items.forEach { item -> onCancelTransfer(item.id) } })
+            }
+        }
+        if (motion.reducedMotion) {
+            if (pillVisible) Box(pillModifier) { pillContent() }
+        } else AnimatedVisibility(
+            visible = pillVisible,
+            modifier = pillModifier,
+            enter = fadeIn(motion.state()) + slideInVertically(
+                tween(motion.duration(TanukiMotionTokens.layout), easing = TanukiMotionEasing.standard)) { shift },
+            exit = fadeOut(motion.state()) + slideOutVertically(
+                tween(motion.duration(TanukiMotionTokens.layout), easing = TanukiMotionEasing.standard)) { shift },
+        ) { pillContent() }
         snackbarHostState?.let { host ->
             SnackbarHost(host, Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp,
                 bottom = if (hasProgress) progressBottom + FileViewerLayout.TransferPillHeight + FileViewerLayout.FloatingGap
@@ -1239,26 +1291,32 @@ private fun PermissionSheet(
 @Composable
 private fun TransferPill(
     summary: FileTransferSummary,
+    identity: Any?,
+    enabled: Boolean,
     onOpen: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val percent = summary.percent
+    val fraction = if (summary.allTotalsKnown) FileTransferPresentation.fraction(summary.received, summary.total) else null
+    val animated by rememberFileTransferFraction(identity, fraction)
+    val reduced = TanukiDesign.motion.reducedMotion
     val label = TanukiFileVisuals.transferLabel(percent)
     TanukiGlassPill(
         modifier = modifier
             .widthIn(max = 190.dp)
-            .clickable(onClick = onOpen)
+            .clickable(enabled = enabled, onClick = onOpen)
             .semantics { contentDescription = "文件传输$label，共 ${summary.count} 项，点击查看详情" },
         contentPadding = PaddingValues(start = TanukiSpace.MD_DP.dp, end = 0.dp),
     ) {
         Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
             if (percent != null) CircularProgressIndicator(
-                progress = { percent / 100f },
+                progress = { animated },
                 modifier = Modifier.fillMaxSize(),
                 strokeWidth = 2.5.dp,
                 trackColor = MaterialTheme.colorScheme.primaryContainer,
-            ) else CircularProgressIndicator(
+            ) else if (reduced) Icon(Icons.Default.Info, "总大小未知，正在传输", Modifier.fillMaxSize())
+            else CircularProgressIndicator(
                 modifier = Modifier.fillMaxSize(),
                 strokeWidth = 2.5.dp,
                 trackColor = MaterialTheme.colorScheme.primaryContainer,
@@ -1269,7 +1327,7 @@ private fun TransferPill(
             Text("· ${summary.count}", maxLines = 1, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        IconButton(onClick = onCancel, modifier = Modifier.size(TanukiSpace.TOUCH_TARGET_MIN_DP.dp)) {
+        IconButton(onClick = onCancel, enabled = enabled, modifier = Modifier.size(TanukiSpace.TOUCH_TARGET_MIN_DP.dp)) {
             Icon(Icons.Default.Close,
                 if (summary.count > 1) "取消全部文件传输" else "取消文件传输",
                 Modifier.size(18.dp))
@@ -1318,7 +1376,7 @@ private fun TransferSheet(
                 key(item.id) {
                     TransferRow(item = item, now = now, onCancel = {
                         if (visible && transfers.any { it.id == item.id }) onCancel(item.id)
-                    })
+                    }, enabled = visible && transfers.any { it.id == item.id })
                 }
             }
             Text("进度按实际复制或下载的字节计算；总大小未知时显示不定进度，不估造百分比。",
@@ -1333,8 +1391,12 @@ internal fun TransferRow(
     item: FileTransferProgress,
     now: Long,
     onCancel: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val percent = FileTransferPresentation.percent(item.received, item.total)
+    val fraction = FileTransferPresentation.fraction(item.received, item.total)
+    val animated by rememberFileTransferFraction(item.id to item.label, fraction)
+    val reduced = TanukiDesign.motion.reducedMotion
     val progressModifier = Modifier.fillMaxWidth().semantics {
         contentDescription = "${item.label}的传输进度"
         stateDescription = percent?.let { "已完成 $it%" } ?: "总大小未知，进度无法估算"
@@ -1347,8 +1409,10 @@ internal fun TransferRow(
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        // 与安装入口共用连续进度条，百分比仍来自真实传输字节。
-        OperationProgressBar(fraction = percent?.let { it / 100f }, modifier = progressModifier)
+        // 只平滑图形显示；百分比与可访问状态仍来自真实传输字节。
+        if (fraction != null) LinearProgressIndicator(progress = { animated }, modifier = progressModifier)
+        else if (reduced) Text("总大小未知 · 正在传输", progressModifier, style = MaterialTheme.typography.labelSmall)
+        else LinearProgressIndicator(modifier = progressModifier)
         Text(FileTransferPresentation.sizeText(item.received, item.total),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1358,6 +1422,7 @@ internal fun TransferRow(
         TanukiPillButton(
             text = "取消此文件",
             onClick = onCancel,
+            enabled = enabled,
             tone = TanukiPillButtonTone.Outline,
             modifier = Modifier.fillMaxWidth(),
         )

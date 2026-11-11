@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -468,6 +469,15 @@ private fun MessageList(
     val grouped = remember(grouping, history, live) { grouping.project(history, live) }
     val historyRows = grouped.history
     val liveRows = grouped.live
+    // 展示快照独立于阅读锚点；资格跨普通重组保留，历史 revision 变化时全量立即显示。
+    var previousMotion by remember(state.selectedId) { mutableStateOf(DshMessageMotionSnapshot()) }
+    val streaming = state.streamingText.isNotBlank()
+    val messageMotion = remember(previousMotion, historyRows, liveRows, state.historyRevision,
+        state.loading, composerSending, streaming) {
+        previousMotion.next(historyRows + liveRows, state.historyRevision, state.loading, composerSending, streaming)
+    }
+    SideEffect { previousMotion = messageMotion }
+    val motionSpecs = TanukiDesign.motion
     val unseen = remember(split) { split?.let { DshChatAnchorPolicy.unseenMessages(it.live) } ?: 0 }
     // 与 LazyColumn 完全一致的渲染 key 顺序：顶部提示、历史段、锚点分隔行、新消息段。
     val renderKeys = remember(historyRows, liveRows, split) {
@@ -594,9 +604,15 @@ private fun MessageList(
                 key = { it.key },
                 contentType = { if (it.tools.isEmpty()) "message" else "tool-group" }
             ) { row ->
+                val rowMotion = messageMotion.motion(row.key, motionSpecs)
+                val itemModifier = Modifier.animateItem(
+                    placementSpec = rowMotion.placement,
+                    fadeInSpec = rowMotion.fadeIn,
+                    fadeOutSpec = rowMotion.fadeOut,
+                )
                 when (val item = row.item) {
-                    is DshTimelineItem.Text -> MessageCard(item.message)
-                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, pendingApprovalCalls, onOpenApproval)
+                    is DshTimelineItem.Text -> MessageCard(item.message, itemModifier)
+                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, itemModifier, pendingApprovalCalls, onOpenApproval)
                 }
             }
             if (split != null) {
@@ -610,9 +626,15 @@ private fun MessageList(
                 key = { it.key },
                 contentType = { if (it.tools.isEmpty()) "message" else "tool-group" }
             ) { row ->
+                val rowMotion = messageMotion.motion(row.key, motionSpecs)
+                val itemModifier = Modifier.animateItem(
+                    placementSpec = rowMotion.placement,
+                    fadeInSpec = rowMotion.fadeIn,
+                    fadeOutSpec = rowMotion.fadeOut,
+                )
                 when (val item = row.item) {
-                    is DshTimelineItem.Text -> MessageCard(item.message)
-                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, pendingApprovalCalls, onOpenApproval)
+                    is DshTimelineItem.Text -> MessageCard(item.message, itemModifier)
+                    is DshTimelineItem.Tool -> DshToolGroupCard(row.tools, itemModifier, pendingApprovalCalls, onOpenApproval)
                 }
             }
             activeFailure?.let { failed ->
@@ -730,12 +752,12 @@ private fun ComposerPendingCard(text: String) {
 }
 
 @Composable
-private fun MessageCard(message: DshMessage) {
+private fun MessageCard(message: DshMessage, modifier: Modifier = Modifier) {
     val colors = TanukiDesign.tokens.colors
     val clipboard = LocalClipboardManager.current
     val assistant = message.role == DshMessageRole.ASSISTANT
     var details by remember(message.seq) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (assistant) {
             DshMarkdown(message.text)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -788,7 +810,7 @@ internal fun DshShareButton(text: String) {
 @Composable
 private fun StreamingCard(text: String) {
     // 流式正文直接显示；状态和停止入口分别由状态条与输入栏承担。
-    DshMarkdown(text, Modifier.fillMaxWidth())
+    DshMarkdown(text, Modifier.fillMaxWidth(), streaming = true)
 }
 
 @Composable
