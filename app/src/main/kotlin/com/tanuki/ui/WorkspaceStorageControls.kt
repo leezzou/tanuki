@@ -48,9 +48,9 @@ fun WorkspaceStorageControls(
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("项目空间", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text("工作区空间", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             IconButton(onClick = onRefresh, enabled = !storage.measuring && !saving) {
-                TanukiIcon(TanukiGlyph.Refresh, "刷新项目用量", tint = secondary)
+                TanukiIcon(TanukiGlyph.Refresh, "刷新工作区用量", tint = secondary)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -59,35 +59,35 @@ fun WorkspaceStorageControls(
                 storage.usedBytes != null -> storageSize(storage.usedBytes)
                 else -> "尚未统计"
             }, style = MaterialTheme.typography.headlineMedium)
-            Text("项目已用 · 软上限 ${storage.limitBytes?.let(::storageSize) ?: "跟随可用空间"}",
+            Text("工作区已用 · 限额 ${storage.limitBytes?.let(::storageSize) ?: "使用可用空间"}",
                 style = MaterialTheme.typography.bodyMedium, color = secondary)
         }
         WorkspaceFact("可继续使用", storage.availableBytes?.let(::storageSize) ?: "待确认")
-        WorkspaceFact("磁盘剩余", storageSize(storage.freeBytes))
+        WorkspaceFact("手机可用空间", storageSize(storage.freeBytes))
         if (storage.complete && storage.limitBytes != null) {
             val fraction = (storage.usedBytes!!.toDouble() / storage.limitBytes.toDouble()).coerceIn(0.0, 1.0).toFloat()
-            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "项目容量预算使用进度" },
+            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "工作区空间使用情况" },
                 color = if (fraction >= .9f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-            if (storage.overBudget) Text("已超出预算；请调高预算或改为跟随可用空间后再启动。", color = MaterialTheme.colorScheme.error,
+            if (storage.overBudget) Text("已超出限额，请调高限额或选择“使用可用空间”后再启动。", color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium)
         }
         Text(when {
-            storage.measuring -> "正在统计项目实际占用…"
+            storage.measuring -> "正在统计工作区用量"
             storage.measuredAtMillis > 0 -> "最近统计 ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(storage.measuredAtMillis))}"
             else -> "刷新后显示实际占用，统计不会读取文件内容。"
         }, style = MaterialTheme.typography.bodySmall, color = secondary)
-        storage.configurationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-        storage.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-        Text("仅计算项目文件，不包含运行组件和会话；预算不会预占磁盘或删除文件。",
+        storage.configurationError?.let { Text("空间设置读取失败，请重新打开应用。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+        storage.error?.let { Text("用量统计未完成，请刷新后重试。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+        Text("只统计工作区文件，不含运行环境和对话；设置限额不会预占空间或删除文件。",
             style = MaterialTheme.typography.bodySmall, color = secondary)
         if (!editing) {
             OutlinedButton(onClick = { saveError = null; editing = true }, enabled = canEdit,
                 shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("调整容量预算") }
-            if (!canEdit) Text("停止 DSH 并完成当前操作后可调整。", style = MaterialTheme.typography.bodySmall, color = secondary)
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("调整空间限额") }
+            if (!canEdit) Text("请先停止助手并完成当前操作，再调整限额。", style = MaterialTheme.typography.bodySmall, color = secondary)
         } else {
-            WorkspaceChoice("跟随可用空间", !custom, canEdit && !saving) { custom = false; saveError = null }
-            WorkspaceChoice("自定容量上限", custom, canEdit && !saving) {
+            WorkspaceChoice("使用可用空间", !custom, canEdit && !saving) { custom = false; saveError = null }
+            WorkspaceChoice("自定空间限额", custom, canEdit && !saving) {
                 custom = true
                 if (draft.isBlank()) {
                     val suggested = WorkspaceCapacity.availableForWorkspace(storage.usedBytes ?: 0, storage.freeBytes)
@@ -98,18 +98,18 @@ fun WorkspaceStorageControls(
             }
             if (custom) {
                 OutlinedTextField(value = draft, onValueChange = { if (it.length <= 32) draft = it; saveError = null },
-                    label = { Text("容量预算（GiB）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    label = { Text("空间限额 GiB") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true, enabled = canEdit && !saving, isError = saveError != null,
-                    supportingText = { Text("1 GiB = 1024 MiB，至少 0.0625 GiB；不能小于已用空间。") },
+                    supportingText = { Text("至少0.0625 GiB，不能小于工作区已用空间。") },
                     modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium)
-                if (storage.complete) Text("当前最多可设 ${storageSize(WorkspaceCapacity.availableForWorkspace(storage.usedBytes!!, storage.freeBytes))}，包含现有项目。",
+                if (storage.complete) Text("当前最多可设 ${storageSize(WorkspaceCapacity.availableForWorkspace(storage.usedBytes!!, storage.freeBytes))}，包含现有工作区文件。",
                     style = MaterialTheme.typography.bodySmall, color = secondary)
             }
-            if (custom && !storage.complete) Text("当前用量尚未确认，可刷新后设置自定预算，或先选“跟随可用空间”。",
+            if (custom && !storage.complete) Text("用量尚未确认，请先刷新，或选择“使用可用空间”。",
                 style = MaterialTheme.typography.bodySmall, color = secondary)
-            Text("这是软上限：导入及启动前检查，运行中定期检查。发现超限后会停止 DSH，可能中断任务；直接写入可能在检查前超额。",
+            Text("限额定期检查，写入可能暂时超额；超限会停止助手，可能中断任务。",
                 style = MaterialTheme.typography.bodySmall, color = secondary)
-            saveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+            saveError?.let { Text("限额未保存，请检查输入后重试。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { editing = false; saveError = null }, enabled = !saving,
                     shape = MaterialTheme.shapes.medium,
@@ -123,12 +123,12 @@ fun WorkspaceStorageControls(
                             onSave(bytes)
                             editing = false
                         } catch (error: CancellationException) { throw error }
-                        catch (error: Exception) { saveError = error.message ?: "保存失败，请重试" }
+                        catch (error: Exception) { saveError = error.message ?: "限额未保存，请检查输入后重试。" }
                         finally { saving = false }
                     }
                 }, enabled = canEdit && !saving && (!custom || (!storage.measuring && storage.complete)),
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (saving) "正在保存…" else "保存预算") }
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(if (saving) "正在保存…" else "保存限额") }
             }
         }
     }

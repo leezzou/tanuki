@@ -41,13 +41,13 @@ internal class OperationClock {
 internal fun operationLabel(command: String): String = when (command) {
     "component-ubuntu" -> "准备安装 Ubuntu"
     "component-node" -> "准备安装 Node.js"
-    "component-tools" -> "准备检查基础工具"
+    "component-tools" -> "正在检查基础工具"
     "component-uninstall-ubuntu" -> "准备卸载 Ubuntu"
     "component-uninstall-node" -> "准备卸载 Node.js"
     "component-uninstall-dsh" -> "准备卸载 DSH"
     "initialize" -> "准备运行环境"
     "health" -> "检查运行环境"
-    "background-probe" -> "执行后台运行检查"
+    "background-probe" -> "正在检查后台运行"
     "ubuntu-cache" -> "整理 Ubuntu 缓存"
     else -> "准备执行操作"
 }

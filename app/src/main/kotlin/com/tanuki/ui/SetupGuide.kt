@@ -64,11 +64,11 @@ fun SetupGuide(
                 ) {
                     TanukiIcon(TanukiGlyph.Terminal, tint = colors.primary, modifier = Modifier.size(23.dp))
                 }
-                Text("TANUKI · 本地开发空间", style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                Text("运行环境", style = MaterialTheme.typography.labelMedium, color = colors.primary)
             }
-            Text("让开发环境，\n随灵感就位。", style = MaterialTheme.typography.headlineLarge)
+            Text("准备开始使用", style = MaterialTheme.typography.headlineLarge)
             Text(
-                "准备本地环境，开始创造。",
+                "完成以下步骤，就能在本机使用助手。",
                 style = MaterialTheme.typography.bodyLarge,
                 color = colors.onSurfaceVariant,
             )
@@ -165,7 +165,7 @@ fun SetupGuide(
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
             shape = MaterialTheme.shapes.large,
-        ) { Text("进入 DSH") }
+        ) { Text("打开对话") }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             if (index > 0) TextButton(onClick = { onStep(index - 1) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("上一步") }
             else Spacer(Modifier.width(1.dp))
@@ -173,7 +173,7 @@ fun SetupGuide(
                 onClick = { onStep(index + 1) },
                 enabled = steps[index + 1].accessible,
                 modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(if (current.complete) "下一步：${steps[index + 1].title}" else "查看下一步") }
+            ) { Text(if (current.complete) "下一步" else "查看下一步") }
         }
     }
 }
