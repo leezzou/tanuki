@@ -124,7 +124,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | SESS-11 | 工作区分组/树形层级 | 按工作区或工作区树分组，折叠、层级拖拽、祖先展开 | `仅官方`：原生是扁平会话条 | P2 · `workspace/follow` · 44 会话管理（工作区树，待确认） · A-FILE-05 |
 | SESS-12 | 待处理交互/未读状态 | 行内显示等待审批/计划待审/等待回答、warning 点、未读完成 | `仅官方`：原生只区分 running | P1 · `DshMuxProtocol` 事件 · 42 聊天链路（事件）+ 45 审批（状态展示） · A-APPROVAL-01、A-NOTIFY-01 |
 | SESS-13 | 子代理会话 | 侧栏隐藏 subagent 来源会话，可按直接父子地址打开 | `仅官方` | P2 · `subagents/*` · 42 聊天链路（子会话路由，待确认） · A-TOOL-02 |
-| SESS-14 | 会话目标（goal） | 输入框上方目标条，支持编辑/暂停/恢复/清除与 `/goal` 气泡 | `仅官方` | P2 · `goals/*` · 44 会话管理（目标，待确认） · A-SESS-05 |
+| SESS-14 | 会话目标（goal） | 输入框上方目标条，支持编辑/暂停/恢复/清除与 `/goal` 气泡 | `原生部分`：输入框上方目标条读取真实目标事件，显示摘要/状态；暂停、恢复、编辑、清除 RPC 未接，按钮禁用并说明。2026-11-11 android_agent-62 接线，设备未验证 | P2 · `goals/*` 操作与 `/goal` 气泡 · `DshGoalDock`/`DshDockStateMapper` · A-SESS-05 |
 | SESS-15 | 定时任务/自动化 | Schedule 列表、历史、更新/删除，活动任务在会话行显示时钟 | `仅官方` | P2 · `schedule/*` · 未排期 · A-SESS-06 |
 | SESS-16 | 复制会话 ID/日志导出 | 行菜单复制完整 ID；会话日志下载 | `仅官方` | P2 · `session/*`、日志路由 · 44 会话管理（复制 ID/日志导出，待确认） · A-SESS-07 |
 | SESS-17 | 通知点击定位会话 | 通知携带会话 id，点击后展开侧栏、清搜索、展开分组并选中 | `原生完整`：`DshNativeController.openSession()` 冷启动/已加载均选中，失败保留 pending 给官方回退 | — · `DshNativeController.kt` · android_agent-29/PR #22、android_agent-33/PR #26 · A-SESS-03、A-NOTIFY-02 |
@@ -154,7 +154,7 @@ P0 不是一行笼统的“原生页不可用”，按矩阵行拆开，便于�
 | CHAT-16 | 历史滚动位置 | 切换/返回恢复滚动位置 | `仅官方` | P2 · 原生列表状态 · 未排期 · A-CHAT-05 |
 | CHAT-17 | 系统提示/上下文隐藏 | 不显示系统提示、普通上下文注入、permission 命令行 | `原生部分`：原生只取文本事件，天然不显示这些行 | — · `DshNativeApi.kt` · android_agent-33 · A-CHAT-01 |
 | CHAT-18 | 交付物（deliverables） | 轮次页脚交付物卡片、右侧预览 | `仅官方` | P2 · 官方交付物协议 · 未排期 · A-FILE-03 |
-| CHAT-19 | Goal/Todo/Queue 卡片 | 输入框上方上下文堆栈 | `仅官方` | P2 · `goals/*`、`session/updateQueue` · 未排期 · A-CHAT-06 |
+| CHAT-19 | Goal/Todo/Queue 卡片 | 输入框上方上下文堆栈 | `原生部分`：目标/待办停靠条已接入，审批>目标>待办、同屏最多两条、其余 `+N`；队列卡片未接。2026-11-11 android_agent-62，设备未验证 | P2 · 队列编辑 · `DshDockColumn`/`DshCoordination` · A-CHAT-06 |
 | CHAT-20 | 中断轮次显示 | 进程中途退出显示本地化停止行，不显示代码标签 | `仅官方` | P2 · 原生消息状态 · 未排期 · A-CHAT-05 |
 
 ### 3.3 输入（INPUT）
