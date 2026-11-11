@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,15 +57,20 @@ internal fun <T : Any> TanukiModalSheet(
     var presentation by remember { mutableStateOf(TanukiOverlayState<T>()) }
     presentation = presentation.update(value)
     val shown = presentation.shown ?: return
+    val generation = presentation.generation
     val reduced = TanukiDesign.motion.reducedMotion
     val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var closing by remember { mutableStateOf(false) }
-    LaunchedEffect(presentation.open, reduced) {
+    LaunchedEffect(generation, reduced) {
         if (!presentation.open) {
             closing = true
-            // 移除动画直接卸载；正常关闭仍由系统窗口完成位移及遮罩。
-            if (!reduced) sheetState.hide()
-            presentation = presentation.hidden()
+            // 正常退出等系统动画；取消时同步卸载旧窗口，旧代次不能清理新内容。
+            finishTanukiOverlayExit(
+                generation = generation,
+                hide = { if (!reduced) sheetState.hide() },
+                current = { presentation },
+                update = { presentation = it },
+            )
         } else if (closing) {
             closing = false
             // 快速重开重定向正在退出的系统动画，不排队等待旧 hide。
@@ -73,10 +79,19 @@ internal fun <T : Any> TanukiModalSheet(
     }
     if (reduced && !presentation.open) return
     androidx.compose.material3.ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = {
+            if (presentation.open && presentation.generation == generation) onDismissRequest()
+        },
+        // 覆盖整个 Surface，包含 Material 自带的 clickable 拖拽柄及其无障碍操作。
+        modifier = Modifier.tanukiOverlayInput(presentation.open),
         sheetState = sheetState,
+        sheetGesturesEnabled = presentation.open,
+        properties = androidx.compose.material3.ModalBottomSheetProperties(
+            shouldDismissOnBackPress = presentation.open,
+            shouldDismissOnClickOutside = presentation.open,
+        ),
     ) {
-        Column(Modifier.tanukiOverlayInput(presentation.open)) {
+        Column {
             content(shown)
         }
     }
@@ -84,7 +99,7 @@ internal fun <T : Any> TanukiModalSheet(
 
 /** 离场快照不接受旧操作；入场与可见期间始终允许交互。 */
 internal fun Modifier.tanukiOverlayInput(enabled: Boolean): Modifier = if (enabled) this else
-    clearAndSetSemantics {}.pointerInput(Unit) {
+    clearAndSetSemantics {}.onPreviewKeyEvent { true }.pointerInput(Unit) {
         awaitPointerEventScope {
             while (true) {
                 awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }

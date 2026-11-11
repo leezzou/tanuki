@@ -225,9 +225,11 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | 系统 ModalBottomSheet | Material 3 窗口默认 | 系统 hide 完成后卸载展示内容 | 平台独占位移/遮罩；不伪造固定毫秒，移除动画关闭立即卸载，打开遵循平台缩放 |
 | AlertDialog / Dialog / DropdownMenu | 系统默认 | 系统默认 | 不包自绘 scale/fade，保留窗口焦点、返回与系统无障碍设置 |
 
-`TanukiModalSheet` 位于 `ui/TanukiMotionFeedback.kt`，为审批、权限、传输/全局进度、会话详情/主机选择和浏览器菜单提供常驻宿主。调用方传当前模型，关闭时传 null；`TanukiOverlayState` 保留最后 UI 快照到 hide 结束，快速重开取消旧 hide 并重定向。错误详情使用同一快照策略和自绘 `onHidden`。退出快照不接收触摸/无障碍操作；打开期间可正常操作，业务许可与状态更新不等待动画。未接线的 `RemoteHostSwitchSheet` 保持平台默认；TanukiDrawer 为本批新增的单一位移宿主，复用 Material 表面；当前源码没有 TanukiDialog 定义，不新增同义系统窗口。
+`TanukiModalSheet` 位于 `ui/TanukiMotionFeedback.kt`，为审批、权限、传输/全局进度、会话详情/主机选择和浏览器菜单提供常驻宿主。调用方传当前模型，关闭时传 null；`TanukiOverlayState` 保留最后 UI 快照到 hide 结束，快速重开取消旧 hide 并重定向。关闭代次仅在打开/关闭边界递增；`finally` 即使遇到系统 hide 取消也会释放同一关闭代次的窗口，不吞掉取消，不清理快速重开或再次关闭的新代次。系统关闭回调也核对渲染代次，避免旧任务清空新模型。
 
-Host 回归 `TanukiOverlayMotionTest` 采样实际 spec 时长/曲线、0ns 终态、退出快照保留/清理与快速重开，另检查自绘遮罩单次 alpha 和系统窗口不叠外层动画。它不替代 Compose 挂载、系统设置、返回焦点、拖拽、TalkBack、IME、帧率和深浅色设备 QA；详见 [C 批交接](handoffs/20261111-1900-motion-batch-c.md)。
+退出时关闭系统 sheet 手势、返回和遮罩点击，触摸/键盘/无障碍屏障覆盖整个 sheet Surface（包括 Material 自带的 clickable 拖拽柄），不能只覆盖内容 Column。打开期间正常交互，业务许可与状态更新不等待动画。错误详情仍使用快照策略和自绘 `onHidden`。未接线的 `RemoteHostSwitchSheet` 保持平台默认；TanukiDrawer 为本批新增的单一位移宿主，复用 Material 表面；当前源码没有 TanukiDialog 定义，不新增同义系统窗口。
+
+Host 回归 `TanukiOverlayMotionTest` 采样实际 spec 时长/曲线、0ns 终态、退出快照保留/清理与快速重开，另检查自绘遮罩单次 alpha 和系统窗口不叠外层动画；`TanukiOverlayExitTest` 实际取消关闭协程，验证同代次释放与新代次隔离。Android 回归 `TanukiModalSheetInteractionTest` 使用独立合成 Activity、正常时长的可控帧时钟和系统触摸注入，检查退出中按住系统拖拽柄仍卸载窗口、下层物理点击恢复，以及快速重开后能再次关闭。Android 源码编译不等于设备执行，实际执行及未覆盖的系统设置、返回焦点、RTL、TalkBack、IME、帧率与深浅色边界以 [C 批交接](handoffs/20261111-1900-motion-batch-c.md) 为准。
 
 ## 7. 基础组件
 
