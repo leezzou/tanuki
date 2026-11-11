@@ -2,6 +2,14 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 动效 D 批列表变化（2026-11-11，android_agent-92，Host）
+
+- 起始远端 main / HEAD 实核 `37358849742b2ad3e2b24bc539395ec20801f413`，分支 `ao/motion/batch-d`。会话按 id、文件列表/网格按 path 接入 S-list；排序/增删/归档保持数据集身份，搜索/筛选/目录与主机切换重建行动画宿主并保留外部滚动状态。聊天仅新提交行 alpha，历史 placement 永远为 null，锚定与滚动逻辑未改。
+- 第一轮实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest`；七个 `--tests` 为 `com.tanuki.ui.TanukiListMotionTest`、`com.tanuki.ui.DshMessageMotionTest`、`com.tanuki.ui.design.TanukiMotionSpecsTest`、`com.tanuki.FileListPresentationTest`、`com.tanuki.DshChatWindowTest`、`com.tanuki.DshChatFollowStateTest`、`com.tanuki.DshChatRenderTest`。**BUILD SUCCESSFUL（4m1s）/ 退出 0**；XML 实核 **7 类71项（5/7/5/8/18/5/23），0 failures / 0 errors / 0 skipped**。
+- 新增13项覆盖实际文件排序、会话置顶与归档、240ms placement/160ms fade 时间采样、搜索异步提交及清空、目录/来源/隐藏筛选身份、首屏/加载/分页头插/窗口释放、工具组成员更新、占位/流式落盘替换，以及 reduced 全 null。补强一项验证正式消息先到、占位信号后清除时，不会反复补记抑制而漏掉后续新消息入场。宿主时间采样不代表 Android 实际帧行为。
+- 最终用相同配置、前三个任务与七类过滤，再追加 `--tests 'com.tanuki.DshNativePagingTest' :app:lintModernDebug` 完整重跑：**BUILD SUCCESSFUL（7m35s）/ 退出0**，产品/AndroidTest/JVM源码 compile 通过；XML实核 **8类88项（5/8/5/8/18/5/23/16），0 failures / 0 errors / 0 skipped**。lint **0 errors / 105 warnings / 2 hints**，公共策略与新增测试无告警。此前独立 lint 一轮亦成功（5m2s），不以首轮71项替代最终88项。
+- 编排者已批准并完成工具组的单点扩展：DshToolGroupCard 只增加默认 Modifier 参数并传给原根 Surface，历史/实时段复用同一新增行 alpha 策略，不改结构/展开/内容。初版接线后同套88项通过（5m55s），lint新增1条ModifierParameter警告；将Modifier移至第一个可选参数并同步调用点后，以上文完整八类命令最终重跑 **BUILD SUCCESSFUL（3m34s）/退出0**，产品/AndroidTest/JVM源码compile通过，**8类88项、0失败/错误/跳过**，lint **0 errors/105 warnings/2 hints**，新增警告消失。前述71项和7m35s结果只作为阶段证据。未执行完整 JVM、Android 仪器、设备安装/操作、实际 Compose 列表挂载/快速打断或帧率；未生成设备/发布 APK，跳过原生运行时的 Host 编译不作为可安装验收包。API Key/真实模型/真机暂停项保留。完整范围和后续见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
+
 ## 动效 B 批页面转场（2026-11-11，android_agent-90，Host）
 
 - 起始基线 fetch 实核 `226c3f95e0b71b8e4a34b13f8302ec68abce5314`，分支 `ao/motion/batch-b`；保留本地改动无冲突快进新 main `824c6c9be855389708e2b3d5886f5670cbc6695e` 后刷新验证。编排已批准文件/浏览器最小接线，主目的地、设置、文件列表/查看器、浏览器原生二级、窄屏 TwoPane 共用转场组件；业务页旧入场已清零。WebView 只用原生背景遮罩，旧内容立即卸载，原 BackHandler 和返回目标不改。

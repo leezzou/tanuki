@@ -50,8 +50,9 @@ import com.tanuki.web.DshToolStatus
 @Composable
 internal fun DshToolGroupCard(
     tools: List<DshToolItem>,
+    modifier: Modifier = Modifier,
     pendingApprovalCalls: Set<String> = emptySet(),
-    onOpenApproval: () -> Unit = {}
+    onOpenApproval: () -> Unit = {},
 ) {
     if (tools.isEmpty()) return
     val colors = TanukiDesign.tokens.colors
@@ -60,7 +61,7 @@ internal fun DshToolGroupCard(
     val failed = tools.any { it.status == DshToolStatus.FAILED }
     Surface(color = Color(colors.surface), contentColor = Color(colors.textPrimary),
         shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Color(colors.outline)),
-        modifier = Modifier.fillMaxWidth()) {
+        modifier = modifier.fillMaxWidth()) {
         Column {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (expanded) "收起工具调用" else "展开工具调用") {
                 expanded = !expanded

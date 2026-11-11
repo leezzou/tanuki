@@ -214,6 +214,16 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 
 回归 `TanukiPageTransitionsTest` 使用 Compose 实际动画 spec 的时间采样验证主目的地矩阵、层级曲线/方向、RTL、进入/返回方向互逆、0ns 即终态及 WebView 零位移；不把 JVM 策略验证称为 Android 视觉、WebView/Surface 或帧率验收。
 
+### 6.3 D 批列表与内容变化
+
+会话管理行与文件列表/网格复用 `TanukiDesign.motion.list()`：同一稳定 key 数据集内，placement 为 240ms standard，新增淡入为 160ms enter，删除淡出为 140ms exit；reduced-motion 三个 spec 均为 null。分组标题不逐项入场，不给整列表加 `animateContentSize`。
+
+`ui/TanukiListMotion.kt` 固定数据集身份：排序/新增/删除/归档保持身份；搜索、筛选、目录/存储来源或主机变化重建 Lazy 动效宿主，滚动状态仍放在宿主外。文件异步过滤使用**当前显示结果**的筛选身份，新结果提交才切换；请求过滤期间与已过滤结果均关闭行动画，清空搜索同样不会给整批结果补入场。Compose 1.10.3 的 Lazy 动效节点卸载会 reset animator，宿主重建不继承上一个数据集的 placement/退出动画。
+
+聊天历史与实时段均不使用 placement/退出动画；独立 `DshMessageMotionSnapshot` 按会话记录序号水位和新增行资格，只有新追加的已提交行允许 160ms alpha。首屏恢复、加载完成、历史 revision 变化（头插/窗口释放）、旧行重读、流式 delta、发送占位与流式落盘替换立即显示；工具组追加成员不重播。普通重组保留已入场行的 spec，不截断当前淡入。消息分组、渲染 key、锚定与自动/手动滚动逻辑保持原样。
+
+Host 回归 `TanukiListMotionTest` / `DshMessageMotionTest` 覆盖排序时间采样、异步搜索/清空边界、目录/来源/筛选身份、分页/窗口释放、分组与占位对账和 reduced 全 null；它们不代表 Compose 实际挂载、Android 视觉、滚动手势或帧率已验收。适用独立设备 QA 仍须在 PR 最新 SHA 上执行。范围和实际验证见 [D 批交接](handoffs/20261111-2043-motion-batch-d.md)。
+
 ## 7. 基础组件
 
 除三态外，组件位于 `com.tanuki.ui.design`，当前为模块内 `internal`，由同一 App 模块的页面直接使用。

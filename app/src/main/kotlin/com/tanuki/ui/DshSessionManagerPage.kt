@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -63,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -78,6 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tanuki.runtime.Redact
 import com.tanuki.ui.design.TanukiBottomSheet
+import com.tanuki.ui.design.TanukiDesign
 import com.tanuki.ui.design.TanukiPillButton
 import com.tanuki.ui.design.TanukiPillButtonTone
 import com.tanuki.ui.design.TanukiPressable
@@ -162,6 +165,11 @@ fun DshSessionManagerPage(
         state.visibleSessions
     }
     val visibleGroups = remember(visibleSessions) { DshSessionGrouping.groups(visibleSessions) }
+    val listState = rememberLazyListState()
+    val listDataset = sessionListMotionDataset(state)
+    val contentSearchVisible = state.contentSearching || state.contentSearched || state.contentHits.isNotEmpty()
+    val listMotion = listDataset.motion(TanukiDesign.motion,
+        filtering = listDataset.query.isNotEmpty() || state.filter != DshSessionFilter.ALL || contentSearchVisible)
     val selectedIdSet = selectedIds.toSet()
     val selectedSessions = state.sessions.filter { it.id in selectedIdSet }
 
@@ -330,77 +338,86 @@ fun DshSessionManagerPage(
                             onRefresh = controller::refresh,
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            LazyColumn(
-                                Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(
-                                    start = TanukiSpace.LG_DP.dp,
-                                    end = TanukiSpace.LG_DP.dp,
-                                    top = TanukiSpace.XS_DP.dp,
-                                    bottom = 96.dp,
-                                ),
-                                verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
-                            ) {
-                                if (state.contentSearching || state.contentSearched || state.contentHits.isNotEmpty()) {
-                                    item(key = "content-search", contentType = "content-search") {
-                                        ContentSearchCard(
-                                            state = state,
-                                            onOpen = { hit ->
-                                                controller.clearMessages()
-                                                detailId = hit.sessionId
-                                                detailModeName = DshDetailMode.DETAIL.name
-                                                detailTabName = DshDetailTab.OVERVIEW.name
-                                                controller.openSession(hit.sessionId)
-                                            },
-                                            onClear = controller::clearContentSearch
-                                        )
+                            // 筛选/换主机重建行动画宿主，保留外部滚动状态；排序/归档不换身份。
+                            key(controller, currentHost?.id, remote, listDataset, contentSearchVisible) {
+                                LazyColumn(
+                                    Modifier.fillMaxSize(),
+                                    state = listState,
+                                    contentPadding = PaddingValues(
+                                        start = TanukiSpace.LG_DP.dp,
+                                        end = TanukiSpace.LG_DP.dp,
+                                        top = TanukiSpace.XS_DP.dp,
+                                        bottom = 96.dp,
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(TanukiSpace.SM_DP.dp)
+                                ) {
+                                    if (state.contentSearching || state.contentSearched || state.contentHits.isNotEmpty()) {
+                                        item(key = "content-search", contentType = "content-search") {
+                                            ContentSearchCard(
+                                                state = state,
+                                                onOpen = { hit ->
+                                                    controller.clearMessages()
+                                                    detailId = hit.sessionId
+                                                    detailModeName = DshDetailMode.DETAIL.name
+                                                    detailTabName = DshDetailTab.OVERVIEW.name
+                                                    controller.openSession(hit.sessionId)
+                                                },
+                                                onClear = controller::clearContentSearch
+                                            )
+                                        }
                                     }
-                                }
-                                if (visibleSessions.isEmpty()) {
-                                    item(key = "empty-filter", contentType = "empty") {
-                                        ManagerInlineEmpty(
-                                            title = when {
-                                                state.query.isNotBlank() -> "没有匹配的对话"
-                                                state.filter == DshSessionFilter.UNREAD -> "没有未读对话"
-                                                state.filter == DshSessionFilter.RUNNING -> "没有正在回复的对话"
-                                                else -> "没有可显示的对话"
-                                            },
-                                            detail = "当前条件下没有对话，请清除筛选后查看。",
-                                            action = "清除筛选",
-                                            onAction = {
-                                                controller.setQuery("")
-                                                controller.clearContentSearch()
-                                                controller.setFilter(DshSessionFilter.ALL)
-                                            }
-                                        )
-                                    }
-                                }
-                                visibleGroups.forEach { group ->
-                                    item(key = "group:${group.key}", contentType = "group") {
-                                        SessionGroupHeader(group)
-                                    }
-                                    items(group.sessions, key = { it.id }, contentType = { "session" }) { item ->
-                                        SessionRow(
-                                            session = item,
-                                            unread = item.id in state.unreadIds,
-                                            pinned = item.id in state.pinnedIds,
-                                            selectionMode = selectionMode,
-                                            selected = item.id in selectedIdSet,
-                                            onTogglePin = { controller.togglePinned(item.id) },
-                                            onToggleSelect = {
-                                                selectedIds = if (item.id in selectedIdSet) {
-                                                    selectedIds - item.id
-                                                } else {
-                                                    selectedIds + item.id
+                                    if (visibleSessions.isEmpty()) {
+                                        item(key = "empty-filter", contentType = "empty") {
+                                            ManagerInlineEmpty(
+                                                title = when {
+                                                    state.query.isNotBlank() -> "没有匹配的对话"
+                                                    state.filter == DshSessionFilter.UNREAD -> "没有未读对话"
+                                                    state.filter == DshSessionFilter.RUNNING -> "没有正在回复的对话"
+                                                    else -> "没有可显示的对话"
+                                                },
+                                                detail = "当前条件下没有对话，请清除筛选后查看。",
+                                                action = "清除筛选",
+                                                onAction = {
+                                                    controller.setQuery("")
+                                                    controller.clearContentSearch()
+                                                    controller.setFilter(DshSessionFilter.ALL)
                                                 }
-                                            },
-                                            onClick = {
-                                                controller.clearMessages()
-                                                detailId = item.id
-                                                detailModeName = DshDetailMode.DETAIL.name
-                                                detailTabName = DshDetailTab.OVERVIEW.name
-                                                controller.openSession(item.id)
-                                            }
-                                        )
+                                            )
+                                        }
+                                    }
+                                    visibleGroups.forEach { group ->
+                                        item(key = "group:${group.key}", contentType = "group") {
+                                            SessionGroupHeader(group)
+                                        }
+                                        items(group.sessions, key = { it.id }, contentType = { "session" }) { item ->
+                                            SessionRow(
+                                                modifier = Modifier.animateItem(
+                                                    placementSpec = listMotion.placement,
+                                                    fadeInSpec = listMotion.fadeIn,
+                                                    fadeOutSpec = listMotion.fadeOut,
+                                                ),
+                                                session = item,
+                                                unread = item.id in state.unreadIds,
+                                                pinned = item.id in state.pinnedIds,
+                                                selectionMode = selectionMode,
+                                                selected = item.id in selectedIdSet,
+                                                onTogglePin = { controller.togglePinned(item.id) },
+                                                onToggleSelect = {
+                                                    selectedIds = if (item.id in selectedIdSet) {
+                                                        selectedIds - item.id
+                                                    } else {
+                                                        selectedIds + item.id
+                                                    }
+                                                },
+                                                onClick = {
+                                                    controller.clearMessages()
+                                                    detailId = item.id
+                                                    detailModeName = DshDetailMode.DETAIL.name
+                                                    detailTabName = DshDetailTab.OVERVIEW.name
+                                                    controller.openSession(item.id)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1004,11 +1021,12 @@ private fun SessionRow(
     selected: Boolean,
     onTogglePin: () -> Unit,
     onToggleSelect: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // 行容器统一走可按压卡片：0.98 缩放走反馈令牌，48dp 触控区由组件保证。
     TanukiPressable(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         onClick = { if (selectionMode) onToggleSelect() else onClick() },
         shape = TanukiShapeTokens.card,
     ) {
