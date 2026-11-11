@@ -80,7 +80,7 @@
 
 ## 3. 主机端 5 分钟上手（quickstart）
 
-`scripts/remote-relay/quickstart.sh` 把主机端启动收敛为一条命令：检查 python3/openssl；按需在 `~/.tanuki-relay` 生成自签名证书（复用 `gen-cert.sh`）；自动计算中继证书的 `sha256-...` 钉扎，不需要手工抄写；后台启动 TLS 中继并做端口健康检查；启动 `host_agent.py` 时自动带上 `--cert-pin`；把配对链接尽力复制到剪贴板，并在终端显示配对链接、6 位核对码和手机端步骤。Ctrl+C 会同时停止中继与主机端 agent，不留孤儿进程。
+`scripts/remote-relay/quickstart.sh` 把主机端启动收敛为一条命令：检查 python3/openssl；按需在 `~/.tanuki-relay` 生成自签名证书（复用 `gen-cert.sh`）；自动计算中继证书的 `sha256-...` 钉扎，不需要手工抄写；后台启动 TLS 中继并做端口健康检查；启动 `host_agent.py` 时自动带上 `--cert-pin`；默认广播 `_tanuki-remote._tcp.local` 局域网发现；把配对链接尽力复制到剪贴板，用 `qrencode` 打印可扫二维码（缺失时打印链接大字和安装提示），并在终端显示配对链接、6 位核对码和手机端步骤。Ctrl+C 会同时停止中继与主机端 agent，不留孤儿进程。
 
 ### 3.1 三条命令
 
@@ -121,6 +121,7 @@ bash scripts/remote-relay/quickstart.sh --print-only
 
   6 位核对码：  >>>  123456  <<<
 
+  手机端：打开远程页面，列表里应出现「Tanuki Host」；不在同一网络时扫下面的码。
   手机端下一步：
     1. 打开 Tanuki → 设置 → 远程主机 → 新增远程连接
     2. 选“配对链接”：手机一般会自动读取剪贴板，读不到时粘贴上面的链接
@@ -136,6 +137,8 @@ bash scripts/remote-relay/quickstart.sh --print-only
 
 看到 `远程连接已就绪` 且没有 `注意：主机端尚未确认注册`，表示中继已监听、agent 已注册房间。日志在 `~/.tanuki-relay/agent.log` 与 `relay.log`；配对链接同时写入 `~/.tanuki-relay/pairing.txt`（0600）。链接含一次性房间 token，不要截图、贴到公开聊天或提交到仓库。
 
+安装了 `qrencode` 时，横幅后还会打印 ANSI 二维码，内容就是上面的配对链接；没有安装时打印链接大字和安装提示（macOS `brew install qrencode`，Debian/Ubuntu `sudo apt install qrencode`）。二维码同样含 token，只在自己的终端显示。
+
 ### 3.3 常见失败对照
 
 | 手机/终端现象 | 含义 | 主机端处理 |
@@ -149,6 +152,42 @@ bash scripts/remote-relay/quickstart.sh --print-only
 | `未能自动复制到剪贴板` | 主机没有 pbcopy/wl-copy/xclip/xsel，或没有图形会话 | 手动打开 `~/.tanuki-relay/pairing.txt` 复制，或加 `--no-clipboard` 跳过提示 |
 
 失败时先看终端提示和 `agent.log`。`--print-only` 会打印解析后的证书路径、钉扎、监听地址和将执行的 relay/agent 命令，便于确认参数；它不建目录、不生成证书、不启动进程。中继日志只记录房间短前缀和错误码，不记录 token、配对链接或 SSH 数据。
+
+### 3.4 局域网自动发现（mDNS）
+
+`host_agent.py` 启动后默认同时广播 `_tanuki-remote._tcp.local`，手机在同一 Wi-Fi 打开远程页面时可直接看到电脑。广播只包含显示名、SSH/DSH 端口、hostId、协议版本和指纹摘要，**不包含配对 token**；手机仍必须用配对链接/token 或用户主动配置，并完成 SSH 主机密钥确认。
+
+**前置条件**
+
+- 手机和主机在同一 Wi-Fi/热点，或同一允许组播的 VLAN；
+- 路由器/AP 未启用客户端隔离（AP isolation）、访客网络隔离或 mDNS 屏蔽；
+- 主机防火墙放行 UDP 5353 入站和组播 `224.0.0.251`；
+- 主机有非回环局域网 IPv4；只有 IPv6 或没有 LAN 地址时 Python 兜底会跳过并告警；
+- 没有加 `--no-mdns`。
+
+**广播内容**
+
+| TXT 键 | 含义 |
+|---|---|
+| `name` | 显示名；默认 hostname 首段，可用 `--name` 覆盖（UTF-8，≤63 字节） |
+| `ssh` | 本机 sshd 端口，与 `--ssh-port` 一致 |
+| `dsh` | 远程 DSH 端口，默认 3080，可用 `--dsh-port` 覆盖 |
+| `host` | 32 位小写十六进制 hostId，与配对链接的 `host` 相同 |
+| `ver` | 协议版本，当前为 `1` |
+| `fp` | `sha256(hostId)` 前 16 位小写十六进制，仅用于界面显示/人工对照，不是认证凭据 |
+
+SRV 端口为 SSH 端口；A 记录为主机局域网 IPv4。实现优先调用系统 `avahi-publish-service`（Linux）或 `dns-sd`（macOS）；命令不存在或启动失败时，自动回退到 Python 标准库最小应答，只回答本服务的 PTR/SRV/TXT/A，不实现完整 mDNS 栈。广播失败只在 `agent.log` 记录，不影响中继注册；quickstart 横幅也会提示“mDNS 广播未确认成功”。端口冲突或不需要发现时用 `--no-mdns` 关闭。
+
+**常见失败对照**
+
+| 现象 | 可能原因 | 处理 |
+|---|---|---|
+| 手机列表看不到电脑 | 不在同一 Wi-Fi/VLAN；AP 隔离/访客网络；防火墙挡 UDP 5353；系统或路由器禁用 mDNS；加了 `--no-mdns` | 连同一网络并关闭客户端隔离；放行 5353/组播；看 `agent.log` 是否有 `mDNS 广播`；临时改用二维码 |
+| 能看到但连不上 | SRV/SSH 端口不对；sshd 未监听或被防火墙挡；DSH 端口不是实际值；A 记录地址不可达 | 核对 `--ssh-port`、`--dsh-port`、sshd 监听和防火墙；用二维码/直连验证 |
+| 看到多台同名电脑 | 显示名冲突；最小实现不做自动改名 | 用 `--name` 给不同主机起不同显示名 |
+| 中文主机名 | SRV/A 目标回退为 `tanuki-<hostId 前 8 位>`，显示名仍是中文 | 正常行为；不需要改配置 |
+
+发现信息可被同网段伪造，不能代替配对 token 和 SSH 主机密钥确认；`fp` 只用于对照。广播失败不会回退明文，也不会让中继模式失效。
 
 ## 4. 协议契约
 
@@ -181,6 +220,7 @@ bash scripts/remote-relay/quickstart.sh --print-only
 ### 5.2 远程主机端
 
 - 推荐用 [3. 主机端 5 分钟上手](#3-主机端-5-分钟上手quickstart) 的 `quickstart.sh` 一条命令启动；它复用下面的 relay/agent，不改变安全边界。
+- 默认广播 mDNS 发现信息（显示名/端口/hostId/版本/指纹摘要），不广播 token；广播失败只记日志，`--no-mdns` 可关闭。
 - 只需要**出站**访问中继端口；不新增监听端口，不需要路由器端口映射/公网 IP。
 - 本机 sshd 已运行，agent 只连接 `127.0.0.1:<sshPort>`；不读取/修改 sshd 配置，不执行命令。
 - 配对文件包含 token，权限 0600；不要提交到仓库、贴到公开聊天或写入日志。
@@ -218,6 +258,7 @@ bash scripts/remote-relay/quickstart.sh --print-only
 | JVM 回归 | `app/src/test/kotlin/com/tanuki/RemoteRelayTest.kt` |
 | Python 参考中继/主机端/自测 | `scripts/remote-relay/{protocol,relay,host_agent,test_remote_relay,gen-cert}.py/sh` |
 | 一键启动/钉扎与参数辅助/自测 | `scripts/remote-relay/{quickstart.sh,quickstart_lib.py,test_quickstart.py}` |
+| 局域网发现/mDNS 编解码/自测 | `scripts/remote-relay/{discovery.py,test_mdns.py}` |
 | 共享协议向量 | `app/src/test/resources/relay-protocol-vectors.json` |
 
 ## 8. 验证与未验证
@@ -229,11 +270,14 @@ bash scripts/remote-relay/quickstart.sh --print-only
 - `RemoteRelayTest` 新增 P2 回归：对端不读/写阻塞时 `RelayBridge.close` 与 `RelayClientSession.close` 及时返回；`relayRetry` 先失败后成功、重试耗尽、认证/钉扎/协议不重试、退避取消。
 - `RemoteWizardTest` 新增配对交互回归：进入链接步骤自动读取剪贴板并算码、非链接/无效链接保留粘贴回退、手动编辑链接不被覆盖且可显式替换、可选码校对与自动回填、确认步骤仅链接方式出现、链接过期/房间不存在/电脑离线/钉扎不匹配/中继端口不可达五类中文原因与下一步。
 - Python 参考实现 9 项回环端到端：自签名 TLS + pin、主机注册、客户端 JOIN/OPEN_OK/DATA 双向、2 MiB 慢消费者完整传输、错误 token、未知房间、明文连接不获得协议响应、共享向量一致、日志不泄露 token。
-- `test_quickstart.py` 19 项离线自测（2026-11-11，本机 Python 3.9.6/OpenSSL 4.1.0）：证书 DER SHA-256 钉扎与 `protocol.cert_pin` 一致、不同证书钉扎不同、非法 PEM 拒绝；relay/agent 命令拼装与 `--cert-pin`/`--pairing-relay` 传递、非法端口/地址拒绝；配对文件解析与 6 位码、空/损坏文件拒绝；端口探测与等待、局域网 IPv4 探测；`--print-only` 不建目录/不启动进程；端口占用快速失败；真实回环启动后 SIGINT 退出码 130，relay 与 agent 均退出、端口释放、`quickstart.pids` 清理。
+- `test_quickstart.py` 20 项离线自测（2026-11-11，本机 Python 3.9.6/OpenSSL 4.1.0）：证书 DER SHA-256 钉扎与 `protocol.cert_pin` 一致、不同证书钉扎不同、非法 PEM 拒绝；relay/agent 命令拼装与 `--cert-pin`/`--pairing-relay` 传递、非法端口/地址拒绝；配对文件解析与 6 位码、空/损坏文件拒绝；端口探测与等待、局域网 IPv4 探测；`--print-only` 不建目录/不启动进程；端口占用快速失败；真实回环启动后 SIGINT 退出码 130，relay 与 agent 均退出、端口释放、`quickstart.pids` 清理。
 - `host_agent.py --pairing-relay` 回归：连接地址仍为 `127.0.0.1:1` 时，配对链接展示 `203.0.113.9:9443`，钉扎保持不变。
+- `test_mdns.py` 20 项离线自测：TXT 必填键且不含 token、名称清洗/UTF-8 截断/非 ASCII 回退、固定 mDNS 查询与响应向量、压缩指针解析、系统 avahi/dns-sd 命令拼装、工具缺失/启动失败回退 Python 应答。
+- `host_agent.py` 默认 mDNS 手动回环验证：macOS `dns-sd` 后端启动并记录 `mDNS 广播：测试主机（dns-sd...）`，SIGTERM 退出码 0；`--no-mdns` 只记录关闭日志，配对文件仍正常生成。
 
 未验证：
 
 - 真实 Android 设备与真实远程 sshd/DSH 的端到端；真实 Android 剪贴板自动读取（Android 10+ 仅前台可读、系统提示与厂商差异）；Android Keystore 在真机上的中继 token 存储；真实弱网/断线重连；中继公网部署、TLS 证书链/域名、运营商网络/CGNAT；多客户端并发/高可用/限流；真实二维码扫描；Ed25519；WebRTC/TURN。
 - quickstart 的真实手机配对、真实剪贴板（pbcopy/xclip/wl-copy）与真实公网地址未验证；自测使用 `--no-clipboard` 和回环端口，不能替代设备/公网验收。
+- 真实手机 mDNS 发现列表、真实 avahi/dns-sd 与路由器 AP 隔离/组播屏蔽、真实 `qrencode` 扫码未验证；自测用固定报文、假进程和 `--no-mdns`，不能替代同网段设备验收。
 - 需要独立 Android QA 提供设备、APK、SHA 和实际步骤；需要用户提供一台可访问的中继主机或明确的中继地址后，才能做真实公网验收。

@@ -156,7 +156,25 @@ class QuickstartUnitTest(unittest.TestCase):
         self.assertEqual(self.pin, command[command.index("--cert-pin") + 1])
         self.assertEqual("127.0.0.1:8443", command[command.index("--relay") + 1])
         self.assertEqual("relay.example.test:9443", command[command.index("--pairing-relay") + 1])
+        self.assertEqual("3080", command[command.index("--dsh-port") + 1])
         self.assertIn("--state-dir", command)
+        self.assertNotIn("--no-mdns", command)
+
+    def test_agent_command_passes_name_and_no_mdns(self) -> None:
+        command = q.agent_command(
+            sys.executable,
+            "127.0.0.1:8443",
+            "127.0.0.1",
+            22,
+            self.root / "state",
+            self.pin,
+            "relay.example.test:9443",
+            name="我的 Mac",
+            dsh_port=3080,
+            no_mdns=True,
+        )
+        self.assertEqual("我的 Mac", command[command.index("--name") + 1])
+        self.assertIn("--no-mdns", command)
 
     def test_agent_command_rejects_missing_pin(self) -> None:
         with self.assertRaises(q.QuickstartError):
@@ -257,11 +275,17 @@ class QuickstartUnitTest(unittest.TestCase):
             22,
             self.root / "state" / "pairing.txt",
             self.pin,
+            name="我的 Mac",
+            dsh_port=3080,
+            no_mdns=True,
         )
         self.assertIn("cert_pin=" + self.pin, text)
         self.assertIn("relay_command=", text)
         self.assertIn("agent_command=", text)
         self.assertIn("--pairing-relay relay.example.test:8443", text)
+        self.assertIn("display_name=我的 Mac", text)
+        self.assertIn("dsh_port=3080", text)
+        self.assertIn("mdns=off（--no-mdns）", text)
         self.assertIn("pairing_file_status=不存在", text)
 
 
@@ -288,6 +312,7 @@ class HostAgentPairingTest(unittest.TestCase):
                     str(pairing),
                     "--cert-pin",
                     pin,
+                    "--no-mdns",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -337,6 +362,11 @@ class QuickstartProcessTest(unittest.TestCase):
             "127.0.0.1",
             "--ssh-port",
             str(free_port()),
+            "--dsh-port",
+            "3080",
+            "--name",
+            "测试主机",
+            "--no-mdns",
             "--no-clipboard",
             "--ready-timeout",
             "10",
@@ -374,10 +404,19 @@ class QuickstartProcessTest(unittest.TestCase):
                 self.assertEqual(q.certificate_pin(state / "relay-cert.pem"), parsed["pin"])
                 self.assertIn("pin=sha256-", link)
 
+                self.assertTrue(
+                    wait_until(
+                        lambda: "扫码配对" in read_text_safe(stdout_path)
+                        or "qrencode" in read_text_safe(stdout_path),
+                        5.0,
+                    ),
+                    "二维码或安装提示缺失",
+                )
                 stdout_text = read_text_safe(stdout_path)
                 self.assertIn(link, stdout_text)
                 self.assertIn(code, stdout_text)
                 self.assertIn("手机端下一步", stdout_text)
+                self.assertIn("已关闭局域网广播（--no-mdns）", stdout_text)
                 self.assertIn("Ctrl+C", stdout_text)
 
                 pids: Dict[str, int] = {}
@@ -420,6 +459,9 @@ class QuickstartProcessTest(unittest.TestCase):
         self.assertIn("relay_command=", completed.stdout)
         self.assertIn("agent_command=", completed.stdout)
         self.assertIn("--cert-pin", completed.stdout)
+        self.assertIn("display_name=测试主机", completed.stdout)
+        self.assertIn("mdns=off（--no-mdns）", completed.stdout)
+        self.assertIn("--no-mdns", completed.stdout)
         self.assertFalse(state.exists(), "--print-only must not create the state directory")
         self.assertFalse(q.port_in_use("127.0.0.1", port, timeout=0.2))
 

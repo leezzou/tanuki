@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import socket
 import ssl
 import threading
@@ -22,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import discovery
 import protocol as p
 
 MAX_SSHD_BUFFER = 8 * 1024
@@ -246,6 +248,9 @@ def main() -> int:
     )
     parser.add_argument("--ssh-host", default="127.0.0.1", help="本机 sshd 地址；默认 127.0.0.1")
     parser.add_argument("--ssh-port", type=int, default=22, help="本机 sshd 端口；默认 22")
+    parser.add_argument("--dsh-port", type=int, default=discovery.DEFAULT_DSH_PORT, help="远程 DSH 端口；默认 3080，仅用于局域网发现 TXT")
+    parser.add_argument("--name", default="", help="局域网显示名；默认取 hostname")
+    parser.add_argument("--no-mdns", action="store_true", help="关闭局域网 mDNS 广播（端口冲突或不需要发现时使用）")
     parser.add_argument("--state-dir", default=str(Path.home() / ".tanuki-relay"), help="保存 host-id 与配对文件的目录")
     parser.add_argument("--pairing-out", default="", help="配对链接输出文件；默认 <state-dir>/pairing.txt")
     parser.add_argument("--room", default="", help="已有房间号（默认自动生成）")
@@ -268,6 +273,8 @@ def main() -> int:
         parser.error("--pairing-relay 无效：{}".format(error))
     if not 1 <= args.ssh_port <= 65535:
         parser.error("--ssh-port 必须在 1-65535")
+    if not 1 <= args.dsh_port <= 65535:
+        parser.error("--dsh-port 必须在 1-65535")
     if args.cert_pin and not args.cert_pin.startswith("sha256-"):
         parser.error("--cert-pin 必须以 sha256- 开头")
     if not args.cert_pin and not args.ca_file:
@@ -297,14 +304,45 @@ def main() -> int:
         print(uri, flush=True)
         print("pairing_code=" + code, flush=True)
 
-    agent = HostAgent(args)
+    # SIGTERM 也走 KeyboardInterrupt 路径，确保 finally 能停掉 mDNS 子进程/应答线程。
+    def _terminate(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _terminate)
+    advertiser = None
     try:
+        if args.no_mdns:
+            logging.info("mDNS 广播已关闭（--no-mdns）")
+        else:
+            display_name = discovery.sanitize_name(args.name or discovery.default_display_name())
+            try:
+                advertiser = discovery.Advertiser(
+                    display_name,
+                    args.ssh_port,
+                    args.dsh_port,
+                    host_id,
+                    target=discovery.dns_host_label(host_id),
+                )
+                backend = advertiser.start()
+                logging.info(
+                    "mDNS 广播：%s（%s，服务 %s）", display_name, backend, discovery.SERVICE_TYPE
+                )
+                for note in advertiser.notes:
+                    logging.info("mDNS: %s", note)
+            except (discovery.DiscoveryError, OSError, ValueError) as error:
+                # 发现失败不能影响中继；手机仍可用配对链接/二维码连接。
+                logging.warning("mDNS 广播失败（不影响中继模式）：%s", error)
+                advertiser = None
+        agent = HostAgent(args)
         agent.run_forever()
     except PinMismatch:
         logging.error("relay certificate pin mismatch; refusing to continue")
         return 2
     except KeyboardInterrupt:
         return 0
+    finally:
+        if advertiser is not None:
+            advertiser.stop()
     return 0
 
 

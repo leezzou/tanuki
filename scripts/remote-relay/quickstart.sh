@@ -22,6 +22,9 @@ CERT_SET=0
 KEY_SET=0
 SSH_HOST=127.0.0.1
 SSH_PORT=22
+DSH_PORT=3080
+NAME=""
+NO_MDNS=0
 PRINT_ONLY=0
 COPY_CLIPBOARD=1
 READY_TIMEOUT=10
@@ -44,7 +47,7 @@ Tanuki 远程连接一键启动
   1. 检查 python3/openssl，必要时在 ~/.tanuki-relay 生成自签名证书；
   2. 自动计算中继证书钉扎（sha256-...），不需要手工抄写；
   3. 后台启动 TLS 中继并等待端口监听，然后启动 host_agent 并自动带 --cert-pin；
-  4. 把配对链接复制到剪贴板，并在终端显示链接、6 位核对码和手机端步骤；
+  4. 广播局域网 mDNS（默认开启），把配对链接复制到剪贴板，并打印二维码、链接、6 位核对码和手机端步骤；
   5. Ctrl+C 同时停止中继与主机端 agent。
 
 选项：
@@ -56,6 +59,9 @@ Tanuki 远程连接一键启动
   --key PATH            使用指定私钥（需与 --cert 同时提供）
   --ssh-host HOST       本机 sshd 地址（默认 127.0.0.1）
   --ssh-port N          本机 sshd 端口（默认 22）
+  --dsh-port N          远程 DSH 端口（默认 3080，仅用于局域网发现 TXT）
+  --name NAME           局域网显示名（默认取 hostname）
+  --no-mdns             关闭局域网 mDNS 广播（冲突或不需要发现时使用）
   --print-only          只打印解析后的参数和将要执行的命令，不启动任何进程
   --no-clipboard        不自动复制配对链接（改为提示手动复制 pairing.txt）
   --ready-timeout N     等待中继/配对文件就绪的秒数（默认 10）
@@ -67,6 +73,9 @@ Tanuki 远程连接一键启动
 
   # 手机走公网域名/地址，端口 9443
   bash scripts/remote-relay/quickstart.sh --port 9443 --public-host relay.example.com
+
+  # 指定局域网显示名，或关闭 mDNS 广播
+  bash scripts/remote-relay/quickstart.sh --name "书房 Mac" --no-mdns
 
   # 只排查参数，不启动
   bash scripts/remote-relay/quickstart.sh --print-only
@@ -169,6 +178,11 @@ while [[ $# -gt 0 ]]; do
     --ssh-host=*) SSH_HOST="${1#*=}"; shift ;;
     --ssh-port) need_value "$1" "${2:-}"; SSH_PORT="$2"; shift 2 ;;
     --ssh-port=*) SSH_PORT="${1#*=}"; shift ;;
+    --dsh-port) need_value "$1" "${2:-}"; DSH_PORT="$2"; shift 2 ;;
+    --dsh-port=*) DSH_PORT="${1#*=}"; shift ;;
+    --name) need_value "$1" "${2:-}"; NAME="$2"; shift 2 ;;
+    --name=*) NAME="${1#*=}"; shift ;;
+    --no-mdns) NO_MDNS=1; shift ;;
     --ready-timeout) need_value "$1" "${2:-}"; READY_TIMEOUT="$2"; shift 2 ;;
     --ready-timeout=*) READY_TIMEOUT="${1#*=}"; shift ;;
     --print-only) PRINT_ONLY=1; shift ;;
@@ -182,8 +196,12 @@ case "${PORT}" in ''|*[!0-9]*) fail "--port 必须是整数" ;; esac
 [[ "${PORT}" -ge 1 && "${PORT}" -le 65535 ]] || fail "--port 必须在 1-65535 之间"
 case "${SSH_PORT}" in ''|*[!0-9]*) fail "--ssh-port 必须是整数" ;; esac
 [[ "${SSH_PORT}" -ge 1 && "${SSH_PORT}" -le 65535 ]] || fail "--ssh-port 必须在 1-65535 之间"
+case "${DSH_PORT}" in ''|*[!0-9]*) fail "--dsh-port 必须是整数" ;; esac
+[[ "${DSH_PORT}" -ge 1 && "${DSH_PORT}" -le 65535 ]] || fail "--dsh-port 必须在 1-65535 之间"
 case "${READY_TIMEOUT}" in ''|*[!0-9]*) fail "--ready-timeout 必须是整数" ;; esac
 [[ "${READY_TIMEOUT}" -ge 1 && "${READY_TIMEOUT}" -le 120 ]] || fail "--ready-timeout 必须在 1-120 之间"
+MDNS_ARG=""
+if [[ "${NO_MDNS}" -eq 1 ]]; then MDNS_ARG="--no-mdns"; fi
 [[ -n "${LISTEN}" ]] || fail "--listen 不能为空"
 [[ -n "${SSH_HOST}" ]] || fail "--ssh-host 不能为空"
 if [[ "${CERT_SET}" -ne "${KEY_SET}" ]]; then
@@ -209,6 +227,8 @@ PYTHON="$(command -v python3)"
 if ! "${PYTHON}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
   fail "python3 版本过低（$("${PYTHON}" --version 2>&1)）；需要 3.9+"
 fi
+
+DISPLAY_NAME="$("${PYTHON}" "${LIB}" display-name --name "${NAME}")"
 
 PUBLIC_HOST_AUTO=0
 if [[ -z "${PUBLIC_HOST}" ]]; then
@@ -241,8 +261,10 @@ if [[ "${PRINT_ONLY}" -eq 1 ]]; then
     --public-host "${PUBLIC_HOST}" \
     --ssh-host "${SSH_HOST}" \
     --ssh-port "${SSH_PORT}" \
+    --name "${DISPLAY_NAME}" \
+    --dsh-port "${DSH_PORT}" \
     --pairing-file "${STATE_DIR%/}/pairing.txt" \
-    --cert-pin "${PIN}"
+    --cert-pin "${PIN}" ${MDNS_ARG}
   exit 0
 fi
 
@@ -336,9 +358,11 @@ printf '启动主机端 agent：连接 127.0.0.1:%s，配对地址 %s\n' "${PORT
   --relay "127.0.0.1:${PORT}" \
   --ssh-host "${SSH_HOST}" \
   --ssh-port "${SSH_PORT}" \
+  --dsh-port "${DSH_PORT}" \
+  --name "${DISPLAY_NAME}" \
   --state-dir "${STATE_DIR}" \
   --cert-pin "${PIN}" \
-  --pairing-relay "${PAIRING_ENDPOINT}" >>"${AGENT_LOG}" 2>&1 &
+  --pairing-relay "${PAIRING_ENDPOINT}" ${MDNS_ARG} >>"${AGENT_LOG}" 2>&1 &
 AGENT_PID=$!
 printf 'relay=%s\nagent=%s\n' "${RELAY_PID}" "${AGENT_PID}" > "${PID_FILE}"
 
@@ -370,6 +394,10 @@ for ((i = 0; i < 30; i++)); do
   kill -0 "${AGENT_PID}" 2>/dev/null || break
   sleep 0.1
 done
+MDNS_STATUS=0
+if [[ "${NO_MDNS}" -eq 0 ]] && grep -q 'mDNS 广播：' "${AGENT_LOG}" 2>/dev/null; then
+  MDNS_STATUS=1
+fi
 
 BOLD=""
 DIM=""
@@ -385,6 +413,13 @@ printf '%s\n\n' "${BOLD}========================================================
 printf '%s\n' "  配对链接（复制到手机；含一次性密钥，勿外传）："
 printf '%s\n\n' "  ${PAIRING_LINK}"
 printf '%s\n\n' "  ${BOLD}6 位核对码：  >>>  ${PAIRING_CODE}  <<<${RESET}"
+if [[ "${NO_MDNS}" -eq 1 ]]; then
+  printf '%s\n' "  手机端：已关闭局域网广播（--no-mdns）；请用下面的二维码/链接配对。"
+elif [[ "${MDNS_STATUS}" -eq 1 ]]; then
+  printf '%s\n' "  手机端：打开远程页面，列表里应出现「${DISPLAY_NAME}」；不在同一网络时扫下面的码。"
+else
+  printf '%s\n' "  注意：mDNS 广播未确认成功，手机可能看不到本机；请用下面的二维码/链接配对。"
+fi
 printf '%s\n' "  手机端下一步："
 printf '%s\n' "    1. 打开 Tanuki → 设置 → 远程主机 → 新增远程连接"
 printf '%s\n' "    2. 选“配对链接”：手机一般会自动读取剪贴板，读不到时粘贴上面的链接"
@@ -433,6 +468,21 @@ elif [[ "${COPY_CLIPBOARD}" -eq 1 ]]; then
 else
   printf '已跳过剪贴板；请手动打开 %s 复制。\n' "${PAIRING_FILE}"
 fi
+
+print_qr() {
+  local link="$1"
+  if command -v qrencode >/dev/null 2>&1 \
+    && printf '%s' "${link}" | qrencode -t ANSIUTF8 2>/dev/null; then
+    printf '扫码配对（二维码内容为上面的配对链接；含一次性密钥，勿外传）\n'
+    return 0
+  fi
+  printf '\n未安装 qrencode，无法在终端生成二维码。\n'
+  printf '请手动复制下面的配对链接，或安装 qrencode 后重试：\n'
+  printf '  macOS: brew install qrencode；Debian/Ubuntu: sudo apt install qrencode\n'
+  printf '\n===== 配对链接（复制到手机） =====\n%s\n==================================\n' "${link}"
+  return 1
+}
+print_qr "${PAIRING_LINK}" || true
 
 if [[ -t 1 ]]; then
   printf '实时日志（Ctrl+C 退出）：\n'
