@@ -41,7 +41,9 @@ data class DshSession(
     val agentAvailable: Boolean,
     val asOfSeq: Int?
 ) {
-    val displayTitle: String get() = title.ifBlank { "会话 ${id.take(8)}" }
+    // JSON 空值、空白和旧数据里的字面 null 均不能作为用户看到的会话名。
+    val displayTitle: String get() = title.trim().takeUnless { it.equals("null", ignoreCase = true) }
+        .orEmpty().ifBlank { "新对话" }
 }
 
 enum class DshMessageRole(val label: String) { USER("你"), ASSISTANT("DSH") }
@@ -160,7 +162,7 @@ object DshApiProtocol {
             val projectionValues = projections?.optJSONObject("values")
             result += DshSession(
                 id = id,
-                title = projectionValues?.optString("title", "").orEmpty(),
+                title = (projectionValues?.opt("title") as? String).orEmpty(),
                 updatedAt = item.optLong("updatedAt", 0L),
                 running = item.optBoolean("running", false),
                 blank = item.optBoolean("blank", false),

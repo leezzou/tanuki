@@ -68,6 +68,8 @@ import com.tanuki.web.ChatNotificationRoute
 import com.tanuki.web.ChatNotificationRoutePolicy
 import com.tanuki.web.ChatNotificationTargetPolicy
 import com.tanuki.web.DshEndpoint
+import com.tanuki.web.DshAdminTransportAdapter
+import com.tanuki.web.DshSessionAdminClient
 import com.tanuki.web.DshComposerClient
 import com.tanuki.web.DshNativeClient
 import com.tanuki.web.DshNativeComposerRemote
@@ -394,7 +396,19 @@ class MainActivity : ComponentActivity() {
                     if (origin != null && launchUrl != null) DshEndpoint(origin, launchUrl) else null
                 }
                 val nativeClient = remember { DshNativeClient(endpointProvider = nativeEndpointProvider) }
-                val nativeController = remember { DshNativeController(nativeClient, lifecycleScope) }
+                val nativeController = remember {
+                    val admin = DshSessionAdminClient(DshAdminTransportAdapter(nativeClient::call))
+                    DshNativeController(nativeClient, lifecycleScope, renameRemote = { sessionId, title ->
+                        // 与会话管理页相同：本地安全/试用模式禁止写入；远程使用远端权限。
+                        if (!manager.remoteHost.ui.value.status.connected &&
+                            manager.state.value.recovery.mode != RecoveryMode.NORMAL
+                        ) {
+                            Result.failure(IllegalStateException("安全模式下不能重命名会话"))
+                        } else {
+                            admin.renameSession(sessionId, title)
+                        }
+                    })
+                }
                 val approvalController = remember {
                     DshApprovalController(
                         endpointProvider = nativeEndpointProvider,

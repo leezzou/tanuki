@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONException
+import java.io.IOException
 
 /**
  * 原生页状态；会话、历史、发送与审批都直接来自官方 DSH，不维护第二套聊天库。
@@ -80,7 +81,8 @@ data class DshFailedPrompt(
  */
 class DshNativeController(
     private val client: DshChatSource,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val renameRemote: (suspend (String, String) -> Result<String>)? = null
 ) {
     private val _state = MutableStateFlow(DshNativeState())
     val state: StateFlow<DshNativeState> = _state.asStateFlow()
@@ -146,6 +148,34 @@ class DshNativeController(
                 _state.value = DshNativeState(loading = false, error = message, unavailableReason = message)
             }
         }
+    }
+
+    val canRenameSession: Boolean get() = renameRemote != null
+
+    /** 重命名复用官方接口；失败保留原标题，切换会话后不再发布旧请求结果。 */
+    suspend fun renameSession(sessionId: String, title: String): Result<Unit> {
+        val rename = renameRemote ?: return Result.failure(IOException("当前无法重命名会话"))
+        val clean = title.trim()
+        if (clean.isEmpty() || clean.length > 200 || clean.any { it.code < 0x20 || it.code == 0x7f }) {
+            return Result.failure(IllegalArgumentException("标题不能为空、不能超过 200 字或包含控制字符"))
+        }
+        if (_state.value.selectedId != sessionId) return Result.failure(IOException("会话已切换，请重新打开标题"))
+        val token = generation
+        return rename(sessionId, clean).fold(
+            onSuccess = { officialTitle ->
+                if (token != generation) {
+                    Result.failure(IOException("会话已切换，请刷新查看标题"))
+                } else {
+                    _state.update { state ->
+                        state.copy(sessions = state.sessions.map { session ->
+                            if (session.id == sessionId) session.copy(title = officialTitle) else session
+                        })
+                    }
+                    Result.success(Unit)
+                }
+            },
+            onFailure = { Result.failure(IOException(messageOf(it))) }
+        )
     }
 
     /** 通知点击：优先选择已加载列表中的目标；未加载/不在列表时刷新后再选中。 */

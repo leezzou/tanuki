@@ -388,6 +388,56 @@ class DshNativeControllerTest {
         assertTrue(controller.state.value.notice!!.contains("官方"))
     }
 
+    @Test fun renameUsesOfficialReturnedTitleAndKeepsMessages() = runBlocking {
+        val requests = mutableListOf<Pair<String, String>>()
+        val controller = DshNativeController(
+            FakeSource(listOf(session("A"))), CoroutineScope(Dispatchers.Unconfined),
+            renameRemote = { id, title -> requests += id to title; Result.success("官方标题") }
+        )
+        controller.refresh()
+        val original = awaitSelection(controller, "A").messages
+        assertTrue(controller.renameSession("A", "  新标题  ").isSuccess)
+        assertEquals(listOf("A" to "新标题"), requests)
+        assertEquals("官方标题", controller.state.value.selectedSession!!.displayTitle)
+        assertEquals(original, controller.state.value.messages)
+    }
+
+    @Test fun renameFailureKeepsOriginalTitleAndRejectsInvalidInput() = runBlocking {
+        var calls = 0
+        val controller = DshNativeController(
+            FakeSource(listOf(session("A"))), CoroutineScope(Dispatchers.Unconfined),
+            renameRemote = { _, _ -> calls++; Result.failure(IOException("网络不可用")) }
+        )
+        controller.refresh()
+        awaitSelection(controller, "A")
+        assertTrue(controller.renameSession("A", " ").isFailure)
+        assertTrue(controller.renameSession("A", "x".repeat(201)).isFailure)
+        assertTrue(controller.renameSession("A", "带\n换行").isFailure)
+        assertEquals(0, calls)
+        assertTrue(controller.renameSession("A", "新标题").isFailure)
+        assertEquals(1, calls)
+        assertEquals("会话 A", controller.state.value.selectedSession!!.displayTitle)
+    }
+
+    @Test fun lateRenameCannotUpdateAnotherSession() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val controller = DshNativeController(
+            FakeSource(listOf(session("A"), session("B"))), CoroutineScope(Dispatchers.Unconfined),
+            renameRemote = { _, _ -> gate.await(); Result.success("仅 A 的新标题") }
+        )
+        controller.refresh()
+        awaitSelection(controller, "A")
+        val request = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            controller.renameSession("A", "修改 A")
+        }
+        controller.select("B")
+        awaitSelection(controller, "B")
+        gate.complete(Unit)
+        request.join()
+        assertEquals("B", controller.state.value.selectedId)
+        assertEquals("会话 B", controller.state.value.selectedSession!!.displayTitle)
+    }
+
     private fun controller(source: DshChatSource): DshNativeController =
         DshNativeController(source, CoroutineScope(Dispatchers.Unconfined))
 

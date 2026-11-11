@@ -980,7 +980,7 @@ private fun DshPage(model: TanukiUiModel, c: TanukiUiCallbacks, browser: WebView
                     Text("DSH", style = MaterialTheme.typography.titleMedium)
                     Text(
                         when {
-                            native -> "原生界面 · 只读"
+                            native -> "原生界面"
                             remoteActive -> "远程 · ${s.remote.host}"
                             else -> s.web.label
                         },

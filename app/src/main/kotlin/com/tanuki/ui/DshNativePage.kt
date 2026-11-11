@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -23,7 +24,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -103,6 +106,10 @@ fun DshNativePage(
         DshFailedPrompt(it.text, it.reason, it.time, it.attachmentCount)
     }
     var showApprovalSheet by rememberSaveable { mutableStateOf(false) }
+    var renameTarget by remember(state.selectedId) { mutableStateOf<DshSession?>(null) }
+    var renameTitle by remember(renameTarget?.id) { mutableStateOf(renameTarget?.displayTitle.orEmpty()) }
+    var renameBusy by remember(renameTarget?.id) { mutableStateOf(false) }
+    var renameError by remember(renameTarget?.id) { mutableStateOf<String?>(null) }
     // 直接收集 composer 状态（不经过重组）；recorder 存在时失败由持久化结果提供。
     LaunchedEffect(composer, composerSendFailures) {
         var wasSending = false
@@ -137,7 +144,9 @@ fun DshNativePage(
         Header(
             state = state,
             onRefresh = controller::refresh,
-            onSwitchOfficial = onSwitchOfficial
+            onSwitchOfficial = onSwitchOfficial,
+            canRename = controller.canRenameSession,
+            onRename = { renameTarget = state.selectedSession }
         )
         state.error?.let { ErrorBanner("原生界面读取失败", it) }
         state.actionError?.let { ErrorBanner("操作未完成", it) }
@@ -228,6 +237,44 @@ fun DshNativePage(
         )
         DshComposerBar(composer, Modifier.fillMaxWidth())
     }
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!renameBusy) renameTarget = null },
+            title = { Text("重命名会话") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = renameTitle,
+                        onValueChange = { renameTitle = it.take(200); renameError = null },
+                        label = { Text("会话名称") },
+                        singleLine = true,
+                        enabled = !renameBusy,
+                        isError = renameError != null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    renameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !renameBusy && renameTitle.isNotBlank(),
+                    onClick = {
+                        renameBusy = true
+                        scope.launch {
+                            controller.renameSession(target.id, renameTitle).fold(
+                                onSuccess = { renameTarget = null },
+                                onFailure = { renameError = it.message ?: "重命名失败，请重试" }
+                            )
+                            renameBusy = false
+                        }
+                    }
+                ) { Text(if (renameBusy) "保存中…" else "保存") }
+            },
+            dismissButton = {
+                TextButton(enabled = !renameBusy, onClick = { renameTarget = null }) { Text("取消") }
+            }
+        )
+    }
     DshApprovalSheet(
         visible = showApprovalSheet,
         onDismiss = { showApprovalSheet = false },
@@ -243,19 +290,44 @@ fun DshNativePage(
 }
 
 @Composable
-private fun Header(state: DshNativeState, onRefresh: () -> Unit, onSwitchOfficial: () -> Unit) {
+private fun Header(
+    state: DshNativeState,
+    onRefresh: () -> Unit,
+    onSwitchOfficial: () -> Unit,
+    canRename: Boolean,
+    onRename: () -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
+            val session = state.selectedSession
+            if (session != null) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .clickable(enabled = canRename, onClickLabel = "重命名会话", onClick = onRename),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        session.displayTitle,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (canRename) Text("重命名", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("原生界面", style = MaterialTheme.typography.titleMedium)
+                Text("原生界面", style = MaterialTheme.typography.labelMedium)
                 StatusPill(if (state.live) "实时" else "未实时", state.live)
                 if (state.running) StatusPill("运行中", true)
             }
             Text(
-                "消息、发送、停止与审批都走官方 DSH；不会另建聊天协议",
+                "和官方界面是同一份会话，随时可切换",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -426,8 +498,8 @@ private fun MessageList(
             ) {
                 item(key = "empty", contentType = "empty") {
                     EmptyNativeState(
-                        title = "该会话没有可读文本消息",
-                        detail = "原生页读取官方 user/message、assistant/message 与工具事件；点击下方输入框即可发送。"
+                        title = "开始对话",
+                        detail = "这个会话还没有消息，在下面输入就能开始"
                     )
                 }
             }
