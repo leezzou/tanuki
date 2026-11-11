@@ -19,7 +19,7 @@
 - 已实现：上述引导流程、状态机、环境门槛、准备阶段映射、权限计划、首页提示条、设置回看、解压写入量上报。
 - 已验证：JVM 全量测试与 lint 通过（见下）；定向引导测试 32 项通过。
 - 待验证：设备 UI、真实安装链路、真实权限弹窗、升级安装现场、深色/大字体/TalkBack。
-- 当前分支：`ao/first-run-onboarding/root`，基于 `origin/main=62e4c30b4a61636867cfc94736e44fa159f50b9f`；未提交前工作区包含本次改动，无运行中的安装/测试任务。
+- 当前分支：`ao/first-run-onboarding/root`，基于 `origin/main=62e4c30b4a61636867cfc94736e44fa159f50b9f`；实现提交 `933d4d7`，PR [#67](https://github.com/leezzou/tanuki/pull/67) 已创建，工作区干净，无运行中的安装/测试任务。
 - 关键事实与可定位源码：`docs/ONBOARDING.md`；纯状态机 `app/src/main/kotlin/com/tanuki/onboarding/OnboardingModel.kt`；环境门槛 `OnboardingEnvironment.kt`；准备/失败/权限 `OnboardingPrepare.kt`；SharedPreferences 与设备读取 `OnboardingStore.kt`；控制器 `OnboardingController.kt`；界面 `app/src/main/kotlin/com/tanuki/ui/OnboardingScreen.kt`。
 
 ## 本次改动
@@ -50,21 +50,22 @@
 | `source scripts/ao-worktree-env.sh && ./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:testModernDebugUnitTest :app:lintModernDebug` | 通过（最终重跑 BUILD SUCCESSFUL，7m51s） | 111 个结果文件、1079 tests、0 failures / 0 errors / 0 skipped；lint 0 errors / 108 warnings / 1 hint。 |
 | 测试结果统计脚本（解析 `app/build/test-results/testModernDebugUnitTest/TEST-*.xml`） | 通过 | `files=111 tests=1079 failures=0 errors=0 skipped=0`。 |
 | `python3 scripts/check-handoff.py --pr --record docs/handoffs/20261111-1049-first-run-onboarding.md` | 通过 | 仅校验本记录；共享状态与印章允许落后。 |
+| GitHub Actions PR #67（`933d4d7`） | 通过 | Host scripts and handoff checks 43s；Android build, JVM tests and lint 8m19s；两次运行均为 pass。 |
 
 - 哪些是前一轮结果，哪些是本次新验证：前一轮基线为 `main=62e4c30`；本次新增 JVM 回归与完整测试/lint 均为本次新执行。
 - 未测试、超时、失败和暂未复现的情况（不能抹掉）：未在设备/模拟器点击四步；未实际下载/解压/apt；未验证通知权限弹窗、升级安装现场、深色/大字体/TalkBack；未执行 instrumentation 测试；未打 APK。
 
 ## 未完成与暂停项
 
-- 未完成：设备/模拟器 UI 与真实安装链路验收；独立 Codex High 对当前 SHA 的审查；PR 创建与 CI（尚未提交/推送）。
+- 未完成：设备/模拟器 UI 与真实安装链路验收；独立 Codex High 对 PR 当前完整 SHA 的审查；设备 QA。
 - 外部阻塞：无。
 - 用户暂停：API Key 保存、真实模型/账号验收、真机验收；合并与发布需用户明确授权。
 
 ## 下一步
 
-1. 以当前分支提交并创建 PR（base `main`），PR 描述写明四步流程、状态与权限边界、JVM 验证结果和未验证项。
-2. 由独立 Codex High 审查 PR 当前完整 SHA；由独立 QA 在测试设备上验证首启、跳过、提示条、环境不满足、真实准备与权限弹窗。
-3. 通过审查与适用 QA 后，等待用户明确合并授权；不要自行合并、打 tag 或发布。
+1. 由独立 Codex High 审查 PR #67 的当前完整 SHA；由独立 QA 在测试设备上验证首启、跳过、提示条、环境不满足、真实准备与权限弹窗。
+2. 通过审查与适用 QA 后，等待用户明确合并授权；不要自行合并、打 tag 或发布。
+3. 若后续修改源码，重新运行完整 JVM 测试与 lint，并更新本记录中的 SHA/验证证据。
 
 ## 约束与风险
 
