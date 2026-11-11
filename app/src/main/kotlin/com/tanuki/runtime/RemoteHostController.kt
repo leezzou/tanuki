@@ -76,12 +76,14 @@ class RemoteHostController(
         }
     }
 
-    fun test(config: RemoteHostConfig) = launchAttempt(config, keepTunnel = false)
+    /** 返回是否接收本次测试；拒绝并发时，调用方不能进入等待结果的状态。 */
+    fun test(config: RemoteHostConfig): Boolean = launchAttempt(config, keepTunnel = false)
 
-    fun connect(config: RemoteHostConfig, profileId: String? = null) =
+    fun connect(config: RemoteHostConfig, profileId: String? = null) {
         // “连接当前配置”/失败重试只拿到 config；此时必须从活动副本或本次失败尝试恢复来源，
         // 否则成功保存会把 sourceProfileId 清空，删除 profile 时漏清旧凭据。
         launchAttempt(config, keepTunnel = true, profileId = profileId ?: sourceProfileIdFor(config))
+    }
 
     /** 连接命名连接：先标记“上次使用”，再走与手动配置相同的严格流程。 */
     fun connectProfile(profile: RemoteHostProfile) {
@@ -254,8 +256,8 @@ class RemoteHostController(
         tunnel = null
     }
 
-    private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean, profileId: String? = null) {
-        if (mutableUi.value.busy) return
+    private fun launchAttempt(config: RemoteHostConfig, keepTunnel: Boolean, profileId: String? = null): Boolean {
+        if (mutableUi.value.busy || mutableUi.value.pendingFingerprint != null) return false
         mutableUi.update {
             it.copy(
                 busy = true,
@@ -273,6 +275,7 @@ class RemoteHostController(
             )
         }
         scope.launch { attempt(config, keepTunnel, profileId = profileId) }
+        return true
     }
 
     internal suspend fun attempt(
