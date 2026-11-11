@@ -650,7 +650,7 @@ internal fun WorkspaceFilesPage(
                                 modifier = Modifier.heightIn(min = 48.dp),
                             ) { Text(part, maxLines = 1) }
                         }
-                        Text("${shown.size} 项", Modifier.padding(horizontal = 12.dp),
+                        TanukiAnimatedCount("${shown.size} 项", Modifier.padding(horizontal = 12.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

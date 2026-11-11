@@ -38,8 +38,7 @@ internal fun tanukiMotionMs(token: TanukiMotionToken): Int {
 
 /** 反馈类动画（按压、选中、状态切换），时长走 feedback/toggle 令牌。 */
 @Composable
-internal fun tanukiToggleSpec(): FiniteAnimationSpec<Float> =
-    tween(durationMillis = tanukiMotionMs(TanukiMotionTokens.toggle))
+internal fun tanukiToggleSpec(): FiniteAnimationSpec<Float> = TanukiDesign.motion.toggle()
 
 /** 原生内容的一次性入场；不包含也不能包住任何 WebView。 */
 internal fun Modifier.tanukiEnter(): Modifier = composed {

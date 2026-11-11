@@ -54,8 +54,6 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
     val clipboard = LocalClipboardManager.current
     var expanded by rememberSaveable(item.callId) { mutableStateOf(item.status == DshToolStatus.FAILED) }
     var diffExpanded by rememberSaveable(item.callId) { mutableStateOf(false) }
-    var copiedOutput by rememberSaveable(item.callId) { mutableStateOf(false) }
-    var copiedError by rememberSaveable(item.callId) { mutableStateOf(false) }
     val errorColor = MaterialTheme.colorScheme.error
     val duration = DshToolDuration.label(item.durationMs)
     Surface(
@@ -148,10 +146,9 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                TextButton(onClick = {
+                                TanukiCopyButton("复制错误", identity = item.callId, onCopy = {
                                     clipboard.setText(AnnotatedString(error))
-                                    copiedError = true
-                                }) { Text(if (copiedError) "已复制" else "复制错误") }
+                                })
                             }
                             SelectionContainer {
                                 Text(error, style = MaterialTheme.typography.bodySmall)
@@ -163,10 +160,9 @@ fun DshToolCard(item: DshToolItem, modifier: Modifier = Modifier) {
                     LabeledBlock("输出") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Spacer(Modifier.weight(1f))
-                            TextButton(onClick = {
+                            TanukiCopyButton("复制输出", identity = item.callId, onCopy = {
                                 clipboard.setText(AnnotatedString(output))
-                                copiedOutput = true
-                            }) { Text(if (copiedOutput) "已复制" else "复制输出") }
+                            })
                         }
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,

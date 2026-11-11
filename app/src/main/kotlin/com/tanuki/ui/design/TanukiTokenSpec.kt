@@ -143,6 +143,9 @@ internal object TanukiMotion {
     const val STRUCTURAL_MAX_MS: Int = 340
     const val AMBIENT_MS: Int = 2400
 
+    // 即时档与语义别名不重复加入历史枚举列表，避免调用方重复统计同一时长档。
+    val instant = TanukiMotionToken("instant", 0, TanukiMotionKind.Feedback)
+    val layout = TanukiMotionToken("layout", 240, TanukiMotionKind.Structural)
     val pressIn = TanukiMotionToken("pressIn", 100, TanukiMotionKind.Feedback)
     val pressOut = TanukiMotionToken("pressOut", 140, TanukiMotionKind.Feedback)
     val toggle = TanukiMotionToken("toggle", 160, TanukiMotionKind.Feedback)
