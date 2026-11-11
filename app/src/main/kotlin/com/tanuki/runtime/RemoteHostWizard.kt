@@ -5,6 +5,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+/** 新入口和异步返回统一使用此门禁；向导只接收自己实际提交的配置结果。 */
+internal class RemoteWizardAttemptGuard {
+    private var submittedConfig: RemoteHostConfig? = null
+
+    fun submit(config: RemoteHostConfig, remoteBusy: Boolean, pendingFingerprint: String?, action: (RemoteHostConfig) -> Boolean): Boolean {
+        if (!canOpen(remoteBusy, pendingFingerprint)) return false
+        if (!action(config)) {
+            submittedConfig = null
+            return false
+        }
+        submittedConfig = config
+        return true
+    }
+
+    fun accepts(config: RemoteHostConfig?): Boolean = config != null && config == submittedConfig
+
+    companion object {
+        fun canOpen(remoteBusy: Boolean, pendingFingerprint: String?): Boolean = !remoteBusy && pendingFingerprint == null
+    }
+}
+
 /** 连接方式；三种方式最终都落到同一个严格 SSH 校验流程。 */
 enum class RemoteConnectionMethod(
     val title: String,
@@ -552,6 +573,18 @@ class RemoteHostWizard(
         val parsed = result.getOrNull()
         if (parsed == null) {
             val reason = result.exceptionOrNull()?.message ?: "格式不符"
+            // 无效剪贴板也必须尊重扫码/手动输入；不能先破坏草稿再判断是否允许覆盖。
+            val existing = current.draft.relayUri.trim()
+            if (existing.isNotEmpty() && existing != current.autoFilledLink) {
+                _state.update {
+                    it.copy(
+                        clipboardStatus = PairingClipboardStatus.KEPT_EXISTING,
+                        clipboardMessage = "剪贴板里的旧链接不可用，已保留当前填写的配对链接。",
+                        pendingClipboardLink = ""
+                    )
+                }
+                return false
+            }
             _state.update {
                 it.copy(
                     draft = it.draft.copy(relayUri = raw, pairingCode = ""),

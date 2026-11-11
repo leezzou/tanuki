@@ -172,7 +172,7 @@ data class TanukiUiCallbacks(
     val downloadAppUpdate: () -> Unit = {},
     val installAppUpdate: () -> Unit = {},
     val cancelAppUpdate: () -> Unit = {},
-    val testRemoteHost: (RemoteHostConfig) -> Unit = {},
+    val testRemoteHost: (RemoteHostConfig) -> Boolean = { false },
     val connectRemoteHost: (RemoteHostConfig) -> Unit = {},
     val confirmRemoteHostKey: () -> Unit = {},
     val cancelRemoteHostKey: () -> Unit = {},

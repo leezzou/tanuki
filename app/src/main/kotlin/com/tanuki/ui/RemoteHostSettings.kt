@@ -53,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +85,7 @@ import com.tanuki.runtime.RemoteHostConfig
 import com.tanuki.runtime.RemoteHostProfile
 import com.tanuki.runtime.RemoteHostStatus
 import com.tanuki.runtime.RemoteHostWizard
+import com.tanuki.runtime.RemoteWizardAttemptGuard
 import com.tanuki.runtime.RemotePhase
 import com.tanuki.runtime.RemoteStageStatus
 import com.tanuki.runtime.RemoteWizardField
@@ -216,6 +218,9 @@ private fun RemoteHostSettingsContent(
     var pendingConnect by remember { mutableStateOf<RemoteHostProfile?>(null) }
     var pendingDelete by remember { mutableStateOf<RemoteHostProfile?>(null) }
     var pendingLanHost by remember { mutableStateOf<LanDiscoveredHost?>(null) }
+    var scanNotice by remember { mutableStateOf("") }
+    val currentModel by rememberUpdatedState(model)
+    val connectionsEnabled = RemoteWizardAttemptGuard.canOpen(model.remoteBusy, model.remotePendingFingerprint)
     val saved = model.remoteHost
     val savedProfile = saved?.let { config ->
         model.remoteProfiles.firstOrNull {
@@ -235,11 +240,22 @@ private fun RemoteHostSettingsContent(
         }
     }
 
+    fun canOpenWizard(): Boolean {
+        if (RemoteWizardAttemptGuard.canOpen(currentModel.remoteBusy, currentModel.remotePendingFingerprint)) return true
+        scanNotice = "连接正在进行，请完成当前连接或指纹确认后再添加。"
+        return false
+    }
+
+    fun openExisting(config: RemoteHostConfig, name: String, id: String?) {
+        if (canOpenWizard()) wizard = WizardSession(config, name, id)
+    }
+
     fun openManualWizard() {
-        wizard = WizardSession()
+        if (canOpenWizard()) wizard = WizardSession()
     }
 
     fun openPairingWizard(link: String? = null) {
+        if (!canOpenWizard()) return
         wizard = WizardSession().also { session ->
             session.machine.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
             session.machine.next()
@@ -247,8 +263,9 @@ private fun RemoteHostSettingsContent(
         }
     }
 
-    var scanNotice by remember { mutableStateOf("") }
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        // 相机返回时连接状态可能已变化，必须再次检查，不能只依赖打开相机前的按钮状态。
+        if (!canOpenWizard()) return@rememberLauncherForActivityResult
         val link = result.contents
         if (link == null) {
             scanNotice = "扫码已取消，可继续粘贴配对链接。"
@@ -260,6 +277,7 @@ private fun RemoteHostSettingsContent(
         }
     }
     fun scanQr() {
+        if (!canOpenWizard()) return
         runCatching {
             scanLauncher.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                 .setPrompt("扫描电脑端的配对二维码").setBeepEnabled(false)
@@ -269,6 +287,7 @@ private fun RemoteHostSettingsContent(
     }
 
     fun openDiscoveredHost(host: LanDiscoveredHost) {
+        if (!canOpenWizard()) return
         val session = WizardSession()
         // 发现地址无法直接用于 SSH（例如带 zone 的 IPv6）时退回手动填写，避免死路。
         wizard = if (session.machine.startFromLanDiscovery(host.address, host.sshPort, host.dshPort, host.name)) {
@@ -281,12 +300,12 @@ private fun RemoteHostSettingsContent(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         StatusCard(
             model = model,
-            onEdit = { saved?.let { wizard = WizardSession(it, savedProfile?.name.orEmpty(), savedProfile?.id) } },
+            onEdit = { saved?.let { openExisting(it, savedProfile?.name.orEmpty(), savedProfile?.id) } },
             onForget = { confirmForget = true },
             onConnectSaved = { saved?.let { c.connectRemoteHost(it) } },
             onEditFailed = {
                 failedConfig?.let {
-                    wizard = WizardSession(it, failedProfile?.name.orEmpty(), failedProfile?.id)
+                    openExisting(it, failedProfile?.name.orEmpty(), failedProfile?.id)
                 }
             },
             onRetry = { (failedConfig ?: saved)?.let { c.connectRemoteHost(it) } }
@@ -299,8 +318,9 @@ private fun RemoteHostSettingsContent(
         LanDiscoveryCard(
             state = discovery,
             permissionDenied = permissionDenied,
+            connectionEnabled = connectionsEnabled,
             onRefresh = onRefresh,
-            onSelect = { pendingLanHost = it },
+            onSelect = { if (canOpenWizard()) pendingLanHost = it },
             onUseQr = ::scanQr,
             onPaste = { openPairingWizard() }
         )
@@ -308,11 +328,12 @@ private fun RemoteHostSettingsContent(
         SavedProfilesCard(
             model = model,
             onConnect = { pendingConnect = it },
-            onEdit = { profile -> wizard = WizardSession(profile.config, profile.name, profile.id) },
+            onEdit = { profile -> openExisting(profile.config, profile.name, profile.id) },
             onDelete = { pendingDelete = it }
         )
 
         OtherWaysCard(
+            enabled = connectionsEnabled,
             onUseQr = ::scanQr,
             onPaste = { openPairingWizard() },
             onUseManual = ::openManualWizard
@@ -350,7 +371,7 @@ private fun RemoteHostSettingsContent(
                     val selected = host
                     pendingLanHost = null
                     openDiscoveredHost(selected)
-                }) { Text("继续配对") }
+                }, enabled = connectionsEnabled) { Text("继续配对") }
             },
             dismissButton = { TextButton(onClick = { pendingLanHost = null }) { Text("取消") } }
         )
@@ -378,8 +399,8 @@ private fun RemoteHostSettingsContent(
             confirmButton = {
                 TextButton(onClick = {
                     pendingConnect = null
-                    c.connectRemoteProfile(profile)
-                }) { Text("连接") }
+                    if (canOpenWizard()) c.connectRemoteProfile(profile)
+                }, enabled = connectionsEnabled) { Text("连接") }
             },
             dismissButton = { TextButton(onClick = { pendingConnect = null }) { Text("取消") } }
         )
@@ -421,6 +442,7 @@ private fun RemoteHostSettingsContent(
 private fun LanDiscoveryCard(
     state: LanDiscoveryState,
     permissionDenied: Boolean,
+    connectionEnabled: Boolean,
     onRefresh: () -> Unit,
     onSelect: (LanDiscoveredHost) -> Unit,
     onUseQr: () -> Unit,
@@ -450,10 +472,10 @@ private fun LanDiscoveryCard(
             }
 
             when {
-                permissionDenied -> PermissionDegraded(onUseQr, onPaste)
-                state.hosts.isEmpty() -> LanEmptyState(onUseQr = onUseQr)
+                permissionDenied -> PermissionDegraded(connectionEnabled, onUseQr, onPaste)
+                state.hosts.isEmpty() -> LanEmptyState(enabled = connectionEnabled, onUseQr = onUseQr)
                 else -> state.hosts.forEach { host ->
-                    LanHostRow(host = host, onClick = { onSelect(host) })
+                    LanHostRow(host = host, enabled = connectionEnabled, onClick = { onSelect(host) })
                 }
             }
 
@@ -465,7 +487,7 @@ private fun LanDiscoveryCard(
 }
 
 @Composable
-private fun PermissionDegraded(onUseQr: () -> Unit, onPaste: () -> Unit) {
+private fun PermissionDegraded(enabled: Boolean, onUseQr: () -> Unit, onPaste: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -473,14 +495,14 @@ private fun PermissionDegraded(onUseQr: () -> Unit, onPaste: () -> Unit) {
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(LanDiscoveryCopy.PERMISSION_DENIED, style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onUseQr) { Text("扫码连接") }
-            TextButton(onClick = onPaste) { Text("粘贴配对链接") }
+            TextButton(onClick = onUseQr, enabled = enabled) { Text("扫码连接") }
+            TextButton(onClick = onPaste, enabled = enabled) { Text("粘贴配对链接") }
         }
     }
 }
 
 @Composable
-private fun LanEmptyState(onUseQr: () -> Unit) {
+private fun LanEmptyState(enabled: Boolean, onUseQr: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -510,14 +532,14 @@ private fun LanEmptyState(onUseQr: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = onUseQr) { Text(LanDiscoveryCopy.USE_QR) }
+            OutlinedButton(onClick = onUseQr, enabled = enabled) { Text(LanDiscoveryCopy.USE_QR) }
         }
     }
 }
 
 @Composable
-private fun LanHostRow(host: LanDiscoveredHost, onClick: () -> Unit) {
-    val clickable = host.online && host.connectable
+private fun LanHostRow(host: LanDiscoveredHost, enabled: Boolean, onClick: () -> Unit) {
+    val clickable = enabled && host.online && host.connectable
     Surface(
         onClick = onClick,
         enabled = clickable,
@@ -546,7 +568,7 @@ private fun LanHostRow(host: LanDiscoveredHost, onClick: () -> Unit) {
 
 /** 扫码/粘贴与手动填写；与局域网列表并列，作为网络不支持发现时的稳定入口。 */
 @Composable
-private fun OtherWaysCard(onUseQr: () -> Unit, onPaste: () -> Unit, onUseManual: () -> Unit) {
+private fun OtherWaysCard(enabled: Boolean, onUseQr: () -> Unit, onPaste: () -> Unit, onUseManual: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -559,11 +581,11 @@ private fun OtherWaysCard(onUseQr: () -> Unit, onPaste: () -> Unit, onUseManual:
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(onClick = onUseQr, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onUseQr, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Text("扫码连接")
             }
-            OutlinedButton(onClick = onPaste, modifier = Modifier.fillMaxWidth()) { Text("粘贴配对链接") }
-            TextButton(onClick = onUseManual, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onPaste, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("粘贴配对链接") }
+            TextButton(onClick = onUseManual, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Text(LanDiscoveryCopy.USE_MANUAL)
             }
             Text(
@@ -789,6 +811,7 @@ private class WizardSession(
     profileId: String? = null
 ) {
     val machine = RemoteHostWizard(initialConfig, initialName, profileId)
+    val attempt = RemoteWizardAttemptGuard()
 }
 
 @Composable
@@ -799,6 +822,9 @@ private fun RemoteWizardDialog(
     onDismiss: () -> Unit
 ) {
     val state by session.machine.state.collectAsState()
+    val currentModel by rememberUpdatedState(model)
+    val canStartAttempt = RemoteWizardAttemptGuard.canOpen(model.remoteBusy, model.remotePendingFingerprint)
+    val ownsAttempt = session.attempt.accepts(model.remoteAttemptConfig)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var keyLoading by remember { mutableStateOf(false) }
@@ -824,18 +850,18 @@ private fun RemoteWizardDialog(
         }
     }
 
-    // 控制器是唯一连接执行者；向导只把阶段/指纹/结果转成步骤状态。
-    LaunchedEffect(model.remotePendingFingerprint) {
-        model.remotePendingFingerprint?.let(session.machine::onHostKeyRequired)
+    // 只有本向导实际提交过的配置才可接收控制器事件；其他已保存连接的迟到结果全部忽略。
+    LaunchedEffect(session, model.remoteAttemptConfig, model.remotePendingFingerprint) {
+        if (session.attempt.accepts(model.remoteAttemptConfig)) model.remotePendingFingerprint?.let(session.machine::onHostKeyRequired)
     }
-    LaunchedEffect(model.remoteStage) {
-        model.remoteStage?.let(session.machine::onStage)
+    LaunchedEffect(session, model.remoteAttemptConfig, model.remoteStage) {
+        if (session.attempt.accepts(model.remoteAttemptConfig)) model.remoteStage?.let(session.machine::onStage)
     }
-    LaunchedEffect(model.remoteAttemptSucceeded) {
-        if (model.remoteAttemptSucceeded) session.machine.onTestSucceeded(model.remoteLocalPort)
+    LaunchedEffect(session, model.remoteAttemptConfig, model.remoteAttemptSucceeded) {
+        if (session.attempt.accepts(model.remoteAttemptConfig) && model.remoteAttemptSucceeded) session.machine.onTestSucceeded(model.remoteLocalPort)
     }
-    LaunchedEffect(model.remoteFailure) {
-        model.remoteFailure?.let(session.machine::onFailure)
+    LaunchedEffect(session, model.remoteAttemptConfig, model.remoteFailure) {
+        if (session.attempt.accepts(model.remoteAttemptConfig)) model.remoteFailure?.let(session.machine::onFailure)
     }
 
     // 每次进入配对链接步骤读一次剪贴板；读不到就保留粘贴框，不阻塞、不报错。
@@ -850,8 +876,14 @@ private fun RemoteWizardDialog(
 
     fun dismiss() {
         if (state.busy) return
-        if (model.remotePendingFingerprint != null) c.cancelRemoteHostKey()
+        if (session.attempt.accepts(currentModel.remoteAttemptConfig) && currentModel.remotePendingFingerprint != null) c.cancelRemoteHostKey()
         onDismiss()
+    }
+
+    fun canBeginTest(): Boolean {
+        if (RemoteWizardAttemptGuard.canOpen(currentModel.remoteBusy, currentModel.remotePendingFingerprint)) return true
+        session.machine.setNotice("请先完成当前连接或指纹确认，再测试这条连接。")
+        return false
     }
 
     fun testNow() {
@@ -864,9 +896,16 @@ private fun RemoteWizardDialog(
             session.machine.onFailure(
                 com.tanuki.runtime.RemoteConnectionErrors.validation("连接配置不完整，请返回上一步检查主机、账号和认证信息")
             )
-        } else {
-            c.testRemoteHost(config)
+        } else if (!session.attempt.submit(config, currentModel.remoteBusy, currentModel.remotePendingFingerprint, c.testRemoteHost)) {
+            // 防御迟到点击：控制器拒绝并发尝试时，不能让向导停在等待别人的结果的状态。
+            session.machine.onFailure(com.tanuki.runtime.RemoteConnectionErrors.validation("当前另有连接正在进行，请完成后重新测试"))
         }
+    }
+
+    fun retest() {
+        if (!canBeginTest()) return
+        session.machine.beginTest()
+        testNow()
     }
 
     fun startNext() {
@@ -875,6 +914,7 @@ private fun RemoteWizardDialog(
             return
         }
         val before = session.machine.state.value.step
+        if (before == RemoteWizardStep.AUTHENTICATION && !canBeginTest()) return
         if (!session.machine.next()) return
         val after = session.machine.state.value
         if (before != RemoteWizardStep.TEST && after.step == RemoteWizardStep.TEST && after.busy) {
@@ -885,11 +925,16 @@ private fun RemoteWizardDialog(
     fun goBack() {
         session.machine.cancelPrivateKeyRead()
         keyLoading = false
-        if (session.machine.state.value.step == RemoteWizardStep.FINGERPRINT) c.cancelRemoteHostKey()
+        if (session.machine.state.value.step == RemoteWizardStep.FINGERPRINT && session.attempt.accepts(currentModel.remoteAttemptConfig)) c.cancelRemoteHostKey()
         session.machine.back()
     }
 
     fun save(connect: Boolean) {
+        if (!canBeginTest()) return
+        if (!session.attempt.accepts(currentModel.remoteAttemptConfig) || !session.machine.state.value.tested) {
+            session.machine.setNotice("请先重新测试当前连接，再保存。")
+            return
+        }
         if (!session.machine.requireValidName()) return
         val config = session.machine.buildConfig() ?: return
         c.saveRemoteProfile(state.name.trim(), config, state.editingProfileId, connect)
@@ -971,11 +1016,8 @@ private fun RemoteWizardDialog(
                             model = model,
                             session = session,
                             state = state,
-                            onRetryConnect = { session.machine.buildConfig()?.let(c.connectRemoteHost) },
-                            onRetest = {
-                                session.machine.beginTest()
-                                testNow()
-                            }
+                            onRetryConnect = { if (canBeginTest()) session.machine.buildConfig()?.let(c.connectRemoteHost) },
+                            onRetest = ::retest
                         )
                     }
                     Spacer(Modifier.height(12.dp))
@@ -1013,7 +1055,7 @@ private fun RemoteWizardDialog(
                             TextButton(onClick = ::goBack) { Text("上一步") }
                             Button(
                                 onClick = ::startNext,
-                                enabled = !keyLoading,
+                                enabled = !keyLoading && canStartAttempt,
                                 modifier = Modifier.weight(1f)
                             ) { Text(if (keyLoading) "正在读取私钥…" else "开始测试连接") }
                         }
@@ -1021,9 +1063,9 @@ private fun RemoteWizardDialog(
                             TextButton(onClick = ::goBack) { Text("返回修改") }
                             Button(
                                 onClick = {
-                                    if (session.machine.confirmFingerprint()) c.confirmRemoteHostKey()
+                                    if (ownsAttempt && session.machine.confirmFingerprint()) c.confirmRemoteHostKey()
                                 },
-                                enabled = state.canConfirmFingerprint,
+                                enabled = ownsAttempt && state.canConfirmFingerprint,
                                 modifier = Modifier.weight(1f)
                             ) { Text("核对无误，继续测试") }
                         }
@@ -1034,7 +1076,8 @@ private fun RemoteWizardDialog(
                                     TextButton(onClick = ::goBack) { Text("返回修改") }
                                     if (failure.retryable) {
                                         Button(
-                                            onClick = { if (session.machine.retry()) testNow() },
+                                            onClick = { if (canBeginTest() && session.machine.retry()) testNow() },
+                                            enabled = canStartAttempt,
                                             modifier = Modifier.weight(1f)
                                         ) { Text("重试") }
                                     }
@@ -1043,26 +1086,20 @@ private fun RemoteWizardDialog(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(onClick = ::goBack, enabled = !state.busy) { Text("返回修改") }
                                     Button(
-                                        onClick = {
-                                            session.machine.beginTest()
-                                            testNow()
-                                        },
-                                        enabled = !state.busy,
+                                        onClick = ::retest,
+                                        enabled = !state.busy && canStartAttempt,
                                         modifier = Modifier.weight(1f)
                                     ) { Text(if (state.busy) "正在测试…" else "重新测试") }
                                 }
                             }
                         }
                         RemoteWizardStep.DONE -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = {
-                                session.machine.beginTest()
-                                testNow()
-                            }, enabled = !state.busy) { Text("重新测试") }
+                            TextButton(onClick = ::retest, enabled = !state.busy && canStartAttempt) { Text("重新测试") }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { save(connect = false) }, modifier = Modifier.weight(1f)) {
+                                OutlinedButton(onClick = { save(connect = false) }, enabled = canStartAttempt && ownsAttempt, modifier = Modifier.weight(1f)) {
                                     Text(if (state.isEditing) "仅保存修改" else "仅保存")
                                 }
-                                Button(onClick = { save(connect = true) }, modifier = Modifier.weight(1f)) {
+                                Button(onClick = { save(connect = true) }, enabled = canStartAttempt && ownsAttempt, modifier = Modifier.weight(1f)) {
                                     Text("保存并连接")
                                 }
                             }

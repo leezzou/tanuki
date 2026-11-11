@@ -155,6 +155,7 @@ HTTP 200..399 或 401 → 存活
 | 切换 | `RemoteHostMachine` 同时保存本地与远程端点，远程优先；远程断开/失败自动恢复本地端点，本地 DSH 停止不清除仍存活的远程端点 |
 | Cookie 隔离 | 本地与每台远程 DSH 使用独立逻辑 Cookie 集合；切换前清空 CookieManager 并恢复目标集合，失败时页面不可用；Cookie 端口不参与作用域 |
 | 连接向导 | 六步固定顺序 `METHOD → HOST_ACCOUNT → AUTHENTICATION → FINGERPRINT → TEST → DONE`；不可跳步，`FINGERPRINT` 只有在首次连接/信任缺失时出现，未勾选“已核对 SHA256”不能继续 |
+| 测试接纳 | `RemoteHostController.test` 与 UI `testRemoteHost` 返回是否接收本次测试，非测试成功与否；已有尝试忙碌或等待指纹确认时返回 false 且不替换本次配置。新增入口/异步扫码返回/确认/重试均检查忙碌；向导只消费自己已接纳配置对应的阶段、指纹与结果，拒绝接纳时退出等待并允许稍后重试 |
 | 阶段进度 | `TCP → SSH_HANDSHAKE → AUTHENTICATION → PORT_FORWARD → DSH_PROBE → COMPLETE`；只前进不后退；控制器通过可选 `StagedSshTransport` 报告，未实现阶段回调的测试假传输退化为粗粒度 |
 | 错误契约 | `RemoteFailureInfo(stage, kind, reason, suggestion, retryable)`；中文原因 + 下一步建议；主机密钥变化 `retryable=false`；错误文案只使用固定中文或领域异常，不回显密码/私钥/token |
 | 命名连接 | 最多 50 条，名称 1-64 字符；非敏感字段与应用私有配置分离，密码/私钥/口令/token 只经 Android Keystore AES-256-GCM 保存；删除一条不影响其他连接；同一时间仍只允许一个活动远程连接 |
@@ -168,7 +169,7 @@ HTTP 200..399 或 401 → 存活
 
 | 项目 | 契约 |
 |---|---|
-| 配对链接 | `tanuki-relay://v1?relay=<host:port>&room=<16B base64url>&token=<32B base64url>&host=<16B hex>&pin=sha256-<32B base64url>`；`pin` 可省略但仅当系统 CA + 主机名校验可用；自签名中继必须提供。手机进入链接步骤时自动读取剪贴板并解析该前缀的文本，失败或非该前缀时保留手动粘贴；自动填入与手动编辑都只影响本地草稿，不改变链接格式 |
+| 配对链接 | `tanuki-relay://v1?relay=<host:port>&room=<16B base64url>&token=<32B base64url>&host=<16B hex>&pin=sha256-<32B base64url>`；`pin` 可省略但仅当系统 CA + 主机名校验可用；自签名中继必须提供。手机进入链接步骤时自动读取剪贴板并解析该前缀的文本，失败或非该前缀时保留手动粘贴；自动填入与手动编辑都只影响本地草稿，不改变链接格式；即使剪贴板有该前缀但内容无效，也不得覆盖已扫码或手动编辑的链接、核对码与字段校验状态 |
 | 6 位配对码 | `code = SHA-256(规范配对链接) 前 8 字节大端无符号整数 mod 1,000,000`，零填充 6 位；主机端显示/打印，手机端解析链接后自动计算并展示“电脑上应显示 XXXXXX”，不要求手输；可选手动校对的码与自动值不一致时提示并以链接值为准；它是人工核对码，不是新的传输秘密，单独输入不能恢复 relay/room/token |
 | 传输 | TLS 1.2/1.3；有 pin 时只信任该证书 DER 的 SHA-256 并检查有效期；无 pin 时使用系统 CA + 主机名；不存在忽略证书/明文回退开关 |
 | 帧 | `4 字节大端总长 | 1 字节类型 | 4 字节流号 | 负载`；总长 ≤64 KiB，控制帧负载 ≤1 KiB |

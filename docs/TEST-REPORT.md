@@ -5,7 +5,12 @@ Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tan
 ## 手机局域网发现与远程页验证（2026-11-11，android_agent-72，非设备）
 
 - 范围：基于 `origin/main=8ba7b4b3ecdc82c17a200dca77ef9420924d76b1`，手机 NSD 发现、TXT 严格解析、串行回调/页面代次、去重与在线排序、附近设备权限单次申请、向导预填、实际相机扫码与粘贴、页面结构与空态、隐藏本页无关安装进度。分支 `ao/lan-discovery/mobile`，不合并、不发布。
-- 本轮实际执行（macOS ARM64、JDK17、SDK36，workspacecheck）：
+- PR #76 复审修复后实际执行（macOS ARM64、JDK17、SDK36，workspacecheck）：
+  - `assembleModernDebug`、`compileModernDebugAndroidTestKotlin`、完整 `testModernDebugUnitTest`、`lintModernDebug` 同一流程通过（4m02s）。**1184 tests / 119 结果文件 / 0 failures/errors/skipped**；其中 `RemoteWizardTest` **53 项**，lint **0 errors / 110 warnings / 1 hint**。
+  - 新增 4 项回归：有效扫码/手动输入不被残缺旧剪贴板覆盖；延迟 A 的指纹/成功/认证失败均不推进 B；陈旧 UI 报空闲时控制器仍拒绝并发测试；只接收本向导已接纳配置的事件。对应两条 P2 均已实现，推送后直接解决原线程。
+  - 首轮复审验证 1184 项中 1 项新回归失败：可信主机跳过公钥探测，假传输在错误位置延迟；把同一信号应用到认证入口后重新执行，以上结果为修正后的完整流程。产品编译和 debug 组装未失败。
+  - 没有执行 Android 仪器/设备；编译缓存命中不计作设备执行，原生运行时仍跳过。
+- 首版提交 `45f61218` 的实际执行（历史结果，非复审后的结论）：
   - 完整 `testModernDebugUnitTest`：**1180 tests / 119 结果文件 / 0 failures / 0 errors / 0 skipped**。
   - 其中 `LanDiscoveryTest` **17 项**、`RemoteWizardTest` **49 项**、`OperationProgressTest` **7 项**全部通过。本轮新增 17 项 LAN 与 3 项向导回归；包含字段缺失/非法 UTF-8/超长/未知协议、重复与稳定排序、失效/服务丢失、退出重入与迟到回调、权限拒绝降级、空态入口、不可直连地址、Unicode 边界、预填不继承旧凭据/编辑归属。
   - `assembleModernDebug`、`compileModernDebugAndroidTestKotlin`、完整 JVM、`lintModernDebug`、运行依赖清单同一 Gradle 流程通过（16m47s）；lint **0 errors / 110 warnings / 1 hint**，发现控制器新增一项 `UseKtx` 风格建议。清单为 **93 个运行归档**（本轮新增 2 个扫码依赖），必要许可已收集。

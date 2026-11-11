@@ -19,7 +19,7 @@
 - 已实现：单一顶栏标题，内容按「当前主机状态 → 局域网发现的电脑 → 我的连接 → 其他方式」排列；空态命令复制和实际扫码入口；安全一句话与折叠技术细节；仅本页隐藏运行时/安装 banner。
 - 已实现：`_tanuki-remote._tcp` 发现、串行解析、主机标识去重、在线优先稳定排序、有效期清理、退出后旧解析不更新新页面。广播可见不等于 SSH/DSH 已验证。
 - 关键限制：现有 TXT 没有平台/操作系统/DSH 版本，`ver` 为协议版本，列表明确显示“平台未提供 · 协议 v1”；没有从名称猜测平台或改主机端协议。摘要 `fp` 不写入 known_hosts，不冒充 SSH 指纹。
-- 已验证：最终完整 JVM 1180 项、119 结果文件，0 失败/错误/跳过；LAN 17、向导 49、进度 7 项通过；debug 组装/AndroidTest 源码编译/lint/依赖清单通过（16m47s）；lint 0 errors / 110 warnings / 1 hint。主机 mDNS 20 项与交接/公开扫描通过。
+- 已验证：首版完整 JVM 1180 项、119 结果文件，0 失败/错误/跳过；LAN 17、向导 49、进度 7 项通过；debug 组装/AndroidTest 源码编译/lint/依赖清单通过（16m47s）；lint 0 errors / 110 warnings / 1 hint。主机 mDNS 20 项与交接/公开扫描通过。
 - 待验证：独立 Android QA、真实同 Wi-Fi mDNS/路由器隔离、相机扫码、系统权限拒绝与设置恢复、页面手势/深色/大字号、真实 sshd/DSH；独立审查与 PR CI 以最终 head 为准。
 - 包名：验证构建使用 `com.tanuki.modern.workspacecheck`；未安装、未操作设备、未发布附件。
 
@@ -30,9 +30,10 @@
 | `app/src/main/kotlin/com/tanuki/lan/LanDiscovery.kt` | TXT 严格解析、发现模型、去重/排序/有效期、单次权限策略、空态文案、带代次的串行解析队列。 |
 | `app/src/main/kotlin/com/tanuki/lan/LanDiscoveryController.kt` | NsdManager 发现与解析适配、主线程回调、5 秒重扫、停止回调后重启、多播锁与权限撤销处理。 |
 | `app/src/main/AndroidManifest.xml` | 附近设备、多播锁权限；扫码相机为可选硬件。 |
-| `app/src/main/kotlin/com/tanuki/runtime/RemoteHostWizard.kt` | 局域网点选预填入口；认证与真实 SSH 指纹确认继续复用。 |
+| `app/src/main/kotlin/com/tanuki/runtime/RemoteHostWizard.kt` | 局域网点选预填入口、无效剪贴板保留已有输入、统一忙碌/接纳门禁；认证与真实 SSH 指纹确认继续复用。 |
+| `app/src/main/kotlin/com/tanuki/runtime/RemoteHostController.kt` | 测试提交返回是否接纳；忙碌或等待指纹时拒绝新尝试，不改本次配置。 |
 | `app/src/main/kotlin/com/tanuki/ui/RemoteHostSettings.kt` | 页面生命周期/下拉刷新、发现列表、确认、扫码/粘贴、空态与安全折叠。 |
-| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 远程页独立滚动容器，保留单一顶栏标题，本页隐藏无关运行时 banner。 |
+| `app/src/main/kotlin/com/tanuki/ui/TanukiUi.kt` | 远程页独立滚动容器，保留单一顶栏标题，本页隐藏无关运行时 banner；测试回调返回接纳结果。 |
 | `app/src/main/kotlin/com/tanuki/ui/OperationProgress.kt` | 按调用页隐藏运行时进度与安装取消；工作台/DSH 保留原入口。 |
 | `app/build.gradle.kts`、`THIRD_PARTY_NOTICES`、`licenses/` | 实际扫码依赖与必要许可清单。 |
 | `app/src/test/kotlin/com/tanuki/LanDiscoveryTest.kt`、`RemoteWizardTest.kt` | TXT、重复/在线/过期、队列迟到/重入/服务消失、权限降级、空态与向导预填回归。 |
@@ -75,8 +76,22 @@
 
 ## 产物与校验
 
-- PR：源分支 `ao/lan-discovery/mobile`，目标 `main`；最终 URL 与完整 head 见本会话 AO 完成报告/provider PR，不合并、不发布。
+- PR：[#76](https://github.com/leezzou/tanuki/pull/76)，源分支 `ao/lan-discovery/mobile`，目标 `main`；最终完整 head 见本会话 AO 完成报告/provider PR，不合并、不发布。
 - APK/源码 ZIP：只做验证构建，未交付 APK/正式源码 ZIP、tag 或 Release；许可清单在验证后按实际解析归档补齐。源码候选归档与校验只在系统临时目录检查，不作为用户取用附件。生成日志/中间件不作为用户产物。
 - 覆盖安装：无；没有设备写入或签名迁移。
 - 过期交接清理：已核对本任务直接依赖的主机广播与配对交接；仍含独有协议/验证与设备未完成项，本次保留。没有属于本任务且已完全过期可删的记录；不做跨 PR 清理。
 - 普通 PR 不刷新共享状态/印章；由集成维护方在合并后处理。
+
+## PR #76 复审修复
+
+- 继续同一分支/PR：已重新登记归属，provider 与本地均为 `45f61218db6e124afb199d00c60e8de88d0d5c25`，干净工作树下 fetch 后按完整 SHA 刷新分支并核对；没有替换 PR。
+- `PRRT_kwDOVgRm4s62DIwC`：无效旧剪贴板现在也先检查是否可覆盖；扫码或手动输入保留链接、核对码与字段校验状态，空输入仍展示无效剪贴板错误。新增“有效扫码结果/手动内容 + 残缺旧链接”回归。
+- `PRRT_kwDOVgRm4s62DIwF`：LAN、扫码/粘贴/手动和编辑入口禁用并在回调重查；相机返回与确认同样重查。测试接纳返回 Boolean，控制器拒绝时不替换尝试配置，向导不再等待其他连接结果；阶段/指纹/成功/失败按本向导已接纳配置过滤，确认/取消也核对归属。新增延迟 A 的指纹/成功/失败、UI 陈旧空闲但控制器忙碌、只接收自己配置三项回归。
+- 新增共 4 项 JVM 回归；冻结代码后完整流程通过（4m02s），1184 tests / 119 结果文件 / 0 failures/errors/skipped，RemoteWizardTest 53 项全通过，lint 0 errors / 110 warnings / 1 hint。上一版 1180 项/CI 通过只属于旧 head，最新 CI/独立审查仍须绑定推送后的新 SHA。
+- 线程在修复推送后使用提供的线程 ID 直接解决；新 head 仍需独立审查与 CI，不沿用旧 head 的任何审查结论。
+- 设备保持由独立 QA 会话独占，本次没有启动/操作模拟器或真机、没有 adb 安装。未测范围仍为真实 NSD/权限/相机/页面交互与真实 SSH/DSH。
+- 清理复核：沿用本任务唯一记录；相关旧广播/配对记录仍有独有协议与未验事项，继续保留。未修改共享状态/印章。
+
+- 复审验证首轮失败保留：产品/仪器源码编译与 debug 组装通过；1184 项中 1 项新回归失败。原因是已信任主机跳过 `probeHostKey`，测试假传输只在该入口延迟，导致“仍忙碌”断言提前完成；把同一延迟信号应用到认证入口，并显式核对三种终态后重新冻结测试重跑。不是沿用失败结果计通过。
+
+- 复审修复最终命令：`./gradlew --no-daemon -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:assembleModernDebug :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`，BUILD SUCCESSFUL（4m02s）；没有更改依赖/许可清单，没有设备执行。提交前重跑 `check-handoff.py --pr`、`check-publication.py --git` 与源码候选校验。修复与文档收尾统一一次提交/推送，再解决两条原线程。
