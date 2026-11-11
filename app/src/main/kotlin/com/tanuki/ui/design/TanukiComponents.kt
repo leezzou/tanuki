@@ -164,11 +164,11 @@ internal fun tanukiPillButtonColors(
         )
     }
     return when (tone) {
-        TanukiPillButtonTone.Filled -> TanukiPillButtonColors(colors.primary, colors.onPrimary, null)
+        TanukiPillButtonTone.Filled -> TanukiPillButtonColors(colors.primaryFill, colors.onPrimary, null)
         TanukiPillButtonTone.Tonal -> TanukiPillButtonColors(
-            colors.primaryContainer,
-            colors.onPrimaryContainer,
-            null,
+            colors.surface,
+            colors.textPrimary,
+            colors.outline,
         )
         TanukiPillButtonTone.Outline -> TanukiPillButtonColors(
             background = colors.surface,
@@ -416,7 +416,7 @@ internal fun TanukiPathText(
     Text(
         text = path,
         modifier = modifier,
-        color = Color(tokens.colors.textTertiary),
+        color = Color(tokens.colors.descriptionOn(tokens.colors.surfaceMuted)),
         style = tokens.type.codeSmall,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,

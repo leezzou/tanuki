@@ -7,87 +7,105 @@
 - JVM 回归：`app/src/test/kotlin/com/tanuki/ui/design/TanukiDesignTokensTest.kt`、`app/src/test/kotlin/com/tanuki/TanukiPageVisualsTest.kt`。
 - 相关文档：[原生界面实现边界](NATIVE-UI.md)、[原生界面行为规格](handoffs/20261110-1759-native-ui-parity-spec.md)、[代码规范](code-standards.md)。
 
+当前配色由 android_agent-87 在 `main=7cfe1446effa76d1e7901f839d6a22996778d013` 上实现，android_agent-73 从含#89动效的 `main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935` 落库；第2节配色取值表与落地说明逐行一致，保留主线动效工厂/时长及reduced-motion结构。当前集成验证见 [主题落库交接](handoffs/20261111-1819-sky-theme-landing.md)，下文历史验证均不代表本次设备验收。
+
 ## 1. 设计原则
 
-1. **感知明度优先**：中性色和语义色共用一条 OKLCH 明度阶梯，换色相不改变版面的轻重关系。
+1. **用途与可读性优先**：角色色使用明确 sRGB 值；保留 OKLCH 转换、WCAG 对比度及 alpha 合成能力。装饰色不作为可读文字或白字实底。
 2. **系统字体优先**：中文标题、正文、说明全部跟随系统字体，不打包字体资源；等宽字体只用于代码和路径。三态组件复用 main 已有实现，主题包裹后自动采用本令牌。
 3. **触控优先**：所有可点击控件至少 48dp 触控区；视觉胶囊可以更矮，但热区不变。
 4. **层级克制**：只有 chrome 和 pill 允许模糊；sheet 和 card 使用不透明表面和细边框，保证密集内容可读。
 5. **动效可关闭**：所有时长都走令牌；系统移除动画时时长统一为 0，循环动画改为静态。
 6. **纯函数可测**：颜色生成、对比度和数值范围不依赖 Android/Compose，JVM 可直接锁定；对比度公式复用 main 的 `TanukiContrast`，避免两份阈值漂移。
 
-## 2. 颜色令牌
+## 2. 配色
 
-### 2.1 生成方式
+### 2.1 用途约束
 
-颜色由 OKLCH 生成：`L` 是感知明度，`C` 是彩度，`H` 是色相角。请求彩度超出 sRGB 色域时，沿同一色相二分降低彩度，避免直接裁剪通道导致色相漂移。
+角色令牌直接指定 sRGB 值（下表省略不透明 alpha FF），不再由旧暖色中性阶梯取样；`TanukiColorMath` 继续支持 OKLCH、色域映射、WCAG 和透明合成。备用 OKLCH 中性色阶设为零彩度，避免暖色残留。
 
-五组色相：
+- 装饰天蓝：浅色 #0EA5E9、深色 #38BDF8；仅用于选中、进度、状态点、图标着色、细描边与小面积浅底。白字主按钮两种主题均为 #0369A1，按下色 #075985。
+- 文字：浅色链接/可点击文字 #0369A1，深色 #7DD3FC。信息图标需 ≥3:1，浅色用深天蓝，深色用亮天蓝；纯装饰色不参加文字阈值。
+- 弱灰：#8C929A / #6F767F 仅禁用、占位、装饰。说明色 #6B7280 在白底通过，但在 #F5F6F7 上为 4.47:1、在 #E6F4FE 上为 4.31:1，因此 `descriptionOn(background)` 在这些底色上改用 #5A6068；路径采用分组底也可读的说明色。
+- 次按钮：浅色纯白底、#ECEDEF 描边、#111315 文字；深色使用 #1A1D21、#24282D、#F2F4F6。普通 tonal 次按钮也遵守此规则；Ghost 保留透明底。
+- 成功/警告/危险只用于语义；深色单独取亮度。浅色危险实底 #DC2626 配白字；白底危险文字 #B91C1C。成功/警告实色配深色文字，浅底标签使用各自容器文字色。
+- Material `primary` 供文字和选中控件，`onPrimary` 与之配对；白字按钮通过 `TanukiButton` / `TanukiPillButton` 读取独立 `primaryFill/onPrimary`，不把深色亮天蓝当白字底。Material 表面不叠加天蓝 tonal tint。
 
-| 色相组 | H | C | 用途 |
-|---|---:|---:|---|
-| Neutral | 110° | 0.008 | 画布、表面、正文、边框 |
-| Success | 150° | 0.11 | 成功、完成、已连接 |
-| Warning | 75° | 0.13 | 警告、降级、需注意 |
-| Danger | 27° | 0.15 | 危险、失败、拒绝 |
-| Info | 245° | 0.12 | 信息、运行中、提示 |
-
-共享明度阶梯共 14 档（索引 0–13）：
-
-```text
-0.995, 0.975, 0.945, 0.905, 0.855, 0.775, 0.665,
-0.555, 0.455, 0.365, 0.285, 0.215, 0.165, 0.115
-```
-
-浅色主题从浅端取画布、从深端取正文；深色主题反向取用。语义色与中性色在每个索引上使用同一个 L 值。
-
-### 2.2 角色令牌
-
-浅色/深色是两套角色映射，共用同一份色板。下表为 JVM 测试输出的实际 ARGB。
+### 2.2 当前完整取值表
 
 | 令牌 | 浅色 | 深色 | 用途 |
 |---|---|---|---|
-| `canvas` | `#FFF7F7F1` | `#FF050503` | 页面画布 |
-| `surface` | `#FFFEFEF8` | `#FF0E0F0B` | 基础表面 |
-| `surfaceRaised` | `#FFFEFEF8` | `#FF1A1A16` | 抬升表面 |
-| `surfaceSunken` | `#FFEDEDE7` | `#FF050503` | 凹陷表面 |
-| `surfaceMuted` | `#FFEDEDE7` | `#FF1A1A16` | 次级块、分组底 |
-| `sheet` | `#FFFEFEF8` | `#FF1A1A16` | 底部弹层 |
-| `chromeBase` | `#FFFEFEF8` | `#FF0E0F0B` | 玻璃 chrome 不透明底 |
-| `scrim` | `#66000000` | `#99000000` | 弹层遮罩（带 alpha） |
-| `textPrimary` | `#FF0E0F0B` | `#FFFEFEF8` | 正文主色 |
-| `textSecondary` | `#FF3E3F3A` | `#FFB6B6B1` | 次级正文 |
-| `textTertiary` | `#FF575752` | `#FF94948F` | 三级正文、路径 |
-| `textDisabled` | `#FF73736E` | `#FF73736E` | 停用文字（大号/图标） |
-| `outline` | `#FFB6B6B1` | `#FF3E3F3A` | 弱边框、拖动把手 |
-| `outlineStrong` | `#FF73736E` | `#FF73736E` | 强边框、图标 |
-| `hairline` | `#FFE0E0DA` | `#FF2A2A26` | 1px 分隔线 |
-| `primary` | `#FF1A1A16` | `#FFEDEDE7` | 主操作 |
-| `onPrimary` | `#FFFEFEF8` | `#FF0E0F0B` | 主操作正文 |
-| `primaryContainer` | `#FFEDEDE7` | `#FF3E3F3A` | 主操作容器 |
-| `onPrimaryContainer` | `#FF0E0F0B` | `#FFF7F7F1` | 主容器正文 |
-| `success` | `#FF1B6734` | `#FF5EA76F` | 成功实心色 |
-| `onSuccess` | `#FFFEFEF8` | `#FF050503` | 成功实心色正文 |
-| `successContainer` | `#FFC1FFCC` | `#FF003413` | 成功容器 |
-| `onSuccessContainer` | `#FF0E0F0B` | `#FFE5FFE9` | 成功容器正文 |
-| `warning` | `#FF754D00` | `#FFC28621` | 警告实心色 |
-| `onWarning` | `#FFFEFEF8` | `#FF050503` | 警告实心色正文 |
-| `warningContainer` | `#FFFFE9CC` | `#FF3B2500` | 警告容器 |
-| `onWarningContainer` | `#FF0E0F0B` | `#FFFFF5E8` | 警告容器正文 |
-| `danger` | `#FF992724` | `#FFE16A60` | 危险实心色 |
-| `onDanger` | `#FFFEFEF8` | `#FF050503` | 危险实心色正文 |
-| `dangerContainer` | `#FFFFE6E3` | `#FF560004` | 危险容器 |
-| `onDangerContainer` | `#FF0E0F0B` | `#FFFFF4F2` | 危险容器正文 |
-| `info` | `#FF005B91` | `#FF4D9AD8` | 信息实心色 |
-| `onInfo` | `#FFFEFEF8` | `#FF050503` | 信息实心色正文 |
-| `infoContainer` | `#FFDEEFFF` | `#FF002C4B` | 信息容器 |
-| `onInfoContainer` | `#FF0E0F0B` | `#FFF0F8FF` | 信息容器正文 |
-| `neutralStatus` | `#FF575752` | `#FF94948F` | 中性状态点 |
-| `onNeutralStatus` | `#FFFEFEF8` | `#FF050503` | 中性实心色正文 |
-| `neutralStatusContainer` | `#FFEDEDE7` | `#FF2A2A26` | 中性状态容器 |
-| `onNeutralStatusContainer` | `#FF0E0F0B` | `#FFF7F7F1` | 中性容器正文 |
+| `canvas` | `#FFFFFF` | `#0E1012` | 页面与系统栏背景 |
+| `surface` | `#FFFFFF` | `#1A1D21` | 卡片表面 |
+| `surfaceRaised` | `#FFFFFF` | `#1A1D21` | 卡片表面 |
+| `surfaceSunken` | `#F5F6F7` | `#16181B` | 次级背景 |
+| `surfaceMuted` | `#F5F6F7` | `#16181B` | 分组背景 |
+| `sheet` | `#FFFFFF` | `#1A1D21` | 弹层 |
+| `chromeBase` | `#FFFFFF` | `#16181B` | 浮层底色 |
+| `scrim` | `#66111315` | `#990E1012` | 带透明度的遮罩 |
+| `textPrimary` | `#111315` | `#F2F4F6` | 主文字 |
+| `textSecondary` | `#5A6068` | `#A8AFB8` | 次级正文 |
+| `textTertiary` | `#6B7280` | `#9AA1AA` | 白底说明；其他背景用 descriptionOn |
+| `textDisabled` | `#8C929A` | `#6F767F` | 仅禁用、占位及装饰 |
+| `outline` | `#ECEDEF` | `#24282D` | 灰描边 |
+| `outlineStrong` | `#ECEDEF` | `#24282D` | 灰描边；不作为信息图标 |
+| `hairline` | `#ECEDEF` | `#24282D` | 分隔线 |
+| `primary` | `#0369A1` | `#7DD3FC` | 链接与可点击文字 |
+| `accent` | `#0EA5E9` | `#38BDF8` | 仅装饰、选中、进度、状态点、细描边 |
+| `accentIcon` | `#0369A1` | `#38BDF8` | 信息图标，至少 3:1 |
+| `primaryFill` | `#0369A1` | `#0369A1` | 白字主按钮实底 |
+| `primaryPressed` | `#075985` | `#075985` | 主按钮按下色 |
+| `onPrimary` | `#FFFFFF` | `#FFFFFF` | 白字主按钮前景 |
+| `primaryContainer` | `#E6F4FE` | `#0B2B3A` | 选中态浅底 |
+| `onPrimaryContainer` | `#0369A1` | `#7DD3FC` | 选中态文字 |
+| `success` | `#16A34A` | `#4ADE80` | 语义状态实色/容器与配对前景 |
+| `onSuccess` | `#052E16` | `#052E16` | 语义状态实色/容器与配对前景 |
+| `successContainer` | `#F0FDF4` | `#102A1B` | 语义状态实色/容器与配对前景 |
+| `onSuccessContainer` | `#166534` | `#86EFAC` | 语义状态实色/容器与配对前景 |
+| `warning` | `#D97706` | `#FBBF24` | 语义状态实色/容器与配对前景 |
+| `onWarning` | `#111315` | `#111315` | 语义状态实色/容器与配对前景 |
+| `warningContainer` | `#FFFBEB` | `#30230E` | 语义状态实色/容器与配对前景 |
+| `onWarningContainer` | `#92400E` | `#FCD34D` | 语义状态实色/容器与配对前景 |
+| `danger` | `#DC2626` | `#F87171` | 语义状态实色/容器与配对前景 |
+| `onDanger` | `#FFFFFF` | `#450A0A` | 语义状态实色/容器与配对前景 |
+| `dangerContainer` | `#FEF2F2` | `#32181B` | 语义状态实色/容器与配对前景 |
+| `onDangerContainer` | `#B91C1C` | `#FCA5A5` | 语义状态实色/容器与配对前景 |
+| `info` | `#0369A1` | `#7DD3FC` | 语义状态实色/容器与配对前景 |
+| `onInfo` | `#FFFFFF` | `#0E1012` | 语义状态实色/容器与配对前景 |
+| `infoContainer` | `#E6F4FE` | `#0B2B3A` | 语义状态实色/容器与配对前景 |
+| `onInfoContainer` | `#0369A1` | `#7DD3FC` | 语义状态实色/容器与配对前景 |
+| `neutralStatus` | `#5A6068` | `#A8AFB8` | 语义状态实色/容器与配对前景 |
+| `onNeutralStatus` | `#FFFFFF` | `#0E1012` | 语义状态实色/容器与配对前景 |
+| `neutralStatusContainer` | `#F5F6F7` | `#16181B` | 语义状态实色/容器与配对前景 |
+| `onNeutralStatusContainer` | `#5A6068` | `#A8AFB8` | 语义状态实色/容器与配对前景 |
 
-`TanukiStatusTone` 固定为 `Neutral / Success / Warning / Danger / Info`。组件只接收语义，不接收具体色值；`statusColors(tone)` 返回 `dot / container / content` 三枚颜色。
+`TanukiStatusTone` 的五类语义不变；Info 的点用装饰强调色，标签用可读的容器文字色。状态含义同时由文字表达。卡片以设备密度换算的 1px 灰描边分层，内容卡阴影为 0。状态栏/系统导航栏与 canvas 同色，浅色深字、深色浅字；导航栏深色图标按平台能力从 API 27 起通过专用资源启用，API 26 不支持此能力且未设备验证。底部导航选中标签用可读天蓝、图标用图标用途色。
+
+### 2.3 全仓硬编码收敛清单
+
+扫描涵盖全仓已跟踪 Kotlin/XML/HTML/CSS/JS/SVG 色值以及 `Color.White/Black` 等命名常量；构建缓存不属于产品源码。
+
+| 文件/范围（相对 app/src） | 本次处理 |
+|---|---|
+| `main/kotlin/com/tanuki/ui/design/TanukiPalette.kt` | 统一浅深调色板、装饰/文字/白字底分工、用途注释和审计 |
+| `main/kotlin/com/tanuki/ui/design/TanukiDesignTheme.kt` | Material 与原生 View 同源，消除默认 tint，危险文字取可读语义色 |
+| `main/kotlin/com/tanuki/ui/design/TanukiComponents.kt`、`TanukiMaterialButtons.kt` | 胶囊与 Material 主次按钮统一取令牌 |
+| `main/kotlin/com/tanuki/ui/design/TanukiGlass.kt`、`TanukiTokenSpec.kt` | 去固定白高光；灰描边与无阴影内容卡 |
+| `main/kotlin/com/tanuki/ui/GlassNavigationBar.kt`、`OperationProgress.kt`、`DshComposerBar.kt` | 导航、进度和发送键按用途读取强调色 |
+| `main/kotlin/com/tanuki/ui/DshMarkdown.kt` | 删除固定 #4C8DFF，所有生产链接传递当前主题文字色 |
+| `main/kotlin/com/tanuki/ui/WorkspacePdfPreview.kt`、`WorkspaceDocxPreview.kt`、`WorkspaceVideoPlayer.kt` | 加载/错误/边框/留白改令牌；文档纸张见保留边界 |
+| `main/kotlin/com/tanuki/MainActivity.kt`、`main/res/values{,-v27,-v29,-night,-night-v27,-night-v29}/themes.xml`、`main/res/values{,-night}/colors.xml` | 系统栏、首帧窗口同背景；图标色集中资源 |
+| `main/res/drawable/ic_tanuki.xml` | 原路径不变，原绿/棕/米色改白灰与天蓝叶片 |
+| `main/kotlin/com/tanuki/ui/{WorkspaceStorageControls,SetupGuide,WorkspaceFileViewer,OnboardingScreen,DshPlanCard,AgentBrowserPage,TanukiUi,DshNativePage,ApplicationUpdateCard,RemoteHostSettings,SetupScreens,RuntimeComponents,DshApprovalPanel,DshVersionManagerDialog,SourceSpeedControls,DshGoalDock,DshQuestionCard,TanukiAccessibility}.kt` | Material 按钮导入统一颜色入口；普通提示/装饰底回归灰白 |
+| `test/kotlin/com/tanuki/{DshMarkdownTest,TanukiPageVisualsTest}.kt`、`test/kotlin/com/tanuki/ui/design/{TanukiDesignTokensTest,TanukiPlatformThemeTest}.kt` | 用途回归、明暗链接、方案取值与平台资源断言 |
+
+保留项及原因：
+
+- `storage/docx/{DocxXml,DocxModel,DocxStyles,DocxDocumentReader}.kt` 和 `storage/XlsxWorkbook.kt`：文档格式命名色、索引色及默认原文色，不是应用调色板；改变会破坏文件忠实显示。
+- PDF 渲染位图的白纸底与 DOCX 纸张：属于文档内容，保持原文前景/填充；纸张占位文案收敛到 Light 令牌，应用工具栏、卡片、加载/失败外壳跟随主题。深色没有白色应用卡片或纯黑视频留白，不宣称将原文纸张自动改色。
+- `ui/BrowserIcons.kt` 的黑色向量笔画：绘制遮罩，实际 Icon tint 由主题决定；透明常量仅代表透明。
+- JVM `TanukiContrastTest`、`DocxDocumentReaderTest`、`XlsxWorkbookParserTest`、颜色数学测试的色值：算法/格式输入与预期。
+- Android `FixedBottomControlsFixture`、`SetupPresentationTest`、`BrowserLibraryTest`、`BrowserWorkspacePresentationTest`、`AgentBrowserControlTest` 的彩色页与像素断言：合成渲染/截图探针，不是用户界面配色，不修改测试辨识色。
 
 ## 3. 字体阶梯
 
@@ -132,7 +150,7 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 | chrome | 4 | 14dp / 0.14 | 0.86 | 是，16dp | 浮在内容上的顶栏、底栏、悬浮控制 |
 | sheet | 3 | 18dp / 0.18 | 1.00 | 否 | 模态底部弹层，密集内容 |
 | pill | 2 | 6dp / 0.10 | 0.78 | 是，8dp | 玻璃胶囊、短标签、单个高频操作 |
-| card | 1 | 2dp / 0.06 | 1.00 | 否 | 内容卡、分组块 |
+| card | 1 | 0dp / 0.00 | 1.00 | 否 | 内容卡、分组块 |
 
 只有 **chrome 与 pill** 开启模糊。sheet 和 card 不模糊，优先保证正文与表单在复杂背景上的可读性。
 
@@ -267,31 +285,13 @@ Material3 通用 `Shapes` 映射：`extraSmall=8dp`、`small=12dp`、`medium=20d
 - 玻璃层放在内容之上时必须提供真实背板；没有背板就用 card/sheet 的不透明表面。
 - WebView 保持原层级和生命周期，不包进玻璃、缩放或动画容器。
 
-## 9. 对比度校验
+## 9. 当前用途对比度校验
 
-审计代码在 `TanukiContrastAudit`，每个主题 28 项，共 56 项；正文/容器正文最低 4.5:1，停用文字/图标/状态点最低 3.0:1。测试结果：**19 tests / 0 failures / 0 errors / 0 skipped**。
+`TanukiContrastAudit` 每主题 45 项，共 90 项；正文、说明、链接、按钮及状态标签 ≥4.5:1，大字与信息图标 ≥3:1。装饰天蓝、禁用灰和细分隔线不参与可读文字断言；测试明确证明装饰天蓝配白字不合格，不会通过降低阈值掩盖问题。
 
-关键实测值：
+白字主按钮 #0369A1 为 5.93:1。#6B7280 在灰底的不足通过 `descriptionOn` 回退解决。玻璃 chrome 以实际底色和 fillAlpha 压在 canvas 上审计；任意网页或原文图片的像素对比度不在该模型的保证范围。
 
-| 检查项 | 浅色 | 深色 | 最低要求 |
-|---|---:|---:|---:|
-| 正文/画布 | 17.89 | 20.15 | 4.5 |
-| 正文/表面 | 19.00 | 19.00 | 4.5 |
-| 次级正文/画布 | 9.88 | 10.02 | 4.5 |
-| 三级正文/画布 | 6.76 | 6.69 | 4.5 |
-| 三级正文/凹陷表面 | 6.18 | 5.73 | 4.5 |
-| 停用正文/画布 | 4.43 | 4.28 | 3.0（大号） |
-| 玻璃 chrome 正文/画布 | 18.84 | 19.13 | 4.5 |
-| 主操作正文/主色 | 17.24 | 16.37 | 4.5 |
-| 主容器正文/主容器 | 16.37 | 9.88 | 4.5 |
-| 成功正文/成功色 | 6.83 | 7.03 | 4.5 |
-| 警告正文/警告色 | 7.36 | 6.53 | 4.5 |
-| 危险正文/危险色 | 7.77 | 6.25 | 4.5 |
-| 信息正文/信息色 | 7.14 | 6.73 | 4.5 |
-| 成功容器正文/容器 | 16.89 | 13.20 | 4.5 |
-| 危险容器正文/容器 | 16.19 | 13.94 | 4.5 |
-
-玻璃 chrome 的审计方式是：`chromeBase` 以 0.86 不透明度压在画布上后再计算正文。实际页面上的玻璃会随底层内容变化；关键正文应使用 sheet/card，或确保背板有足够不透明度，不能仅凭该审计值宣称任意背景都达标。
+原补丁在7cfe1446基线的主源码、Android 测试源码及 JVM 测试源码编译通过；该会话定向 JVM 共 58 项（设计令牌 23、平台主题 3、Material 主题 4、页面映射 12、Markdown 16），0 failures / errors / skipped；90 项用途审计全部通过。正文配对最低约 4.52:1，图标/大字最低约 5.29:1；主按钮 5.93:1、按下态 7.56:1、浅/深链接在卡片上分别 5.93/10.14:1。最终同命令重跑 BUILD SUCCESSFUL（5m52s），lint 为 0 errors / 103 warnings / 1 hint；此前 API27 资源属性位置错误已修复，失败原因保留于交接和测试报告。设备仍未验证。下节为旧接入工作的历史验证，不作为本轮通过依据。
 
 ## 10. 验证与未验证
 

@@ -98,8 +98,8 @@ class TanukiPageVisualsTest {
                     "$theme $tone 容器正文对比度 ${rate(role.content, role.container)}",
                     TanukiContrast.passesNormalText(role.content, role.container),
                 )
-                // 状态点作为图形元素，按大号文字阈值检查。
-                assertTrue(
+                // 信息状态点是装饰天蓝；状态含义同时由通过正文阈值的标签表达。
+                if (tone != TanukiStatusTone.Info) assertTrue(
                     "$theme $tone 状态点对比度 ${rate(role.dot, tokens.canvas)}",
                     TanukiContrast.passesLargeText(role.dot, tokens.canvas),
                 )
@@ -118,8 +118,8 @@ class TanukiPageVisualsTest {
             // 弹层正文与副标题依赖 LocalContentColor：这里锁定它们实际继承的颜色。
             assertTrue("$theme 弹层正文/弹层", TanukiContrast.passesNormalText(tokens.textPrimary, tokens.sheet))
             assertTrue("$theme 弹层副标题/弹层", TanukiContrast.passesNormalText(tokens.textSecondary, tokens.sheet))
-            // 停用行文字属于大号/非关键说明，按 3.0 检查。
-            assertTrue("$theme 停用文字/分组底", TanukiContrast.passesLargeText(tokens.textDisabled, tokens.surfaceMuted))
+            // 禁用色不承担正文信息；分组中的说明使用可读的用途色。
+            assertTrue("$theme 分组说明", TanukiContrast.passesNormalText(tokens.descriptionOn(tokens.surfaceMuted), tokens.surfaceMuted))
         }
     }
 

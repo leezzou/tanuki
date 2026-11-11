@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiTonalButton as FilledTonalButton
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -162,7 +164,7 @@ internal fun WorkspaceVideoPlayer(uri: Uri, fullscreen: Boolean, onFullscreen: (
         }
     }
     Column(modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
             AndroidView(modifier = Modifier.fillMaxSize(), factory = { currentContext ->
                 WorkspaceVideoView(currentContext).apply {
                     view = this

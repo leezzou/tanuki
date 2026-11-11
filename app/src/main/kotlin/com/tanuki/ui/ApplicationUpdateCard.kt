@@ -1,5 +1,9 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
+
+import com.tanuki.ui.design.TanukiButton as Button
+
 import android.os.SystemClock
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*

@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiButton as Button
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween

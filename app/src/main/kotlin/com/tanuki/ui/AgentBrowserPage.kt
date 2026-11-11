@@ -1,5 +1,7 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiTonalButton as FilledTonalButton
+
 import android.content.Intent
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -248,7 +250,7 @@ fun AgentBrowserPage(controller: AgentBrowserController, modifier: Modifier = Mo
                 }
                 if (state.overlayFrame == null && state.url.isEmpty() && !state.rendererFailed) Column(Modifier.fillMaxSize().padding(bottom = bottomInset).verticalScroll(rememberScrollState()).padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                         Box(Modifier.size(68.dp), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.Public, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
                         }

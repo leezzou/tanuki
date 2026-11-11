@@ -1,5 +1,9 @@
 package com.tanuki.ui
 
+import com.tanuki.ui.design.TanukiOutlinedButton as OutlinedButton
+
+import com.tanuki.ui.design.TanukiButton as Button
+
 import android.os.Build
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -511,7 +515,7 @@ private fun TanukiHeader(tab: Int, title: String, c: TanukiUiCallbacks, stoppabl
             verticalAlignment = Alignment.CenterVertically) {
             if (tab == 4) IconButton(onClick = back) { TanukiIcon(TanukiGlyph.Back, "返回上一页") }
             if (tab == 0) {
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer) {
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                     Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
                         TanukiIcon(TanukiGlyph.Terminal, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
                     }
@@ -1276,6 +1280,7 @@ private fun TanukiCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         shape = TanukiShapeTokens.card,
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = androidx.compose.foundation.BorderStroke(with(LocalDensity.current) { 1.toDp() }, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(

@@ -540,7 +540,7 @@ class MainActivity : ComponentActivity() {
                 val browserControl = browserAttention?.collectAsState(initial = BrowserControlUiState())?.value ?: BrowserControlUiState()
                 LaunchedEffect(dark, colors.background, colors.surface) {
                     window.statusBarColor = colors.background.toArgb()
-                    window.navigationBarColor = colors.surface.toArgb()
+                    window.navigationBarColor = colors.background.toArgb()
                     WindowCompat.getInsetsController(window, window.decorView).apply {
                         isAppearanceLightStatusBars = !dark
                         isAppearanceLightNavigationBars = !dark

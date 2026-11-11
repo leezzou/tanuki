@@ -2,7 +2,11 @@
     <style name="Theme.Tanuki" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:windowBackground">#12141A</item>
+        <item name="android:windowBackground">@color/tanuki_canvas</item>
+        <item name="android:colorBackground">@color/tanuki_canvas</item>
+        <item name="android:colorAccent">@color/tanuki_link</item>
+        <item name="android:statusBarColor">@color/tanuki_canvas</item>
+        <item name="android:navigationBarColor">@color/tanuki_canvas</item>
         <item name="android:forceDarkAllowed">false</item>
     </style>
 </resources>

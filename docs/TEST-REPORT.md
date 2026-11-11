@@ -2,6 +2,24 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 纯白灰与天蓝主题落库（2026-11-11，android_agent-73，Host）
+
+- 从fetch实核的 `origin/main=4710c5e08ffa8c86d8cdc1bffbec1a1052be0935`（含#87/#88/#89）建立 `ao/theme-colors/sky-theme`。原补丁SHA256 `e91e1787b06113dc597748e5a541ed6bef47c5948f62abe4124bee3450e8b821` 匹配，全部48文件兼容检查通过；精确应用47路径，以本次落库记录替代已完成的1731补丁交付记录，无冲突或手工产品代码调整。保留main动效工厂/设置/令牌、按压时序和章节，完整配色表与landing逐行相同。
+- 实际执行 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime --offline` 运行主源码/Android测试源码编译与 `:app:testModernDebugUnitTest`，过滤下列五类：`TanukiDesignTokensTest`、`TanukiPlatformThemeTest`、`TanukiContrastTest`、`TanukiPageVisualsTest`、`DshMarkdownTest`。BUILD SUCCESSFUL（1m43s），完整命令见 [落库交接](handoffs/20261111-1819-sky-theme-landing.md)。
+- XML实核 **58项 / 5结果文件 / 0失败 / 0错误 / 0跳过**，各类23/3/4/12/16；两套主题的生产用途审计各45项，共 **90项通过**，包含普通文字≥4.5、图标/大字≥3以及装饰色不可冒充文字的负向回归。未降低阈值。
+- 本轮未执行lint、完整JVM、设备/adb、Android仪器或逐页截图，不生成/分发APK。编译仅既有弃用/API、SDK XML和analytics写权限提示，无编译或测试失败。下节是原实现会话的旧基线结果，不冒充本次lint或设备证据。
+
+## 纯白灰与天蓝浅深主题（2026-11-11，android_agent-87，历史Host）
+
+- 基线：远端 main 与起始 HEAD 均为 `7cfe1446effa76d1e7901f839d6a22996778d013`。仅配色、颜色用途令牌及相关组件映射，未改业务逻辑、协议和布局尺寸。完整取值/硬编码收敛清单见 [设计令牌](DESIGN-TOKENS.md) 第 2 节。
+- 最终执行环境：macOS ARM64、JDK17、Android SDK36，`source scripts/ao-worktree-env.sh` 隔离构建缓存；`./gradlew --console=plain -PtestBuildType=debug -I scripts/workspace-verification.init.gradle :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.ui.design.TanukiDesignTokensTest' --tests 'com.tanuki.ui.design.TanukiPlatformThemeTest' --tests 'com.tanuki.TanukiContrastTest' --tests 'com.tanuki.TanukiPageVisualsTest' --tests 'com.tanuki.DshMarkdownTest' :app:lintModernDebug -x buildNativeRuntime --offline`。
+- 主源码、Android 测试源码和 JVM 测试源码编译通过。定向 JVM **58 tests / 5 个结果文件 / 0 failures / 0 errors / 0 skipped**，分别为设计令牌 23、平台主题 3、Material 对比度 4、页面映射 12、Markdown 16；未执行完整 JVM 套件。
+- 两套主题共 **90 项用途对比度审计通过**。正文/说明/链接/按钮/标签 ≥4.5:1，图标/大字 ≥3:1，装饰与禁用色不参与可读文字阈值。最低正文约 4.52:1，图标/大字约 5.29:1；白字主按钮 5.93:1、按下态 7.56:1；链接/卡片浅深分别 5.93/10.14:1。
+- #6B7280 在纯白通过，但在分组/选中浅底分别只有 4.47/4.31:1；`descriptionOn` 在这些底色回退 #5A6068。装饰天蓝配白字的不足通过负向断言明确锁定，不能改低阈值冒充通过。
+- 首次 lint 报 2 个 NewApi errors / 103 warnings / 1 hint：把 API 27 的 `windowLightNavigationBar` 放在了 minSdk26 基础资源。已移到 values-v27 / values-night-v27，JVM 同时断言基础资源不能声明此属性；修复后原命令完整重跑 BUILD SUCCESSFUL（5m52s），58 项定向 JVM 全通过，lint **0 errors / 103 warnings / 1 hint**。API 26 不支持导航栏深色图标，不宣称已验证其设备表现。构建另有既有弃用/API、SDK XML 版本和工作区外 analytics 不可写提示。
+- 本会话没有启动、操作或安装到设备；Android 测试源码编译不等于仪器执行。深浅逐页渲染、透明导航在真实内容上的像素、系统栏、文档原文色彩、TalkBack/大字体、模拟器/真机仍待独立 QA。`-x buildNativeRuntime` 的宿主产物不是设备/发布包；未合并、未发布，API Key/真实模型/真机暂停项保留。
+- 原实现会话Git创建子分支因共享 `.git` ref lock 不可写失败，HEAD/branch未改变，因此交付完整补丁；以上均为7cfe1446上的历史验证。后由android_agent-73从含#89动效的4710c5e0接管，最新落库验证与保留边界见 [主题落库交接](handoffs/20261111-1819-sky-theme-landing.md)。原1731阶段交接的有用事实与未验事项已归入本节/设计专题和该记录，不再重复引入已完成的补丁交付记录。
+
 ## 0.1.13 发布候选（2026-11-11，android_agent-81，非设备）
 
 **当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
