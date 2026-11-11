@@ -49,10 +49,10 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
         }
     }
     val steps=listOf(
-        SetupGuideStep("ubuntu","Ubuntu","提供 DSH 所需的 Linux 系统与基础目录。",complete[0]),
-        SetupGuideStep("node","Node.js","为 DSH 提供 JavaScript 运行环境。",complete[1]),
+        SetupGuideStep("ubuntu","系统组件","为助手准备系统组件，请先完成安装。",complete[0]),
+        SetupGuideStep("node","运行组件","为助手准备运行组件，请继续安装。",complete[1]),
         SetupGuideStep("tools","基础工具","检查基础工具，只安装缺失的组件。",complete[2]),
-        SetupGuideStep("dsh","DSH","安装完成后，即可配置模型并开始使用。",complete[3]))
+        SetupGuideStep("dsh","助手","安装后设置模型，即可开始对话。",complete[3]))
     val prerequisite=when {
         step>0 && !comp.ubuntuInstalled -> 0
         step>1 && !comp.nodeInstalled -> 1
@@ -63,12 +63,12 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
     SetupGuide(steps,step,onStep={step=it},busy=s.setupBusy,
         isReady=ready,
         onOpenDsh={if(s.service!=ServiceState.RUNNING)c.command("START");openDsh()}) {
-        if(s.service==ServiceState.RUNNING)SetupCaption("DSH 正在运行。停止服务后才能安装或更换组件，停止会中断当前任务。")
+        if(s.service==ServiceState.RUNNING)SetupCaption("请先停止助手再安装或更换组件；停止会中断当前任务。")
         if(prerequisite!=null)SetupPanel {
             Text("先完成 ${steps[prerequisite].title}",style=MaterialTheme.typography.titleMedium)
-            SetupCaption("前一步就绪后才能安装${steps[step].title}。查看其他步骤不会中断当前安装。")
+            SetupCaption("请先完成前一步安装；查看其他步骤不会中断安装。")
             OutlinedButton(onClick={step=prerequisite},modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
-                Text("返回${steps[prerequisite].title}步骤")
+                Text("返回上一步")
             }
         } else if(step==2)FoundationTools(model,c) else EnvironmentSection(model,c,step,onOpenStorage)
         s.download?.takeIf { it.component!=steps[step].id }?.let { progress ->
@@ -77,7 +77,7 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
                 ComponentDownloadProgress(ComponentProgressModel(s.stage,progress.source,progress.received,
                     progress.total,progress.bytesPerSecond,progress.reused))
                 TextButton(onClick={step=steps.indexOfFirst { it.id==progress.component }.takeIf { it>=0 } ?: step}) {
-                    Text("查看正在安装的步骤")
+                    Text("查看安装进度")
                 }
             }
         }
@@ -93,8 +93,8 @@ internal fun SetupOverview(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
 private fun RecoveryGuidance(s:Snapshot,c:TanukiUiCallbacks) {
     if(s.update==UpdateState.RECOVERY_REQUIRED)SetupPanel {
         Text("上次更新需要确认",style=MaterialTheme.typography.titleMedium)
-        SetupCaption("检查当前版本或恢复匹配快照后，再继续安装和启动。")
-        TextButton(onClick={c.command("RESUME_UPDATE")},enabled=s.setupIdle) { Text("检查并保留当前版本") }
+        SetupCaption("请检查当前版本，或恢复对应的数据备份后继续。")
+        TextButton(onClick={c.command("RESUME_UPDATE")},enabled=s.setupIdle) { Text("检查当前版本") }
     }
 }
 
@@ -132,9 +132,9 @@ internal fun RuntimeRecoveryCard(
     SetupPanel {
         Text(
             when (recovery.mode) {
-                RecoveryMode.SAFE -> "当前正在使用安全模式"
+                RecoveryMode.SAFE -> "正在使用安全模式"
                 RecoveryMode.PROBATION -> "正在试用正常模式"
-                RecoveryMode.NORMAL -> failure?.title ?: "服务恢复"
+                RecoveryMode.NORMAL -> failure?.title ?: "恢复助手"
             },
             style = MaterialTheme.typography.titleMedium
         )
@@ -164,24 +164,24 @@ internal fun RuntimeRecoveryCard(
 
         when (recovery.mode) {
             RecoveryMode.SAFE -> {
-                SetupCaption("安全模式只加载最小配置，不加载你的插件和配置；项目、会话、程序和配置均保留。安全模式不会自动切回正常模式。")
-                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复的数据尚未在正常模式加载；安全模式启动不会提交恢复检查。")
+                SetupCaption("安全模式不加载你的插件和设置；对话和工作区保留，请手动试用正常模式。")
+                if (s.update == UpdateState.RESTORED_PENDING_CHECK) SetupCaption("恢复检查尚未完成，请在正常模式启动助手。")
                 if (failure == null || failure.primaryAction.kind != FailureActionKind.TRY_NORMAL) {
                     TanukiPillButton(
-                        text = "试用正常模式（进入 2 分钟观察）",
+                        text = "试用正常模式",
                         onClick = { c.command("RECOVERY_TRIAL") },
                         enabled = !s.setupBusy,
                         tone = TanukiPillButtonTone.Filled,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                SetupCaption("试用后 2 分钟内再次失败会自动回到安全模式；已中断的任务不会自动重放。")
+                SetupCaption("两分钟内再次失败会回到安全模式；中断任务请确认状态后再继续。")
             }
             RecoveryMode.PROBATION -> {
-                SetupCaption(if (s.service == ServiceState.RUNNING) "正在加载正常模式的插件与配置。2 分钟内再次失败会自动回到安全模式；已中断任务不会自动重放。" else "上次正常模式试用未在运行。可退出试用回到安全模式，或手动启动继续试用；已中断任务不会自动重放。")
+                SetupCaption(if (s.service == ServiceState.RUNNING) "正在加载插件和设置；两分钟内再失败会回到安全模式，中断任务请手动继续。" else "正常模式试用已中断，请重新启动或返回安全模式；中断任务请手动继续。")
                 if (failure == null || failure.primaryAction.kind != FailureActionKind.SAFE_MODE) {
                     TanukiPillButton(
-                        text = "退出试用，回到安全模式",
+                        text = "返回安全模式",
                         onClick = { c.command("RECOVERY_SAFE") },
                         enabled = !s.setupBusy,
                         tone = TanukiPillButtonTone.Outline,
@@ -190,7 +190,7 @@ internal fun RuntimeRecoveryCard(
                 }
             }
             RecoveryMode.NORMAL -> {
-                SetupCaption(if (s.service == ServiceState.RUNNING) "服务已按正常模式运行。自动重启不会重放已中断的任务；若反复失败，可清理下载缓存或切换已安装版本。" else "当前服务未运行，可能正在等待有限次自动重启或已停止自动重启；已中断任务不会自动重放。")
+                SetupCaption(if (s.service == ServiceState.RUNNING) "助手已正常运行，请确认中断任务的状态后再继续。" else "助手尚未运行，请查看当前状态后重新启动；中断任务请手动继续。")
             }
         }
 
@@ -208,7 +208,7 @@ internal fun RuntimeRecoveryCard(
                 )
             }
             TanukiPillButton(
-                text = "切换已安装版本",
+                text = "切换版本",
                 onClick = { showVersions = true },
                 enabled = !s.setupBusy,
                 tone = TanukiPillButtonTone.Outline,
@@ -236,8 +236,8 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
     val s=model.snapshot
     var showPermissions by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text("你的移动开发空间",style=MaterialTheme.typography.headlineLarge)
-        SetupCaption("管理本机项目，在 DeepSeek Harness 中开始工作。")
+        Text("你的开发工作台",style=MaterialTheme.typography.headlineLarge)
+        SetupCaption("管理本机工作区，告诉助手你想完成的事。")
     }
     RecoveryGuidance(s,c)
     RuntimeRecoveryCard(s,c,model.components,onOpenStorage)
@@ -255,15 +255,15 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
                 StatusPill(s.service.label,s.service==ServiceState.RUNNING)
             }
             Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                Text("DeepSeek Harness",style=MaterialTheme.typography.headlineMedium)
-                Text("DSH ${s.dsh}",style=MaterialTheme.typography.bodyMedium,
+                Text("助手",style=MaterialTheme.typography.headlineMedium)
+                Text("版本 ${s.dsh}",style=MaterialTheme.typography.bodyMedium,
                     fontFamily=FontFamily.Monospace,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Button(onClick={if(s.service!=ServiceState.RUNNING)c.command("START");openDsh()},
                 enabled=!s.setupBusy && s.update!=UpdateState.RECOVERY_REQUIRED &&
                     model.support.state!=com.tanuki.web.WebViewSupportState.UPDATE_REQUIRED,
                 shape=MaterialTheme.shapes.large,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp)) {
-                Text(if(s.service==ServiceState.RUNNING)"打开 DSH" else if(s.service==ServiceState.STARTING)"正在启动…" else "启动 DSH")
+                Text(if(s.service==ServiceState.RUNNING)"打开对话" else if(s.service==ServiceState.STARTING)"正在启动…" else "启动助手")
             }
         }
     }
@@ -277,14 +277,14 @@ private fun ReadyWorkspace(model:TanukiUiModel,c:TanukiUiCallbacks,openDsh:()->U
             TanukiIcon(TanukiGlyph.Layers,tint=MaterialTheme.colorScheme.primary)
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                 Text("运行环境已就绪",style=MaterialTheme.typography.titleMedium)
-                SetupCaption("Ubuntu ${model.components.ubuntuVersion} · Node.js ${model.components.nodeVersion}")
-                Text("查看安装步骤与版本",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
+                SetupCaption("系统组件 ${model.components.ubuntuVersion} · 运行组件 ${model.components.nodeVersion}")
+                Text("查看组件版本",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
             }
             TanukiIcon(TanukiGlyph.Chevron,tint=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     Column(Modifier.animateContentSize()) {
-        TextButton(onClick={showPermissions=!showPermissions},modifier=Modifier.heightIn(min=48.dp)) { Text("文件与命令权限说明") }
+        TextButton(onClick={showPermissions=!showPermissions},modifier=Modifier.heightIn(min=48.dp)) { Text("权限说明") }
         AnimatedVisibility(visible=showPermissions) { SandboxGuidance(s) }
     }
     DeviceConditionBanner(model.deviceCondition)
@@ -301,11 +301,11 @@ private fun DeviceConditionBanner(state: DeviceConditionState) {
     SetupPanel {
         Text("设备状态 · ${state.condition.label}", style = MaterialTheme.typography.titleMedium)
         SetupCaption(state.reasonText())
-        SetupCaption("${state.statusText()} · 下载并发 ${state.workerCap} 路 · 日志 ${state.logLineLimit} 行 · 预览上限 ${state.previewMaxDimension} 像素")
+        SetupCaption("已调整后台活动，当前任务保持运行。")
         if (state.deferredChecks.isNotEmpty()) {
-            SetupCaption("后台更新检查已延后，状态恢复后自动补跑；正在运行的 DSH 任务和用户下载不会被暂停或取消。")
+            SetupCaption("后台更新检查已延后，状态恢复后继续；助手和当前下载保持运行。")
         } else {
-            SetupCaption("DSH 任务和前台操作不受影响；可在“设置 · 运行与后台”中调整开关与低电阈值。")
+            SetupCaption("助手和当前操作保持运行，可在设置中调整后台选项。")
         }
     }
 }
@@ -315,15 +315,15 @@ private fun FoundationTools(model:TanukiUiModel,c:TanukiUiCallbacks) {
     val s=model.snapshot
     val current=model.tools.checked && model.tools.ubuntuMarker.startsWith("${model.components.ubuntuVersion} ")
     val groups=listOf(
-        "Git、curl 与 HTTPS 证书" to setOf("git","curl","ca-certificates"),
-        "Python、SSL 与虚拟环境" to setOf("python3","python3-venv"),
-        "SSH 客户端与 OpenSSL" to setOf("openssh-client","openssl"),
-        "代码搜索与 JSON" to setOf("ripgrep","jq"),
-        "xz、ZIP 解压与压缩" to setOf("xz-utils","zip","unzip"),
-        "文件识别、查看与同步" to setOf("file","less","rsync"),
-        "补丁与轻量构建工具" to setOf("patch","make","pkg-config"),
-        "工作区目录支持" to setOf("xdg-user-dirs"),
-        "Node.js 运行库" to setOf("libatomic1","libstdc++6"))
+        "版本管理与网络工具" to setOf("git","curl","ca-certificates"),
+        "脚本与开发工具" to setOf("python3","python3-venv"),
+        "远程连接工具" to setOf("openssh-client","openssl"),
+        "代码搜索工具" to setOf("ripgrep","jq"),
+        "文件压缩工具" to setOf("xz-utils","zip","unzip"),
+        "文件查看与同步工具" to setOf("file","less","rsync"),
+        "项目构建工具" to setOf("patch","make","pkg-config"),
+        "工作区支持工具" to setOf("xdg-user-dirs"),
+        "运行支持组件" to setOf("libatomic1","libstdc++6"))
     SetupPanel {
         Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
             groups.forEachIndexed { index, (name,ids) ->
@@ -336,18 +336,18 @@ private fun FoundationTools(model:TanukiUiModel,c:TanukiUiCallbacks) {
                 if(index<groups.lastIndex)HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
             }
         }
-        SetupCaption(if(current && model.tools.passed)"检查已通过。安装 Ubuntu 和 Node 时也会自动补齐基础工具。" else "只安装缺失项，项目与 DSH 配置保留；首次升级会下载新增工具，请留意下方进度。")
-        SetupCaption("只安装 SSH 客户端，不启动 SSH 服务或其他后台进程，也不会自动扩大 DSH 命令权限。")
+        SetupCaption(if(current && model.tools.passed)"基础工具已准备好，可继续安装助手。" else "将安装缺少的基础工具，工作区和助手设置保留，请留意安装进度。")
+        SetupCaption("基础工具不会自动开放远程登录或扩大助手权限。")
         if(s.setupBusy && s.phasePercent!=null) {
             Text("${s.phasePercent}%",style=MaterialTheme.typography.headlineLarge,fontFamily=FontFamily.Monospace,color=MaterialTheme.colorScheme.primary)
             LinearProgressIndicator(progress={s.phasePercent/100f},modifier=Modifier.fillMaxWidth())
-            SetupCaption(s.stage)
+            SetupCaption("正在${operationStage(s.stage, s.environment, s.update).label}")
         }
         Button(onClick={c.command("TOOLS")},enabled=s.setupIdle && model.components.ubuntuInstalled && model.components.nodeInstalled,
             modifier=Modifier.fillMaxWidth().heightIn(min=52.dp),shape=MaterialTheme.shapes.medium) {
-            Text(if(s.setupBusy)"正在检查与补齐…" else if(current && model.tools.passed)"重新检查" else "检查并补齐")
+            Text(if(s.setupBusy)"正在检查" else if(current && model.tools.passed)"重新检查" else "检查并补齐")
         }
-        if(s.service==ServiceState.RUNNING)SetupCaption("先停止 DSH，再检查和修复运行组件。")
+        if(s.service==ServiceState.RUNNING)SetupCaption("请先停止助手，再检查和修复运行组件。")
     }
 }
 
@@ -357,12 +357,12 @@ internal fun SandboxGuidance(s:Snapshot) {
         Text("文件与命令权限",style=MaterialTheme.typography.titleMedium)
         when(s.confinement) {
             Confinement.UNAVAILABLE -> {
-                SetupCaption("本机没有可用的命令沙箱。workspace-write 的文件工具可用，但 bash 会被阻止。")
-                SetupCaption("需要执行命令时，在官方 DSH 的文件策略中明确选择 danger-full-access。该模式允许命令访问 App 权限范围内的其他文件与网络，仍是普通 Android App 权限。")
+                SetupCaption("当前权限下无法执行命令，文件工具仍可使用。")
+                SetupCaption("完全权限可访问工作区外文件和网络，请先核对助手权限设置。")
             }
-            Confinement.PARTIAL -> SetupCaption("本机沙箱只有部分能力，请按 DSH 权限设置中的能力提示选择文件与命令策略。")
-            Confinement.FULL -> SetupCaption("本机命令沙箱已检测可用，工具执行继续遵循 DSH 中的权限设置。")
-            Confinement.UNKNOWN -> SetupCaption("沙箱能力尚未确认。若 DSH 提示 workspace-write 无法执行 bash，请先检查其文件策略与可用后端。")
+            Confinement.PARTIAL -> SetupCaption("本机命令能力有限，请查看助手权限设置中的可用选项。")
+            Confinement.FULL -> SetupCaption("本机可以执行命令，仍遵循你选择的权限设置。")
+            Confinement.UNKNOWN -> SetupCaption("命令能力尚未确认，请重新检查运行环境。")
         }
     }
 }

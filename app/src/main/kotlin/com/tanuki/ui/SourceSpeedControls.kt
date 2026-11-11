@@ -65,25 +65,25 @@ fun SourceSpeedControls(
     val sample = snapshot.results[selectedSource]
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(when {
-            automatic && snapshot.running -> "正在自动测速 · ${snapshot.results.values.count { it.status != SourceProbeStatus.TESTING }} / ${sources.size}"
-            automatic && snapshot.measuredAtMillis>0 && !fresh -> "上次测速已过期，安装前会重新测速"
+            automatic && snapshot.running -> "正在检测下载速度 · ${snapshot.results.values.count { it.status != SourceProbeStatus.TESTING }} / ${sources.size}"
+            automatic && snapshot.measuredAtMillis>0 && !fresh -> "上次测速已过期，安装前会重新检测。"
             automatic && snapshot.bestSourceId != null && resolved != null -> "已自动选择：${resolved.title}"
-            automatic && snapshot.measuredAtMillis > 0 -> "测速暂不可用，下载时逐个尝试"
-            automatic -> "自动测速并选择最快可用源"
-            else -> "手动优先：${resolved?.title ?: selectedSource}"
+            automatic && snapshot.measuredAtMillis > 0 -> "测速未完成，安装时会尝试其他下载源。"
+            automatic -> "安装前自动选择较快的下载源。"
+            else -> "优先使用：${resolved?.title ?: "请重新选择下载源"}"
         }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
         if(snapshot.running) {
-            LinearProgressIndicator(modifier=Modifier.fillMaxWidth().semantics { contentDescription="$componentTitle 下载源测速进行中" })
+            LinearProgressIndicator(modifier=Modifier.fillMaxWidth().semantics { contentDescription="正在检测下载源速度" })
         }
         if(!snapshot.running && sample?.status == SourceProbeStatus.SUCCESS) {
-            Text("${if(fresh)"本次采样" else "上次采样"} ${mbps(sample.bytesPerSecond)} MB/s · 连接 ${sample.latencyMs} ms",
+            Text("${if(fresh)"本次测速" else "上次测速"} ${mbps(sample.bytesPerSecond)} MB/s · 连接 ${sample.latencyMs} ms",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         TextButton(onClick = {
             dialogOpen = true
             if(!snapshot.running && snapshot.results.isEmpty() && canTest)onTest()
         }, enabled = sources.isNotEmpty(),modifier=Modifier.heightIn(min=48.dp)) {
-            Text("查看测速与下载源")
+            Text("查看下载源")
         }
     }
 
@@ -94,13 +94,13 @@ fun SourceSpeedControls(
 
         AlertDialog(
             onDismissRequest = { dialogOpen = false },
-            title = { Text("$componentTitle · 下载源测速") },
+            title = { Text("下载源测速") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if(hasResults && !snapshot.running && !fresh)Text("以下为上次采样结果，已超过 10 分钟。安装时会重新测速。",
+                    if(hasResults && !snapshot.running && !fresh)Text("上次测速已超过10分钟，安装时会重新检测。",
                         style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     if(!automatic)TextButton(onClick={onSource("auto");dialogOpen=false},enabled=canSelect,
-                        modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("恢复自动择优") }
+                        modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("自动选择") }
                     if (snapshot.running) {
                         // A finished-source count is not a time estimate for the in-flight source.
                         LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
@@ -131,10 +131,10 @@ fun SourceSpeedControls(
                             TextButton(onClick = { dialogOpen = false }) { Text("关闭") }
                         }
                     }
-                    Text("每个源最多采样 256 KiB，比较首字节延迟和传输耗时。结果随当前网络变化。",
+                    Text("检测会消耗少量网络流量，速度随当前网络变化。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(if(automatic)"自动模式会使用本次最快可用源。点击“使用”可改为手动优先。" else "优先使用你选择的源，下载失败后尝试其他可用源。",
+                    Text(if(automatic)"自动选择本次较快的下载源，也可点“使用”手动选择。" else "优先使用所选下载源，失败后会尝试其他下载源。",
 style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -181,7 +181,7 @@ private fun SourceSpeedRow(
                 SourceSpeedDetail(result,running)
             }
             if(canSelect)OutlinedButton(onClick={onSource(option.id)},modifier=Modifier.heightIn(min=48.dp)
-                .semantics { contentDescription="使用${option.title}" }) { Text(if(selected)"选定" else "使用") }
+                .semantics { contentDescription="使用此下载源" }) { Text(if(selected)"选定" else "使用") }
         }
     }
 }
@@ -195,7 +195,7 @@ private fun SourceSpeedDetail(result: com.tanuki.runtime.SourceProbeResult?,runn
             style = MaterialTheme.typography.bodySmall, color = color
         )
         SourceProbeStatus.FAILED -> Text(
-            "连接失败" + if (result.error.isNotBlank()) "：${result.error}" else "",
+            "下载源连接失败，请重新测速或选择其他下载源。",
             style = MaterialTheme.typography.bodySmall, color = color
         )
         SourceProbeStatus.TESTING -> Text("测试中…",style=MaterialTheme.typography.bodySmall,color=color)

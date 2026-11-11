@@ -214,7 +214,7 @@ class RuntimeFailurePolicy(
      * 之后直接 boot rescue，避免每次救援启动都删除上一次安全模式目录。
      */
     fun startArguments(version: String, safe: Boolean, rescueProfileExists: Boolean): List<String> {
-        require(version.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?"))) { "DSH 版本格式无效" }
+        require(version.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?"))) { "助手版本格式无效，请重新选择版本。" }
         val entry = "/opt/engines/$version/node_modules/@deepseek-ai/dsh/lib/bin.js"
         val webArguments = listOf("--no-open", "--host", "127.0.0.1", "--port", "0")
         if (!safe) return listOf(entry, "web") + webArguments
@@ -269,7 +269,7 @@ class RuntimeFailurePolicy(
 
     private fun handleStartupFailure(state: RuntimeRecoveryState, nowMillis: Long): RecoveryDecision {
         if (state.mode == RecoveryMode.SAFE) return safeModeFailed(state, "安全模式启动失败")
-        if (inProbationWindow(state, nowMillis)) return enterSafeAfterFailure(state, nowMillis, "试用正常模式未通过")
+        if (inProbationWindow(state, nowMillis)) return enterSafeAfterFailure(state, nowMillis, "试用正常模式失败")
         val streak = state.startupFailureStreak + 1
         if (streak >= safeModeThreshold) {
             return enterSafeAfterFailure(state.copy(startupFailureStreak = streak), nowMillis, "连续 $streak 次启动失败")
@@ -281,18 +281,18 @@ class RuntimeFailurePolicy(
                 probationStartedAtMillis = 0L
             ),
             nowMillis,
-            "启动未就绪或就绪后早期崩溃"
+            "助手启动失败"
         )
     }
 
     private fun handleLaunchFailure(state: RuntimeRecoveryState, nowMillis: Long): RecoveryDecision {
-        if (state.mode == RecoveryMode.SAFE) return safeModeFailed(state, "安全模式启动命令失败")
+        if (state.mode == RecoveryMode.SAFE) return safeModeFailed(state, "安全模式启动失败")
         if (inProbationWindow(state, nowMillis)) return enterSafeAfterFailure(state, nowMillis, "试用正常模式启动失败")
         // 启动命令失败不是 startupFailed/crashedEarly，不能累计后两类失败的连续计数。
         return restartOrStop(
             state.copy(mode = RecoveryMode.NORMAL, probationStartedAtMillis = 0L, startupFailureStreak = 0),
             nowMillis,
-            "启动命令失败"
+            "助手启动失败"
         )
     }
 
@@ -300,7 +300,7 @@ class RuntimeFailurePolicy(
         // 日志就绪可能早于 HTTP 就绪；按日志判为晚崩溃时，试用窗口可能仍未结束。
         // 先按实际 probation 计时处理，避免跳过“窗口内失败回安全模式”的保证。
         if (inProbationWindow(state, nowMillis)) {
-            return enterSafeAfterFailure(state, nowMillis, "试用正常模式在延迟就绪后晚崩溃")
+            return enterSafeAfterFailure(state, nowMillis, "试用正常模式失败")
         }
         val stable = onStable(state, nowMillis).copy(
             lastFailure = state.lastFailure,
@@ -309,11 +309,11 @@ class RuntimeFailurePolicy(
         )
         // 安全模式运行稳定后崩溃仍重启安全模式，不借自动重启切回用户配置。
         val next = if (state.mode == RecoveryMode.SAFE) stable.copy(mode = RecoveryMode.SAFE) else stable.copy(mode = RecoveryMode.NORMAL)
-        return restartOrStop(next, nowMillis, "DSH 稳定运行后崩溃")
+        return restartOrStop(next, nowMillis, "助手运行中意外停止")
     }
 
     private fun handleResourceFailure(state: RuntimeRecoveryState, kind: FailureKind, nowMillis: Long): RecoveryDecision {
-        val reason = if (kind == FailureKind.NO_SPACE) "输出或磁盘空间不足" else "DSH 进程被终止或低内存"
+        val reason = if (kind == FailureKind.NO_SPACE) "存储空间不足" else "助手已停止，可能运行内存不足"
         if (inProbationWindow(state, nowMillis)) {
             val safe = state.copy(
                 mode = RecoveryMode.SAFE,
@@ -326,7 +326,7 @@ class RuntimeFailurePolicy(
                 safe,
                 autoRestart = false,
                 restartDelayMillis = 0L,
-                summary = "试用正常模式失败（$reason）；已回到安全模式，此类失败不会自动重启。请先检查存储或内存后手动启动"
+                summary = "$reason；试用失败，已回安全模式，请检查后手动启动。"
             )
         }
         val settled = if (state.mode == RecoveryMode.PROBATION) onStable(state, nowMillis).copy(
@@ -338,7 +338,7 @@ class RuntimeFailurePolicy(
             settled.copy(restartAttempts = 0, startupFailureStreak = 0),
             autoRestart = false,
             restartDelayMillis = 0L,
-            summary = "$reason；已停止自动重启。请先检查存储或内存，确认后再手动启动"
+            summary = "$reason；自动重启已停止，请检查后手动启动。"
         )
     }
 
@@ -354,7 +354,7 @@ class RuntimeFailurePolicy(
             safe,
             autoRestart = true,
             restartDelayMillis = baseBackoffMillis,
-            summary = "$reason；已进入安全模式，将用最小救援配置重启（不加载你的插件和配置），项目、会话和程序均不会删除"
+            summary = "$reason；正以安全模式重启，不加载插件和设置，数据保留。"
         )
     }
 
@@ -362,7 +362,7 @@ class RuntimeFailurePolicy(
         state.copy(restartAttempts = 0, probationStartedAtMillis = 0L),
         autoRestart = false,
         restartDelayMillis = 0L,
-        summary = "$reason；安全模式已停止自动重启。请检查运行环境后手动重试，或从组件维护入口重新检查"
+        summary = "$reason；自动重启已停止，请检查运行环境后重试。"
     )
 
     private fun restartOrStop(state: RuntimeRecoveryState, nowMillis: Long, reason: String): RecoveryDecision {
@@ -372,7 +372,7 @@ class RuntimeFailurePolicy(
                 state.copy(restartAttempts = maxRestartAttempts),
                 autoRestart = false,
                 restartDelayMillis = 0L,
-                summary = "$reason；自动重启已达上限 $maxRestartAttempts 次，已停止自动重启。请检查环境后手动启动"
+                summary = "$reason；重启已达上限 $maxRestartAttempts 次，请检查运行环境后启动。"
             )
         }
         val delay = backoffMillis(attempt)
@@ -380,7 +380,7 @@ class RuntimeFailurePolicy(
             state.copy(restartAttempts = attempt),
             autoRestart = true,
             restartDelayMillis = delay,
-            summary = "$reason；将在 ${delay / 1000} 秒后自动重启（$attempt/$maxRestartAttempts 次），已中断任务不会自动重放"
+            summary = "$reason；${delay / 1000}秒后第 $attempt/$maxRestartAttempts 次重启；中断任务不自动重试。"
         )
     }
 

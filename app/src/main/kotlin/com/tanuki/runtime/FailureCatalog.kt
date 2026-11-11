@@ -86,7 +86,7 @@ data class AppFailure(
         }
         if (attempt > 0) appendLine("已尝试：$attempt 次")
         if (detail.isNotBlank()) {
-            appendLine("技术详情：")
+            appendLine("问题详情：")
             append(detail)
         }
     }.trim()
@@ -160,7 +160,7 @@ object FailureCatalog {
         val mode = input.recovery.mode
         val checkingVersions = domain == FailureDomain.UPDATE &&
             (input.operation == "dsh-check" || (input.operation == null && input.update in setOf(UpdateState.CHECKING, UpdateState.CHECK_FAILED)))
-        val actions = if (checkingVersions) action(FailureActionKind.RETRY, "重新获取版本") to
+        val actions = if (checkingVersions) action(FailureActionKind.RETRY, "刷新版本") to
             action(FailureActionKind.CLEAN_CACHE, "清理下载缓存") else resolveActions(domain, cause, componentId, mode)
         val retry = input.retry ?: retryCommand(domain, cause, input.operation, componentId)?.let { FailureRetry(it) }
         val title = titleFor(domain)
@@ -275,28 +275,28 @@ object FailureCatalog {
     }
 
     private fun titleFor(domain: FailureDomain): String = when (domain) {
-        FailureDomain.INSTALL -> "安装没有完成"
-        FailureDomain.UPDATE -> "更新没有完成"
-        FailureDomain.RUNTIME -> "DSH 没有正常运行"
-        FailureDomain.FILE -> "文件操作没有完成"
-        FailureDomain.UNKNOWN -> "操作没有完成"
+        FailureDomain.INSTALL -> "安装失败"
+        FailureDomain.UPDATE -> "更新失败"
+        FailureDomain.RUNTIME -> "助手已停止"
+        FailureDomain.FILE -> "文件操作失败"
+        FailureDomain.UNKNOWN -> "操作失败"
     }
 
     private fun reasonFor(domain: FailureDomain, cause: FailureCause): String = when (cause) {
         FailureCause.NETWORK -> if (domain == FailureDomain.UPDATE)
-            "网络连接中断，更新已经停下；现有应用和环境没有改动，恢复网络后可以重试。"
-        else "网络连接中断，操作已经停下；已下载的部分会保留，恢复网络后可以重试。"
-        FailureCause.DISK -> "设备空间不足，操作已经停止；项目、会话和已安装的组件都还在。清理下载缓存或设备空间后可以重试。"
-        FailureCause.PERMISSION -> "系统没有允许访问需要的文件，操作因此停止；原有文件没有被覆盖。可以到系统设置授权后重试。"
-        FailureCause.CHECKSUM -> "下载内容没有通过完整性检查，损坏的文件已经丢弃；可以重新下载或换一个下载源。"
-        FailureCause.EXTRACT -> "下载内容无法解压，可能没有下载完整；可以重试或换一个下载源。"
-        FailureCause.COMPATIBILITY -> "所选版本与当前环境不匹配，现有组件没有被替换；请选择其他版本再试。"
-        FailureCause.BUSY -> "另一个安装或更新还在进行，请等它结束后再试。"
-        FailureCause.STARTUP -> "DSH 在启动完成前停下了，所以页面暂时打不开；项目和会话都还在，可以重新启动。"
-        FailureCause.CRASH -> "DSH 运行中意外停止，当前任务被中断；项目和会话都还在，可以重新启动，已中断的任务不会自动重放。"
-        FailureCause.KILLED -> "系统回收了 DSH，可能是内存紧张；项目和会话都还在，可以清理下载缓存后重新启动。"
-        FailureCause.FILE_ACCESS -> "文件没有读取或写入成功，原有文件没有被覆盖；请检查文件是否还在，然后重试。"
-        FailureCause.UNKNOWN -> "操作没有完成，现有环境、项目和会话都没有被删除；可以重试或清理下载缓存后再试。"
+            "更新因网络中断，请联网后重试。"
+        else "网络连接中断，请联网后重试。"
+        FailureCause.DISK -> "存储空间不足，请清理空间后重试。"
+        FailureCause.PERMISSION -> "无法访问所需文件，请检查文件权限后重试。"
+        FailureCause.CHECKSUM -> "下载文件校验未通过，请重新下载或更换下载源。"
+        FailureCause.EXTRACT -> "下载文件无法解压，请重新下载或更换下载源。"
+        FailureCause.COMPATIBILITY -> "所选版本与运行环境不兼容，请选择其他版本。"
+        FailureCause.BUSY -> "正在安装或更新，请等待完成后重试。"
+        FailureCause.STARTUP -> "助手启动失败，请重新启动。"
+        FailureCause.CRASH -> "助手意外停止，当前任务已中断。重启后请检查任务状态。"
+        FailureCause.KILLED -> "助手已停止，可能是运行内存不足。请关闭闲置应用后重启助手。"
+        FailureCause.FILE_ACCESS -> "文件读写失败，请确认文件仍在并重试。"
+        FailureCause.UNKNOWN -> "操作失败，请重试。仍失败时可复制问题详情反馈。"
     }
 
     private fun resolveActions(
@@ -310,7 +310,7 @@ object FailureCatalog {
                 action(FailureActionKind.OPEN_STORAGE, "查看存储占用")
             mode == RecoveryMode.SAFE -> action(FailureActionKind.TRY_NORMAL, "试用正常模式") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
-            mode == RecoveryMode.PROBATION -> action(FailureActionKind.SAFE_MODE, "回到安全模式") to
+            mode == RecoveryMode.PROBATION -> action(FailureActionKind.SAFE_MODE, "返回安全模式") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             else -> action(FailureActionKind.RESTART, "重新启动") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
@@ -320,12 +320,12 @@ object FailureCatalog {
                 action(FailureActionKind.OPEN_STORAGE, "查看存储占用")
             FailureCause.PERMISSION -> action(FailureActionKind.OPEN_SETTINGS, "去系统设置") to
                 action(FailureActionKind.RETRY, "重试")
-            FailureCause.COMPATIBILITY -> action(FailureActionKind.VIEW_VERSIONS, "选择其他版本") to
+            FailureCause.COMPATIBILITY -> action(FailureActionKind.VIEW_VERSIONS, "换个版本") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             FailureCause.BUSY -> action(FailureActionKind.RETRY, "重试") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             else -> action(FailureActionKind.RETRY, "重试") to
-                if (componentId != null) action(FailureActionKind.SWITCH_SOURCE, "换一个下载源")
+                if (componentId != null) action(FailureActionKind.SWITCH_SOURCE, "更换下载源")
                 else action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
         }
         FailureDomain.UPDATE -> when (cause) {
@@ -333,10 +333,10 @@ object FailureCatalog {
                 action(FailureActionKind.OPEN_STORAGE, "查看存储占用")
             FailureCause.PERMISSION -> action(FailureActionKind.OPEN_SETTINGS, "去系统设置") to
                 action(FailureActionKind.RETRY, "重试")
-            FailureCause.COMPATIBILITY -> action(FailureActionKind.VIEW_VERSIONS, "选择其他版本") to
+            FailureCause.COMPATIBILITY -> action(FailureActionKind.VIEW_VERSIONS, "换个版本") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             else -> if (componentId == "dsh")
-                action(FailureActionKind.VIEW_VERSIONS, "选择版本重试") to
+                action(FailureActionKind.VIEW_VERSIONS, "选择版本") to
                     action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")
             else action(FailureActionKind.RETRY, "重试") to
                 action(FailureActionKind.CLEAN_CACHE, "清理下载缓存")

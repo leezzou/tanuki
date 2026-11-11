@@ -47,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tanuki.runtime.AppFailure
+import com.tanuki.runtime.EnvironmentState
 import com.tanuki.runtime.FailureActionKind
+import com.tanuki.runtime.UpdateState
 import com.tanuki.ui.design.TanukiSpace
 
 data class ComponentSourceOption(val id: String, val title: String, val detail: String)
@@ -98,6 +100,12 @@ fun RuntimeComponentCard(
     val cs = MaterialTheme.colorScheme
     var isExpanded by rememberSaveable(model.id) { mutableStateOf(false) }
     val p = model.progress
+    val componentTitle = when (model.id) {
+        "ubuntu" -> "系统组件"
+        "node" -> "运行组件"
+        "dsh" -> "助手"
+        else -> "运行环境"
+    }
 
     // 下载或失败出现时自动展开：活动进度与恢复动作都不允许被折叠隐藏。
     LaunchedEffect(model.progress, model.failure?.stableKey, versionPickerRequest) {
@@ -128,7 +136,7 @@ fun RuntimeComponentCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    model.title,
+                    componentTitle,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
@@ -198,7 +206,8 @@ fun RuntimeComponentCard(
             ) {
                 if (!model.guided && model.dependencyHint.isNotBlank()) {
                     Text(
-                        model.dependencyHint,
+                        if (model.id == "ubuntu") "为助手提供系统支持，工作区与设置独立保留。"
+                        else "请先安装系统组件，再安装运行组件。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = cs.onSurfaceVariant
                     )
@@ -208,7 +217,7 @@ fun RuntimeComponentCard(
                     val versionSelectorEnabled = model.actionsEnabled
                     if (model.versions.isNotEmpty()) {
                         VersionSelector(
-                            label = if (model.id == "ubuntu") "Ubuntu 镜像" else "Node.js 版本",
+                            label = if (model.id == "ubuntu") "系统组件版本" else "运行组件版本",
                             options = model.versions,
                             selectedVersion = model.selectedVersion,
                             enabled = versionSelectorEnabled,
@@ -245,7 +254,7 @@ fun RuntimeComponentCard(
                             !model.installed || model.selectedVersion.isBlank() || model.selectedVersion == model.version
                         val reinstallLabel = if (selectionMatchesInstalled) "重新安装" else "安装所选版本"
                         if (model.guided && selectionMatchesInstalled) {
-                            Text("已安装 ${model.title} ${model.version}",style=MaterialTheme.typography.bodyMedium,
+                            Text("已安装 $componentTitle ${model.version}",style=MaterialTheme.typography.bodyMedium,
                                 color=cs.onSurfaceVariant)
                         } else Button(
                             onClick = onReinstall,
@@ -274,7 +283,7 @@ fun RuntimeComponentCard(
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
                         ) {
-                            Text(if (busy) "进行中…" else if(model.guided)"安装 ${model.title}" else "安装")
+                            Text(if (busy) "进行中…" else if(model.guided)"安装组件" else "安装")
                         }
                     }
                 }
@@ -460,8 +469,8 @@ fun ComponentDownloadProgress(p: ComponentProgressModel) {
     val percent=if(known)(p.received.toDouble()/p.total*100).toInt().coerceIn(0,100) else null
     Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text(p.label,style=MaterialTheme.typography.titleMedium)
-            Text(if(p.reused)"使用已校验的本地缓存" else p.source,
+            Text("正在${operationStage(p.label, EnvironmentState.ABSENT, UpdateState.UNCHECKED).label}",style=MaterialTheme.typography.titleMedium)
+            Text(if(p.reused)"正在使用已下载文件" else p.source,
                 style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(known) {
                 Text("$percent%",style=MaterialTheme.typography.headlineLarge,fontFamily=FontFamily.Monospace,
@@ -472,13 +481,13 @@ fun ComponentDownloadProgress(p: ComponentProgressModel) {
                 Text("${byteSize(p.received)} / ${byteSize(p.total)}",style=MaterialTheme.typography.bodyMedium)
             } else {
                 LinearProgressIndicator(modifier=Modifier.fillMaxWidth().semantics {
-                    contentDescription="下载进行中，总大小未知"
+                    contentDescription="正在下载安装文件"
                 })
-                Text("总大小未知 · 已接收 ${byteSize(p.received)}",style=MaterialTheme.typography.bodyMedium)
+                Text("已下载 ${byteSize(p.received)}",style=MaterialTheme.typography.bodyMedium)
             }
             if(p.bytesPerSecond>0) {
                 val seconds=if(known)((p.total-p.received).coerceAtLeast(0)/p.bytesPerSecond) else 0
-                Text("${byteSize(p.bytesPerSecond)}/s"+(if(seconds>0)" · 约剩余 ${etaText(seconds)}" else ""),
+                Text("${byteSize(p.bytesPerSecond)}/s"+(if(seconds>0)" · 下载剩余约 ${etaText(seconds)}" else ""),
                     style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
