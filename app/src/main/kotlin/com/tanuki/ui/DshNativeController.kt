@@ -61,7 +61,10 @@ data class DshNativeState(
     /** 真实目标事件投影出的目标条状态；没有真实数据时为 null（整条隐藏）。 */
     val goal: GoalDockState? = null,
     /** 真实待办事件/待办工具调用投影出的待办条状态；没有真实数据时为 null（整条隐藏）。 */
-    val todos: TodoDockState? = null
+    val todos: TodoDockState? = null,
+    /** 两类投影独立比较序号；清除后仍保留序号，防止旧页重新显示已移除的条。 */
+    val lastGoalSeq: Int? = null,
+    val lastTodoSeq: Int? = null
 ) {
     val selectedSession: DshSession? get() = sessions.firstOrNull { it.id == selectedId }
 }
@@ -220,6 +223,8 @@ class DshNativeController(
                 releasedOlder = 0,
                 goal = null,
                 todos = null,
+                lastGoalSeq = null,
+                lastTodoSeq = null,
                 loading = true,
                 running = session?.running ?: it.running,
                 stopping = false,
@@ -511,8 +516,8 @@ class DshNativeController(
             _state.update { state ->
                 val currentMax = state.messages.filterNot { it.pending }.maxOfOrNull { it.seq } ?: -1
                 val pageMax = page.messages.maxOfOrNull { it.seq } ?: -1
-                // 实时快照可能比这次 HTTP 历史更新；旧页不能覆盖它。
-                if (state.messages.isEmpty() || pageMax >= currentMax) {
+                // 文本与停靠条各用自己的序号；文本旧页也可能携带较新的目标/待办投影。
+                val reconciled = if (state.messages.isEmpty() || pageMax >= currentMax) {
                     val pageMin = page.messages.minOfOrNull { it.seq }
                     val loadedOldest = DshChatWindowPolicy.oldestSeq(state.messages, state.tools)
                     // 只有这一页真正接到已加载窗口的起点时，它的 hasMore 才代表“还有更早历史”；
@@ -533,10 +538,11 @@ class DshNativeController(
                             maxTools = null
                         ),
                         hasMore = if (pageReachesLoadedStart) page.hasMore else state.hasMore
-                    ).withCoordination(page.coordination)
+                    )
                 } else {
                     state.copy(loading = false)
                 }
+                reconciled.withCoordination(page.coordination)
             }
         }.onFailure { error ->
             // 实时快照已到达时，历史页失败不覆盖已显示的消息。
@@ -633,15 +639,28 @@ class DshNativeController(
     }
 
     /**
-     * 合并真实目标/待办投影：只更新本次事件里实际出现的字段；
-     * 解析失败或未知状态不会清空已知内容，也不会生成占位数据。
+     * 历史页、快照和增量统一按各类投影序号合并，包括清除投影；重放与旧页不能回退状态。
+     * 字段缺失、未知目标状态或解析失败不改变已有状态，也不推进该类序号。
      */
     private fun DshNativeState.withCoordination(update: DshCoordination): DshNativeState {
-        if (update.isEmpty) return this
-        return copy(
-            goal = update.goal?.let(DshDockStateMapper::goal) ?: goal,
-            todos = update.todos?.let(DshDockStateMapper::todo) ?: todos
-        )
+        var merged = this
+        update.goal?.let { projection ->
+            if (lastGoalSeq == null || projection.seq > lastGoalSeq) {
+                val mapped = DshDockStateMapper.goal(projection)
+                if (projection.clearsDock || mapped != null) {
+                    merged = merged.copy(goal = mapped, lastGoalSeq = projection.seq)
+                }
+            }
+        }
+        update.todos?.let { projection ->
+            if (lastTodoSeq == null || projection.seq > lastTodoSeq) {
+                val mapped = DshDockStateMapper.todo(projection)
+                if (projection.items.isEmpty() || mapped != null) {
+                    merged = merged.copy(todos = mapped, lastTodoSeq = projection.seq)
+                }
+            }
+        }
+        return merged
     }
 
     /**

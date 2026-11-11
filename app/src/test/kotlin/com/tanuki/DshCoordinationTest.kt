@@ -137,13 +137,45 @@ class DshCoordinationTest {
         assertTrue(coordination.isEmpty)
     }
 
-    @Test fun emptyTodoListDoesNotCreateABar() {
+    @Test fun explicitEmptyTodoListRetainsItsClearingSequence() {
         val coordination = DshCoordinationParser.parse(
             records(
                 event("todos/update", 1, JSONObject().put("todos", JSONArray())),
                 event("todo/update", 2, JSONObject().put("items", JSONArray()))
             )
         )
-        assertNull(coordination.todos)
+        assertEquals(2, coordination.todos!!.seq)
+        assertTrue(coordination.todos!!.items.isEmpty())
+    }
+
+    @Test fun emptyTodoUpdateSupersedesNonEmptyHistoryEvenIfRecordsArriveUnsorted() {
+        val coordination = DshCoordinationParser.parse(records(
+            event("todos/update", 12, JSONObject().put("todos", JSONArray())),
+            event("todos/update", 10, JSONObject().put("todos", JSONArray().put("旧待办")))
+        ))
+        assertEquals(12, coordination.todos!!.seq)
+        assertTrue(coordination.todos!!.items.isEmpty())
+    }
+
+    @Test fun missingOrMalformedTodoArraysDoNotClearParsedHistory() {
+        val coordination = DshCoordinationParser.parse(records(
+            event("todos/update", 10, JSONObject().put("todos", JSONArray().put("保留待办"))),
+            event("todos/update", 11, JSONObject()),
+            event("todos/update", 12, JSONObject().put("todos", "损坏")),
+            event("todos/update", 13, JSONObject().put("todos", JSONArray().put(JSONObject())))
+        ))
+        assertEquals(10, coordination.todos!!.seq)
+        assertEquals("保留待办", coordination.todos!!.items.single().text)
+    }
+
+    @Test fun terminalGoalWithoutSummaryRetainsItsClearingSequence() {
+        for (status in listOf("completed", "cleared")) {
+            val coordination = DshCoordinationParser.parse(records(
+                event("goal/update", 3, JSONObject().put("summary", "旧目标").put("status", "running")),
+                event("goal/update", 4, JSONObject().put("status", status))
+            ))
+            assertEquals(4, coordination.goal!!.seq)
+            assertTrue(coordination.goal!!.clearsDock)
+        }
     }
 }

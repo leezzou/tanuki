@@ -152,7 +152,7 @@
 
 - 位置：页面纵向顺序为“消息区 `weight(1f)` → `DshDockColumn` → `DshComposerBar`”。原 `SessionStrip` 下方的审批条已移入停靠容器插槽，不再单独渲染，避免出现两条审批条。
 - 顺序与折叠：审批 > 目标 > 待办；同屏最多两条（三条齐全时显示审批+目标，待办折叠为“+1”），点“+N”临时铺开、按钮变“收起”；组件按唯一渲染计划遍历，展开时每条只出现一次。
-- 数据：目标/待办只来自真实事件投影（`goal/update`/`goal`/`goals/update`/`session/goal`、`todo/update`/`todos/update` 与待办工具调用），经 `DshDockStateMapper` 映射；缺失、空文本或未知状态时保持 `null`，对应停靠条不占高度。目标操作能力在 `goals/*` RPC 接线前保持默认全 false，只展示禁用原因，不伪造成功。
+- 数据：目标/待办只来自真实事件投影（`goal/update`/`goal`/`goals/update`/`session/goal`、`todo/update`/`todos/update` 与待办工具调用），经 `DshDockStateMapper` 映射；初始缺失时保持 `null`，对应停靠条不占高度。已有条目遇到字段缺失、损坏或未知状态时保持旧值；明确 `completed/cleared` 目标或显式空待办数组则清除旧条。HTTP 页、快照与实时事件按目标/待办各自的 seq 合并，清除后仍保存序号，旧事件不能复活旧条；切换会话时重置两类序号。目标操作能力在 `goals/*` RPC 接线前保持默认全 false，只展示禁用原因，不伪造成功。
 - 输入栏稳定：停靠条高度动画只压缩消息区，输入栏始终是纵向栈最后一项；页面不要在外层再包 `animateContentSize`/`AnimatedVisibility`（布局契约见 `DshDockPlacement`）。纯策略回归覆盖三档折叠/展开不重复、缺失隐藏，以及停靠条高度变化时输入栏顶部不变。
 - 兼容：锚定滚动、审批抽屉、发送/停止逻辑未改；审批入口点击仍打开 `DshApprovalSheet`。设备上的高度动画、展开滚动、深色/大字体与 TalkBack 未验证。
 

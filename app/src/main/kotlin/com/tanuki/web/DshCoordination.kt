@@ -2,6 +2,7 @@ package com.tanuki.web
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /** 目标投影；只保留单行摘要、官方状态码与短说明，不保留原始事件。 */
 data class DshGoalProjection(
@@ -9,7 +10,10 @@ data class DshGoalProjection(
     val summary: String,
     val status: String? = null,
     val detail: String? = null
-)
+) {
+    /** 明确终态与字段缺失不同；保留序号，即使没有摘要也可清除旧目标条。 */
+    val clearsDock: Boolean get() = status?.lowercase(Locale.ROOT) in setOf("completed", "cleared")
+}
 
 /** 单条待办投影；`id` 用于列表键，缺失时由展示层回退到下标。 */
 data class DshTodoItemProjection(
@@ -27,8 +31,8 @@ data class DshTodoProjection(
 /**
  * 一次历史/实时解析得到的目标与待办投影。
  *
- * `null` 表示该类数据在本次来源中不存在，调用方必须保持原值或隐藏停靠条，
- * 不能用默认文案、示例目标或空清单占位。
+ * `null` 表示该类数据在本次来源中不存在，调用方保持原值（初始状态隐藏）。
+ * 明确终态和显式空待办数组保留为非 null 投影以清除旧条，不能用默认文案占位。
  */
 data class DshCoordination(
     val goal: DshGoalProjection? = null,
@@ -41,8 +45,8 @@ data class DshCoordination(
  * 官方目标/待办事件的保守投影。
  *
  * - 只识别白名单事件类型与待办工具调用；其余事件原样跳过，不猜字段。
- * - 目标必须有非空摘要才产生投影；待办必须有至少一条非空文本。
- * - 同一批记录里同类数据取 seq 最大的一条；后到的空值不覆盖已有内容。
+ * - 活跃目标需要非空摘要；明确终态与显式空待办数组保留为带序号的清除投影。
+ * - 同一批记录里同类数据取 seq 最大的一条；字段缺失或损坏不产生更新。
  * - 字段长度与条数都有上限，不保留原始 JSON、参数或凭据。
  *
  * 真实字段仍以设备/官方返回为准；识别失败时停靠条保持隐藏，而不是显示假数据。
@@ -94,8 +98,7 @@ object DshCoordinationParser {
 
     private fun goalOf(seq: Int, data: JSONObject): DshGoalProjection? {
         val goal = data.optJSONObject("goal") ?: data
-        val summary = firstText(goal, "summary", "title", "text", "description", "name", "goal")
-            ?: return null
+        val summary = firstText(goal, "summary", "title", "text", "description", "name", "goal").orEmpty()
         val status = firstText(goal, "status", "state", "phase")
             ?: firstText(data, "status", "state")
         val detail = firstText(goal, "detail", "reason", "blockedReason", "statusText")
@@ -103,9 +106,9 @@ object DshCoordinationParser {
         return DshGoalProjection(
             seq = seq,
             summary = oneLine(summary, MAX_GOAL_CHARS),
-            status = status?.lowercase()?.take(64),
+            status = status?.lowercase(Locale.ROOT)?.take(64),
             detail = detail?.let { oneLine(it, MAX_DETAIL_CHARS) }?.takeIf { it.isNotBlank() }
-        )
+        ).takeIf { it.summary.isNotBlank() || it.clearsDock }
     }
 
     private fun todosFromToolCall(seq: Int, data: JSONObject): DshTodoProjection? {
@@ -137,7 +140,7 @@ object DshCoordinationParser {
         } ?: container.optJSONObject("todo")?.let { todo ->
             TODO_ARRAY_KEYS.firstNotNullOfOrNull { key -> todo.optJSONArray(key) }
         } ?: return null
-        if (array.length() == 0) return null
+        if (array.length() == 0) return DshTodoProjection(seq, emptyList())
         val items = ArrayList<DshTodoItemProjection>(minOf(array.length(), MAX_TODO_ITEMS))
         for (index in 0 until array.length()) {
             if (items.size >= MAX_TODO_ITEMS) break

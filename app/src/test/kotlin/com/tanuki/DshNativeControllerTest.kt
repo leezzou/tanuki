@@ -602,16 +602,152 @@ class DshNativeControllerTest {
                     DshCoordination(goal = DshGoalProjection(2, "有效目标", "running"))
                 ),
                 DshLiveEvent.Coordination(
-                    DshCoordination(goal = DshGoalProjection(3, "已完成目标", "completed"))
+                    DshCoordination(goal = DshGoalProjection(3, "未知状态目标", "unrecognized"))
                 )
             )
         )
         val controller = controller(source)
         controller.refresh()
         val state = awaitState(controller) { it.goal != null }
-        // 未知/已完成状态不猜成进行中，也不能清掉已知目标。
+        // 未知状态保持已知状态，且不推进序号；明确完成状态由单独用例验证清除。
         assertEquals("有效目标", state.goal!!.summary)
         assertEquals(com.tanuki.ui.GoalDockStatus.RUNNING, state.goal!!.status)
+        assertEquals(2, state.lastGoalSeq)
+    }
+
+    @Test fun completedAndClearedGoalsHideOldDockAndRejectStaleSnapshot() = runBlocking {
+        for (status in listOf("completed", "cleared")) {
+            val running = DshCoordination(goal = DshGoalProjection(2, "当前目标", "running"))
+            val source = FakeSource(listOf(session("A")), liveEvents = listOf(
+                DshLiveEvent.Connected,
+                DshLiveEvent.Coordination(running),
+                DshLiveEvent.Coordination(DshCoordination(
+                    goal = DshGoalProjection(3, if (status == "completed") "当前目标" else "", status)
+                )),
+                DshLiveEvent.Snapshot(emptyList(), false, "", coordination = running)
+            ))
+            val controller = controller(source)
+            controller.refresh()
+            val state = awaitSelection(controller, "A")
+            assertEquals(3, state.lastGoalSeq)
+            assertNull(state.goal)
+        }
+    }
+
+    @Test fun liveEmptyTodosHideOldDockAndRejectStaleSnapshot() = runBlocking {
+        val todos = DshCoordination(todos = DshTodoProjection(2,
+            listOf(DshTodoItemProjection("t", "当前待办", "pending"))))
+        val source = FakeSource(listOf(session("A")), liveEvents = listOf(
+            DshLiveEvent.Connected,
+            DshLiveEvent.Coordination(todos),
+            DshLiveEvent.Coordination(DshCoordination(todos = DshTodoProjection(3, emptyList()))),
+            DshLiveEvent.Snapshot(emptyList(), false, "", coordination = todos)
+        ))
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitSelection(controller, "A")
+        assertEquals(3, state.lastTodoSeq)
+        assertNull(state.todos)
+    }
+
+    @Test fun delayedHistoryCannotRegressNewLiveProjectionsOrUndoTheirClearing() = runBlocking {
+        for (cleared in listOf(false, true)) {
+            val gate = CompletableDeferred<Unit>()
+            val old = DshCoordination(
+                goal = DshGoalProjection(10, "当前目标", "running"),
+                todos = DshTodoProjection(11, listOf(DshTodoItemProjection("t", "当前待办", "pending")))
+            )
+            val latest = DshCoordination(
+                goal = DshGoalProjection(20, "当前目标", if (cleared) "completed" else "paused"),
+                todos = DshTodoProjection(21,
+                    if (cleared) emptyList() else listOf(DshTodoItemProjection("t", "当前待办", "completed")))
+            )
+            val source = FakeSource(
+                listOf(session("A")), messages = mapOf("A" to "历史页"), pageGate = gate,
+                coordinations = mapOf("A" to old),
+                liveEvents = listOf(
+                    DshLiveEvent.Connected,
+                    DshLiveEvent.Snapshot(listOf(DshMessage(1, DshMessageRole.USER, "实时页", 1)),
+                        false, "", coordination = old),
+                    DshLiveEvent.Coordination(latest)
+                )
+            )
+            val controller = controller(source)
+            controller.refresh()
+            awaitState(controller) { it.lastTodoSeq == 21 }
+            gate.complete(Unit)
+            val state = awaitState(controller) { !it.loading && it.messages.any { row -> row.text == "历史页" } }
+            assertEquals(20, state.lastGoalSeq)
+            assertEquals(21, state.lastTodoSeq)
+            if (cleared) {
+                assertNull(state.goal)
+                assertNull(state.todos)
+            } else {
+                assertEquals(com.tanuki.ui.GoalDockStatus.PAUSED, state.goal!!.status)
+                assertEquals(1, state.todos!!.completed)
+            }
+        }
+    }
+
+    @Test fun olderTextPageStillAppliesItsNewerCoordination() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeSource(
+            listOf(session("A")), pageGate = gate,
+            coordinations = mapOf("A" to DshCoordination(goal = DshGoalProjection(60, "更新目标", "paused"))),
+            liveEvents = listOf(DshLiveEvent.Connected, DshLiveEvent.Snapshot(
+                listOf(DshMessage(5, DshMessageRole.USER, "更新文本", 5)), false, "",
+                coordination = DshCoordination(goal = DshGoalProjection(40, "旧目标", "running"))
+            ))
+        )
+        val controller = controller(source)
+        controller.refresh()
+        awaitState(controller) { it.lastGoalSeq == 40 }
+        gate.complete(Unit)
+        val state = awaitState(controller) { it.lastGoalSeq == 60 }
+        assertEquals("更新目标", state.goal!!.summary)
+        assertEquals(listOf("更新文本"), state.messages.map { it.text })
+    }
+
+    @Test fun goalAndTodoSequencesAreIndependentAcrossLiveAndSnapshotUpdates() = runBlocking {
+        val initial = DshCoordination(
+            goal = DshGoalProjection(40, "新目标", "paused"),
+            todos = DshTodoProjection(5, listOf(DshTodoItemProjection("t", "待办", "pending")))
+        )
+        val mixed = DshCoordination(
+            goal = DshGoalProjection(39, "旧目标", "running"),
+            todos = DshTodoProjection(6, listOf(DshTodoItemProjection("t", "待办", "completed")))
+        )
+        val source = FakeSource(listOf(session("A")), liveEvents = listOf(
+            DshLiveEvent.Connected,
+            DshLiveEvent.Coordination(initial),
+            DshLiveEvent.Snapshot(emptyList(), false, "", coordination = mixed),
+            DshLiveEvent.Coordination(initial)
+        ))
+        val controller = controller(source)
+        controller.refresh()
+        val state = awaitSelection(controller, "A")
+        assertEquals("新目标", state.goal!!.summary)
+        assertEquals(com.tanuki.ui.GoalDockStatus.PAUSED, state.goal!!.status)
+        assertEquals(1, state.todos!!.completed)
+        assertEquals(40, state.lastGoalSeq)
+        assertEquals(6, state.lastTodoSeq)
+    }
+
+    @Test fun sessionSwitchResetsBothProjectionSequences() = runBlocking {
+        val source = FakeSource(listOf(session("A"), session("B")), coordinations = mapOf(
+            "A" to DshCoordination(DshGoalProjection(40, "A", "running"), DshTodoProjection(41, emptyList())),
+            "B" to DshCoordination(DshGoalProjection(1, "B", "paused"),
+                DshTodoProjection(2, listOf(DshTodoItemProjection("b", "B 待办", "pending"))))
+        ))
+        val controller = controller(source)
+        controller.refresh()
+        awaitSelection(controller, "A")
+        controller.select("B")
+        val state = awaitSelection(controller, "B")
+        assertEquals("B", state.goal!!.summary)
+        assertEquals("B 待办", state.todos!!.items.single().text)
+        assertEquals(1, state.lastGoalSeq)
+        assertEquals(2, state.lastTodoSeq)
     }
 
     @Test fun lateHistoryPageCannotRegressCompletedTool() = runBlocking {
