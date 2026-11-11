@@ -1,5 +1,6 @@
 package com.tanuki.ui
 
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.tanuki.runtime.PairingClipboardStatus
 import com.tanuki.runtime.RemoteAuthType
 import com.tanuki.runtime.RemoteConnectionMethod
 import com.tanuki.runtime.RemoteConnectionStage
@@ -442,6 +444,16 @@ private fun RemoteWizardDialog(
         model.remoteFailure?.let(session.machine::onFailure)
     }
 
+    // 每次进入配对链接步骤读一次剪贴板；读不到就保留粘贴框，不阻塞、不报错。
+    // 结果带回 visit，状态机会丢弃离开/返回后迟到的读取。
+    LaunchedEffect(state.step, state.method, state.clipboardVisit) {
+        if (state.step == RemoteWizardStep.HOST_ACCOUNT &&
+            state.method == RemoteConnectionMethod.PAIRING_LINK
+        ) {
+            session.machine.applyClipboardPairing(readPairingClipboard(context), state.clipboardVisit)
+        }
+    }
+
     fun dismiss() {
         if (state.busy) return
         if (model.remotePendingFingerprint != null) c.cancelRemoteHostKey()
@@ -509,7 +521,7 @@ private fun RemoteWizardDialog(
                             style = MaterialTheme.typography.titleLarge
                         )
                         Text(
-                            "第 ${state.step.position}/${RemoteWizardStep.total} 步 · ${state.step.title}",
+                            "第 ${state.stepNumber}/${state.stepTotal} 步 · ${state.step.titleFor(state.method)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -520,13 +532,13 @@ private fun RemoteWizardDialog(
                     Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    repeat(RemoteWizardStep.total) { index ->
+                    state.steps.forEachIndexed { index, step ->
                         Box(
                             Modifier
                                 .weight(1f)
                                 .height(4.dp)
                                 .background(
-                                    if (index < state.step.position) {
+                                    if (index < state.steps.indexOf(state.step)) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.surfaceVariant
@@ -547,6 +559,7 @@ private fun RemoteWizardDialog(
                     when (state.step) {
                         RemoteWizardStep.METHOD -> StepMethod(session, state.method)
                         RemoteWizardStep.HOST_ACCOUNT -> StepHostAccount(session, state)
+                        RemoteWizardStep.PAIRING_CONFIRM -> StepPairingConfirm(state)
                         RemoteWizardStep.AUTHENTICATION -> StepAuthentication(
                             session = session,
                             state = state,
@@ -584,7 +597,23 @@ private fun RemoteWizardDialog(
                         }
                         RemoteWizardStep.HOST_ACCOUNT -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = ::goBack) { Text("上一步") }
-                            Button(onClick = ::startNext, modifier = Modifier.weight(1f)) { Text("下一步：选择认证") }
+                            Button(onClick = ::startNext, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (state.method == RemoteConnectionMethod.PAIRING_LINK) {
+                                        "下一步：确认这台电脑"
+                                    } else {
+                                        "下一步：选择认证"
+                                    }
+                                )
+                            }
+                        }
+                        RemoteWizardStep.PAIRING_CONFIRM -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = ::goBack) { Text("返回修改") }
+                            Button(
+                                onClick = { session.machine.confirmPairing() },
+                                enabled = state.canConfirmPairing,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("这是你的电脑") }
                         }
                         RemoteWizardStep.AUTHENTICATION -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = ::goBack) { Text("上一步") }
@@ -697,9 +726,10 @@ private fun StepMethod(session: WizardSession, selected: RemoteConnectionMethod?
 @Composable
 private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.RemoteWizardState) {
     val pairing = state.method == RemoteConnectionMethod.PAIRING_LINK
+    val preview = state.pairingPreview
     Text(
         if (pairing) {
-            "粘贴主机端生成的配对链接。链接包含一次性密钥，不要截图或转发。"
+            "手机已尝试从剪贴板读取配对链接；识别成功会自动填入并算好 6 位码，你只需确认。链接包含一次性密钥，不要截图或转发。"
         } else {
             "填写远程主机的地址和登录账号。端口不确定时先保留默认值。"
         },
@@ -708,7 +738,7 @@ private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.Re
     if (pairing) {
         OutlinedTextField(
             value = state.draft.relayUri,
-            onValueChange = { value -> session.machine.updateDraft { it.copy(relayUri = value) } },
+            onValueChange = session.machine::updateRelayLink,
             label = { Text("配对链接") },
             placeholder = { Text("tanuki-relay://v1?relay=…&room=…&token=…&host=…") },
             minLines = 2,
@@ -717,24 +747,95 @@ private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.Re
             supportingText = state.fieldErrors[RemoteWizardField.RELAY_LINK]?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
-        OutlinedTextField(
-            value = state.draft.pairingCode,
-            onValueChange = { value -> session.machine.updateDraft { it.copy(pairingCode = value.filter(Char::isDigit).take(6)) } },
-            label = { Text("6 位配对码") },
-            placeholder = { Text("电脑启动日志里的 pairing code") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            isError = state.fieldErrors[RemoteWizardField.PAIRING_CODE] != null,
-            supportingText = state.fieldErrors[RemoteWizardField.PAIRING_CODE]?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (state.clipboardMessage.isNotBlank()) {
+            Text(
+                state.clipboardMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state.clipboardStatus == PairingClipboardStatus.INVALID_LINK) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+            )
+        }
+        if (state.pendingClipboardLink.isNotBlank()) {
+            TextButton(onClick = { session.machine.usePendingClipboardLink() }) {
+                Text("改用剪贴板里的配对链接")
+            }
+        }
+
+        if (preview != null) {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("电脑上应显示", style = MaterialTheme.typography.labelMedium)
+                    SelectionContainer {
+                        Text(
+                            preview.code,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Text(
+                        "手机已按配对链接自动算出这个 6 位码，不需要手输。请和电脑屏幕上显示的值对照。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "如果电脑显示的不是这个数，说明链接不是同一次配对：不要继续，返回电脑重新复制完整链接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = state.draft.pairingCode,
+                onValueChange = { value ->
+                    session.machine.updateDraft { it.copy(pairingCode = value.filter(Char::isDigit).take(6)) }
+                },
+                label = { Text("6 位配对码（可选校对）") },
+                placeholder = { Text(preview.code) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                isError = state.fieldErrors[RemoteWizardField.PAIRING_CODE] != null,
+                supportingText = {
+                    Text(
+                        state.fieldErrors[RemoteWizardField.PAIRING_CODE]
+                            ?: "已自动填入上面的码；只有想和电脑核对时才需要改这里。"
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (state.draft.pairingCode.isBlank() || state.draft.pairingCode != preview.code) {
+                TextButton(onClick = { session.machine.fillAutoPairingCode() }) {
+                    Text("填入自动计算的 ${preview.code}")
+                }
+            }
+        } else {
+            // 链接无效或还没拿到时保留手动回退；不会要求用户先手抄电脑上的码才能继续。
+            OutlinedTextField(
+                value = state.draft.pairingCode,
+                onValueChange = { value ->
+                    session.machine.updateDraft { it.copy(pairingCode = value.filter(Char::isDigit).take(6)) }
+                },
+                label = { Text("6 位配对码（手动回退）") },
+                placeholder = { Text("链接解析成功后会自动填入") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                isError = state.fieldErrors[RemoteWizardField.PAIRING_CODE] != null,
+                supportingText = state.fieldErrors[RemoteWizardField.PAIRING_CODE]?.let { message -> { Text(message) } },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Text(
-            "配对码由电脑端与配对链接一起显示，用于确认“链接 + 码”来自同一次配对；它不能单独恢复中继地址/房间/token，仍需上面的完整链接。",
+            "配对码只是链接的人工核对值，不能单独恢复中继地址/房间/token，因此仍需完整的配对链接。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "配对链接由远程主机端生成；手机只经 TLS 中继转发 SSH 密文，仍会独立校验 SSH 主机密钥。",
+            "配对链接由远程电脑生成；手机只经 TLS 中继转发 SSH 密文，仍会独立校验 SSH 主机密钥。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -812,6 +913,94 @@ private fun StepHostAccount(session: WizardSession, state: com.tanuki.runtime.Re
         "远程 DSH 端口是 DSH 在远程电脑 127.0.0.1 上监听的端口，默认 3080；SSH 隧道只转发到这个回环端口。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun StepPairingConfirm(state: com.tanuki.runtime.RemoteWizardState) {
+    val preview = state.pairingPreview
+    if (preview == null) {
+        Text(
+            "配对链接已失效或无法解析，请返回上一步重新复制。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error
+        )
+        return
+    }
+    var showFullPin by remember(preview.pin) { mutableStateOf(false) }
+    Text(
+        "链接解析成功。请确认下面这台电脑确实是你自己的，再继续登录。",
+        style = MaterialTheme.typography.bodyMedium
+    )
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("电脑名", style = MaterialTheme.typography.labelMedium)
+            Text(preview.computerName, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                preview.computerNameSource,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text("中继地址", style = MaterialTheme.typography.labelMedium)
+            SelectionContainer {
+                Text(preview.relayLabel, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            }
+
+            Text("中继证书指纹", style = MaterialTheme.typography.labelMedium)
+            if (preview.pinned) {
+                SelectionContainer {
+                    Text(
+                        if (showFullPin) preview.pin else preview.pinSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                TextButton(onClick = { showFullPin = !showFullPin }) {
+                    Text(if (showFullPin) "收起完整指纹" else "展开完整指纹")
+                }
+            } else {
+                Text("系统 CA（链接未固定证书）", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "手机会用系统 CA 和主机名校验中继；如果电脑使用的是自签名证书，请让电脑重新生成带证书指纹的链接。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Text("SSH 目标", style = MaterialTheme.typography.labelMedium)
+            Text(preview.sshHint, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            Text(
+                "中继只转发 SSH 密文；手机仍会单独核对远程主机的 SSH 密钥指纹。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text("远程 DSH", style = MaterialTheme.typography.labelMedium)
+            Text(preview.dshHint, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+
+            Text("6 位配对码", style = MaterialTheme.typography.labelMedium)
+            SelectionContainer {
+                Text(
+                    preview.code,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            Text(
+                "电脑上应显示同一个 ${preview.code}；手机按链接自动算出，不需要手输。",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+    Text(
+        "如果电脑名、中继地址或证书指纹与电脑上显示的不一致，请返回修改，不要点“这是你的电脑”。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error
     )
 }
 
@@ -1285,6 +1474,21 @@ private fun modeImpact(phase: RemotePhase): String = when (phase) {
     RemotePhase.FALLBACK ->
         "远程连接未建立，已回退本地 DSH。检查下方原因后可以直接重试，或重新运行向导。"
 }
+
+/**
+ * 读取系统剪贴板的第一条文本。
+ *
+ * Android 10+ 只在应用可见/聚焦时允许读取；无内容、剪贴板服务不可用或被系统拒绝时
+ * 一律返回 null，由向导保留手动粘贴框，不把“读不到”当成错误弹窗。
+ */
+private fun readPairingClipboard(context: Context): String? = runCatching {
+    val clip = context.getSystemService(ClipboardManager::class.java)?.primaryClip
+    if (clip == null || clip.itemCount == 0) {
+        null
+    } else {
+        clip.getItemAt(0).coerceToText(context)?.toString()
+    }
+}.getOrNull()
 
 private data class PickedPrivateKey(val name: String, val text: String)
 

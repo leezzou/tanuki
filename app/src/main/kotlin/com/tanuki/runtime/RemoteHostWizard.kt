@@ -28,17 +28,37 @@ enum class RemoteConnectionMethod(
     )
 }
 
-/** 向导步骤；顺序不可跳过，指纹步骤只在首次连接或信任记录缺失时出现。 */
-enum class RemoteWizardStep(val title: String, val position: Int) {
-    METHOD("选择连接方式", 1),
-    HOST_ACCOUNT("填写主机与账号", 2),
-    AUTHENTICATION("选择认证方式", 3),
-    FINGERPRINT("核对主机指纹", 4),
-    TEST("测试连接", 5),
-    DONE("完成", 6);
+/**
+ * 向导步骤；顺序不可跳过，指纹步骤只在首次连接或信任记录缺失时出现。
+ *
+ * [PAIRING_CONFIRM] 只用于配对链接方式：解析出链接后先让用户确认“这是你的电脑”，
+ * 再进入认证；直连/局域网不会出现这一步。
+ */
+enum class RemoteWizardStep(val title: String) {
+    METHOD("选择连接方式"),
+    HOST_ACCOUNT("填写主机与账号"),
+    PAIRING_CONFIRM("确认这台电脑"),
+    AUTHENTICATION("选择认证方式"),
+    FINGERPRINT("核对主机指纹"),
+    TEST("测试连接"),
+    DONE("完成");
+
+    /** 配对方式把主机/账号步骤显示为链接步骤；文案不改变步骤顺序。 */
+    fun titleFor(method: RemoteConnectionMethod?): String =
+        if (method == RemoteConnectionMethod.PAIRING_LINK && this == HOST_ACCOUNT) {
+            "读取配对链接"
+        } else {
+            title
+        }
 
     companion object {
-        val total: Int = entries.size
+        /** 当前连接方式实际会走到的步骤；配对方式多出确认页。 */
+        fun forMethod(method: RemoteConnectionMethod?): List<RemoteWizardStep> =
+            if (method == RemoteConnectionMethod.PAIRING_LINK) {
+                entries.toList()
+            } else {
+                entries.filter { it != PAIRING_CONFIRM }
+            }
     }
 }
 
@@ -105,6 +125,81 @@ data class RemoteHostDraft(
     }
 }
 
+/** 打开配对链接步骤时自动读取剪贴板的结果；UI 只按它显示一行说明。 */
+enum class PairingClipboardStatus {
+    /** 还没读取过剪贴板。 */
+    IDLE,
+
+    /** 剪贴板里是有效配对链接，已自动填入并算出 6 位码。 */
+    AUTO_FILLED,
+
+    /** 剪贴板里是 tanuki-relay:// 开头的链接，但解析失败；已填入原文供修改。 */
+    INVALID_LINK,
+
+    /** 剪贴板有内容但不是配对链接；不覆盖粘贴框，保留手动粘贴。 */
+    NOT_A_LINK,
+
+    /** 剪贴板为空或系统不允许读取；保留粘贴框。 */
+    EMPTY,
+
+    /** 已有手动粘贴/编辑的链接，不能悄悄覆盖；提供“改用剪贴板链接”。 */
+    KEPT_EXISTING
+}
+
+/**
+ * 配对确认页的只读展示模型。
+ *
+ * 从草稿里的链接解析而来，不包含 token；[code] 由链接现场计算，
+ * 与电脑端显示值不一致时说明两次配对不是同一次。
+ */
+data class RemotePairingPreview(
+    val pairing: RemoteRelayPairing,
+    val code: String,
+    val computerName: String,
+    val computerNameSource: String,
+    val hostIdShort: String,
+    val relayLabel: String,
+    val pin: String,
+    val pinSummary: String,
+    val sshUser: String,
+    val sshPort: Int,
+    val remoteDshPort: Int
+) {
+    /** 证书指纹是否固定；没有固定时依赖系统 CA，界面必须明确说明。 */
+    val pinned: Boolean get() = pin.isNotEmpty()
+
+    val sshHint: String get() = "$sshUser@127.0.0.1:$sshPort（经中继转发）"
+
+    val dshHint: String get() = "127.0.0.1:$remoteDshPort"
+
+    companion object {
+        const val UNNAMED_SOURCE = "链接未包含电脑名，可返回上一步填写展示名"
+
+        fun of(draft: RemoteHostDraft): RemotePairingPreview? {
+            val pairing = RemoteRelayPairing.parse(draft.relayUri).getOrNull() ?: return null
+            val name = draft.host.trim()
+            val pin = pairing.certPin
+            return RemotePairingPreview(
+                pairing = pairing,
+                code = RemotePairingCode.of(pairing),
+                computerName = name.ifBlank { "未命名电脑（${pairing.hostId.take(8)}）" },
+                computerNameSource = if (name.isBlank()) UNNAMED_SOURCE else "上一步填写的展示名",
+                hostIdShort = pairing.hostId.take(8),
+                relayLabel = pairing.endpointLabel(),
+                pin = pin,
+                pinSummary = if (pin.isBlank()) {
+                    "系统 CA（链接未固定证书）"
+                } else {
+                    RelayTlsPin.abbreviate(pin)
+                },
+                sshUser = draft.user.trim().ifBlank { "<用户名>" },
+                sshPort = draft.sshPort.trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: 22,
+                remoteDshPort = draft.remoteDshPort.trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: 3080
+            )
+        }
+    }
+}
+
 /** 向导完整状态；Compose 与 JVM 测试都只依赖这一份状态。 */
 data class RemoteWizardState(
     val step: RemoteWizardStep = RemoteWizardStep.METHOD,
@@ -121,9 +216,34 @@ data class RemoteWizardState(
     val busy: Boolean = false,
     val tested: Boolean = false,
     val localPort: Int? = null,
-    val notice: String = ""
+    val notice: String = "",
+    /** 用户已在确认页点过“这是你的电脑”；链接变化或重新进入时清零。 */
+    val pairingAcknowledged: Boolean = false,
+    val clipboardStatus: PairingClipboardStatus = PairingClipboardStatus.IDLE,
+    val clipboardMessage: String = "",
+    /** 每次进入配对链接步骤加一；UI 用它触发一次剪贴板读取，并丢弃迟到结果。 */
+    val clipboardVisit: Int = 0,
+    /** 剪贴板里有新链接但用户已手动编辑时暂存，等用户显式选择是否替换。 */
+    val pendingClipboardLink: String = "",
+    /** 上一次由本机自动填入的链接原文；只允许自动覆盖自己填的内容。 */
+    val autoFilledLink: String? = null
 ) {
     val isEditing: Boolean get() = editingProfileId != null
+
+    val steps: List<RemoteWizardStep> get() = RemoteWizardStep.forMethod(method)
+
+    /** 当前步骤在本次连接方式可见步骤中的序号（从 1 开始）。 */
+    val stepNumber: Int get() = (steps.indexOf(step) + 1).coerceAtLeast(1)
+
+    val stepTotal: Int get() = steps.size
+
+    /** 配对链接解析成功后的确认页数据；其他方式或链接无效时为 null。 */
+    val pairingPreview: RemotePairingPreview?
+        get() = if (method == RemoteConnectionMethod.PAIRING_LINK) {
+            RemotePairingPreview.of(draft)
+        } else {
+            null
+        }
 
     /** 指纹必须由用户显式勾选确认；没有默认信任。 */
     val canConfirmFingerprint: Boolean
@@ -131,6 +251,10 @@ data class RemoteWizardState(
             hostKeyFingerprint != null &&
             hostKeyAcknowledged &&
             !busy
+
+    /** 确认页只有在链接可解析、字段无错误时才能继续。 */
+    val canConfirmPairing: Boolean
+        get() = step == RemoteWizardStep.PAIRING_CONFIRM && pairingPreview != null && !busy
 }
 
 /** 字段校验；错误文案包含示例或下一步动作，不直接复述用户输入。 */
@@ -228,6 +352,7 @@ object RemoteWizardValidation {
                 if (state.method == null) errors[RemoteWizardField.METHOD] = "请选择一种连接方式后再继续"
             }
             RemoteWizardStep.HOST_ACCOUNT -> validateHostAccount(state, errors)
+            RemoteWizardStep.PAIRING_CONFIRM -> validateHostAccount(state, errors)
             RemoteWizardStep.AUTHENTICATION -> validateAuthentication(state, errors)
             RemoteWizardStep.DONE -> name(state.name)?.let { errors[RemoteWizardField.NAME] = it }
             RemoteWizardStep.FINGERPRINT, RemoteWizardStep.TEST -> Unit
@@ -256,12 +381,17 @@ object RemoteWizardValidation {
                 errors[RemoteWizardField.RELAY_LINK] = linkError
             } else {
                 val pairing = RemoteRelayPairing.parse(state.draft.relayUri).getOrNull()
-                val codeError = RemotePairingCode.validate(state.draft.pairingCode)
-                if (codeError != null) {
-                    errors[RemoteWizardField.PAIRING_CODE] = codeError
-                } else if (pairing != null && !RemotePairingCode.matches(pairing, state.draft.pairingCode)) {
-                    errors[RemoteWizardField.PAIRING_CODE] =
-                        "配对码与配对链接不一致；请确认两者来自电脑上的同一次配对"
+                // 配对码已由手机按链接自动算出；只有用户主动校对时才校验输入值。
+                if (pairing != null && state.draft.pairingCode.isNotBlank()) {
+                    val codeError = RemotePairingCode.validate(state.draft.pairingCode)
+                    if (codeError != null) {
+                        errors[RemoteWizardField.PAIRING_CODE] = codeError
+                    } else if (!RemotePairingCode.matches(pairing, state.draft.pairingCode)) {
+                        val expected = RemotePairingCode.of(pairing)
+                        errors[RemoteWizardField.PAIRING_CODE] =
+                            "配对码与配对链接不一致；本链接自动算出的是 $expected。" +
+                                "请确认你对照的是电脑上同一次配对，或点“填入自动码”修正"
+                    }
                 }
             }
             val displayName = state.draft.host
@@ -315,15 +445,186 @@ class RemoteHostWizard(
 
     fun selectMethod(method: RemoteConnectionMethod) {
         _state.update {
-            it.copy(
-                method = method,
-                fieldErrors = it.fieldErrors - RemoteWizardField.METHOD
-            )
+            if (it.method == method) {
+                it.copy(fieldErrors = it.fieldErrors - RemoteWizardField.METHOD)
+            } else {
+                it.copy(
+                    method = method,
+                    fieldErrors = it.fieldErrors - RemoteWizardField.METHOD,
+                    pairingAcknowledged = false
+                )
+            }
         }
     }
 
     fun updateDraft(transform: (RemoteHostDraft) -> RemoteHostDraft) {
-        _state.update { it.copy(draft = transform(it.draft), fieldErrors = emptyMap()) }
+        _state.update {
+            it.copy(
+                draft = transform(it.draft),
+                fieldErrors = emptyMap(),
+                pairingAcknowledged = false
+            )
+        }
+    }
+
+    /**
+     * 用户手动编辑/粘贴配对链接。
+     *
+     * 链接能解析时立即算出 6 位码写回草稿；这既是展示值，也让“下一步”不必要求手输。
+     * 链接被改坏时清空旧码，避免旧码和新链接看起来仍然一致。
+     */
+    fun updateRelayLink(value: String) {
+        val parsed = RemoteRelayPairing.parse(value).getOrNull()
+        _state.update { current ->
+            current.copy(
+                draft = current.draft.copy(
+                    relayUri = value,
+                    pairingCode = parsed?.let(RemotePairingCode::of).orEmpty()
+                ),
+                fieldErrors = current.fieldErrors -
+                    RemoteWizardField.RELAY_LINK - RemoteWizardField.PAIRING_CODE,
+                pairingAcknowledged = false,
+                clipboardStatus = PairingClipboardStatus.IDLE,
+                clipboardMessage = "",
+                pendingClipboardLink = "",
+                autoFilledLink = null,
+                tested = false
+            )
+        }
+    }
+
+    /**
+     * 应用一次剪贴板读取结果。
+     *
+     * [visit] 必须与当前 [RemoteWizardState.clipboardVisit] 一致，避免用户已返回/离开后
+     * 迟到的剪贴板结果覆盖新的草稿。剪贴板不是配对链接时只记录状态，绝不改粘贴框。
+     *
+     * @return true 表示已填入一条有效配对链接并算出了码。
+     */
+    fun applyClipboardPairing(text: String?, visit: Int): Boolean {
+        val current = _state.value
+        if (current.step != RemoteWizardStep.HOST_ACCOUNT) return false
+        if (current.method != RemoteConnectionMethod.PAIRING_LINK) return false
+        if (visit != current.clipboardVisit) return false
+
+        val raw = text.orEmpty().trim()
+        if (raw.isEmpty()) {
+            _state.update { it.copy(clipboardStatus = PairingClipboardStatus.EMPTY, clipboardMessage = "") }
+            return false
+        }
+        if (!raw.startsWith(RemoteRelayPairing.URI_PREFIX)) {
+            _state.update {
+                it.copy(
+                    clipboardStatus = PairingClipboardStatus.NOT_A_LINK,
+                    clipboardMessage = "剪贴板内容不是配对链接，已保留下面的粘贴框；也可以手动粘贴。",
+                    pendingClipboardLink = ""
+                )
+            }
+            return false
+        }
+
+        val result = RemoteRelayPairing.parse(raw)
+        val parsed = result.getOrNull()
+        if (parsed == null) {
+            val reason = result.exceptionOrNull()?.message ?: "格式不符"
+            _state.update {
+                it.copy(
+                    draft = it.draft.copy(relayUri = raw, pairingCode = ""),
+                    fieldErrors = it.fieldErrors + (
+                        RemoteWizardField.RELAY_LINK to
+                            "剪贴板里的配对链接无法解析：$reason；请重新复制电脑上的完整链接，或手动粘贴"
+                        ),
+                    pairingAcknowledged = false,
+                    clipboardStatus = PairingClipboardStatus.INVALID_LINK,
+                    clipboardMessage = "已读取剪贴板，但链接不可用；请重新复制后再试。",
+                    pendingClipboardLink = "",
+                    autoFilledLink = null,
+                    tested = false
+                )
+            }
+            return false
+        }
+
+        // 只覆盖空白框或本机上一次自动填入的内容；用户手动编辑的链接先保留并给出替换入口。
+        val existing = current.draft.relayUri.trim()
+        if (existing == raw) {
+            _state.update {
+                it.copy(
+                    draft = it.draft.copy(pairingCode = RemotePairingCode.of(parsed)),
+                    fieldErrors = it.fieldErrors -
+                        RemoteWizardField.RELAY_LINK - RemoteWizardField.PAIRING_CODE,
+                    pairingAcknowledged = false,
+                    clipboardStatus = PairingClipboardStatus.AUTO_FILLED,
+                    clipboardMessage = "剪贴板里的配对链接与当前内容一致，已确认 6 位码。",
+                    pendingClipboardLink = "",
+                    autoFilledLink = raw
+                )
+            }
+            return true
+        }
+        val canReplace = existing.isEmpty() || existing == current.autoFilledLink
+        if (!canReplace) {
+            _state.update {
+                it.copy(
+                    clipboardStatus = PairingClipboardStatus.KEPT_EXISTING,
+                    clipboardMessage = "检测到新的配对链接，但当前粘贴框已有你编辑的内容，未自动替换。",
+                    pendingClipboardLink = raw
+                )
+            }
+            return false
+        }
+
+        _state.update {
+            it.copy(
+                draft = it.draft.copy(
+                    relayUri = raw,
+                    pairingCode = RemotePairingCode.of(parsed)
+                ),
+                fieldErrors = it.fieldErrors -
+                    RemoteWizardField.RELAY_LINK - RemoteWizardField.PAIRING_CODE,
+                pairingAcknowledged = false,
+                clipboardStatus = PairingClipboardStatus.AUTO_FILLED,
+                clipboardMessage = "已从剪贴板读取配对链接，并自动算出 6 位码。",
+                pendingClipboardLink = "",
+                autoFilledLink = raw,
+                tested = false
+            )
+        }
+        return true
+    }
+
+    /** 用户确认改用剪贴板里暂存的链接；没有暂存内容时返回 false。 */
+    fun usePendingClipboardLink(): Boolean {
+        val current = _state.value
+        val pending = current.pendingClipboardLink
+        if (pending.isBlank()) return false
+        val parsed = RemoteRelayPairing.parse(pending).getOrNull() ?: return false
+        _state.update {
+            it.copy(
+                draft = it.draft.copy(relayUri = pending, pairingCode = RemotePairingCode.of(parsed)),
+                fieldErrors = it.fieldErrors -
+                    RemoteWizardField.RELAY_LINK - RemoteWizardField.PAIRING_CODE,
+                pairingAcknowledged = false,
+                clipboardStatus = PairingClipboardStatus.AUTO_FILLED,
+                clipboardMessage = "已改用剪贴板里的配对链接，并自动算出 6 位码。",
+                pendingClipboardLink = "",
+                autoFilledLink = pending
+            )
+        }
+        return true
+    }
+
+    /** 把自动计算的码填回校对框；用户手输错误后可用它恢复一致。 */
+    fun fillAutoPairingCode(): Boolean {
+        val current = _state.value
+        val pairing = RemoteRelayPairing.parse(current.draft.relayUri).getOrNull() ?: return false
+        _state.update {
+            it.copy(
+                draft = it.draft.copy(pairingCode = RemotePairingCode.of(pairing)),
+                fieldErrors = it.fieldErrors - RemoteWizardField.PAIRING_CODE
+            )
+        }
+        return true
     }
 
     fun setAuth(auth: RemoteAuthType) {
@@ -389,11 +690,33 @@ class RemoteHostWizard(
         }
         return when (current.step) {
             RemoteWizardStep.METHOD -> {
-                _state.update { it.copy(step = RemoteWizardStep.HOST_ACCOUNT, fieldErrors = emptyMap()) }
+                val pairing = current.method == RemoteConnectionMethod.PAIRING_LINK
+                _state.update {
+                    it.copy(
+                        step = RemoteWizardStep.HOST_ACCOUNT,
+                        fieldErrors = emptyMap(),
+                        clipboardVisit = if (pairing) it.clipboardVisit + 1 else it.clipboardVisit
+                    )
+                }
                 true
             }
             RemoteWizardStep.HOST_ACCOUNT -> {
-                _state.update { it.copy(step = RemoteWizardStep.AUTHENTICATION, fieldErrors = emptyMap()) }
+                val next = if (current.method == RemoteConnectionMethod.PAIRING_LINK) {
+                    RemoteWizardStep.PAIRING_CONFIRM
+                } else {
+                    RemoteWizardStep.AUTHENTICATION
+                }
+                _state.update { it.copy(step = next, fieldErrors = emptyMap()) }
+                true
+            }
+            RemoteWizardStep.PAIRING_CONFIRM -> {
+                _state.update {
+                    it.copy(
+                        step = RemoteWizardStep.AUTHENTICATION,
+                        pairingAcknowledged = true,
+                        fieldErrors = emptyMap()
+                    )
+                }
                 true
             }
             RemoteWizardStep.AUTHENTICATION -> {
@@ -409,6 +732,12 @@ class RemoteHostWizard(
         }
     }
 
+    /** 确认页主按钮：用户点“这是你的电脑”后进入认证步骤。 */
+    fun confirmPairing(): Boolean {
+        if (_state.value.step != RemoteWizardStep.PAIRING_CONFIRM) return false
+        return next()
+    }
+
     /** 返回上一步；连接进行中或指纹待确认时不擅自回退，避免留下未关闭的尝试。 */
     fun back(): Boolean {
         val current = _state.value
@@ -417,7 +746,13 @@ class RemoteHostWizard(
         val previous = when (current.step) {
             RemoteWizardStep.METHOD -> return false
             RemoteWizardStep.HOST_ACCOUNT -> RemoteWizardStep.METHOD
-            RemoteWizardStep.AUTHENTICATION -> RemoteWizardStep.HOST_ACCOUNT
+            RemoteWizardStep.PAIRING_CONFIRM -> RemoteWizardStep.HOST_ACCOUNT
+            RemoteWizardStep.AUTHENTICATION ->
+                if (current.method == RemoteConnectionMethod.PAIRING_LINK) {
+                    RemoteWizardStep.PAIRING_CONFIRM
+                } else {
+                    RemoteWizardStep.HOST_ACCOUNT
+                }
             RemoteWizardStep.FINGERPRINT, RemoteWizardStep.TEST -> RemoteWizardStep.AUTHENTICATION
             // 完成页不允许退回测试，避免把已通过的状态误当成“待重测”。
             RemoteWizardStep.DONE -> return false
@@ -428,7 +763,16 @@ class RemoteHostWizard(
                 fieldErrors = emptyMap(),
                 failure = if (previous == RemoteWizardStep.AUTHENTICATION) null else it.failure,
                 hostKeyFingerprint = if (previous == RemoteWizardStep.AUTHENTICATION) null else it.hostKeyFingerprint,
-                hostKeyAcknowledged = false
+                hostKeyAcknowledged = false,
+                pairingAcknowledged = if (previous == RemoteWizardStep.HOST_ACCOUNT) false else it.pairingAcknowledged,
+                // 回到链接步骤时重新读一次剪贴板；已编辑内容由 applyClipboardPairing 保护。
+                clipboardVisit = if (previous == RemoteWizardStep.HOST_ACCOUNT &&
+                    it.method == RemoteConnectionMethod.PAIRING_LINK
+                ) {
+                    it.clipboardVisit + 1
+                } else {
+                    it.clipboardVisit
+                }
             )
         }
         return true
@@ -625,7 +969,9 @@ class RemoteHostWizard(
                 method = method,
                 draft = initialConfig?.let { RemoteHostDraft.from(it) } ?: RemoteHostDraft(),
                 name = initialName.ifBlank { initialConfig?.displayName().orEmpty() },
-                editingProfileId = initialProfileId
+                editingProfileId = initialProfileId,
+                // 编辑已有配对时也在进入链接步骤后读一次剪贴板；已有内容不会被覆盖。
+                clipboardVisit = if (method == RemoteConnectionMethod.PAIRING_LINK) 1 else 0
             )
         }
     }
