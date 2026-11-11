@@ -29,7 +29,7 @@
   - `DshDockStateMapper`（ui）：目标状态映射 `RUNNING/PAUSED/BLOCKED`，未知/已完成隐藏；待办状态映射 `PENDING/IN_PROGRESS/COMPLETED`，空清单隐藏。
   - 控制器 `DshNativeState.goal/todos`；选择会话清空，页面/快照/实时事件按字段合并，解析失败不覆盖已知值。
   - `DshDockPlacement` 记录“停靠条高度只压缩消息区、输入栏贴底”的布局契约，配套 JVM 回归。
-- 已验证：定向 6 类共 64 tests 通过；完整 JVM 1164 tests/119 文件 0 失败；lint 0 errors/108 warnings/1 hint（改动文件无新增告警）。
+- 已验证：定向 6 类共 64 tests 与 follow 解析 1 项通过；完整 JVM 1165 tests/119 文件 0 失败；lint 0 errors/108 warnings/1 hint（改动文件无新增告警）。
 - 待验证：真实 DSH 的 goal/todo 事件名与字段、设备高度动画/展开滚动/深色/大字体/TalkBack、独立审查、合并与发布。
 - 关键源码：`app/src/main/kotlin/com/tanuki/ui/DshNativePage.kt`、`DshNativeController.kt`、`DshDockStateMapper.kt`（新增）、`app/src/main/kotlin/com/tanuki/web/DshCoordination.kt`（新增）、`DshNativeApi.kt`、`DshMuxProtocol.kt`、`DshLive.kt`、`DshDock.kt`。
 
@@ -48,6 +48,7 @@
 | `app/src/test/kotlin/com/tanuki/DshCoordinationTest.kt` | 新增 7 项事件投影回归：目标摘要/状态、空文本忽略、取最新、待办事件、工具参数（对象/裸数组）、未知事件忽略、空清单隐藏。 |
 | `app/src/test/kotlin/com/tanuki/DshDockIntegrationTest.kt` | 新增 5 项接线回归：状态映射、空数据隐藏、三条折叠/展开不重复、缺失不占槽、停靠条高度变化时输入栏顶部不变。 |
 | `app/src/test/kotlin/com/tanuki/DshNativeControllerTest.kt` | 新增 4 项控制器回归：历史页驱动目标/待办、实时事件更新、会话切换隐藏、未知状态不覆盖已知目标。 |
+| `app/src/test/kotlin/com/tanuki/DshMuxProtocolTest.kt` | 新增 1 项 follow 解析回归：snapshot 与 event 帧携带 goal/todo 投影。 |
 | `docs/INTERFACES.md` | 增加目标/待办投影契约与缺失隐藏边界；更新缺口列表。 |
 | `docs/NATIVE-UI.md` | 增加输入栏上方三条停靠条接线说明与布局契约。 |
 | `docs/NATIVE-PARITY.md` | SESS-14/CHAT-19 更新为原生部分（只读目标/待办停靠条）。 |
@@ -59,7 +60,8 @@
 |---|---|---|
 | `git rev-parse origin/main` | `7780fbf3ec23d207263e210c6911c338a062d7cd` | #68 已合入的基线 |
 | `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshCoordinationTest' --tests 'com.tanuki.DshDockIntegrationTest' --tests 'com.tanuki.DshDockLayoutTest' --tests 'com.tanuki.DshGoalDockTest' --tests 'com.tanuki.DshTodoDockTest' --tests 'com.tanuki.DshNativeControllerTest'` | 通过：定向 6 类 / 64 tests / 0 failed（coordination 7、integration 5、layout 11、goal 7、todo 8、controller 26） | JDK17；不访问真实 DSH |
-| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 通过：完整 JVM **1164 tests / 119 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 108 warnings / 1 hint** | 同一 Gradle 配置；新增/修改文件无 lint 告警 |
+| `./gradlew ... :app:testModernDebugUnitTest --tests 'com.tanuki.DshMuxProtocolTest'` | 通过（follow 解析 1 项） | 覆盖 snapshot/event 的 goal/todo 投影 |
+| `./gradlew ... :app:testModernDebugUnitTest :app:lintModernDebug` | 通过：完整 JVM **1165 tests / 119 个结果文件 / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 108 warnings / 1 hint** | 同一 Gradle 配置；新增/修改文件无 lint 告警 |
 | 设备/模拟器/真实 DSH | 未执行 | 设备由独立 QA 独占 |
 
 - 未测试：真实 DSH 目标/待办事件名与字段、目标操作 RPC、设备高度动画与展开滚动、深色/大字体/横屏/分屏/TalkBack。

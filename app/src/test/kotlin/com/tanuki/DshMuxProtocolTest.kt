@@ -16,6 +16,54 @@ import org.junit.Test
 import java.util.Base64
 
 class DshMuxProtocolTest {
+    @Test fun followSnapshotAndEventExposeGoalAndTodoProjections() {
+        val parser = DshFollowParser()
+        val snapshot = parser.accept(
+            JSONObject()
+                .put("type", "snapshot")
+                .put("hasMore", false)
+                .put(
+                    "records",
+                    JSONArray().put(
+                        JSONObject().put(
+                            "event",
+                            JSONObject()
+                                .put("type", "goal/update")
+                                .put("seq", 1)
+                                .put(
+                                    "data",
+                                    JSONObject().put("summary", "目标 A").put("status", "running")
+                                )
+                        )
+                    )
+                )
+        ).filterIsInstance<DshFollowFrame.Snapshot>().single()
+        assertEquals("目标 A", snapshot.coordination.goal?.summary)
+
+        val frames = parser.accept(
+            JSONObject()
+                .put("type", "event")
+                .put(
+                    "event",
+                    JSONObject()
+                        .put("type", "todos/update")
+                        .put("seq", 2)
+                        .put(
+                            "data",
+                            JSONObject().put(
+                                "todos",
+                                JSONArray().put(
+                                    JSONObject().put("id", "t1").put("text", "写回归")
+                                        .put("status", "completed")
+                                )
+                            )
+                        )
+                )
+        )
+        val coordination = frames.filterIsInstance<DshFollowFrame.Coordination>().single()
+        assertEquals("写回归", coordination.update.todos?.items?.single()?.text)
+    }
+
     @Test fun openItemEndAndCancelUseOfficialMuxShape() {
         val open = JSONObject(
             DshMuxProtocol.openFrame(
