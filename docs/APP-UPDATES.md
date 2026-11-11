@@ -1,6 +1,10 @@
 # 应用内更新
 
-**0.1.12/code14 workspacecheck 候选已核验（基于最终 `main=f338bdb`，含 #48/#51/#57/#58/#59，未发布）**：包名 `com.tanuki.modern.workspacecheck`、ARM64、minSdk26/targetSdk34，候选 APK SHA-256 `27580e6d4c2234466b026cd46c65a3c01794a327c717acc1218cb19ca6949a02`、12,295,334 字节。发布 PR #61 待合并；**未创建 tag/Release、未上传附件。** 已发布版本仍为 **0.1.11/code13**（Pre-release，tag `v0.1.11`，main=`4f2a3717d6d7`）：APK SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节。上一 Pre-release 0.1.9/code11（tag `5c680b9`）APK SHA-256 `210b6ec2119e8dd6ee08ec3d2be07889f1fa36720c6e15dd24d74a1d25a49dc8`、10,506,550 字节；0.1.10/code12 为历史本地候选，未发布。
+**当前候选：0.1.13/code18，workspacecheck，基线 `main=9f5a2fe3c1b16e019144d1ff26f94c5babf12bcf`。** 包名 `com.tanuki.modern.workspacecheck`，ARM64、non-debuggable、minSdk26/targetSdk34，沿用开发证书 `371dc301...`。六附件位于 `artifacts/releases/0.1.13/`，实际大小与 SHA-256 以该目录 `app-update.json`、`RELEASE-SHA256SUMS` 为准。未合并、未创建 tag/Release、未上传。
+
+0.1.13 包含基线已合并的原生聊天历史分页/停靠条、设计令牌接入、首次启动引导、文件导入与复制移动、统一失败出口、局域网发现与远程页、横屏阅读/复制反馈、QA-10 会话同步/QA-07 阅读状态、文本完整字符分页、全局安装进度浮层与文件空态（#62/#67/#68/#70/#71/#73/#74/#75/#76/#79/#80/#82/#83）；#84 为动效盘点与方案文档，不宣称方案已实现。本轮仅更新发布版本与必要文档，不改产品逻辑。
+
+**本轮未验证：** JVM 全套、lint、Android 仪器执行、设备安装/升级、模拟器/真机 UI、真实 PRoot/DSH/sshd/中继、弱网、真实模型/账号；按用户要求不等待 QA，先出候选包。历史测试记录不作为本版已测依据。API Key 保存与真机/真实模型验收继续暂停。
 
 入口：**设置 → 应用更新 → 检查更新**。这里更新 Tanuki APK，不是「组件维护与诊断」中的 DSH/Ubuntu/Node 更新。
 
@@ -48,23 +52,22 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）、`v0.1.11`（code13）；本次确认 `v0.1.12`（code14）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）、`v0.1.11`（code13）；本次确认 `v0.1.13`（code18）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
-0.1.12 候选基于最终 `main=f338bdb`，包含 0.1.11 之后合并的原生聊天渲染、输入胶囊、审批抽屉与提问卡、会话管理设置、文件页瘦身、SSH 六步向导、文本编码识别、设计令牌；完整 JVM **1044 tests / 107 结果文件**、lint **0 errors / 101 warnings / 1 hint**。0.1.11 已发布（Pre-release），基于 `main=4f2a3717d6d7`（#40 合并点 `1f7222d0`），包含原生聊天/输入栏/审批接线、交接机制、文件查看器、复制稳定性、远程中继、原生会话管理、原生审批/工具、输入附件、DSH 版本卸载等；#40 `DshTransport` 已包含，临时 `DshHttpAdminTransport` 适配器切换留作后续清理；行为和权限边界见[项目存储说明](WORKSPACE-STORAGE.md)/[浏览器工作区](BROWSER-WORKSPACE.md)。候选 release 须独立完成适用测试；debug 或 0.1.8/0.1.9 历史结果不能替代。完成全部验证、文档与交接、过期记录清理及公开/实际 index 检查后，统一一次 commit/push；由用户自行合并 PR 并在网页发布 Release，Agent 不创建 tag 或上传 Release。
 
-下面命令以本次 0.1.12/code14 候选为例；未来发版替换为用户确认的版本和递增 code：
+下面命令以本次 0.1.13/code18 候选为例；未来发版替换为用户确认的版本和递增 code：
 
 ```bash
 source scripts/env.sh
-python3 scripts/prepare-app-release.py --version 0.1.12 --version-code 14 --channel workspacecheck \
+python3 scripts/prepare-app-release.py --version 0.1.13 --version-code 18 --channel workspacecheck \
   --verified-apk <已完成测试的候选.apk> --verified-apk-sha256 <候选实际SHA256>
 ```
 
-脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.12/`：
+脚本验证实际 APK 包名、版本、SDK、证书和文件字节，生成 `artifacts/releases/0.1.13/`：
 
-- `Tanuki-0.1.12-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
-- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.12` 的同一个 Release，不能只上传 APK。
-- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.12-source.zip`、原生对应源码与校验文件。
+- `Tanuki-0.1.13-workspacecheck-arm64-release.apk`：开发证书、non-debuggable 的测试发布包；GitHub 应标 Pre-release。
+- **`app-update.json`**：脚本生成的更新清单，必须与 APK 上传到 tag `v0.1.13` 的同一个 Release，不能只上传 APK。
+- `RELEASE-SHA256SUMS`、完整 `Tanuki-0.1.13-source.zip`、原生对应源码与校验文件。
 
 清单结构为 `schemaVersion:1` / `packages` 数组，每个包包含 `packageName`、`versionName`、整数 `versionCode/minSdk/bytes`、`assetName`、`sha256`、`certificateSha256`。不要把文档示例或其他包/版本的元数据当成实际附件。更换/重打 APK 后必须重跑生成和外部散列检查。
 
@@ -76,4 +79,4 @@ python3 scripts/prepare-app-release.py --version 0.1.12 --version-code 14 --chan
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-0.1.11 已由 PR #44 squash 合并且发布（main=`4f2a3717d6d7`，tag `v0.1.11`，Pre-release）。0.1.12 候选基于最终 `main=f338bdb` 生成，发布 PR #61 待合并；未创建 tag/Release、未上传附件；0.1.9 及更早交付附件保持原样。
+0.1.13 基于 `main=9f5a2fe3` 准备，未合并/未发布；旧版附件保持原样。
