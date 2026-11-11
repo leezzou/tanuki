@@ -457,6 +457,31 @@ class RemoteHostWizard(
         }
     }
 
+    /**
+     * 从局域网发现列表点选一台电脑：直接以“局域网”方式进入主机与账号步骤。
+     *
+     * 发现信息只用来预填地址、SSH/DSH 端口和展示名；认证方式、密码/私钥仍由用户填写，
+     * 首次连接仍会停在现有 SSH 主机密钥确认步骤。地址或端口非法时不修改草稿。
+     */
+    fun startFromLanDiscovery(
+        host: String,
+        sshPort: Int,
+        dshPort: Int,
+        displayName: String
+    ): Boolean {
+        if (_state.value.busy || sshPort !in 1..65535 || dshPort !in 1..65535) return false
+        if (RemoteWizardValidation.host(host) != null) return false
+        keyReadRequest++
+        // 发现新电脑不能继承之前草稿中的密码、私钥、信任状态或编辑归属。
+        _state.value = RemoteWizardState(
+            step = RemoteWizardStep.HOST_ACCOUNT,
+            method = RemoteConnectionMethod.LAN,
+            draft = RemoteHostDraft(host = host.trim(), sshPort = sshPort.toString(), remoteDshPort = dshPort.toString()),
+            name = displayName.trim().ifBlank { host.trim() }
+        )
+        return true
+    }
+
     fun updateDraft(transform: (RemoteHostDraft) -> RemoteHostDraft) {
         _state.update {
             it.copy(

@@ -343,6 +343,8 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                         if (!(tab == 2 && activeFullscreen)) OperationBanner(s, model.transfers, onCancel = { callbacks.command("CANCEL") },
                             onCancelTransfer = callbacks.cancelTransfer,
                             showFileTransfers = tab != 2,
+                            // 远程页只展示连接信息；与远程无关的安装/运行时进度留在工作台和 DSH 页。
+                            showRuntimeOperation = !(tab == 4 && settingsSection == "远程主机"),
                             modifier = if (tab == 3 && activeFullscreen) Modifier.displayCutoutPadding().statusBarsPadding()
                                 else if (tab == 3 || (tab == 1 && !browserControl.requestPending)) Modifier.statusBarsPadding() else Modifier)
                     }
@@ -384,21 +386,28 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
                     else -> key(tab, settingsSection.takeIf { tab == 4 }) {
                         val bottomSpace = 32.dp + bottomInset
                         Box(pageModifier.background(tanukiPageBrush())) {
-                            Column(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize().tanukiEnter().imePadding()
-                                .verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottomSpace),
-                                verticalArrangement = Arrangement.spacedBy(28.dp)) {
-                                if (tab == 0) {
-                                    model.onboarding?.banner?.let { banner ->
-                                        OnboardingBannerCard(
-                                            banner = banner,
-                                            onOpen = callbacks.onboardingOpen,
-                                            onDismiss = if (banner.kind == com.tanuki.onboarding.OnboardingBannerKind.UPGRADE)
-                                                callbacks.onboardingDismissUpgrade else callbacks.onboardingDismissBanner,
-                                        )
-                                    }
-                                    Overview(model, callbacks, openDsh = { tab = 1 })
+                            // 远程页自带滚动与下拉刷新；放进外层 verticalScroll 会嵌套滚动并让手势失效。
+                            if (tab == 4 && settingsSection == "远程主机") {
+                                Box(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize()) {
+                                    RemoteHostSettingsPage(model, callbacks, bottomInset)
                                 }
-                                else SettingsPage(model, callbacks, settingsSection) { settingsSection = it }
+                            } else {
+                                Column(Modifier.align(Alignment.TopCenter).widthIn(max = 760.dp).fillMaxSize().tanukiEnter().imePadding()
+                                    .verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = bottomSpace),
+                                    verticalArrangement = Arrangement.spacedBy(28.dp)) {
+                                    if (tab == 0) {
+                                        model.onboarding?.banner?.let { banner ->
+                                            OnboardingBannerCard(
+                                                banner = banner,
+                                                onOpen = callbacks.onboardingOpen,
+                                                onDismiss = if (banner.kind == com.tanuki.onboarding.OnboardingBannerKind.UPGRADE)
+                                                    callbacks.onboardingDismissUpgrade else callbacks.onboardingDismissBanner,
+                                            )
+                                        }
+                                        Overview(model, callbacks, openDsh = { tab = 1 })
+                                    }
+                                    else SettingsPage(model, callbacks, settingsSection) { settingsSection = it }
+                                }
                             }
                         }
                     }
@@ -796,7 +805,6 @@ private fun SettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, section: St
         return
     }
     if (section == "组件维护与诊断") { EnvironmentSection(model, c); return }
-    if (section == "远程主机") { RemoteHostSettings(model, c); return }
     if (section == "项目与备份") SettingsGroup("项目与备份") {
         ActionRow("导入文件", "保存为新项目", enabled = s.tanukiIdle, onClick = c.importFiles)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

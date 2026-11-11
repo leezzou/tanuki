@@ -25,11 +25,13 @@ private data class ProgressItem(val id: String, val title: String, val fraction:
 /** Outside every page's scroll area, including the DSH and browser tabs. */
 @Composable
 internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileTransferProgress>>, onCancel: () -> Unit,
-    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier, showFileTransfers: Boolean = true) {
+    onCancelTransfer: (Long) -> Unit = {}, modifier: Modifier = Modifier, showFileTransfers: Boolean = true,
+    showRuntimeOperation: Boolean = true) {
     // 只有进度区订阅传输流；复制大文件时不会让整个页面跟着重组。
     val transferItems by transfers.collectAsState()
     val items = buildList {
-        if (snapshot.operationActive) {
+        // 远程页与安装进度无关：只隐藏运行时/安装条目，文件传输仍按页面规则展示。
+        if (showRuntimeOperation && snapshot.operationActive) {
             val download = snapshot.download
             add(ProgressItem("runtime", snapshot.stage.ifBlank { "正在准备操作" }, snapshot.measuredFraction(), when {
                 snapshot.phasePercent != null -> "当前安装阶段 · 不代表整个安装已完成"
@@ -80,7 +82,7 @@ internal fun OperationBanner(snapshot: Snapshot, transfers: StateFlow<List<FileT
             }
             Text("有总量时显示当前阶段的真实进度；解析、解压或等待服务响应时显示持续动效，不估造整体百分比。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (snapshot.operationActive && snapshot.service !in setOf(ServiceState.STARTING, ServiceState.STOPPING) &&
+            if (showRuntimeOperation && snapshot.operationActive && snapshot.service !in setOf(ServiceState.STARTING, ServiceState.STOPPING) &&
                 snapshot.update !in setOf(UpdateState.SWITCHING, UpdateState.RESTORING)) {
                 OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消当前操作") }
                 Text("取消会等待当前请求或清理结束；不要反复点击安装。", style = MaterialTheme.typography.bodySmall)

@@ -1,6 +1,6 @@
 # Android 运行依赖实际清单
 
-由 Gradle modernProbeRuntimeClasspath 实际解析结果生成，共 91 个 AAR/JAR。哈希对应构建缓存中的真实归档；许可证声明来自发布 POM，归档内可识别的 LICENSE / NOTICE 文本一同保留。此表不包含构建工具、测试库或手机首次下载的 Ubuntu / Node / DSH。完整法律审阅仍需核对缺失声明和上游要求。
+由 Gradle modernProbeRuntimeClasspath 实际解析结果生成，共 93 个 AAR/JAR。哈希对应构建缓存中的真实归档；许可证声明来自发布 POM，归档内可识别的 LICENSE / NOTICE 文本一同保留。此表不包含构建工具、测试库或手机首次下载的 Ubuntu / Node / DSH。完整法律审阅仍需核对缺失声明和上游要求。
 
 | 组件 | 发布 POM 的许可声明 | 归档 SHA-256 |
 |---|---|---|
@@ -81,6 +81,8 @@
 | `androidx.work:work-runtime-ktx:2.9.1` | The Apache Software License, Version 2.0 | `8f4cc53ac1879665b14d2f17ad4fbcb3045a4b74774250b99829b1c13f7b7728` |
 | `com.github.mwiede:jsch:2.28.8` | Revised BSD; Revised BSD; ISC | `2afca1357d816028f2ac33f22407d2488a68406682973949cebb1b8ea6688a8b` |
 | `com.google.guava:listenablefuture:1.0` | POM 未声明，需人工核对 | `e4ad7607e5c0477c6f890ef26a49cb8d1bb4dffb650bab4502afee64644e3069` |
+| `com.google.zxing:core:3.4.1` | POM 未声明，需人工核对 | `acfa30338c26267b6cab665509c2251bb96e8350bfcad89d59b949ba77011f8d` |
+| `com.journeyapps:zxing-android-embedded:4.3.0` | The Apache License, Version 2.0 | `4ab03353127c34e55cbb80fbc9a34031decbcfb1ec5e8f991944d2d494621a33` |
 | `commons-codec:commons-codec:1.17.1` | POM 未声明，需人工核对 | `f9f6cb103f2ddc3c99a9d80ada2ae7bf0685111fd6bffccb72033d1da4e6ff23` |
 | `commons-io:commons-io:2.16.1` | POM 未声明，需人工核对 | `f41f7baacd716896447ace9758621f62c1c6b0a91d89acee488da26fc477c84f` |
 | `io.github.kyant0:backdrop:1.0.6` | The Apache License, Version 2.0 | `92f42dc2d3a9119bfdd9ad0f5eb608e64ac30028f5b4f564f4d8dd29a1b28145` |

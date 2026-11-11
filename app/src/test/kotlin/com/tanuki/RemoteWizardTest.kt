@@ -98,6 +98,44 @@ class RemoteWizardTest {
     }
 
     @Test
+    fun lanDiscoveryPrefillsHostAccountWithoutMethodStep() {
+        val wizard = RemoteHostWizard()
+        assertTrue(wizard.startFromLanDiscovery("192.168.1.20", 2222, 3080, "书房 Mac"))
+
+        val state = wizard.state.value
+        assertEquals(RemoteWizardStep.HOST_ACCOUNT, state.step)
+        assertEquals(RemoteConnectionMethod.LAN, state.method)
+        assertEquals("192.168.1.20", state.draft.host)
+        assertEquals("2222", state.draft.sshPort)
+        assertEquals("3080", state.draft.remoteDshPort)
+        assertEquals("书房 Mac", state.name)
+        assertTrue(state.fieldErrors.isEmpty())
+    }
+
+    @Test
+    fun discoveredComputerDoesNotReuseSavedCredentialsOrProfile() {
+        val wizard = RemoteHostWizard(config(auth = RemoteAuthType.PASSWORD, password = "synthetic-password"), "旧电脑", "old-profile")
+        assertTrue(wizard.startFromLanDiscovery("192.168.1.20", 22, 3080, "新电脑"))
+        val state = wizard.state.value
+        assertEquals("", state.draft.password)
+        assertEquals("", state.draft.privateKey)
+        assertNull(state.editingProfileId)
+        assertNull(state.hostKeyFingerprint)
+        assertFalse(state.tested)
+        assertFalse(state.pairingAcknowledged)
+    }
+
+    @Test
+    fun lanDiscoveryRejectsInvalidAddressOrPortWithoutChangingDraft() {
+        val wizard = RemoteHostWizard()
+        assertFalse(wizard.startFromLanDiscovery("ssh://bad.example", 22, 3080, "坏主机"))
+        assertFalse(wizard.startFromLanDiscovery("192.168.1.20", 0, 3080, "坏主机"))
+        assertFalse(wizard.startFromLanDiscovery("192.168.1.20", 22, 70000, "坏主机"))
+        assertEquals(RemoteWizardStep.METHOD, wizard.state.value.step)
+        assertEquals("", wizard.state.value.draft.host)
+    }
+
+    @Test
     fun wizardAdvancesThroughAllStepsAndBuildsConfig() {
         val wizard = RemoteHostWizard()
         wizard.selectMethod(RemoteConnectionMethod.LAN)

@@ -3,6 +3,7 @@ package com.tanuki.ui
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,7 +44,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,13 +56,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.tanuki.lan.LanDiscoveredHost
+import com.tanuki.lan.LanDiscoveryController
+import com.tanuki.lan.LanDiscoveryCopy
+import com.tanuki.lan.LanDiscoveryPermission
+import com.tanuki.lan.LanDiscoveryPreferences
+import com.tanuki.lan.LanDiscoveryState
 import com.tanuki.runtime.PairingClipboardStatus
 import com.tanuki.runtime.RemoteAuthType
 import com.tanuki.runtime.RemoteConnectionMethod
@@ -74,19 +89,133 @@ import com.tanuki.runtime.RemoteStageStatus
 import com.tanuki.runtime.RemoteWizardField
 import com.tanuki.runtime.RemoteWizardStep
 import com.tanuki.runtime.RemoteWizardValidation
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 设置页的远程主机入口：状态、命名连接库和分步向导。 */
+/**
+ * 远程页：独立滚动容器，支持下拉刷新。
+ *
+ * 页面可见时启动系统 NsdManager 发现，之后每 5 秒重扫；离开页面立即停止并释放多播锁。
+ * Android 13+ 首次进入只询问一次附近设备权限；拒绝后降级为扫码/粘贴，不再自动弹窗。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
+internal fun RemoteHostSettingsPage(model: TanukiUiModel, c: TanukiUiCallbacks, bottomInset: Dp = 0.dp) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val controller = remember(context) { LanDiscoveryController(context) }
+    val discovery by controller.state.collectAsState()
+    val preferences = remember(context) { LanDiscoveryPreferences(context) }
+    var permissionGranted by remember { mutableStateOf(LanDiscoveryController.hasPermission(context)) }
+    var permissionDenied by remember { mutableStateOf(false) }
+    var manualRefresh by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permissionGranted = granted
+        permissionDenied = !granted
+        preferences.markPermissionAsked()
+        if (granted && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.start()
+    }
+
+    LaunchedEffect(Unit) {
+        when (LanDiscoveryPermission.decide(
+            Build.VERSION.SDK_INT,
+            LanDiscoveryController.hasPermission(context),
+            preferences.permissionAsked()
+        )) {
+            LanDiscoveryPermission.Decision.REQUEST -> {
+                preferences.markPermissionAsked()
+                permissionLauncher.launch(LanDiscoveryPermission.PERMISSION)
+            }
+            LanDiscoveryPermission.Decision.ALLOWED -> {
+                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.start()
+            }
+            LanDiscoveryPermission.Decision.DEGRADED -> permissionDenied = true
+        }
+    }
+
+    // 生命周期驱动发现：只在页面可见时扫描，避免后台耗电和持续组播。
+    DisposableEffect(lifecycleOwner, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    val granted = LanDiscoveryController.hasPermission(context)
+                    permissionGranted = granted
+                    permissionDenied = !granted && preferences.permissionAsked()
+                    if (granted) controller.start() else controller.stop()
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> controller.stop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && permissionGranted) {
+            controller.start()
+        }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            controller.stop()
+        }
+    }
+
+    // 自动重扫每 5 秒一次，不能每次都转下拉指示器；只有用户主动下拉才显示。
+    LaunchedEffect(manualRefresh, discovery.scanning) {
+        if (manualRefresh && !discovery.scanning) {
+            delay(500)
+            manualRefresh = false
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = manualRefresh,
+        onRefresh = {
+            if (permissionGranted) {
+                manualRefresh = true
+                controller.refresh()
+            } else {
+                // 已拒绝过权限时不再自动弹系统框，只保留扫码/粘贴降级路径。
+                permissionDenied = true
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 32.dp + bottomInset),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            RemoteHostSettingsContent(
+                model = model,
+                c = c,
+                discovery = discovery,
+                permissionDenied = permissionDenied || discovery.permissionDenied,
+                onRefresh = { if (permissionGranted) controller.refresh() }
+            )
+        }
+    }
+}
+
+/** 远程页主体；顺序固定为「当前主机状态 → 局域网发现的电脑 → 我的连接 → 其他方式」。 */
+@Composable
+private fun RemoteHostSettingsContent(
+    model: TanukiUiModel,
+    c: TanukiUiCallbacks,
+    discovery: LanDiscoveryState,
+    permissionDenied: Boolean,
+    onRefresh: () -> Unit
+) {
     var wizard by remember { mutableStateOf<WizardSession?>(null) }
     var confirmForget by remember { mutableStateOf(false) }
     var pendingConnect by remember { mutableStateOf<RemoteHostProfile?>(null) }
     var pendingDelete by remember { mutableStateOf<RemoteHostProfile?>(null) }
-    val status = model.remote
+    var pendingLanHost by remember { mutableStateOf<LanDiscoveredHost?>(null) }
     val saved = model.remoteHost
     val savedProfile = saved?.let { config ->
         model.remoteProfiles.firstOrNull {
@@ -106,19 +235,52 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("远程主机", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "用向导连接另一台电脑上的 DSH。每一步都会说明示例和校验原因；连接失败时会指出卡住的阶段和下一步。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+    fun openManualWizard() {
+        wizard = WizardSession()
+    }
 
+    fun openPairingWizard(link: String? = null) {
+        wizard = WizardSession().also { session ->
+            session.machine.selectMethod(RemoteConnectionMethod.PAIRING_LINK)
+            session.machine.next()
+            link?.let(session.machine::updateRelayLink)
+        }
+    }
+
+    var scanNotice by remember { mutableStateOf("") }
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val link = result.contents
+        if (link == null) {
+            scanNotice = "扫码已取消，可继续粘贴配对链接。"
+        } else if (RemoteWizardValidation.relayLink(link) != null) {
+            scanNotice = "这个二维码不是有效的电脑配对链接，请扫描电脑端终端显示的二维码。"
+        } else {
+            scanNotice = ""
+            openPairingWizard(link)
+        }
+    }
+    fun scanQr() {
+        runCatching {
+            scanLauncher.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("扫描电脑端的配对二维码").setBeepEnabled(false)
+                .setBarcodeImageEnabled(false).setOrientationLocked(false)
+                .addExtra("MISSING_CAMERA_PERMISSION_DIALOG_MESSAGE", "未开启相机权限，可以返回后粘贴配对链接。"))
+        }.onFailure { scanNotice = "暂时无法打开相机，可以粘贴配对链接。" }
+    }
+
+    fun openDiscoveredHost(host: LanDiscoveredHost) {
+        val session = WizardSession()
+        // 发现地址无法直接用于 SSH（例如带 zone 的 IPv6）时退回手动填写，避免死路。
+        wizard = if (session.machine.startFromLanDiscovery(host.address, host.sshPort, host.dshPort, host.name)) {
+            session
+        } else {
+            WizardSession()
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         StatusCard(
             model = model,
-            onNew = { wizard = WizardSession() },
             onEdit = { saved?.let { wizard = WizardSession(it, savedProfile?.name.orEmpty(), savedProfile?.id) } },
             onForget = { confirmForget = true },
             onConnectSaved = { saved?.let { c.connectRemoteHost(it) } },
@@ -134,6 +296,15 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
             HostKeyConfirmationCard(model.remotePendingFingerprint, model.remotePendingHost, c)
         }
 
+        LanDiscoveryCard(
+            state = discovery,
+            permissionDenied = permissionDenied,
+            onRefresh = onRefresh,
+            onSelect = { pendingLanHost = it },
+            onUseQr = ::scanQr,
+            onPaste = { openPairingWizard() }
+        )
+
         SavedProfilesCard(
             model = model,
             onConnect = { pendingConnect = it },
@@ -141,10 +312,47 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
             onDelete = { pendingDelete = it }
         )
 
-        Text(
-            "安全边界：始终校验 SSH 主机密钥与中继 TLS，不提供关闭校验的开关；密码、私钥、口令和 token 只加密保存在本机，不写日志、不导出。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        OtherWaysCard(
+            onUseQr = ::scanQr,
+            onPaste = { openPairingWizard() },
+            onUseManual = ::openManualWizard
+        )
+
+        if (scanNotice.isNotBlank()) Text(scanNotice, style = MaterialTheme.typography.bodySmall)
+        SafetyNote()
+    }
+
+    pendingLanHost?.let { host ->
+        AlertDialog(
+            onDismissRequest = { pendingLanHost = null },
+            title = { Text("连接「${host.name}」？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("${host.address}:${host.sshPort}", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        LanDiscoveryCopy.itemSubtitle(host),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "电脑标识：${host.hostId.take(8)}…（${host.fingerprint}）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "发现信息只用来找到电脑。继续后会进入现有向导；首次连接会显示 SSH 主机密钥指纹，需要你手动核对后再信任。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val selected = host
+                    pendingLanHost = null
+                    openDiscoveredHost(selected)
+                }) { Text("继续配对") }
+            },
+            dismissButton = { TextButton(onClick = { pendingLanHost = null }) { Text("取消") } }
         )
     }
 
@@ -208,10 +416,199 @@ fun RemoteHostSettings(model: TanukiUiModel, c: TanukiUiCallbacks) {
     }
 }
 
+/** 局域网发现区块：列表、权限降级、空态命令与扫码入口。 */
+@Composable
+private fun LanDiscoveryCard(
+    state: LanDiscoveryState,
+    permissionDenied: Boolean,
+    onRefresh: () -> Unit,
+    onSelect: (LanDiscoveredHost) -> Unit,
+    onUseQr: () -> Unit,
+    onPaste: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(LanDiscoveryCopy.SECTION_TITLE, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        when {
+                            permissionDenied -> "未开启权限"
+                            state.scanning -> "正在查找同一 Wi-Fi 下的电脑…"
+                            state.hosts.isEmpty() -> "未发现电脑"
+                            else -> "已发现 ${state.hosts.size} 台 · 每 5 秒自动刷新"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = onRefresh, enabled = !permissionDenied) { Text("刷新") }
+            }
+
+            when {
+                permissionDenied -> PermissionDegraded(onUseQr, onPaste)
+                state.hosts.isEmpty() -> LanEmptyState(onUseQr = onUseQr)
+                else -> state.hosts.forEach { host ->
+                    LanHostRow(host = host, onClick = { onSelect(host) })
+                }
+            }
+
+            if (state.error.isNotBlank()) {
+                Text(state.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionDegraded(onUseQr: () -> Unit, onPaste: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(LanDiscoveryCopy.PERMISSION_DENIED, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onUseQr) { Text("扫码连接") }
+            TextButton(onClick = onPaste) { Text("粘贴配对链接") }
+        }
+    }
+}
+
+@Composable
+private fun LanEmptyState(onUseQr: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(LanDiscoveryCopy.EMPTY_TITLE, style = MaterialTheme.typography.titleSmall)
+        Text(
+            LanDiscoveryCopy.EMPTY_DETAIL,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                SelectionContainer(Modifier.weight(1f)) {
+                    Text(
+                        LanDiscoveryCopy.HOST_COMMAND,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(LanDiscoveryCopy.HOST_COMMAND))
+                    copied = true
+                }) { Text(if (copied) LanDiscoveryCopy.COPIED else LanDiscoveryCopy.COPY_COMMAND) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = onUseQr) { Text(LanDiscoveryCopy.USE_QR) }
+        }
+    }
+}
+
+@Composable
+private fun LanHostRow(host: LanDiscoveredHost, onClick: () -> Unit) {
+    val clickable = host.online && host.connectable
+    Surface(
+        onClick = onClick,
+        enabled = clickable,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(LanDiscoveryCopy.itemTitle(host), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    LanDiscoveryCopy.itemSubtitle(host),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    if (host.connectable) "${host.address}:${host.sshPort}" else LanDiscoveryCopy.ADDRESS_PENDING,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TanukiIcon(TanukiGlyph.Chevron, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** 扫码/粘贴与手动填写；与局域网列表并列，作为网络不支持发现时的稳定入口。 */
+@Composable
+private fun OtherWaysCard(onUseQr: () -> Unit, onPaste: () -> Unit, onUseManual: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(LanDiscoveryCopy.OTHER_TITLE, style = MaterialTheme.typography.titleSmall)
+            Text(
+                LanDiscoveryCopy.OTHER_DETAIL,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(onClick = onUseQr, modifier = Modifier.fillMaxWidth()) {
+                Text("扫码连接")
+            }
+            OutlinedButton(onClick = onPaste, modifier = Modifier.fillMaxWidth()) { Text("粘贴配对链接") }
+            TextButton(onClick = onUseManual, modifier = Modifier.fillMaxWidth()) {
+                Text(LanDiscoveryCopy.USE_MANUAL)
+            }
+            Text(
+                "向导会自动读取剪贴板里的配对链接；读不到时仍可手动粘贴。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** 一句话安全说明，技术细节默认收起。 */
+@Composable
+private fun SafetyNote() {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(LanDiscoveryCopy.SAFETY, style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "收起详情" else "了解详情")
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "首次连接会显示 SSH 主机密钥的 SHA256 指纹，需要你手动核对；以后主机密钥变化时会直接拒绝连接。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "局域网发现只用 mDNS 广播电脑名、端口、电脑标识和协议版本，不包含配对 token；同一网络里的其他人也能看到这些信息。发现只用于找到电脑，不能替代配对和指纹确认。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "密码、私钥和口令使用 Android Keystore 加密保存，不写日志、不导出。中继只转发 SSH 密文，中继证书按配对链接中的指纹或系统信任证书校验，没有关闭校验的开关。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatusCard(
     model: TanukiUiModel,
-    onNew: () -> Unit,
     onEdit: () -> Unit,
     onForget: () -> Unit,
     onConnectSaved: () -> Unit,
@@ -227,7 +624,7 @@ private fun StatusCard(
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("当前状态", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("当前主机状态", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text(
                     phaseLabel(status.phase),
                     style = MaterialTheme.typography.labelLarge,
@@ -279,14 +676,11 @@ private fun StatusCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onNew, enabled = !model.remoteBusy) { Text("新增远程连接") }
-                if (saved != null) {
-                    OutlinedButton(
-                        onClick = onConnectSaved,
-                        enabled = !model.remoteBusy && !status.connected
-                    ) { Text("连接当前配置") }
-                }
+            if (saved != null) {
+                OutlinedButton(
+                    onClick = onConnectSaved,
+                    enabled = !model.remoteBusy && !status.connected
+                ) { Text("连接当前配置") }
             }
             if (status.connected || status.phase == RemotePhase.CONNECTING) {
                 TextButton(onClick = { onEdit() }) { Text("查看/编辑当前配置") }
@@ -1466,13 +1860,13 @@ private fun phaseLabel(phase: RemotePhase): String = when (phase) {
 
 private fun modeImpact(phase: RemotePhase): String = when (phase) {
     RemotePhase.LOCAL ->
-        "当前使用本地 DSH。连接远程会断开本地 DSH 页面并切换到远程页面；本地运行时继续在后台运行。"
+        "当前使用手机上的 DSH。选择下面的电脑即可开始连接。"
     RemotePhase.CONNECTING ->
-        "正在切换到远程 DSH。切换期间页面可能短暂不可用，本地 DSH 页面会断开。"
+        "正在连接电脑，请稍候。"
     RemotePhase.REMOTE ->
-        "当前使用远程 DSH。断开或切换会关闭 SSH 隧道并刷新管理页，本地 DSH 页面会重新接管。"
+        "当前使用电脑上的 DSH。断开后会回到手机。"
     RemotePhase.FALLBACK ->
-        "远程连接未建立，已回退本地 DSH。检查下方原因后可以直接重试，或重新运行向导。"
+        "未能连接电脑，已回到手机。可以按下方提示重试。"
 }
 
 /**

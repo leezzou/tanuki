@@ -2,6 +2,18 @@
 
 Tanuki 验证目标：`com.tanuki.modern.workspacecheck`，命名空间 `com.tanuki`，ARM64、minSdk26/targetSdk34。debug/release 构建与证书、宿主与设备执行必须分别记录；源码中存在测试不等于已运行。
 
+## 手机局域网发现与远程页验证（2026-11-11，android_agent-72，非设备）
+
+- 范围：基于 `origin/main=8ba7b4b3ecdc82c17a200dca77ef9420924d76b1`，手机 NSD 发现、TXT 严格解析、串行回调/页面代次、去重与在线排序、附近设备权限单次申请、向导预填、实际相机扫码与粘贴、页面结构与空态、隐藏本页无关安装进度。分支 `ao/lan-discovery/mobile`，不合并、不发布。
+- 本轮实际执行（macOS ARM64、JDK17、SDK36，workspacecheck）：
+  - 完整 `testModernDebugUnitTest`：**1180 tests / 119 结果文件 / 0 failures / 0 errors / 0 skipped**。
+  - 其中 `LanDiscoveryTest` **17 项**、`RemoteWizardTest` **49 项**、`OperationProgressTest` **7 项**全部通过。本轮新增 17 项 LAN 与 3 项向导回归；包含字段缺失/非法 UTF-8/超长/未知协议、重复与稳定排序、失效/服务丢失、退出重入与迟到回调、权限拒绝降级、空态入口、不可直连地址、Unicode 边界、预填不继承旧凭据/编辑归属。
+  - `assembleModernDebug`、`compileModernDebugAndroidTestKotlin`、完整 JVM、`lintModernDebug`、运行依赖清单同一 Gradle 流程通过（16m47s）；lint **0 errors / 110 warnings / 1 hint**，发现控制器新增一项 `UseKtx` 风格建议。清单为 **93 个运行归档**（本轮新增 2 个扫码依赖），必要许可已收集。
+  - `python3 scripts/remote-relay/test_mdns.py`：**20 项通过**；`check-handoff.py --pr --record docs/handoffs/20261111-1300-lan-discovery-ui.md` 与 `check-publication.py --git` 已通过，公开扫描 **0 findings**，提交前再核对暂存内容。
+- 失败保留：首次定向 70 项中 1 项失败（新服务丢失回归与已先编译的旧产品类不一致）。之后冻结产品/测试代码，重新编译并完整执行，以上 1180 项为同一份冻结代码结果；不把首次失败计为通过。
+- 限制：`ver=1` 是发现协议版本，现有广播没有平台或 DSH 版本，页面明确显示“平台未提供 · 协议 v1”。发现摘要不作为认证指纹，SSH 信任仍来自现有公钥核对流程。
+- 未执行：Android 仪器执行、模拟器/真机截图、真实 NSD/路由器组播或隔离、附近设备/相机权限交互与扫码、下拉手势、深色/大字号、真实 sshd/中继/DSH、弱网与模型/账号。构建使用 `-x buildNativeRuntime`，仅为宿主门禁，不能作为可安装设备验收物；未安装、未合并、未发布。
+
 ## 设计令牌页面接入验证（2026-11-11，android_agent-64，非设备）
 
 - 范围：把 PR #59 的设计令牌与基础组件接入根主题、文件页（`WorkspaceFilesPage`）、会话管理页（`DshSessionManagerPage`）与设置段（`TanukiUi`）；新增页面视觉映射的 JVM 回归。起点 `origin/main=62e4c30b`，分支 `ao/token-ui-integration/root`，PR [#70](https://github.com/leezzou/tanuki/pull/70)，不合并、不发布。聊天页与目标/待办停靠条未改源码。
