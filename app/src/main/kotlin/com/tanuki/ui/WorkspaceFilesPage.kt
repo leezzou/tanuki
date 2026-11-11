@@ -95,7 +95,8 @@ private data class PhoneTransfer(
 @Composable
 internal fun WorkspaceFilesPage(
     manager: WorkspaceFileManager, onImport: () -> Unit, onExport: () -> Unit,
-    modifier: Modifier = Modifier, runtimeRunning: Boolean = false, onStop: () -> Unit = {}, bottomInset: Dp = 0.dp,
+    modifier: Modifier = Modifier, runtimeRunning: Boolean = false, environmentBusy: Boolean = false,
+    onStop: () -> Unit = {}, bottomInset: Dp = 0.dp,
     onRequestStoragePermission: () -> Unit = {}, phoneStorageGranted: Boolean = false,
     onExportFile: (WorkspaceFileManager, String, String) -> Unit = { _, _, _ -> },
     onOpenExternal: () -> Unit = {},
@@ -145,6 +146,7 @@ internal fun WorkspaceFilesPage(
     var openedEntry by rememberSaveable(stateSaver = WorkspaceEntrySaver) {
         mutableStateOf<WorkspaceFileManager.Entry?>(null)
     }
+    var viewerActionBarHeight by remember { mutableStateOf(FileViewerLayout.ActionBarHeight) }
     var readerView by rememberSaveable(stateSaver = ReaderViewStateSaver) {
         mutableStateOf(ReaderViewState())
     }
@@ -179,8 +181,8 @@ internal fun WorkspaceFilesPage(
     val clipboard = LocalClipboardManager.current
     val workspaceFiles = remember(manager) { manager.inLocation(FileLocation.WORKSPACE) }
     // chip 的只读/可写是“当前是否可操作”，DSH 运行或手机写入撤销都会立即反映。
-    val access = remember(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable) {
-        FileAccessPresentation.state(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable)
+    val access = remember(location, runtimeRunning, environmentBusy, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable) {
+        FileAccessPresentation.state(location, runtimeRunning, phoneStorageGranted, phoneWriteAllowed, phoneWritingAvailable, environmentBusy)
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val searchFocus = remember { FocusRequester() }
@@ -212,6 +214,7 @@ internal fun WorkspaceFilesPage(
                 searching = false; query = ""; location = FileLocation.WORKSPACE
                 pendingOpenProject = target
             }
+            if (feedback == it) feedback = null
         }
     }
     LaunchedEffect(outcomeVersion) {
@@ -244,7 +247,11 @@ internal fun WorkspaceFilesPage(
         val loaded = files.list(path)
         directory = path; entries = loaded; selected = emptySet(); query = ""
     }
+    fun requestImport() {
+        if (environmentBusy) { feedbackTarget = null; error = null; feedback = FILE_INSTALL_WRITE_NOTICE } else onImport()
+    }
     fun begin(kind: String, targets: List<WorkspaceFileManager.Entry> = emptyList()) {
+        if (environmentBusy) { feedbackTarget = null; error = null; feedback = FILE_INSTALL_WRITE_NOTICE; menu = false; return }
         if (runtimeRunning) { error = "请先停止 DSH，再修改文件。浏览、导入和导出不受影响。"; menu = false; return }
         actionEntries = targets; name = targets.singleOrNull()?.name.orEmpty(); content = ""; draftOriginal = ""
         error = null; action = kind; menu = false
@@ -294,6 +301,10 @@ internal fun WorkspaceFilesPage(
     }
     // 先预检目标目录的同名冲突，用户逐项选择后再启动传输；取消或失败都不会产生半成品。
     fun startPhoneTransfer(draft: PhoneTransfer, scanConflicts: Boolean) {
+        if (environmentBusy) {
+            phoneTransfer = null; feedbackTarget = null; error = null; feedback = FILE_INSTALL_WRITE_NOTICE
+            return
+        }
         if (busy) return
         busy = true; error = null; feedback = null; feedbackTarget = null
         scope.launch {
@@ -427,16 +438,17 @@ internal fun WorkspaceFilesPage(
         Box(modifier.fillMaxSize()) {
             WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
                 actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                onActionBarHeightChanged = { viewerActionBarHeight = it },
                 canEdit = false,
                 previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
                 onClose = onCloseExternal,
                 onExport = { onExportExternal(document) },
                 onEdit = {},
-                onCopyToWorkspace = { onCopyExternalToWorkspace(document) },
+                onCopyToWorkspace = { if (environmentBusy) error = FILE_INSTALL_WRITE_NOTICE else onCopyExternalToWorkspace(document) },
                 onReselect = onReselectExternal)
             // 查看器和列表共用同一个传输浮层；查看器操作栏可见时胶囊需额外上移避让。
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
-                viewerActionBarVisible = !fullscreen, snackbarHostState = snackbarHostState)
+                viewerActionBarVisible = !fullscreen, viewerActionBarHeight = viewerActionBarHeight, snackbarHostState = snackbarHostState)
         }
         return
     }
@@ -445,6 +457,7 @@ internal fun WorkspaceFilesPage(
         Box(modifier.fillMaxSize()) {
             WorkspaceFileViewer(document = document, modifier = Modifier.fillMaxSize(), bottomInset = bottomInset,
                 actionError = error, fullscreen = fullscreen, onFullscreen = onFullscreen,
+                onActionBarHeightChanged = { viewerActionBarHeight = it },
                 canEdit = location.writable && !runtimeRunning && !entry.linked,
                 previewMaxDimension = previewMaxDimension, previewMaxPixels = previewMaxPixels,
                 initialReaderState = readerView,
@@ -458,7 +471,7 @@ internal fun WorkspaceFilesPage(
                 },
                 onClose = { closeReader() },
                 onExport = { onExportFile(files, entry.path, entry.name) },
-                onEdit = { runTask {
+                onEdit = { if (environmentBusy) error = FILE_INSTALL_WRITE_NOTICE else runTask {
                     val editable = files.preview(entry.path)
                     check(editable.text != null) { "此文件不能直接编辑，请使用其他应用打开。" }
                     begin("编辑文本", listOf(entry)); content = editable.text
@@ -466,7 +479,7 @@ internal fun WorkspaceFilesPage(
                 } })
             // 编辑动作会离开查看器；传输浮层保持在当前页面，并按操作栏高度避让。
             FileTransferOverlay(transfers = transfers, bottomInset = bottomInset, onCancelTransfer = onCancelTransfer,
-                viewerActionBarVisible = !fullscreen, snackbarHostState = snackbarHostState)
+                viewerActionBarVisible = !fullscreen, viewerActionBarHeight = viewerActionBarHeight, snackbarHostState = snackbarHostState)
         }
         return
     }
@@ -505,7 +518,7 @@ internal fun WorkspaceFilesPage(
                         }
                     }
                     TanukiPillButton(
-                        text = "＋ 导入", onClick = onImport, enabled = !busy,
+                        text = "＋ 导入", onClick = ::requestImport, enabled = !busy,
                         tone = TanukiPillButtonTone.Filled,
                         modifier = Modifier.padding(horizontal = 4.dp).heightIn(min = 48.dp),
                     )
@@ -536,7 +549,7 @@ internal fun WorkspaceFilesPage(
                                     Text("导入为新项目")
                                     Text("会创建一个新文件夹，不覆盖现有项目", style = MaterialTheme.typography.bodySmall)
                                 }
-                            }, onClick = { menu = false; onImport() })
+                            }, onClick = { menu = false; requestImport() })
                             DropdownMenuItem(text = { Text("复制当前目录路径") },
                                 onClick = { menu = false; copyPath(directory) })
                         }
@@ -749,7 +762,7 @@ internal fun WorkspaceFilesPage(
                                         onReload = { navigate(directory) },
                                         onShowHidden = { hidden = true },
                                         onClearQuery = { query = "" },
-                                        onImport = onImport,
+                                        onImport = ::requestImport,
                                         onCreateFolder = { begin("新建文件夹") },
                                         canCreateFolder = !runtimeRunning,
                                         transfers = transfers,
@@ -1028,48 +1041,40 @@ private fun TransferStatusLine(phase: String, startedAt: Long) {
 
 /** 传输浮层独立订阅进度；列表页只接收稳定布局，不参与每个进度帧的重组。 */
 @Composable
-private fun FileTransferOverlay(
+internal fun FileTransferOverlay(
     transfers: StateFlow<List<FileTransferProgress>>,
     bottomInset: Dp,
     onCancelTransfer: (Long) -> Unit,
     snackbarHostState: SnackbarHostState? = null,
     viewerActionBarVisible: Boolean = false,
+    viewerActionBarHeight: Dp = FileViewerLayout.ActionBarHeight,
 ) {
     val items by transfers.collectAsState()
     val summary = FileTransferPresentation.summary(items)
+    val runtimeOverlay = LocalFileOperationOverlay.current
+    val hasProgress = runtimeOverlay != null || summary != null
+    val progressBottom = FileViewerLayout.transferPillBottomPadding(bottomInset, viewerActionBarVisible, viewerActionBarHeight)
     var sheet by remember { mutableStateOf(false) }
-    LaunchedEffect(items.isEmpty()) { if (items.isEmpty()) sheet = false }
-    Box(Modifier.fillMaxSize()) {
-        // 查看器与列表共用同一个提示宿主，导入完成后都可直接打开目标目录。
-        snackbarHostState?.let { host ->
-            SnackbarHost(
-                host,
-                Modifier.align(Alignment.BottomCenter).padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = bottomInset + if (summary != null) 76.dp else 16.dp,
-                ),
-            )
-        }
-        summary?.let {
-            TransferPill(
-                summary = it,
-                onOpen = { sheet = true },
+    LaunchedEffect(items.isEmpty(), runtimeOverlay != null) {
+        if (items.isEmpty() || runtimeOverlay != null) sheet = false
+    }
+    Box(Modifier.fillMaxSize().imePadding()) {
+        // 一次只放一个入口；运行时抽屉也包含文件任务，保留同一个导入/复制结果提示宿主。
+        if (runtimeOverlay != null) {
+            runtimeOverlay(Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).padding(bottom = progressBottom))
+        } else summary?.let {
+            TransferPill(summary = it, onOpen = { sheet = true },
                 onCancel = { items.forEach { item -> onCancelTransfer(item.id) } },
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(
-                        end = 16.dp,
-                        bottom = FileViewerLayout.transferPillBottomPadding(bottomInset, viewerActionBarVisible),
-                    ),
-            )
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = progressBottom))
+        }
+        snackbarHostState?.let { host ->
+            SnackbarHost(host, Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp,
+                bottom = if (hasProgress) progressBottom + FileViewerLayout.TransferPillHeight + FileViewerLayout.FloatingGap
+                    else bottomInset + 16.dp))
         }
     }
-    if (sheet && items.isNotEmpty()) {
-        TransferSheet(
-            transfers = items,
-            onDismiss = { sheet = false },
-            onCancel = onCancelTransfer,
-        )
+    if (sheet && items.isNotEmpty() && runtimeOverlay == null) {
+        TransferSheet(transfers = items, onDismiss = { sheet = false }, onCancel = onCancelTransfer)
     }
 }
 

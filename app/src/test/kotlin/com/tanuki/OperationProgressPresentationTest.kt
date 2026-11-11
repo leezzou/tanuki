@@ -157,6 +157,15 @@ class OperationProgressPresentationTest {
         assertTrue(text.canRetry)
     }
 
+    @Test fun `组件版本改变后的失败详情只返回组件入口`() {
+        val failed = Snapshot(failedOperation = com.tanuki.runtime.FailedOperation(10, "解压 Ubuntu", "测试失败", 3_000,
+            retryAvailable = false))
+        val text = operationProgress(failed, now, now)!!
+        assertEquals(OperationStage.EXTRACT, text.stage)
+        assertEquals("OPEN_COMPONENTS", text.retryCommand)
+        assertTrue(text.detail.contains("组件版本已更改"))
+    }
+
     @Test fun `缺少阶段速度时不使用整次操作耗时外推剩余时间`() {
         val preparing = Snapshot(environment = EnvironmentState.INSTALLING, stage = "安装依赖",
             phasePercent = 25, timing = OperationTiming(now - 900_000, now))

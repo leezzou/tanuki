@@ -66,8 +66,9 @@ internal object FileViewerLayout {
      * @param bottomInset 系统导航栏等底部安全 inset
      * @param actionBarVisible 阅读页底部操作栏是否可见；列表页或全屏阅读时为 false
      */
-    fun transferPillBottomPadding(bottomInset: Dp, actionBarVisible: Boolean): Dp =
-        bottomInset + FloatingGap + if (actionBarVisible) ActionBarHeight else 0.dp
+    fun transferPillBottomPadding(bottomInset: Dp, actionBarVisible: Boolean,
+        measuredActionBarHeight: Dp = ActionBarHeight): Dp =
+        bottomInset + FloatingGap + if (actionBarVisible) measuredActionBarHeight.coerceAtLeast(ActionBarHeight) else 0.dp
 }
 
 /** 横屏高度预算的纯数据结果，供界面与 JVM 回归共用。 */

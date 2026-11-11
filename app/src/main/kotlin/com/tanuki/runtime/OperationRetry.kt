@@ -7,6 +7,7 @@ data class FailedOperation(
     val reason: String,
     val elapsedMillis: Long,
     val cancelled: Boolean = false,
+    val retryAvailable: Boolean = true,
 )
 
 /** 组件安装必须重新走入口恢复失败任务的版本；其他操作继续重放原任务。 */
@@ -60,6 +61,12 @@ internal class OperationRetry(private val clock: () -> Long = { System.nanoTime(
             failed = false
             action = null
         }
+    }
+
+    @Synchronized fun invalidate() {
+        current = ++sequence
+        failed = false
+        action = null
     }
 
     fun retry(id: Long): Boolean {

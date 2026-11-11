@@ -67,7 +67,7 @@ class WorkspaceFileManager(
         /** 分类委托给集中的 [FileTypeCatalog]：扩展名优先于 MIME，避免 `.ts` 等冲突被当成媒体。 */
         internal fun classifyFileKind(name: String, mime: String?): FileKind = FileTypeCatalog.kind(name, mime)
     }
-    private val lock = Mutex()
+    private val access = WorkspaceIoGate(mutation, requireIdle)
     private val noFollow = LinkOption.NOFOLLOW_LINKS
     private val internalName = Regex("^\\.(?:proot\\.)?l2s\\..*")
     private fun reserved(name: String) = internalName.matches(name) || name.startsWith(".workspace-tmp-")
@@ -146,15 +146,10 @@ class WorkspaceFileManager(
         throw IOException("不支持此文件类型，或文件已不存在")
     }
     private suspend fun <T> io(growing: Boolean = false, writing: Boolean = true, block: suspend () -> T): T = withContext(Dispatchers.IO) {
-        mutation.withLock {
-            if (writing) {
-                check(location.writable) { "此位置只读；请在工作区编辑项目文件" }
-                requireIdle()
-            }
-            lock.withLock {
-                if (growing) storage.requireCanStart()
-                block()
-            }
+        if (writing) check(location.writable) { "此位置只读；请在工作区编辑项目文件" }
+        access.withAccess(writing) {
+            if (growing) storage.requireCanStart()
+            block()
         }
     }
 
@@ -451,7 +446,7 @@ class WorkspaceFileManager(
     }
 
     suspend fun workspaceConflicts(sources: List<String>, targetDirectory: String): List<WorkspaceConflict> = withContext(Dispatchers.IO) {
-        mutation.withLock {
+        access.withAccess(writing = false) {
             val target = inLocation(FileLocation.WORKSPACE).directory(targetDirectory)
             WorkspaceTransfer.conflicts(sources.map(::phoneSource), target)
         }
@@ -466,6 +461,7 @@ class WorkspaceFileManager(
         onPhase: (String) -> Unit = {},
         onProgress: (Long, Long) -> Unit = { _, _ -> },
     ): WorkspaceTransferReport = withContext(Dispatchers.IO) {
+        requireIdle()
         mutation.withLock {
             requireIdle()
             if (mode == WorkspaceTransferMode.MOVE) requirePhoneWrite()
