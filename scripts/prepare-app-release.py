@@ -206,6 +206,8 @@ def prepare(options, tested_apk, pinned):
     prior = prior_entries(directory, options.version, options.version_code, json.loads(manifest.read_text())) if manifest.exists() else []
     source_tree = pinned_source(options.source_commit) if options.source_commit else None
     if options.merge_base:
+        if options.channel != "workspacecheck":
+            raise ValueError("自动合并交接模式仅适用于 workspacecheck，production 仍需严格发布检查")
         if not options.source_commit or not re.fullmatch(r"[0-9a-f]{40}", options.merge_base):
             raise ValueError("自动合并模式必须绑定提交和上一 first-parent")
         parent = run(["git", "rev-parse", "HEAD^1"], "核对合并父提交", capture=True).strip()

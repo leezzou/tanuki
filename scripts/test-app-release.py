@@ -182,6 +182,14 @@ class AppReleaseTests(unittest.TestCase):
                 release.main()
             run.assert_not_called()
 
+    def test_production_cannot_use_automatic_merge_handoff_exception(self):
+        options = mock.Mock(version="0.1.1", version_code=2, channel="production", source_commit="c" * 40, merge_base="a" * 40)
+        with mock.patch.object(release, "ROOT", self.apk.parent), mock.patch.object(release, "pinned_source", return_value="b" * 40), \
+                mock.patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "production 仍需严格"):
+                release.prepare(options, None, None)
+            run.assert_not_called()
+
     def test_verified_mode_still_rejects_wrong_actual_identity(self):
         with self.assertRaises(ValueError):
             self.run_preparation(metadata=self.metadata | {"actual_package": "com.tanuki.modern"})

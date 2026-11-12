@@ -37,7 +37,7 @@
 |---|---|---|
 | git status、rev-parse、ls-remote；gh releases列表、v0.1.14/app-update.json与git ref查询 | 通过 | 只读公开身份/六附件名称大小摘要；tag/main完整SHA如上，code19已实核 |
 | python3 scripts/test-merge-release.py | 30项通过，约2.1秒 | 整数9→10/99→100→101；双进程互斥；多合并/失败重启不漏；同候选不加号；源SHA/tree和命令参数；部分上传/冲突/已公开缺件拒绝/丢失publish响应；无自动commit/push；初始化/只读plan/暂停恢复；共享slot优先与停止；launchd仅合成安装/启停；门禁回执及provider/CI拒绝 |
-| python3 scripts/test-app-release.py | 22项通过，约0.3秒 | 原18项保留并补来源/自动合并交接例外/缺SHA拒绝/SDK和ARM64原生ELF条件；APK及签名工具均合成，不是真实APK验证 |
+| python3 scripts/test-app-release.py | 23项通过，约0.3秒 | 原18项保留并补来源/自动合并交接例外/缺SHA拒绝/production拒绝自动例外/SDK和ARM64原生ELF条件；APK及签名工具均合成，不是真实APK验证 |
 | python3 scripts/test-development-gates.py | 28项通过 | 未修改既有门禁逻辑；无真实PR/设备调用 |
 | python3 scripts/test-check-handoff.py | 11项通过 | PR容忍共享状态落后、集成/严格模式与来源篡改边界 |
 | python3 scripts/test-agent-workflow.py | 19项通过，57秒 | 合成ADB/Gradle/环境；既有两项device-lock测试输出文件句柄ResourceWarning，退出0；不是Android测试 |
@@ -45,6 +45,8 @@
 | git diff --check、check-handoff.py --pr --record 本记录、check-publication.py --git | 通过，公开扫描0 findings | 最终提交前复核实际索引及源码候选归档；不运行共享印章写入模式 |
 
 失败保留：扩展队列套件一次23项中有1项服务准备测试失败，原因是macOS `/var`规范化为`/private/var`，测试预期未resolve；修正测试临时根目录规范化后最终30项通过。实现检查同时修正首次clone的no-checkout状态拒绝、暂停命令与writer互锁、只bootstrap自定义plist不能跨登录恢复、固定候选拷贝未完成就记inventory等问题，并补相应回归。
+
+PR #111创建后的最终渠道边界复核发现自动交接例外还应在代码显式限制workspacecheck；已claim并核对干净本地/provider完整head一致后，追加最小拒绝条件及一项回归（封装23项通过）。production继续要求原严格发布检查，未改变正式构建/签名流程；该追加属于渠道边界修复，不是版本文档元数据回填。
 
 实际核对AO字段：本实现会话harness为deepseek-harness，项目独立reviewer为codex，模型名称不等于harness；先前怀疑同harness门禁冲突经实核排除，未擅改门禁或AO配置。向集成方发送即时steer曾返回CHAT_STEER_UNSUPPORTED，普通消息已发送；未因消息延迟启动重构建。
 
