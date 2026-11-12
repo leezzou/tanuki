@@ -142,7 +142,7 @@ class TanukiDesignTokensTest {
     }
 
     @Test
-    fun `纯白灰与天蓝浅深方案取值固定`() {
+    fun `纯白灰与靛蓝浅深方案取值固定`() {
         val light = TanukiColorTokens.Light
         val dark = TanukiColorTokens.Dark
         assertEquals(0xFFFFFFFFL, light.canvas)
@@ -153,8 +153,8 @@ class TanukiDesignTokensTest {
         assertEquals(0xFF5A6068L, light.textSecondary)
         assertEquals(0xFF6B7280L, light.textTertiary)
         assertEquals(0xFF8C929AL, light.textDisabled)
-        assertEquals(0xFF0EA5E9L, light.accent)
-        assertEquals(0xFFE6F4FEL, light.primaryContainer)
+        assertEquals(0xFF4D6BFEL, light.accent)
+        assertEquals(0xFFEEF0FFL, light.primaryContainer)
         assertEquals(0xFF0E1012L, dark.canvas)
         assertEquals(0xFF16181BL, dark.surfaceMuted)
         assertEquals(0xFF1A1D21L, dark.surface)
@@ -163,21 +163,21 @@ class TanukiDesignTokensTest {
         assertEquals(0xFFA8AFB8L, dark.textSecondary)
         assertEquals(0xFF9AA1AAL, dark.textTertiary)
         assertEquals(0xFF6F767FL, dark.textDisabled)
-        assertEquals(0xFF38BDF8L, dark.accent)
-        assertEquals(0xFF0B2B3AL, dark.primaryContainer)
-        assertEquals(0xFF7DD3FCL, dark.primary)
+        assertEquals(0xFF899BFFL, dark.accent)
+        assertEquals(0xFF232B50L, dark.primaryContainer)
+        assertEquals(0xFFA6B3FFL, dark.primary)
         assertNotEquals(light.success, dark.success)
         assertNotEquals(light.warning, dark.warning)
         assertNotEquals(light.danger, dark.danger)
     }
 
     @Test
-    fun `装饰天蓝不能当白字按钮或浅色正文`() {
+    fun `强调蓝不直接用作白字按钮或浅色正文`() {
         for (tokens in listOf(TanukiColorTokens.Light, TanukiColorTokens.Dark)) {
-            assertTrue(TanukiColorMath.contrastRatio(tokens.onPrimary, tokens.accent) < 3.0)
+            assertTrue(TanukiColorMath.contrastRatio(tokens.onPrimary, tokens.accent) < 4.5)
             assertNotEquals(tokens.primaryFill, tokens.accent)
             assertNotEquals(tokens.primary, tokens.accent)
-            assertEquals(0xFF0369A1L, tokens.primaryFill)
+            assertEquals(0xFF3D56D6L, tokens.primaryFill)
             assertEquals(0xFFFFFFFFL, tokens.onPrimary)
             assertNotEquals(tokens.textTertiary, tokens.textDisabled)
             assertTrue(TanukiContrastAudit.checks(tokens).none { it.foreground == tokens.textDisabled })
@@ -214,6 +214,38 @@ class TanukiDesignTokensTest {
                 assertTrue(TanukiColorMath.contrastRatio(tokens.descriptionOn(bg), bg) >= 4.5)
                 assertTrue(TanukiColorMath.contrastRatio(tokens.accentIcon, bg) >= 3.0)
             }
+        }
+    }
+
+    @Test
+    fun `主按钮按下加深且停用不借用按下色`() {
+        for (tokens in listOf(TanukiColorTokens.Light, TanukiColorTokens.Dark)) {
+            val normal = tanukiPillButtonColors(tokens, TanukiPillButtonTone.Filled, true)
+            val pressed = tanukiPillButtonColors(tokens, TanukiPillButtonTone.Filled, true, pressed = true)
+            val disabled = tanukiPillButtonColors(tokens, TanukiPillButtonTone.Filled, false, pressed = true)
+            assertEquals(tokens.primaryPressed, pressed.background)
+            assertTrue(TanukiColorMath.fromArgb(pressed.background).relativeLuminance() <
+                TanukiColorMath.fromArgb(normal.background).relativeLuminance())
+            assertTrue(TanukiColorMath.contrastRatio(pressed.content, pressed.background) >= 4.5)
+            assertEquals(tokens.surfaceMuted, disabled.background)
+            assertEquals(tokens.textDisabled, disabled.content)
+            for (tone in TanukiPillButtonTone.entries.filter { it != TanukiPillButtonTone.Filled }) {
+                assertEquals(tanukiPillButtonColors(tokens, tone, true),
+                    tanukiPillButtonColors(tokens, tone, true, pressed = true))
+            }
+        }
+    }
+
+    @Test
+    fun `强调进度与焦点在全部应用表面满足非文字对比度`() {
+        for (tokens in listOf(TanukiColorTokens.Light, TanukiColorTokens.Dark)) {
+            for (background in listOf(tokens.canvas, tokens.surface, tokens.surfaceMuted, tokens.primaryContainer)) {
+                assertTrue(TanukiColorMath.contrastRatio(tokens.accent, background) >= 3.0)
+                assertTrue(TanukiColorMath.contrastRatio(tokens.primary, background) >= 4.5)
+            }
+            assertNotEquals(tokens.accent, tokens.success)
+            assertNotEquals(tokens.accent, tokens.warning)
+            assertNotEquals(tokens.accent, tokens.danger)
         }
     }
 
@@ -341,7 +373,7 @@ class TanukiDesignTokensTest {
     fun `对比度审计报告可读且覆盖两种主题`() {
         for (tokens in listOf(TanukiColorTokens.Light, TanukiColorTokens.Dark)) {
             val checks = TanukiContrastAudit.checks(tokens)
-            assertEquals("每个主题应有 45 项用途审计", 45, checks.size)
+            assertEquals("每个主题应有 55 项用途审计", 55, checks.size)
             println("===== ${if (tokens.isDark) "深色" else "浅色"}主题对比度 =====")
             for (check in checks) {
                 println(

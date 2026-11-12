@@ -2,12 +2,15 @@ package com.tanuki.ui.design
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -31,9 +34,18 @@ internal fun TanukiButton(
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     interactionSource: MutableInteractionSource? = null,
     content: @Composable RowScope.() -> Unit,
-) = androidx.compose.material3.Button(
-    onClick, modifier, enabled, shape, colors, elevation, border, contentPadding, interactionSource, content,
-)
+) {
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val tokens = TanukiDesign.tokens.colors
+    // 仅主操作使用按下色；调用方显式的危险/其他语义配色保持其含义。
+    val displayedColors = if (enabled && pressed && colors.containerColor == Color(tokens.primaryFill) &&
+        colors.contentColor == Color(tokens.onPrimary)
+    ) colors.copy(containerColor = Color(tokens.primaryPressed)) else colors
+    androidx.compose.material3.Button(
+        onClick, modifier, enabled, shape, displayedColors, elevation, border, contentPadding, interaction, content,
+    )
+}
 
 /** 次按钮使用中性表面与灰描边，避免普通次操作铺满强调色。 */
 @Composable

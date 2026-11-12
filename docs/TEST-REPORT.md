@@ -16,6 +16,14 @@
 - 首批原head公开检查：`python3 scripts/package-source.py` 与 `python3 scripts/check-publication.py --git --archive artifacts/sources/Tanuki-0.1.7-source.zip` 检查候选862公开文件、0 findings；普通PR交接与diff检查通过。按脚本默认名生成的ZIP仅为内部检查候选，不是发布版本或交付附件；文档定稿后刷新并核对外部SHA。唯一交接：[安装启动](handoffs/20261111-1601-install-startup.md)。
 - 未执行：Android仪器、真实安装/启动/停止竞态、设备冷/热启动耗时、真实模型与账号。历史QA-03首次180秒后重试成功的现场原因仍未证明；本轮不以Host结果宣称已修该现场问题。
 
+## 全局靛蓝主题（2026-11-12，android_agent-101，Host）
+
+- 起始远端main与HEAD实核为 `3c56167b94efeff47a20bd609b389708ba080ce5`，独立分支 `ao/blue-theme/indigo`。白灰、正文和成功/警告/危险角色保持基线，仅替换每主题10个蓝色角色；同步系统颜色资源、按钮按下态、导航焦点和反色链接。
+- 在独立worktree以 `source scripts/ao-worktree-env.sh` 准备JDK17/SDK36，串行执行 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest --tests 'com.tanuki.ui.design.TanukiDesignTokensTest' --tests 'com.tanuki.ui.design.TanukiPlatformThemeTest' --tests 'com.tanuki.TanukiPageVisualsTest' --tests 'com.tanuki.TanukiContrastTest' --tests 'com.tanuki.DshMarkdownTest' :app:lintModernDebug`。
+- 产品/Android测试/JVM源码compile通过；JUnit XML实核 **62项/5类，0 failures/errors/skipped**（25/5/12/4/16）。浅深共110项用途审计通过，正文配对最低4.52:1，非文字配对最低3.82:1；白字主按钮6.00:1，按下态7.61:1。实际Material配对、资源一致性及按下/停用态均有回归。另在Host以线性sRGB矩阵近似模拟protan/deutan/tritan三类色觉条件，已查表面上的链接最低4.56:1、强调最低3.31:1；状态组件保留文字标签/朗读名称。
+- 完整命令 BUILD SUCCESSFUL（19m20s），退出0，47个任务实际执行；lint XML实核 **0 errors / 117 warnings / 2 hints**，本轮改动文件无lint告警。源码复扫无旧天蓝主题色值；DOCX/XLSX格式颜色不改。公开候选扫描0 findings；单一交接见[本轮记录](handoffs/20261112-0015-indigo-theme.md)。
+- 未执行完整本地JVM、Android仪器、设备安装/像素验收、TalkBack/个体色觉设备验收或真实运行链路；不生成设备/发布APK，不将跳过原生构建的Host结果当Android运行通过。后续独立QA须绑定最终SHA，对照深浅按钮/链接/选中/焦点/进度和系统首帧。API Key/真实模型/真机暂停项保留；不合并、tag或发布。
+
 ## 0.1.14 / code19 最终 REBUILD（16c07591b）
 
 - 收到新的RBEBUILD后，实际fetch最终main `16c07591b7ba170a77fdc0720b201a77e5477db3`，在原发布分支上git merge --no-commit origin/main；唯一冲突为OperationProgressLayoutTest，完整保留main的加强版本，并按字节确认一致。旧0910cc1候选由本轮替代，PR #105继续更新；默认版本0.1.14/code19。

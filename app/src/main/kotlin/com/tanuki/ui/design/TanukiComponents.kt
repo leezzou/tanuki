@@ -80,10 +80,10 @@ internal fun TanukiPillButton(
     leading: (@Composable () -> Unit)? = null,
 ) {
     val tokens = TanukiDesign.tokens
-    val colors = tanukiPillButtonColors(tokens.colors, tone, enabled)
     val interaction = remember { MutableInteractionSource() }
     val active = enabled && !loading
     val pressed by interaction.collectIsPressedAsState()
+    val colors = tanukiPillButtonColors(tokens.colors, tone, enabled, pressed && active)
     val motion = TanukiDesign.motion
     val scale by animateFloatAsState(
         targetValue = motion.pressScale(pressed && active),
@@ -155,6 +155,7 @@ internal fun tanukiPillButtonColors(
     colors: TanukiColorTokens,
     tone: TanukiPillButtonTone,
     enabled: Boolean,
+    pressed: Boolean = false,
 ): TanukiPillButtonColors {
     if (!enabled) {
         return TanukiPillButtonColors(
@@ -164,7 +165,9 @@ internal fun tanukiPillButtonColors(
         )
     }
     return when (tone) {
-        TanukiPillButtonTone.Filled -> TanukiPillButtonColors(colors.primaryFill, colors.onPrimary, null)
+        TanukiPillButtonTone.Filled -> TanukiPillButtonColors(
+            if (pressed) colors.primaryPressed else colors.primaryFill, colors.onPrimary, null,
+        )
         TanukiPillButtonTone.Tonal -> TanukiPillButtonColors(
             colors.surface,
             colors.textPrimary,
