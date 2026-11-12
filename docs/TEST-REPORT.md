@@ -1,5 +1,17 @@
 # 测试现状
 
+## PR108变基维护（main a35c6ba）
+
+- 按用户要求变基已发布UI草稿，保留main的conversationReady与启动接纳契约，保留两屏界面并迁移两条旧引导控件fixture；共用准备页的自动/手动入口等待连接和网页支持。后续未提交的大批UI实现另行保存，不混入这次历史维护。
+- 本机未重跑Gradle/JVM/lint或设备；权威G7为发布独占。仅格式、交接和公开源码/归档检查，CI结论以变基后新SHA查询为准；下面原81项与后端数字分别属于原冻结范围，不能替代变基验证。
+
+## 首启与准备界面草稿（2026-11-12，android_agent-105，Host）
+
+- 起始HEAD与远端main实核 `3c56167b94efeff47a20bd609b389708ba080ce5`，分支 `ao/tanuki-onboarding/journey`。两屏首启与共用准备页，保留组件维护；实际组件/工具/环境与运行健康分别门控，主动启动成功后进入对话，当前操作与历史恢复失败互斥。未修改安装运行后端、MainActivity、主题或聊天实现。
+- 最终在 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime` 执行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`；过滤为 `com.tanuki.SetupJourneyPresentationTest`、`com.tanuki.Onboarding*`、`com.tanuki.OperationProgress*`、`com.tanuki.TanukiStartupPolicyTest`。BUILD SUCCESSFUL（6m3s），退出0。
+- XML独立实核 **8类81项、0 failures/errors/skipped**：OnboardingEnvironment 8、OnboardingFlow 14、OnboardingPrepare 11、OperationProgressLayout 7、OperationProgressPresentation 15、OperationProgress 7、SetupJourneyPresentation 15、TanukiStartupPolicy 4。lint **0 errors / 117 warnings / 2 hints**，新准备与引导文件无告警。首轮7类77项/compile通过仅属阶段结果，最终字节以本轮81项为准。
+- 新增5项Android点击用例已编译，**未执行**；没有生成或安装设备验收APK，未执行完整JVM/Android仪器/真实下载启动/权限/模型/真机。API Key保存暂停。独立draft PR先基于当前Snapshot交付，后端typed阶段契约合main后需接入并重新验证，不能用本次Host结果替代后续最终SHA的review/CI/设备QA。详情见[本次交接](handoffs/20261112-1050-onboarding-journey.md)。
+
 ## 安装与启动后端（android_agent-102，Host候选）
 
 - 原head5292657独立Sol review changes_requested（行内4545424021/25/32），新增原子启动接纳/服务请求代次、旧引导READY/DONE可达入口及会话等待、运行中只读HTTP检查三项静态修复。RuntimeStartAdmissionTest3、RuntimeHealthCheckTest4与下列UserStopStateTest21共新增28项JVM源码；OnboardingStartEntryTest2条真实旧页控件fixture只用合成回调、不启动真实DSH，已编译但未设备执行。已获37/106新明确时段执行job bash-e2e759fc343e4db1（max-workers1）；产品/仪器/JVM源码compile完成，实际14 XML/140项、0fail/error/skip，含新增28项；最终exit0/4m54s、lint实际XML117 Warning/2 Hint且0Error/Fatal，slot正式释放106。2条Compose仅编译未设备运行；随后仅接入101稳定b4bb9e2的pool/test两源码，本分支整合增量已按权威generation1完成，job bash-3d6741cf4c174d12 exit0/3m56s，产品/仪器源码compile、2 XML/11项（pool4+policy7）0fail/error/skip、lint117 Warning/2 Hint且0Error/Fatal，已正式释放；140与11分别覆盖各自冻结范围。旧review/96/lint/CI不能覆盖这些修复；没有把源码存在当设备通过。

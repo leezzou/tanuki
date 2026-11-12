@@ -1,10 +1,10 @@
 package com.tanuki.onboarding
 
 /**
- * 首次启动引导的四个步骤。
+ * 首次引导沿用的四个持久化步骤值。
  *
- * 状态机只描述“第几步、哪些步骤完成、是否跳过、是否完成”，不依赖 Android，
- * 便于在 JVM 上覆盖首次启动、升级、跳过和部分完成等场景。
+ * 当前界面将 ENVIRONMENT、INTERFACE、DONE 统一映射到准备页，保留旧值以恢复已有记录。
+ * 状态机只描述引导记录，不代表实际运行环境完成；运行就绪由组件与服务快照判断。
  */
 enum class OnboardingStep(val storageValue: String) {
     WELCOME("welcome"),
@@ -184,8 +184,10 @@ object OnboardingMachine {
 
     /** 返回上一步；欢迎页返回等同于跳过，避免把用户困在引导里。 */
     fun back(state: OnboardingUiState, currentVersion: String): OnboardingUiState {
-        val previous = OnboardingStep.entries.getOrNull(state.step.ordinal - 1)
-            ?: return skip(state, currentVersion)
+        // 旧版本的界面选择/完成记录现在都映射到准备页，返回时不经过不可见的旧步骤。
+        val previous = if (state.step in setOf(OnboardingStep.INTERFACE, OnboardingStep.DONE)) OnboardingStep.WELCOME
+            else OnboardingStep.entries.getOrNull(state.step.ordinal - 1)
+                ?: return skip(state, currentVersion)
         return state.copy(step = previous)
     }
 

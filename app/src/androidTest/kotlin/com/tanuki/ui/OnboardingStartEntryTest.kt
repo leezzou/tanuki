@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tanuki.onboarding.*
 import com.tanuki.runtime.*
+import com.tanuki.ui.design.TanukiDesignTheme
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -46,19 +47,27 @@ class OnboardingStartEntryTest {
     private fun render(initial: OnboardingStep): Fixture {
         val fixture = Fixture(initial)
         compose.setContent {
-            TanukiTheme {
+            TanukiDesignTheme(dark = false) {
                 OnboardingScreen(
                     presentation = OnboardingPresentation(true, fixture.step.value, OnboardingRecord(),
                         DeviceProfile(8L * 1024 * 1024 * 1024, 64L * 1024 * 1024 * 1024, listOf("arm64-v8a"), 34), false, null),
                     snapshot = fixture.snapshot.value,
+                    components = fixture.components, tools = fixture.tools,
+                    webViewSupported = true, onUpdateWebView = {},
                     conversationReady = fixture.conversationReady.value,
                     onContinue = { fixture.step.value.next?.let { fixture.step.value = it } },
-                    onBack = { fixture.step.value = OnboardingStep.ENVIRONMENT }, onSkip = {},
-                    onPrepare = fixture::prepare, onCancelPrepare = {}, onRefreshDevice = {}, onSelectInterface = {},
+                    onBack = { fixture.step.value = OnboardingStep.WELCOME }, onSkip = {},
+                    onPrepare = fixture::prepare,
+                    onCommand = { command ->
+                        assertEquals("START", command)
+                        fixture.prepare()
+                    },
+                    onCancelPrepare = {}, onRefreshDevice = {}, onSelectInterface = {},
                     onComplete = { finish ->
                         assertTrue(fixture.conversationReady.value)
                         assertEquals(LocalPreparationAction.OPEN_CHAT,
                             localPreparationAction(fixture.snapshot.value, fixture.components, fixture.tools))
+                        assertNull("one explicit startup completes the guide only once", fixture.finished)
                         fixture.finished = finish
                     },
                 )
@@ -67,30 +76,26 @@ class OnboardingStartEntryTest {
         return fixture
     }
 
-    @Test fun readyStoppedDonePageCanStartBeforeFirstMessage() {
-        val fixture = render(OnboardingStep.DONE)
-        compose.onNodeWithText("发第一条消息").assertIsNotEnabled()
-        compose.onNodeWithText("继续准备或启动助手").performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText("发第一条消息").performScrollTo().assertIsNotEnabled()
-        compose.runOnIdle { fixture.conversationReady.value = true }
-        compose.onNodeWithText("发第一条消息").performScrollTo().assertIsEnabled().performClick()
+    private fun assertStartAndConversationGate(initial: OnboardingStep) {
+        val fixture = render(initial)
+        compose.onNodeWithText("启动并进入对话").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("等待对话连接").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(listOf("START"), fixture.commands)
+            assertNull(fixture.finished)
+            fixture.conversationReady.value = true
+        }
         compose.runOnIdle {
             assertEquals(listOf("START"), fixture.commands)
             assertEquals(OnboardingFinish.FIRST_MESSAGE, fixture.finished)
         }
     }
 
+    @Test fun readyStoppedDonePageCanStartBeforeFirstMessage() {
+        assertStartAndConversationGate(OnboardingStep.DONE)
+    }
+
     @Test fun readyStoppedEnvironmentPageHasAnExecutableEntryAndCanFinishTheJourney() {
-        val fixture = render(OnboardingStep.ENVIRONMENT)
-        compose.onNodeWithText("继续准备或启动助手").performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText("继续").performClick()
-        compose.onNodeWithText("继续").performClick()
-        compose.onNodeWithText("发第一条消息").performScrollTo().assertIsNotEnabled()
-        compose.runOnIdle { fixture.conversationReady.value = true }
-        compose.onNodeWithText("发第一条消息").performScrollTo().assertIsEnabled().performClick()
-        compose.runOnIdle {
-            assertEquals(listOf("START"), fixture.commands)
-            assertEquals(OnboardingFinish.FIRST_MESSAGE, fixture.finished)
-        }
+        assertStartAndConversationGate(OnboardingStep.ENVIRONMENT)
     }
 }
