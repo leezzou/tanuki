@@ -20,10 +20,13 @@ data class RequiredToolsStatus(
     val checkedAt: Long = 0
 ) {
     val passed: Boolean get() = checked && missing.isEmpty()
+    /** 只供同一独占准备事务复用刚完成的检查；持久化记录不能作为免检凭据。 */
+    fun passedFor(marker: String): Boolean = passed && marker.isNotEmpty() && ubuntuMarker == marker
 }
 data class Snapshot(
     val environment: EnvironmentState = EnvironmentState.ABSENT,
     val health: HealthState = HealthState.UNKNOWN,
+    val networkDiagnostic: NetworkDiagnostic = NetworkDiagnostic(),
     val confinement: Confinement = Confinement.UNKNOWN,
     val service: ServiceState = ServiceState.STOPPED,
     val web: WebState = WebState.DISCONNECTED,
@@ -37,6 +40,7 @@ data class Snapshot(
     val phasePercent: Int? = null,
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
+    val startup: StartupProgress? = null,
     val failedOperation: FailedOperation? = null,
     val remote: RemoteHostStatus = RemoteHostStatus(),
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),

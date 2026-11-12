@@ -11,6 +11,14 @@
 
 ## 1. 控制面：DSH 启动、就绪与 WebView
 
+### 1.0 进程恢复屏障
+
+产品 Application 使用 `RuntimeManager(backgroundRecovery=true)`：构造时先独占 `mutation`，在IO scope按原顺序恢复组件journal、已准备的数据恢复、安装元数据与工具状态。等待期间 `environment=CHECKING`、`operation=runtime-recovery`，没有可信百分比，也不提供取消。屏障只在释放环境锁后完成；失败保留 `REPAIR/RECOVERY_REQUIRED` 和错误，安装/启动/DSH更新不得越过。直接构造的测试fixture默认同步恢复，保持既有立即恢复语义。
+
+环境操作、DSH版本检查/安装/备用/恢复共用 `awaitInitialized()`。提前/手动启动可等待恢复，但恢复后重新校验运行状态与停止代次；等待期间停止不会在恢复后拉起旧请求。磁盘恢复只刷新本地状态，不覆盖期间已建立的远程连接。该机制不重放模型或项目任务。
+
+一键初始化在同一 `mutation` 内刚完成完整工具检查后，可向Node安装传入该检查结果；仅当Ubuntu标记匹配且无缺失项时复用。独立Node安装、缺标记、标记变化或失败检查仍执行原必要库/工具检查；Node候选实启、版本/引擎兼容性及提交校验保持必需。持久化工具记录不能单独作为免检凭据。
+
 ### 1.1 启动命令
 
 DSH 只在已初始化的私有 Ubuntu 中启动。命令由 `RuntimeManager.start()` 组装，`Launcher.start()` 通过 `libsupervisor.so` 进入 PRoot，再执行官方 DSH CLI：
@@ -140,6 +148,16 @@ HTTP 200..399 或 401 → 存活
 - **Cookie 认证检查**要求精确 **200**，401/403 视为认证失效。
 
 启动成功后写 `.web-verified` 标记，状态置 `ServiceState.RUNNING`、`webHealthy=true`，并每 10 秒复查一次；复查失败只把 `webHealthy=false`、`web=DISCONNECTED`，不等同于 DSH 进程退出。DSH 真正退出时状态进入 `STOPPED` 或 `INTERRUPTED`，并关闭 phone 连接。
+
+#### 本地环境检查与公网诊断
+
+`RuntimeManager.diagnostics(checkNetwork=false)` 的返回值只表示私有 Ubuntu 内 Node/npm/pnpm、基础工具、进程/文件及沙箱能力检查。初始化默认不请求公网；手动 `healthCheck()` 额外请求官方 npm HTTPS HEAD（curl 最长30秒，外层命令40秒）。公网结果通过 `Snapshot.networkDiagnostic` 独立记录 `UNCHECKED/CHECKING/REACHABLE/FAILED`，失败保留脱敏原因并写事件；不能把本地已通过误报为环境损坏，也不能把未执行的公网检查标记通过。用户/父任务取消原样传播，不当成网络失败。
+
+#### 启动阶段观测
+
+`Snapshot.startup` 可空；每次实际接纳的启动都有独立 `attemptId`，记录 `StartupStage`、单调的操作与阶段起始时间、结束时间以及已完成阶段耗时。准备 pnpm、工作区、Node兼容性、启动工具、创建进程、等待官方行、发布端点与本地HTTP检查分别上报；成功/失败/取消会冻结计时。该观测不包含 URL、端口、token、Cookie、用户配置或输出内容，不代表百分比。180秒就绪等待仍从进程创建后开始；日志采集异常或结束必须立即退出等待，不继续空等期限。进程登记、就绪行发布、HTTP复查、稳定性计时器与退出处理均复核child身份和启动代次；停止失效后，旧回调不得发布端点/健康/失败或取消新运行的计时器。异常清理仅停止本次创建的child，不按全局引用误停后继进程。
+
+引导准备按钮在点击时按当前完整组件、工具标记、环境元数据和运行状态选择初始化/补工具/检查/启动，已有完整环境不重新初始化。页面重建不触发这些动作；跳转聊天前再次校验本地运行+HTTP健康，或已连接且Cookie作用域就绪的远程环境。远程入口不要求本地组件。初始化沿用完整元数据选定的已安装非默认DSH及其已校验锁；所选非默认程序缺失时先拒绝并指引修复该版本，不回落默认程序或猜测官方SRI。损坏元数据仍拒绝，恢复确认仍生效。
 
 ### 1.5 远程主机 SSH 隧道（直连切片）
 

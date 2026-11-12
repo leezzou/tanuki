@@ -1,5 +1,15 @@
 # 测试现状
 
+## 安装与启动后端（android_agent-102，Host候选）
+
+- 基线：远端main与初始HEAD均为 `3c56167b94efeff47a20bd609b389708ba080ce5`；分支 `ao/tanuki-startup/install-startup`。本轮不操作设备、不读取凭据或修改API Key保存，不生成发布包。
+- Host脚本：`node scripts/test-dsh-path-cache.mjs` 10场景通过；`python3 scripts/test-dsh-lock.py` 通过，模拟Linux ARM64/glibc的Node24.22.2/26.13.0/22.23.4各560归档、锁未变，686项官方HTTPS/SHA-512及3负向场景通过；不下载、不代表Android性能。
+- 首轮定向：`compileModernDebugKotlin`、`compileModernDebugAndroidTestKotlin`与7类定向JVM，79项/2失败；失败均为新增StartupProgressTest要求跨协程异常引用相同。异常类型、消息与原始cause保留，协程栈恢复会复制对象；已改断言为类型/消息及原cause链验证，未改产品语义。
+- 第二轮完整：同一worktree串行执行 `./gradlew --console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime :app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`。产品/仪器源码编译通过；JUnit XML实核148套件、1428 tests、1 failure、0 errors、0 skipped，任务退出1（3m53s）。唯一失败是未改动的 `DshComposerControllerTest.onSentReceivesSessionId`：测试等notice“已发送”后立即断言另一个回调变量，实际null；证据已交聊天owner104确认，不将完整套件记通过。lint因测试失败未执行。
+- 最终增量：获37/106独占时段，在冻结代码上重做产品/AndroidTest Kotlin compile、10类定向JVM及lint，退出0（4m26s）。JUnit XML为10套件、96 tests、0 failures、0 errors、0 skipped；包括StartupProgress 8、RuntimeDiagnostics 6、RuntimeInitialization 4、RequiredToolsStatus 2、LocalPreparation 11，共31项新增回归，以及官方锁/来源/截止期/失败策略。MainActivity完整准备/完成/实际主题接线、最后旧代次回调防护与沿用选定非默认DSH已纳入本轮编译。lint XML为117 Warning/2 Hint，无Error/Fatal。前一条增量命令把--tests置于lint后，配置阶段10秒退出1，未执行产品任务；已修参数顺序，不能把该次配置失败算通过或产品失败。未重复完整JVM，上一轮onSent失败仍由104根因修复与集成复验。
+- 公开检查：`python3 scripts/package-source.py` 与 `python3 scripts/check-publication.py --git --archive artifacts/sources/Tanuki-0.1.7-source.zip` 检查候选862公开文件、0 findings；普通PR交接与diff检查通过。按脚本默认名生成的ZIP仅为内部检查候选，不是发布版本或交付附件；文档定稿后刷新并核对外部SHA。唯一交接：[安装启动](handoffs/20261111-1601-install-startup.md)。
+- 未执行：Android仪器、真实安装/启动/停止竞态、设备冷/热启动耗时、真实模型与账号。历史QA-03首次180秒后重试成功的现场原因仍未证明；本轮不以Host结果宣称已修该现场问题。
+
 ## 0.1.14 / code19 最终 REBUILD（16c07591b）
 
 - 收到新的RBEBUILD后，实际fetch最终main `16c07591b7ba170a77fdc0720b201a77e5477db3`，在原发布分支上git merge --no-commit origin/main；唯一冲突为OperationProgressLayoutTest，完整保留main的加强版本，并按字节确认一致。旧0910cc1候选由本轮替代，PR #105继续更新；默认版本0.1.14/code19。

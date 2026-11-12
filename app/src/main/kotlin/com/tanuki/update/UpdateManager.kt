@@ -28,6 +28,7 @@ class UpdateManager(
     fun check() {
         if (job?.isActive == true) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             // 与切换/卸载共用版本窄锁：检查期间不会改写 installed.json，也不会读到正在删除的 engines。
             // 锁顺序固定为先环境 mutation、后 versionGate；本检查只取 versionGate，不与启动/安装抢占。
             manager.versionGate.withLock {
@@ -82,6 +83,7 @@ class UpdateManager(
     fun install(release: Release, reinstall: Boolean = false) {
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             val retryId = manager.beginOperationRetry { install(release, reinstall) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING) && !manager.hasLiveChild) { "请确认停止服务后再安装，可能中断任务" }
@@ -147,6 +149,7 @@ class UpdateManager(
         if(job?.isActive==true || !keepForeground())return
         val previousUpdate=manager.state.value.update
         job=manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             val retryId = manager.beginOperationRetry { stage(release) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.STARTING,ServiceState.STOPPING) && !manager.hasLiveChild) { "请先停止 DSH" }
@@ -204,6 +207,7 @@ class UpdateManager(
     fun resumeInterrupted() {
         if(job?.isActive==true || !keepForeground())return
         job=manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             manager.state.update { it.copy(failedOperation = null) }
             try {
                 val journal=JSONObject(manager.paths.read("update-transaction") ?: error("没有中断的更新事务"))
@@ -223,6 +227,7 @@ class UpdateManager(
     fun restore() {
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             manager.state.update { it.copy(update=UpdateState.RESTORING,failedOperation=null) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING)) { "请先停止服务" }

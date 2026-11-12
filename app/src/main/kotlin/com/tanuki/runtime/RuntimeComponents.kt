@@ -389,8 +389,10 @@ class RuntimeComponents(private val manager: RuntimeManager) {
             check(result.exitCode==0) { "DSH 与候选组件启动检查失败，当前组件保留：${result.stderr.takeLast(1500)}" }
         } finally { withContext(NonCancellable) { remove(isolated) } }
     }
-    suspend fun ensureNode(force: Boolean = false) {
+    suspend fun ensureNode(force: Boolean = false, preparedTools: RequiredToolsStatus? = null) {
         migrateLegacyLayers()
+        // 只有一键准备在持有同一 mutation 时传入刚完成的检查，Ubuntu 更换后标记不匹配则重检。
+        val reuseTools = preparedTools?.passedFor(File(paths.root, ".base-verified").takeIf { it.isFile }?.readText().orEmpty()) == true
         if(!force && File(paths.node,"bin/node").isFile)return
         val artifact=selected(RuntimeComponent.NODE)
         check(paths.base.usableSpace >= artifact.size*6 + DOWNLOAD_DISK_RESERVE) {
@@ -406,13 +408,13 @@ class RuntimeComponents(private val manager: RuntimeManager) {
         try {
             SafeTar.extract(archive,staging)
             val candidate=File(staging,"node-v${artifact.version}-linux-arm64")
-            manager.ensureNodeLibraries()
+            if (!reuseTools) manager.ensureNodeLibraries()
             manager.phase("验证 Node.js ${artifact.version}",EnvironmentState.VERIFYING)
             val result=manager.launcher.run(paths.root,listOf("/opt/node/bin/node","--version"),nodeHome=candidate)
             check(result.exitCode==0 && result.stdout.trim()=="v${artifact.version}") { "Node.js 候选启动检查失败：${result.stderr}" }
             if(currentDsh.matches(VERSION))checkDshNodeCompatibility(currentDsh,candidate)
             manager.ensurePnpm(candidate)
-            manager.ensureUbuntuTools()
+            if (!reuseTools) manager.ensureUbuntuTools()
             probeInstalledDsh(candidate)
             File(candidate,".component-version").writeText(artifact.version)
             replace("node") { check(candidate.renameTo(paths.node)) { "无法提交 Node.js 组件" } }

@@ -9,7 +9,6 @@ import android.webkit.ValueCallback
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -517,7 +516,7 @@ class MainActivity : ComponentActivity() {
                         delay(5_000)
                     }
                 }
-                val dark = isSystemInDarkTheme()
+                val dark = com.tanuki.ui.design.TanukiDesign.tokens.isDark
                 val colors = MaterialTheme.colorScheme
                 // Pointer/scroll/progress updates in the browser must not recompose DSH.
                 val browserAttention = remember(agentBrowser) {
@@ -694,7 +693,17 @@ class MainActivity : ComponentActivity() {
                         onboardingContinue = onboarding::advance,
                         onboardingBack = onboarding::back,
                         onboardingSkip = onboarding::skip,
-                        onboardingPrepare = {
+                        onboardingPrepare = prepare@ {
+                            if (manager.hasActiveOperation || updates.hasActiveOperation || appUpdates.hasActiveOperation) return@prepare
+                            val command = when (localPreparationAction(manager.state.value, manager.components.state.value, manager.requiredTools.value)) {
+                                LocalPreparationAction.BUSY -> return@prepare
+                                LocalPreparationAction.OPEN_CHAT -> { dshOpenRequest += 1; return@prepare }
+                                LocalPreparationAction.RECOVERY -> { confirmation = "RESUME_UPDATE"; return@prepare }
+                                LocalPreparationAction.INITIALIZE -> "INIT"
+                                LocalPreparationAction.TOOLS -> "TOOLS"
+                                LocalPreparationAction.START -> "START"
+                                LocalPreparationAction.HEALTH -> "HEALTH"
+                            }
                             // 只有真正开始准备时才申请通知权限，用于前台安装进度；拒绝不阻止安装。
                             val need = OnboardingPermissions.needed(
                                 action = OnboardingPermissionAction.PREPARE_ENVIRONMENT,
@@ -706,18 +715,24 @@ class MainActivity : ComponentActivity() {
                             if (need == OnboardingPermissionNeed.NOTIFICATIONS) {
                                 notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                             }
-                            action("INIT", requestNotifications = false)
+                            action(command, requestNotifications = false)
                         },
                         onboardingCancelPrepare = { manager.cancel(); updates.cancel() },
                         onboardingRefreshDevice = onboarding::refreshDevice,
                         onboardingSelectInterface = ::setNativePreference,
                         onboardingComplete = { finish ->
-                            onboarding.complete()
-                            when (finish) {
-                                OnboardingFinish.FIRST_MESSAGE -> dshOpenRequest += 1
-                                OnboardingFinish.REMOTE -> remoteOpenRequest += 1
-                                OnboardingFinish.HOME -> Unit
-                            }
+                            val current = manager.state.value
+                            val canOpenChat = (current.remote.connected && manager.cookieReady()) ||
+                                localPreparationAction(current, manager.components.state.value,
+                                    manager.requiredTools.value) == LocalPreparationAction.OPEN_CHAT
+                            if (finish != OnboardingFinish.FIRST_MESSAGE || canOpenChat) {
+                                onboarding.complete()
+                                when (finish) {
+                                    OnboardingFinish.FIRST_MESSAGE -> dshOpenRequest += 1
+                                    OnboardingFinish.REMOTE -> remoteOpenRequest += 1
+                                    OnboardingFinish.HOME -> Unit
+                                }
+                            } else manager.event("助手连接尚未就绪，请先完成当前准备或启动，再进入对话")
                         },
                         onboardingOpen = { onboarding.open() },
                         onboardingDismissBanner = onboarding::dismissBanner,
