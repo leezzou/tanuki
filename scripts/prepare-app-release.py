@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""用户确认版本后生成指定渠道的 APK、应用更新清单和对应源码；不创建 tag、不上传。"""
+"""按明确版本生成指定渠道 APK、更新清单和对应源码；不创建 tag、不上传。"""
 import argparse
 from contextlib import contextmanager
 import hashlib
@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
@@ -26,7 +27,8 @@ def validate_version(version, code):
 def build_command(channel, version, code):
     validate_version(version, code)
     if channel == "workspacecheck":
-        return ["./gradlew", "--no-daemon", "-I", "scripts/workspace-verification.init.gradle",
+        signing = ["-I", "scripts/development-signing.init.gradle"] if os.environ.get("TANUKI_WORKSPACECHECK_KEYSTORE") else []
+        return ["./gradlew", "--no-daemon", "--max-workers=2", *signing, "-I", "scripts/workspace-verification.init.gradle",
                 "-PdevelopmentReleaseSigning=true", f"-PtanukiVersionName={version}", f"-PtanukiVersionCode={code}",
                 ":app:assembleModernRelease"]
     if channel == "production":
@@ -147,9 +149,43 @@ def inspect_archive(apk, sdk):
     return actual
 
 
+def inspect_workspace_payload(apk, sdk):
+    # 实核渠道约束，不能把无原生库的 Host CI APK 当作可运行发布包。
+    analyzer = sdk / "cmdline-tools/latest/bin/apkanalyzer"
+    target = run([analyzer, "manifest", "target-sdk", apk], "核对 target-sdk", capture=True).strip()
+    debuggable = run([analyzer, "manifest", "debuggable", apk], "核对 debuggable", capture=True).strip()
+    minimum = run([analyzer, "manifest", "min-sdk", apk], "核对 min-sdk", capture=True).strip()
+    if target != "34" or minimum != "26" or debuggable != "false":
+        raise ValueError("workspacecheck 必须 min26/target34/non-debuggable")
+    with zipfile.ZipFile(apk) as archive:
+        libs = {n for n in archive.namelist() if n.startswith("lib/") and n.endswith(".so")}
+        required = {"lib/arm64-v8a/" + n for n in ("libproot.so", "libproot-loader.so", "libsupervisor.so")}
+        if not required <= libs or any(not n.startswith("lib/arm64-v8a/") for n in libs):
+            raise ValueError("workspacecheck 必须仅 ARM64，且包含完整原生运行时")
+        for name in required:
+            if not 20 <= archive.getinfo(name).file_size <= 64 * 1024 * 1024:
+                raise ValueError("原生运行时为空或过大")
+            with archive.open(name) as library:
+                header = library.read(20)
+            if header[:6] != b"\x7fELF\x02\x01" or header[18:20] != b"\xb7\x00":
+                raise ValueError("原生运行时必须是 Android ARM64 ELF64")
+
+
+def pinned_source(commit):
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("源码绑定需要完整 SHA")
+    head = run(["git", "rev-parse", "HEAD"], "核对源码提交", capture=True).strip()
+    dirty = run(["git", "status", "--porcelain", "--untracked-files=no"], "核对源码状态", capture=True).strip()
+    if head != commit or dirty:
+        raise ValueError("源码提交不匹配或有已跟踪修改")
+    return run(["git", "rev-parse", "HEAD^{tree}"], "核对源码树", capture=True).strip()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True, help="必须先向用户询问并确认，不能自行定版本")
+    parser.add_argument("--version", required=True, help="明确版本；自动合并发布由持久队列按整数递增")
+    parser.add_argument("--source-commit", help="绑定干净 checkout 的完整提交 SHA")
+    parser.add_argument("--merge-base", help="自动合并模式的上一 first-parent SHA；核对该变更中的 PR 交接记录")
     parser.add_argument("--version-code", required=True, type=int, help="高于所有已发布/安装的版本代码")
     parser.add_argument("--channel", required=True, choices=tuple(PACKAGES))
     parser.add_argument("--verified-apk", type=Path, help="已完成测试的 APK；只封装固定字节，不重新构建")
@@ -168,7 +204,20 @@ def prepare(options, tested_apk, pinned):
     directory = ROOT / "artifacts/releases" / options.version
     manifest = directory / "app-update.json"
     prior = prior_entries(directory, options.version, options.version_code, json.loads(manifest.read_text())) if manifest.exists() else []
-    run([sys.executable, "scripts/check-handoff.py", "--release"], "确认最新交接")
+    source_tree = pinned_source(options.source_commit) if options.source_commit else None
+    if options.merge_base:
+        if not options.source_commit or not re.fullmatch(r"[0-9a-f]{40}", options.merge_base):
+            raise ValueError("自动合并模式必须绑定提交和上一 first-parent")
+        parent = run(["git", "rev-parse", "HEAD^1"], "核对合并父提交", capture=True).strip()
+        if parent != options.merge_base:
+            raise ValueError("自动合并模式父提交不匹配")
+        changed = run(["git", "diff", "--name-only", options.merge_base, options.source_commit], "核对合并变更", capture=True)
+        command = [sys.executable, "scripts/check-handoff.py", "--pr"]
+        for name in changed.splitlines():
+            command += ["--changed-file", name]
+        run(command, "确认本次合并交接")
+    else:
+        run([sys.executable, "scripts/check-handoff.py", "--release"], "确认最新交接")
     if tested_apk is None:
         command = ["env", f"TANUKI_VERSION_NAME={options.version}", f"TANUKI_VERSION_CODE={options.version_code}",
                    *build_command(options.channel, options.version, options.version_code)]
@@ -177,6 +226,11 @@ def prepare(options, tested_apk, pinned):
         print("[复用已测 APK] 哈希已核对，继续验证实际身份与签名", flush=True)
     source_apk = tested_apk or build_apk_path(ROOT, options.channel, options.version)
     entry = entry_for(source_apk, options.channel, options.version, options.version_code, **inspect_archive(source_apk, sdk))
+    if options.channel == "workspacecheck":
+        inspect_workspace_payload(source_apk, sdk)
+        expected_certificate = "371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f"
+        if entry["certificateSha256"] != expected_certificate:
+            raise ValueError("workspacecheck 必须沿用既有开发证书")
     if pinned is not None and entry["sha256"] != pinned:
         raise ValueError("已验证 APK 在身份核验期间发生变化")
     for old in prior:
@@ -191,7 +245,10 @@ def prepare(options, tested_apk, pinned):
     if digest(destination) != entry["sha256"]:
         raise ValueError("发布 APK 副本与已核验字节不一致")
     entries = [item for item in prior if item["packageName"] != entry["packageName"]] + [entry]
-    manifest.write_text(json.dumps(dict(schemaVersion=1, packages=entries), ensure_ascii=False, indent=2) + "\n")
+    document = dict(schemaVersion=1, packages=entries)
+    if options.source_commit:
+        document.update(sourceCommit=options.source_commit, sourceTree=source_tree)
+    manifest.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     run(["bash", "scripts/package-native-sources.sh"], "打包原生对应源码")
     run([sys.executable, "scripts/package-source.py", "--version", options.version], "打包本次完整源码")
     source_zip = f"Tanuki-{options.version}-source.zip"
@@ -199,6 +256,8 @@ def prepare(options, tested_apk, pinned):
     selected = [directory / item["assetName"] for item in entries] + [manifest, directory / source_zip,
                 directory / "Tanuki-native-corresponding-sources.tar.gz", directory / "native-source-SHA256SUMS"]
     (directory / "RELEASE-SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in selected))
+    if options.source_commit and pinned_source(options.source_commit) != source_tree:
+        raise ValueError("打包期间源码树发生变化")
     print(f"完成：{directory.relative_to(ROOT)}；未创建 tag、上传 Release 或操作设备。")
     print("发布时把该目录附件上传到同一 Release；workspacecheck 必须标为 Pre-release。")
 

@@ -37,7 +37,7 @@
   python3 scripts/check-handoff.py --integrate --record docs/handoffs/<最新记录>.md
   python3 scripts/check-handoff.py --release
   ```
-- 发布前必须 `--release` 通过；`scripts/prepare-app-release.py` 会强制执行。发布严格模式只读，不会自动补章。
+- 手工发布前必须 `--release` 通过；`scripts/prepare-app-release.py` 默认强制执行，严格模式只读。每次合并的自动队列使用[发布说明](docs/RELEASE.md)中的精确 SHA/tree、本 PR 交接守卫与合并前门禁回执，不改共享状态、不自动补章；此例外不跳过审查/CI/适用 QA。
 - 交付源码前再运行 `python3 scripts/package-source.py`，核对 `artifacts/SOURCE-SHA256SUMS`。修改文档也会改变源码包，不能继续发旧 ZIP。
 - 具体分工、时间点、迁移步骤与冲突处理见 [交接机制](docs/HANDOFFS.md)。
 
@@ -84,7 +84,7 @@
 
 ## 5. 发布约定
 
-- 用户说「发布 / 发版」时，**先询问并确认版本号是多少，再打包**；不能自行沿用开发版、猜版本或先打包后补问。日常 debug/验证构建不等于发布，不需要擅自定正式版本。
+- 用户最新要求 main 每次合并由本机持久队列自动发布，patch 按整数递增（0.1.99 后为 0.1.100、0.1.101），不逐次询问版本、不派 Agent 上传。版本/code 按真实公开/保留身份分配；合并前当前 SHA 的独立审查、CI 和适用 QA 不变。服务需经审查验证后由集成维护方显式启用，详见 [发布说明](docs/RELEASE.md)。日常 debug/验证构建不等于发布。
 - 用户已明确要求固定顺序：完成修复、候选构建和全部适用测试，收尾版本/测试/专题文档与交接、清理过期记录并完成上传检查，然后统一一次 commit/push，最后生成正式交付附件。不要为回填版本文档或测试收尾拆成多次推送。提交前源码候选包只用于检查；用户取用的发布目录在推送成功后统一刷新。
 - 确认包名/签名渠道与递增 `versionCode`（必须高于该包已安装/已发布的所有版本），再使用 `scripts/prepare-app-release.py --version <确认版本> --version-code <递增代码> --channel <workspacecheck|production>`。工作区验证包与正式包不能互相覆盖。
 - 打包必须核对 APK 实际包名、版本、Android 要求、证书、大小/SHA-256，输出 `app-update.json`、对应源码与校验清单；保留安装环境，不卸载或清数据。正式密钥须在仓库外，通过环境传递密码，不读取/输出密钥或密码。

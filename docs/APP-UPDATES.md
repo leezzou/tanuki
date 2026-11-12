@@ -1,6 +1,6 @@
 # 应用内更新
 
-**当前候选：0.1.14/code19，workspacecheck，最终基线 `main=16c07591b7ba170a77fdc0720b201a77e5477db3`。** 实核 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34；普通准备入口重新生成 `artifacts/releases/0.1.14/` 六附件。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 本轮更新既有 `release: 0.1.14` PR #105，未合并、未打tag、未创建或上传Release。
+**当前公开测试版：0.1.14/code19，workspacecheck；tag `v0.1.14` 指向 `3c56167b94efeff47a20bd609b389708ba080ce5`。** 以下构建记录的源码基线为 `16c07591b7ba170a77fdc0720b201a77e5477db3`，属于历史候选验证。 实核 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34；普通准备入口重新生成 `artifacts/releases/0.1.14/` 六附件。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 PR #105 已合并，六附件已发布为 Pre-release；自动发布方案及启用边界见[发布说明](RELEASE.md)。
 
 0.1.14 已合入最终 main 的 #104 常驻 sheet 宿主完整断言，覆盖单一宿主、visible互斥、直属层级和失败详情可空模型；传输与失败详情的产品代码不变。已包含此前 #98/#103 及主题/文案、聊天/分页、动效 A/B/C/D/E/F 等实现。本轮测试类与最终main按字节相等，不保留上一轮发布分支的最小替代断言。
 
@@ -58,10 +58,10 @@
 
 ## 发布者必须提供什么
 
-未来用户说「发布」时，Agent **先问版本号**（已经明确则不重复问），确认递增的 `versionCode` 和渠道后再打包。历史记录：用户确认过 `v0.1.7`（code9）、`v0.1.8`（code10）、`v0.1.9`（code11）、`v0.1.11`（code13）；本次确认 `v0.1.14`（code19）。封装前须核对公开、已安装及归档上限，确保 code 严格递增。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
+按用户最新要求，main 每次合并由[本机持久队列](RELEASE.md)按整数递增 patch 和 versionCode 后程序化上传，不逐次询问版本、不派 Agent 上传。`0.1.99` 后是 `0.1.100`、`0.1.101`。封装前核对公开、已安装上限配置及队列保留身份，确保 code 严格递增；重试不重占身份。独立审查、CI、适用 QA 继续在合并前完成。沿用原 workspacecheck 开发证书；目标为 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34。
 
 
-下面命令以本次 0.1.14/code19 候选为例；未来发版替换为用户确认的版本和递增 code：
+下面命令保留 0.1.14/code19 的手工封装示例；该版本已公开发布，不能重建覆盖。自动发布由持久队列传入本次保留版本/code：
 
 ```bash
 source scripts/env.sh
@@ -85,4 +85,4 @@ python3 scripts/prepare-app-release.py --version 0.1.14 --version-code 19 --chan
 
 真实未来 Release 的发现→下载→系统授权→安装完整链仍需在用户上传本版清单及更高版本 APK 后验收；合成私有文件跨覆盖保留、模拟器安装不等于真实账号/真机/全套运行环境升级。最新结果见 [测试现状](TEST-REPORT.md)。
 
-0.1.14 基于 `main=16c07591b` 准备，未合并/未发布；旧版附件保持原样。
+0.1.14 的已发布身份以公开 tag/更新清单为准；旧版附件保持原样，后续版本由队列单独分配。自动清单额外包含 `sourceCommit` 和 `sourceTree`，客户端继续按 schemaVersion1 的包条目进行兼容检查。
