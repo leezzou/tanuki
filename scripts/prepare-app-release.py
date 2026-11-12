@@ -24,11 +24,12 @@ def validate_version(version, code):
         raise ValueError("先确认形如 0.1.1 或 0.1.1-rc.1 的版本，并提供高于所有已安装/已发布版本的 versionCode（至少 2）。")
 
 
-def build_command(channel, version, code):
+def build_command(channel, version, code, force_native=False):
     validate_version(version, code)
     if channel == "workspacecheck":
         signing = ["-I", "scripts/development-signing.init.gradle"] if os.environ.get("TANUKI_WORKSPACECHECK_KEYSTORE") else []
-        return ["./gradlew", "--no-daemon", "--max-workers=2", *signing, "-I", "scripts/workspace-verification.init.gradle",
+        forced = ["-PtanukiForceNative=true"] if force_native else []
+        return ["./gradlew", "--no-daemon", "--max-workers=2", *signing, *forced, "-I", "scripts/native-cache.init.gradle", "-I", "scripts/workspace-verification.init.gradle",
                 "-PdevelopmentReleaseSigning=true", f"-PtanukiVersionName={version}", f"-PtanukiVersionCode={code}",
                 ":app:assembleModernRelease"]
     if channel == "production":
@@ -190,7 +191,10 @@ def main():
     parser.add_argument("--channel", required=True, choices=tuple(PACKAGES))
     parser.add_argument("--verified-apk", type=Path, help="已完成测试的 APK；只封装固定字节，不重新构建")
     parser.add_argument("--verified-apk-sha256", help="已测 APK 的完整 SHA-256，必须与 --verified-apk 成对提供")
+    parser.add_argument("--force-native", action="store_true", help="缓存身份不匹配时仅强制原生task，不跳过原生产物")
     options = parser.parse_args()
+    if options.force_native and (options.channel != "workspacecheck" or options.verified_apk):
+        raise ValueError("强制 native 仅用于 workspacecheck 新构建，不能同时复用固定 APK")
     validate_version(options.version, options.version_code)
     pinned = verified_options(options.verified_apk, options.verified_apk_sha256)
     if options.channel == "production" and pinned is None and ("TANUKI_KEYSTORE" not in os.environ or "TANUKI_STORE_PASSWORD" not in os.environ):
@@ -212,17 +216,19 @@ def prepare(options, tested_apk, pinned):
             raise ValueError("自动合并模式必须绑定提交和上一 first-parent")
         parent = run(["git", "rev-parse", "HEAD^1"], "核对合并父提交", capture=True).strip()
         if parent != options.merge_base:
-            raise ValueError("自动合并模式父提交不匹配")
+            history = run(["git", "rev-list", "--first-parent", options.source_commit], "核对合并范围", capture=True).splitlines()
+            if options.merge_base not in history:
+                raise ValueError("自动合并模式基线不在 first-parent 范围内")
         changed = run(["git", "diff", "--name-only", options.merge_base, options.source_commit], "核对合并变更", capture=True)
         command = [sys.executable, "scripts/check-handoff.py", "--pr"]
         for name in changed.splitlines():
             command += ["--changed-file", name]
         run(command, "确认本次合并交接")
     else:
-        run([sys.executable, "scripts/check-handoff.py", "--release"], "确认最新交接")
+        run([sys.executable, "scripts/check-handoff.py", "--release", "--shared-stamp"], "确认最新交接")
     if tested_apk is None:
         command = ["env", f"TANUKI_VERSION_NAME={options.version}", f"TANUKI_VERSION_CODE={options.version_code}",
-                   *build_command(options.channel, options.version, options.version_code)]
+                   *build_command(options.channel, options.version, options.version_code, options.force_native)]
         run(command, "构建指定渠道")
     else:
         print("[复用已测 APK] 哈希已核对，继续验证实际身份与签名", flush=True)
@@ -250,9 +256,14 @@ def prepare(options, tested_apk, pinned):
     document = dict(schemaVersion=1, packages=entries)
     if options.source_commit:
         document.update(sourceCommit=options.source_commit, sourceTree=source_tree)
+        if options.merge_base:
+            document["sourceBase"] = options.merge_base
     manifest.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     run(["bash", "scripts/package-native-sources.sh"], "打包原生对应源码")
-    run([sys.executable, "scripts/package-source.py", "--version", options.version], "打包本次完整源码")
+    source_command = [sys.executable, "scripts/package-source.py", "--version", options.version]
+    if options.merge_base:
+        source_command += ["--release-manifest", str(manifest)]
+    run(source_command, "打包本次完整源码")
     source_zip = f"Tanuki-{options.version}-source.zip"
     copy_source_attachments(ROOT, directory, options.version)
     selected = [directory / item["assetName"] for item in entries] + [manifest, directory / source_zip,

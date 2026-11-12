@@ -123,6 +123,7 @@ class AppReleaseTests(unittest.TestCase):
             if label == "确认最新交接":
                 # 发布入口必须使用只读严格模式，而不是普通 PR 模式。
                 self.assertIn("--release", command)
+                self.assertIn("--shared-stamp", command)
             if label == "构建指定渠道":
                 target = release.build_apk_path(root, "workspacecheck", "0.1.1")
                 target.parent.mkdir(parents=True)
@@ -181,6 +182,21 @@ class AppReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "绑定提交"):
                 release.main()
             run.assert_not_called()
+
+    def test_force_native_flag_only_changes_native_task_cache_policy(self):
+        command = release.build_command("workspacecheck", "0.1.100", 100, True)
+        self.assertIn("-PtanukiForceNative=true", command)
+        self.assertIn("scripts/native-cache.init.gradle", command)
+        self.assertNotIn("--rerun-tasks", command)
+        self.assertNotIn("-PtanukiForceNative=true", release.build_command("workspacecheck", "0.1.100", 100))
+
+    def test_force_native_cannot_rebuild_fixed_apk_or_production(self):
+        for channel, extra in (("workspacecheck", ["--verified-apk", str(self.apk)]), ("production", [])):
+            arguments = ["prepare", "--version", "0.1.1", "--version-code", "2", "--channel", channel, "--force-native", *extra]
+            with mock.patch.object(sys, "argv", arguments), mock.patch.object(release, "run") as run:
+                with self.assertRaisesRegex(ValueError, "强制 native 仅用于"):
+                    release.main()
+                run.assert_not_called()
 
     def test_production_cannot_use_automatic_merge_handoff_exception(self):
         options = mock.Mock(version="0.1.1", version_code=2, channel="production", source_commit="c" * 40, merge_base="a" * 40)

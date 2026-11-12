@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,8 +32,12 @@ def fixture(directory, job):
     entry = {"packageName": r.PACKAGE, "versionName": job["version"], "versionCode": job["code"],
              "minSdk": 26, "assetName": apk, "sha256": r.digest(directory / apk),
              "bytes": (directory / apk).stat().st_size, "certificateSha256": r.CERTIFICATE}
+    metadata = {"identity": {"commit": job["sha"], "tree": job["tree"], "base": job.get("base", A),
+                 "version": job["version"], "code": job["code"], "certificateSha256": r.CERTIFICATE, "apkSha256": entry["sha256"]}}
+    with zipfile.ZipFile(directory / ("Tanuki-%s-source.zip" % job["version"]), "w") as archive:
+        archive.writestr(zipfile.ZipInfo("Tanuki-%s/RELEASE-SOURCE.json" % job["version"], (1980, 1, 1, 0, 0, 0)), json.dumps(metadata))
     (directory / "app-update.json").write_text(json.dumps({"schemaVersion": 1, "packages": [entry],
-        "sourceCommit": job["sha"], "sourceTree": job["tree"]}))
+        "sourceCommit": job["sha"], "sourceTree": job["tree"], "sourceBase": job.get("base", A)}))
     native = "Tanuki-native-corresponding-sources.tar.gz"
     (directory / "native-source-SHA256SUMS").write_text(r.digest(directory / native) + "  " + native + "\n")
     (directory / "RELEASE-SHA256SUMS").write_text("".join(r.digest(directory / n) + "  " + n + "\n" for n in sorted(names - {"RELEASE-SHA256SUMS"})))
@@ -98,6 +103,9 @@ class Executor:
 
     def commits(self, cursor):
         return self.committed[self.committed.index(cursor) + 1:]
+
+    def discover(self, cursor):
+        return self.commits(cursor), None
 
     def gate(self, job):
         job["pr"] = 1
@@ -324,6 +332,9 @@ class MergeReleaseTests(unittest.TestCase):
         calls = []
         job = self.job.copy()
         candidate = executor.checkout / "app/build/outputs/apk/modern/release/app-modern-release.apk"
+        (executor.checkout / "scripts").mkdir(parents=True)
+        for name in ("release-source.py", "native-cache-identity.py", "native-cache.init.gradle"):
+            (executor.checkout / "scripts" / name).write_text("synthetic-protocol-fixture")
         def run(command, **kwargs):
             calls.append(command)
             if "scripts/prepare-app-release.py" in command:
@@ -332,10 +343,16 @@ class MergeReleaseTests(unittest.TestCase):
                 candidate.write_bytes((directory / ("Tanuki-%s-workspacecheck-arm64-release.apk" % job["version"])).read_bytes())
             return ""
         runner.run.side_effect = run
-        with mock.patch.object(executor, "pin", return_value=B), mock.patch.object(executor, "git", return_value=A):
+        native = {"sha256": "e" * 64}
+        with mock.patch.object(executor, "pin", return_value=B), mock.patch.object(executor, "git", return_value=A), \
+                mock.patch.object(executor, "_native_state", return_value=(None, native, False)) as state, \
+                mock.patch.object(executor, "_record_native", return_value=native):
             result = executor._build(job)
             inventory = job["inventory"].copy()
             executor._build(job)
+            state.return_value = (None, {"sha256": "f" * 64}, False)
+            with self.assertRaisesRegex(r.ReleaseError, "工具链身份改变"):
+                executor._build(job)
         commands = [c for c in calls if "scripts/prepare-app-release.py" in c]
         self.assertEqual(2, len(commands))
         for command in commands:
@@ -344,6 +361,8 @@ class MergeReleaseTests(unittest.TestCase):
             self.assertEqual("0.1.15", command[command.index("--version") + 1])
             self.assertEqual("20", command[command.index("--version-code") + 1])
         self.assertNotIn("--verified-apk", commands[0])
+        self.assertIn("--force-native", commands[0])
+        self.assertNotIn("--force-native", commands[1])
         self.assertEqual(r.digest(candidate), commands[1][commands[1].index("--verified-apk-sha256") + 1])
         self.assertEqual(inventory, r.bundle_inventory(result, job))
 
@@ -355,6 +374,7 @@ class MergeReleaseTests(unittest.TestCase):
         provider.api.side_effect = [{"sha": C, "parents": [{"sha": B}]},
                                     {"sha": B, "parents": [{"sha": A}]}, {"sha": A, "parents": []}]
         provider.identities.return_value = (["0.1.99"], [99])
+        provider.association.side_effect = lambda sha: {"number": 1 if sha == B else 2, "merge_commit_sha": sha}
         output = io.StringIO()
         with mock.patch.object(sys, "argv", ["queue", "--home", str(self.home), "plan"]), \
                 mock.patch.object(r, "GitHub", return_value=provider), contextlib.redirect_stdout(output):
@@ -541,16 +561,23 @@ class MergeReleaseTests(unittest.TestCase):
         provider = mock.Mock()
         provider.merge.return_value = {"number": 7, "head": {"sha": C}}
         executor = r.Executor(config, self.home, r.Runner(), provider)
+        self.job["pr"] = 7
         receipt = {"schema": 1, "repo": "example/repository", "pr": 7, "head_sha": C,
                    "development_gates": "passed", "validation": "Host synthetic only"}
         path = self.home / "gates" / (C + ".json")
         r.atomic_json(path, receipt)
         executor.gate(self.job)
         self.assertEqual([mock.call(C), mock.call(B)], provider.checks.call_args_list)
+        frozen_hash = self.job["gate_receipt_sha256"]
+        path.unlink()
+        executor.gate(self.job)
+        self.assertEqual(frozen_hash, self.job["gate_receipt_sha256"])
         for field, value in (("head_sha", A), ("pr", 8), ("repo", "other/repository"), ("development_gates", "failed")):
             r.atomic_json(path, receipt | {field: value})
+            candidate = self.job.copy()
+            candidate.pop("gate_receipt_sha256")
             with self.assertRaises(r.ReleaseError):
-                executor.gate(self.job)
+                executor.gate(candidate)
 
     def test_gate_recorder_writes_only_after_real_gate_success_and_stable_head(self):
         recorder = r.load_module("test_gate_recorder", ROOT / "scripts/record-release-gate.py")
@@ -578,6 +605,166 @@ class MergeReleaseTests(unittest.TestCase):
                 with self.assertRaises(r.ReleaseError):
                     recorder.main()
                 self.assertFalse((self.home / "gates" / (C + ".json")).exists())
+
+    def test_rebase_members_form_one_release_per_pr_and_keep_continuous_merges(self):
+        d, e, f = "d" * 40, "e" * 40, "f" * 40
+        provider = mock.Mock()
+        mapping = {B: (1, C), C: (1, C), d: (2, e), e: (2, e), f: (3, f)}
+        provider.association.side_effect = lambda sha: {"number": mapping[sha][0], "merge_commit_sha": mapping[sha][1]}
+        groups, blocked = r.resolve_boundaries(provider, [B, C, d, e, f], A)
+        self.assertIsNone(blocked)
+        self.assertEqual([C, e, f], [g["sha"] for g in groups])
+        self.assertEqual([[B, C], [d, e], [f]], [g["members"] for g in groups])
+        self.assertEqual([A, C, e], [g["base"] for g in groups])
+        state = self.state()
+        r.enqueue(state, groups)
+        r.enqueue(state, groups)
+        for job in state["jobs"]:
+            r.reserve(job, state, ["0.1.99"], [99])
+        self.assertEqual(["0.1.100", "0.1.101", "0.1.102"], [j["version"] for j in state["jobs"]])
+        self.assertEqual([100, 101, 102], [j["code"] for j in state["jobs"]])
+
+    def test_uncertain_later_boundary_does_not_block_confirmed_prefix_or_skip_unknown(self):
+        provider = mock.Mock()
+        def associated(sha):
+            if sha == C:
+                raise r.ReleaseError("synthetic direct push boundary unknown")
+            return {"number": 1, "merge_commit_sha": B}
+        provider.association.side_effect = associated
+        groups, blocked = r.resolve_boundaries(provider, [B, C], A)
+        self.assertEqual([B], [g["sha"] for g in groups])
+        state, executor = self.state(), Executor(self.home)
+        executor.discover = lambda cursor: (groups, blocked)
+        with self.assertRaisesRegex(r.ReleaseError, "boundary unknown"):
+            r.run_once(state, lambda: None, executor, self.provider, self.home)
+        self.assertEqual(B, state["cursor"])
+        self.assertEqual("published", state["jobs"][0]["status"])
+        self.assertEqual(1, len(state["jobs"]))
+
+    def test_rebase_range_with_different_pr_is_refused(self):
+        provider = mock.Mock()
+        provider.association.side_effect = lambda sha: {"number": 1 if sha == B else 2, "merge_commit_sha": C}
+        groups, blocked = r.resolve_boundaries(provider, [B, C], A)
+        self.assertEqual([], groups)
+        self.assertIn("其他 PR", blocked)
+
+    def test_floor_raised_during_build_blocks_publish_without_reallocating(self):
+        state, executor = self.state(), Executor(self.home)
+        original = executor.build
+        def build(job):
+            result = original(job)
+            r.set_floor(self.home, state, 25, "synthetic independent QA installed code25")
+            return result
+        executor.build = build
+        with self.assertRaisesRegex(r.ReleaseError, "安装 floor"):
+            r.run_once(state, lambda: None, executor, self.provider, self.home)
+        self.assertEqual(("0.1.15", 20), (state["jobs"][0]["version"], state["jobs"][0]["code"]))
+        self.assertEqual(0, self.provider.creates)
+        self.assertEqual(25, r.read_json(self.home / "floor/value.json")["minimum"])
+        with self.assertRaisesRegex(r.ReleaseError, "不能降低"):
+            r.set_floor(self.home, state, 24, "synthetic lower floor")
+
+    def test_same_candidate_installed_floor_is_bound_to_actual_apk_and_never_adds_code(self):
+        state = self.state()
+        job = self.job.copy()
+        state["jobs"] = [job]
+        name = "Tanuki-0.1.15-workspacecheck-arm64-release.apk"
+        actual = job["inventory"][name]["sha256"]
+        with self.assertRaisesRegex(r.ReleaseError, "哈希不属于"):
+            r.set_floor(self.home, state, 20, "synthetic same candidate QA", B, "f" * 64)
+        r.set_floor(self.home, state, 20, "synthetic same candidate QA", B, actual)
+        for _ in range(4):
+            minimum, data = r.known_floor(self.home, state)
+            r.reserve(job, state, ["0.1.15"], [19])
+            r.check_floor(job, minimum, data)
+        self.assertEqual(("0.1.15", 20), (job["version"], job["code"]))
+        with self.assertRaisesRegex(r.ReleaseError, "安装 floor"):
+            r.check_floor(job | {"sha": C}, minimum, data)
+
+    def test_publication_holds_floor_lock_and_concurrent_floor_update_is_explicitly_rejected(self):
+        state, executor = self.state(), Executor(self.home)
+        executor.committed = [A, B]
+        previous = self.provider.publish
+        def publish(tag):
+            with self.assertRaisesRegex(r.ReleaseError, "floor/发布"):
+                r.set_floor(self.home, state, 25, "synthetic concurrent installed fact")
+            previous(tag)
+        self.provider.publish = publish
+        r.run_once(state, lambda: None, executor, self.provider, self.home)
+        self.assertEqual("published", state["jobs"][0]["status"])
+        self.assertFalse((self.home / "floor/value.json").exists())
+        r.set_floor(self.home, state, 25, "synthetic fact retry after publication")
+        self.assertEqual(25, r.known_floor(self.home, state)[0])
+
+    def test_reservation_uses_live_configured_floor_instead_of_permanent_19(self):
+        state, executor = self.state(), Executor(self.home)
+        executor.committed = [A, B]
+        r.atomic_json(self.home / "config.json", {"installed_code_floor": 31})
+        r.run_once(state, lambda: None, executor, self.provider, self.home)
+        self.assertEqual(32, state["jobs"][0]["code"])
+        self.assertEqual(31, state["code_floor"])
+
+    def test_floor_cli_updates_during_watch_writer_and_status_shows_persistent_fact(self):
+        r.atomic_json(self.home / "config.json", {"repo": "example/repository", "installed_code_floor": 19})
+        r.atomic_json(self.home / "state.json", self.state() | {"repo": "example/repository", "paused": False})
+        with r.writer(self.home):
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/merge-release.py"), "--home", str(self.home),
+                                     "set-floor", "--version-code", "24", "--reason", "synthetic independently confirmed installed code"], capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/merge-release.py"), "--home", str(self.home), "status"], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        status = json.loads(result.stdout)
+        self.assertEqual(24, status["installed_floor"]["effective_minimum"])
+        self.assertEqual(1, len(status["installed_floor"]["history"]))
+        self.assertFalse(status["jobs"])
+
+    def test_missing_receipt_has_actionable_reason_and_frozen_copy_is_checked(self):
+        provider = mock.Mock()
+        provider.merge.return_value = {"number": 1, "head": {"sha": C}}
+        executor = r.Executor({"repo": "example/repository", "gate_receipts": str(self.home / "missing")}, self.home, r.Runner(), provider)
+        with self.assertRaisesRegex(r.ReleaseError, "record-release-gate.py"):
+            executor.gate(self.job)
+        self.job["gate_receipt_sha256"] = "f" * 64
+        with self.assertRaisesRegex(r.ReleaseError, "冻结门禁回执"):
+            executor.gate(self.job)
+
+    def test_source_zip_identity_must_match_the_actual_apk(self):
+        archive = self.directory / "Tanuki-0.1.15-source.zip"
+        with zipfile.ZipFile(archive, "w") as source:
+            source.writestr("Tanuki-0.1.15/RELEASE-SOURCE.json", json.dumps({"identity": {
+                "commit": B, "tree": B, "version": "0.1.15", "code": 20,
+                "certificateSha256": r.CERTIFICATE, "apkSha256": "f" * 64}}))
+        sums = self.directory / "RELEASE-SHA256SUMS"
+        entries = r.checksum_entries(sums)
+        entries[archive.name] = r.digest(archive)
+        sums.write_text("".join(value + "  " + name + "\n" for name, value in sorted(entries.items())))
+        with self.assertRaisesRegex(r.ReleaseError, "实际 APK"):
+            r.bundle_inventory(self.directory, self.job)
+
+    def test_sync_refuses_linked_checkout_or_shared_worktree_metadata_before_git_mutation(self):
+        runner = mock.Mock()
+        executor = r.Executor({"repo": "example/repository"}, self.home, runner, self.provider)
+        foreign = self.home / "another-worktree"
+        foreign.mkdir()
+        marker = foreign / "sentinel.txt"
+        marker.write_text("preserve another worktree")
+        executor.checkout.symlink_to(foreign)
+        with self.assertRaisesRegex(r.ReleaseError, "专用 clone"):
+            executor.sync()
+        executor.checkout.unlink()
+        executor.checkout.mkdir()
+        (executor.checkout / ".git").write_text("gitdir: /synthetic/shared-git\n")
+        with self.assertRaisesRegex(r.ReleaseError, "独立 clone"):
+            executor.sync()
+        runner.run.assert_not_called()
+        self.assertEqual("preserve another worktree", marker.read_text())
+
+    def test_old_source_without_protocol_is_rejected_before_any_build_command(self):
+        runner = mock.Mock()
+        executor = r.Executor({}, self.home, runner, self.provider)
+        with mock.patch.object(executor, "pin", return_value=B), self.assertRaisesRegex(r.ReleaseError, "缺少自动发布源码协议"):
+            executor._build(self.job.copy())
+        runner.run.assert_not_called()
 
     def test_no_automatic_product_commits_or_pushes(self):
         commands = []

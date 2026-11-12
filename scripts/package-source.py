@@ -3,6 +3,8 @@
 from pathlib import Path
 import argparse
 import hashlib
+import importlib.util
+import json
 import re
 import shutil
 import zipfile
@@ -58,7 +60,7 @@ def public_file(path: Path) -> bool:
     return path.is_file()
 
 
-def main(version=None) -> None:
+def main(version=None, release_manifest=None) -> None:
     # 导入本模块做公共指纹时仍保留默认常量；只有显式发布调用才改变归档名称。
     if version is not None and (len(version) > 80 or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", version)):
         raise ValueError("Invalid confirmed source version")
@@ -83,6 +85,15 @@ def main(version=None) -> None:
         if not all(path.is_file() and public_file(path) for path in extras):
             raise FileNotFoundError("Incomplete native source attachments; run scripts/package-native-sources.sh")
         selected.update(extras)
+    generated = None
+    if release_manifest is not None:
+        spec = importlib.util.spec_from_file_location("release_source", ROOT / "scripts/release-source.py")
+        proof = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(proof)
+        document = json.loads(Path(release_manifest).read_text())
+        if document["packages"][0]["versionName"] != version:
+            raise ValueError("Source archive version does not match release identity")
+        generated = json.dumps(proof.make_document(ROOT, selected, document), ensure_ascii=False, indent=2) + "\n"
     output.parent.mkdir(parents=True, exist_ok=True)
     guide = ROOT / "docs/ARTIFACTS.md"
     if guide.is_file():
@@ -95,6 +106,11 @@ def main(version=None) -> None:
             executable = path.name == "gradlew" or path.suffix in {".sh", ".py", ".mjs"}
             info.external_attr = (0o100755 if executable else 0o100644) << 16
             archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        if generated is not None:
+            info = zipfile.ZipInfo(f"{archive_name}/RELEASE-SOURCE.json", date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, generated.encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
     hasher = hashlib.sha256()
     with output.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -112,4 +128,6 @@ def main(version=None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", help="用户已确认的发布版本；日常检查不传")
-    main(parser.parse_args().version)
+    parser.add_argument("--release-manifest", type=Path, help="自动发布的实际更新清单；生成无Git源码证明，不修改已跟踪文件")
+    options = parser.parse_args()
+    main(options.version, options.release_manifest)

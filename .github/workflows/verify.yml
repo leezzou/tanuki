@@ -51,6 +51,10 @@ jobs:
         run: python3 scripts/test-app-release.py
       - name: Test merge release queue
         run: python3 scripts/test-merge-release.py
+      - name: Test generated release source without Git
+        run: python3 scripts/test-release-source.py
+      - name: Test native cache identity with synthetic tools
+        run: python3 scripts/test-native-cache.py
       - name: Test publication checks
         run: python3 scripts/test-publication.py
       - name: Test development gates

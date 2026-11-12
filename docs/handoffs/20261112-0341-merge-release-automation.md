@@ -13,7 +13,7 @@
 
 ## 当前状态
 
-开始和最终离线收尾时，工作树分支为 ao/release-automation/merge-release；HEAD 与远端 main 均为 3c56167b94efeff47a20bd609b389708ba080ce5。公开 v0.1.14 已发布 Pre-release，tag 精确指向该 SHA；通过 gh 实核更新清单 0.1.14/code19/workspacecheck、既有371dc301完整证书和六附件。APK 13,073,258 字节，SHA-256 57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff。下一版按真实公开/保留上限计算，当前应为0.1.15、code至少20；未访问设备，安装上限采用用户确认值与安装配置下限。
+初始工作树分支为 ao/release-automation/merge-release，HEAD与远端main均为3c56167b94efeff47a20bd609b389708ba080ce5；PR #111续接时已claim/fetch，并按完整4d1333c1bee11ffecbdd412a92e7bc15aee0051d检出后回到原功能分支，状态干净。续接实核main仍为上述发布基线；该旧PR head四项CI均通过，不沿用为补强后的新head结论。公开 v0.1.14 已发布 Pre-release，tag 精确指向该 SHA；通过 gh 实核更新清单 0.1.14/code19/workspacecheck、既有371dc301完整证书和六附件。APK 13,073,258 字节，SHA-256 57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff。下一版按真实公开/保留上限计算，当前应为0.1.15、code至少20；未访问设备，安装上限采用用户确认值与安装配置下限。
 
 新执行器已实现并通过 Host 合成回归，尚未在真实 provider 执行写操作、注册 launchd 或运行 Android 构建。最终提交完整 SHA、PR URL 与 CI 以 provider/AO 交付回执为准，不为了回填自身元数据再提交。
 
@@ -21,12 +21,14 @@
 
 | 文件 | 改动与目的 |
 |---|---|
-| scripts/merge-release.py | 原子持久 FIFO/扫描游标、flock 单写者、整数版本/code保留、first-parent/唯一 merged PR 边界、精确 SHA/tree checkout、固定候选、六附件逐字节远端比对及 draft续传/publish事实恢复、plan/status/pause/resume/once/watch |
+| scripts/merge-release.py | 原子持久 FIFO/扫描游标、flock 单写者、整数版本/code保留、逐项provider证明的PR合并区间（多提交rebase一项）、精确SHA/tree、固定候选/六附件远端恢复、冻结门禁回执、动态floor与同候选相等绑定/公开互斥、native缓存实际内容身份、plan/status/pause/resume/once/watch/set-floor |
 | scripts/build-slot.py | 跨工作树共享重构建锁、前台票据优先、后台发布低优先级、停止等待与精确自有票据清理 |
 | scripts/merge-release-service.py | 复制已审代码到稳定目录、非凭据环境配置、launchd显式注册/启停、跨登录恢复；prepare不注册、不覆盖已有状态，stop只移除字节/路径核验过的自有注册 |
 | scripts/record-release-gate.py | 实际调用既有合并前门禁，绑定稳定PR head后写本机回执，失败作废旧回执；服务运行时不依赖AO/LLM |
 | scripts/prepare-app-release.py、scripts/development-signing.init.gradle | 精确来源元数据与自动合并PR交接守卫；已有开发证书路径引用；固定APK模式继续保留；实核min26/target34/non-debuggable/完整ARM64 ELF与证书 |
-| scripts/test-merge-release.py、scripts/test-app-release.py、.github/workflows/verify.yml | 新队列/服务/锁/提供者/来源和封装回归纳入Host CI；只使用临时合成提供者/命令runner/Git仓库，不用真实发布试错 |
+| scripts/release-source.py、scripts/package-source.py、scripts/check-handoff.py | 源码ZIP内生成提交/tree对象证明、公开文件SHA256、本次合并/交接索引及实际发布身份；无Git验证/重建/恢复已验证上游源码，不改原共享文件；人工封装显式--shared-stamp保留严格模式 |
+| scripts/native-cache-identity.py、scripts/native-cache.init.gradle | 实际源码/锁/配置/NDK/依赖/输出内容散列，构建后复核和APK native字节对应；不靠mtime；只在失效时强制native task，固定APK重试拒绝输入身份变化 |
+| scripts/test-merge-release.py、scripts/test-app-release.py、scripts/test-release-source.py、scripts/test-native-cache.py、.github/workflows/verify.yml | 新队列/服务/锁/提供者/来源和封装回归纳入Host CI；只使用临时合成提供者/命令runner/Git仓库，不用真实发布试错 |
 | AGENTS.md、README.md、docs/RELEASE.md、docs/HANDOFFS.md、docs/APP-UPDATES.md、docs/ARTIFACTS.md、docs/PUBLICATION.md | 消除逐次问版本/网页手动上传旧约定，记录服务操作、持久边界、回执、共享印章自动模式例外、失败恢复与真实发布身份 |
 
 普通 Worker 不修改 docs/AGENT-STATE.md 或 docs/handoffs/CURRENT.json，未改其他 Worker 的产品代码、构建版本默认值或 runtime 文件。
@@ -36,13 +38,17 @@
 | 实际命令 / 操作 | 结果 | 证据与限制 |
 |---|---|---|
 | git status、rev-parse、ls-remote；gh releases列表、v0.1.14/app-update.json与git ref查询 | 通过 | 只读公开身份/六附件名称大小摘要；tag/main完整SHA如上，code19已实核 |
-| python3 scripts/test-merge-release.py | 30项通过，约2.1秒 | 整数9→10/99→100→101；双进程互斥；多合并/失败重启不漏；同候选不加号；源SHA/tree和命令参数；部分上传/冲突/已公开缺件拒绝/丢失publish响应；无自动commit/push；初始化/只读plan/暂停恢复；共享slot优先与停止；launchd仅合成安装/启停；门禁回执及provider/CI拒绝 |
-| python3 scripts/test-app-release.py | 23项通过，约0.3秒 | 原18项保留并补来源/自动合并交接例外/缺SHA拒绝/production拒绝自动例外/SDK和ARM64原生ELF条件；APK及签名工具均合成，不是真实APK验证 |
+| python3 scripts/test-merge-release.py | 最终42项通过，约3.3秒 | 整数9→10/99→100→101；双进程互斥；多合并/失败重启不漏；同候选不加号；源SHA/tree和命令参数；部分上传/冲突/已公开缺件拒绝/丢失publish响应；无自动commit/push；初始化/只读plan/暂停恢复；共享slot优先与停止；launchd仅合成安装/启停；门禁回执及provider/CI拒绝 |
+| python3 scripts/test-app-release.py | 25项通过，约0.36秒 | 原18项保留并补来源/自动合并交接例外/缺SHA拒绝/production拒绝自动例外/SDK和ARM64原生ELF条件；APK及签名工具均合成，不是真实APK验证 |
+| python3 scripts/test-release-source.py | 最终12项通过，约14.2秒 | 无.git解压后验证来源、check-handoff两模式、默认verify-workspace合成构建、指定version/code的rebuild --plan与合成Gradle实际调用；源码篡改/漏交接/伪造tree/版本不符/缺证书拒绝；ZIP同输入字节一致 |
+| python3 scripts/test-native-cache.py | 最终9项通过，约1.1秒（微型合成） | 全为临时合成NDK/上游Git/ELF输出；相同mtime工具字节改变仍失效，源码/锁/ABI配置/NDK路径与权限变化失效，首次依赖bootstrap后暖缓存可复用，实际APK库hash对应 |
 | python3 scripts/test-development-gates.py | 28项通过 | 未修改既有门禁逻辑；无真实PR/设备调用 |
 | python3 scripts/test-check-handoff.py | 11项通过 | PR容忍共享状态落后、集成/严格模式与来源篡改边界 |
-| python3 scripts/test-agent-workflow.py | 19项通过，57秒 | 合成ADB/Gradle/环境；既有两项device-lock测试输出文件句柄ResourceWarning，退出0；不是Android测试 |
+| python3 scripts/test-agent-workflow.py | 19项通过，69秒 | 合成ADB/Gradle/环境；既有两项device-lock测试输出文件句柄ResourceWarning，退出0；不是Android测试 |
 | python3 scripts/test-publication.py | 19项通过 | 源码边界、索引与嵌套归档/许可检查 |
 | git diff --check、check-handoff.py --pr --record 本记录、check-publication.py --git | 通过，公开扫描0 findings | 最终提交前复核实际索引及源码候选归档；不运行共享印章写入模式 |
+
+补充验收最终合计165项通过（42+12+9+25+11+28+19+19）。整轮163项通过后，补checkout/JNI链接输出的两项拒绝回归，最终重跑队列42/native-cache9/source12及diff检查全部通过；未改变的其余套件不无谓重复。源码包恢复包内实际对应上游源码，不需要前任.git/缓存；目录链接、不同字节缓存、归档路径越界明确拒绝。全部合成，不把命令runner或生成证明称为Android/设备QA。
 
 失败保留：扩展队列套件一次23项中有1项服务准备测试失败，原因是macOS `/var`规范化为`/private/var`，测试预期未resolve；修正测试临时根目录规范化后最终30项通过。实现检查同时修正首次clone的no-checkout状态拒绝、暂停命令与writer互锁、只bootstrap自定义plist不能跨登录恢复、固定候选拷贝未完成就记inventory等问题，并补相应回归。
 
@@ -52,9 +58,9 @@ PR #111创建后的最终渠道边界复核发现自动交接例外还应在代�
 
 ## 未完成与暂停项
 
-- 未执行：Gradle/native-inclusive release构建、真实签名/SDK工具实核、Android仪器/安装/升级、真实模型/账号/真机。所有脚本回归均为Host，不冒充设备结果。
+- 未执行：Gradle/native-inclusive release构建、真实签名/SDK工具实核、Android仪器/安装/升级、真实模型/账号/真机。NDK全内容散列的真实耗时、实际暖缓存失效/复用、真实上游归档恢复后编译均待集成slot验证；目前只用合成NDK/Git/原生归档/Gradle，所有脚本回归均为Host，不冒充设备结果。
 - 未执行：真实GitHub tag/Release上传、launchd注册/跨登录实测、真实环境网络故障恢复。以上仅合成提供者与配置生命周期回归通过。
-- 集成依赖：已向集成维护方申请唯一重构建slot、既有开发证书路径及稳定共享锁路径，收尾时尚未获安排。需在启用前协调所有重任务真正采用wrapper，不能以口头排程代替长期互斥。
+- 集成依赖：编排已确认既有证书为$HOME/.android/debug.keystore，仅由Gradle引用、实际构建核371dc301完整证书，不再等重复路径。仍未获native构建许可；已提出稳定服务/共享锁/回执路径分别为$HOME/Library/Application Support/TanukiRelease、TanukiBuildSlot、TanukiReleaseGates，待编排核对并由集成方统一所有重任务实际采用wrapper。没有为此创建或启用服务，不能以口头排程代替长期互斥。
 - 待门禁：独立审查、PR最新SHA的CI及适用QA。服务保持未启用；本轮PR不等于已验收或已部署自动发布。
 - 用户暂停：API Key保存、真实模型/账号、真机；独占模拟器不触碰。
 
@@ -70,7 +76,7 @@ PR #111创建后的最终渠道边界复核发现自动交接例外还应在代�
 - 普通PR不写共享状态/印章。自动逐次发布用精确SHA/tree、本次PR交接守卫、合并前门禁回执；手工发布仍严格--release。批量共享印章和每个普通合并边界不兼容，因此必须明确此规则例外，而不能在服务中自动补章/提交版本文件。
 - 服务依赖本机在线、现有gh认证、macOS/JDK/SDK/NDK和已有开发证书；没有新增签名secret/runner，未读取/导出密码或token。
 - 单写者保证以同一稳定服务目录为范围；运维不能为同仓库在另一目录/机器启用第二个发布者。回执/状态是受信任本机运维数据，不是签名证明，不能防同UID恶意写入。
-- main直接push、多提交rebase或无法证明唯一PR合并边界时明确阻塞。CI失败/取消/缺失、公开身份冲突、main历史改写不静默跳过。外部人工发版越过已保留code时需明确迁移，不无限重新分配。
+- main直接push或无法证明唯一PR合并区间时明确阻塞；连续多提交rebase在所有成员经provider证明同属唯一PR时归为一项，前序合法区间可完成，游标不越过未知提交。目标SHA必须包含发布协议；已向编排说明应先合入#111再合后续功能PR，若已有旧协议提交则需额外兼容方案，不混入新脚本或跳过。CI失败/取消/缺失、公开身份冲突、main历史改写不静默跳过。floor动态持久记录且发布阶段互斥，同候选相等floor必须绑SHA与APK实际hash；更高floor/外部发版越过保留code明确停机迁移，不无限加号。
 - 发布保持workspacecheck/开发签名/Pre-release；正式签名渠道不改。日志只显示受控阶段/字节/耗时和简短失败；进程超时仅清理本runner拥有的进程组，不触设备/其他进程。
 
 ## 产物与校验
