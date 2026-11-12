@@ -1,10 +1,12 @@
 # Tanuki 构建产物：从哪里取包
 
-**当前公开测试版：0.1.14/code19，workspacecheck；tag `v0.1.14` 指向 `3c56167b94efeff47a20bd609b389708ba080ce5`。** 以下候选构建的原源码基线为 `16c07591b7ba170a77fdc0720b201a77e5477db3`。 实核 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34；普通准备入口重新生成 `artifacts/releases/0.1.14/` 六附件。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 PR #105 已合并，六附件已发布为 Pre-release。后续[自动发布队列](RELEASE.md)将候选持久保存在服务目录 `bundles/<merge-sha>/`，代码/状态不依赖临时工作树；启用前仍须完成审查与适用验证。
+**启用前历史已核发布基线：0.1.14/code19，workspacecheck；tag `v0.1.14` 指向 `3c56167b94efeff47a20bd609b389708ba080ce5`。** 以下候选构建的原源码基线为 `16c07591b7ba170a77fdc0720b201a77e5477db3`。 实核 `com.tanuki.modern.workspacecheck`、ARM64、non-debuggable、minSdk26/targetSdk34；普通准备入口重新生成 `artifacts/releases/0.1.14/` 六附件。APK **13,073,258 字节**，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；证书 SHA-256 `371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f`。 PR #105 已合并，六附件已发布为 Pre-release。后续[自动发布队列](RELEASE.md)将候选持久保存在服务目录 `bundles/<merge-sha>/`，代码/状态不依赖临时工作树；启用前仍须完成审查与适用验证。
 
-0.1.14 已合入最终 main 的 #104 常驻 sheet 宿主完整断言，覆盖单一宿主、visible互斥、直属层级和失败详情可空模型；传输与失败详情的产品代码不变。已包含此前 #98/#103 及主题/文案、聊天/分页、动效 A/B/C/D/E/F 等实现。本轮测试类与最终main按字节相等，不保留上一轮发布分支的最小替代断言。
+**实际当前取包依据：** GitHub Release、该 Release 对应的 `app-update.json` 与自动队列 `status`，不要把本页历史批次当最新版。以下测试数字只属于 0.1.14 历史验证，生成的 `artifacts/README.md` 同样保留此限定；每次自动发布不反向提交版本文档来触发额外发布。
 
-**最终集成验证：** 完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 本轮在合并工作树无过滤执行JVM/lint，BUILD SUCCESSFUL（59s）。普通release构建成功（15s，增量；package任务实际执行），既有开发证书由私有缓存init显式引用；APK身份/签名与六附件清单已独立核验。设备、Android仪器、真实链路未执行，API Key/真实模型/账号/真机仍暂停。
+0.1.14 已合入当时 main 的 #104 常驻 sheet 宿主完整断言，覆盖单一宿主、visible互斥、直属层级和失败详情可空模型；传输与失败详情的产品代码不变。已包含此前 #98/#103 及主题/文案、聊天/分页、动效 A/B/C/D/E/F 等实现。本轮测试类与最终main按字节相等，不保留上一轮发布分支的最小替代断言。
+
+**0.1.14 历史集成验证（不代表后续每版）：** 完整 JVM **1408 tests / 144 XML / 0 failures / 0 errors / 0 skipped**；lint **0 errors / 117 warnings / 2 hints**。 本轮在合并工作树无过滤执行JVM/lint，BUILD SUCCESSFUL（59s）。普通release构建成功（15s，增量；package任务实际执行），既有开发证书由私有缓存init显式引用；APK身份/签名与六附件清单已独立核验。设备、Android仪器、真实链路未执行，API Key/真实模型/账号/真机仍暂停。
 
 - **0.1.14/code19 workspacecheck 候选**：`artifacts/releases/0.1.14/Tanuki-0.1.14-workspacecheck-arm64-release.apk`；13,073,258字节，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`；同目录六附件已核验，设备QA未执行。
 - **0.1.11/code13 已发布（Pre-release，tag `v0.1.11`）**：`artifacts/releases/0.1.11/Tanuki-0.1.11-workspacecheck-arm64-release.apk`，SHA-256 `192f73f2e07782c63a9b8defc5294153987fd03285181a5c12960531231a976d`、11,890,210 字节、证书 `371dc301...`；同目录含 `app-update.json`、完整源码 ZIP、原生对应源码 TAR 与校验。

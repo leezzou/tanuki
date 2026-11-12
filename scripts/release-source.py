@@ -138,6 +138,15 @@ def validate_document(root, document):
     require(changed == document["changedFiles"] and list(reversed(chain)) == document["mergeCommits"], "合并改动/提交索引不匹配")
     paths, extras = selected_paths(root)
     relative = {p.relative_to(root).as_posix(): p for p in paths}
+    package = load(root, "package-source.py")
+    # 应分发集合来自已核Git tree和真实打包白名单，不能由磁盘/可变清单自证完整。
+    expected = set(package.FILES)
+    expected.update(name for name in after
+                    if (name in package.FILES or any(name.startswith(tree + "/") for tree in package.TREES))
+                    and package.public_name(PurePosixPath(name)))
+    require(all(name in after and after[name][0] in ("100644", "100755") for name in expected),
+            "Git tree 缺少必需公开源码或模式不受支持")
+    require(set(relative) - extras == expected, "Git tree 公开源码文件集合不完整或有额外文件")
     require(set(relative) == set(document["files"]), "源码包公开文件集合发生变化")
     for name, path in relative.items():
         require(not path.is_symlink() and sha256(path) == document["files"][name], "源码包文件散列不匹配：" + name)

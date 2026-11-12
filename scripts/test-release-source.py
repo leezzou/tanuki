@@ -183,6 +183,18 @@ class ReleaseSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Git tree"):
             proof.verify(root)
 
+    def test_removed_source_and_its_manifest_entry_cannot_hide_a_tree_file(self):
+        for name in ("app/src/fixture.txt", ".github/fixture.txt"):
+            with self.subTest(name=name):
+                _, root = self.package_and_extract()
+                (root / name).unlink()
+                path = root / "RELEASE-SOURCE.json"
+                document = json.loads(path.read_text())
+                document["files"].pop(name)
+                path.write_text(json.dumps(document))
+                with self.assertRaisesRegex(ValueError, "Git tree.*文件集合"):
+                    load(root / "scripts/release-source.py").verify(root)
+
     def test_extra_public_source_is_rejected(self):
         _, root = self.package_and_extract()
         (root / "scripts/unrecorded.py").write_text("synthetic-unrecorded")

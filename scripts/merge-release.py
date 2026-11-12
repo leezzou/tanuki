@@ -294,6 +294,13 @@ def reserve(job, state, versions, codes):
     job["status"] = "reserved"
 
 
+def check_remote_ceiling(job, versions, codes):
+    require(job["code"] > max(codes), "外部发布上限已超过保留 code；停止等待明确迁移，不自动反复加号")
+    other_versions = [version_key(version) for version in versions if version != job["version"]]
+    require(not other_versions or version_key(job["version"]) > max(other_versions),
+            "外部发布版本上限已达到或超过保留版本；停止，不改 reservation")
+
+
 def known_floor(home, state):
     config_path, floor_path = home / "config.json", home / "floor/value.json"
     configured = read_json(config_path).get("installed_code_floor", 0) if config_path.exists() else 0
@@ -590,7 +597,7 @@ def run_once(state, save, executor, provider, home, stopped=lambda: False):
                 state["code_floor"] = minimum
                 reserve(job, state, versions, codes)
                 save()
-                require(job["code"] > max(codes), "外部发布上限已超过保留 code；停止等待明确迁移，不自动反复加号")
+                check_remote_ceiling(job, versions, codes)
                 check_floor(job, minimum, floor_data)
             executor.gate(job)
             save()
@@ -614,6 +621,9 @@ def run_once(state, save, executor, provider, home, stopped=lambda: False):
                 minimum, floor_data = known_floor(home, state)
                 state["code_floor"] = minimum
                 check_floor(job, minimum, floor_data)
+                # 构建期间远端可能升号；排除自身后刷新，publish_bundle仍核自身tag/所有已有字节。
+                versions, codes = provider.identities("v" + job["version"])
+                check_remote_ceiling(job, versions, codes)
                 # 整个远端上传/公开期间拒绝并发 floor 改写，避免检查后身份下限变化。
                 publish_bundle(provider, job, directory, notes, stopped)
             job["status"] = "published"

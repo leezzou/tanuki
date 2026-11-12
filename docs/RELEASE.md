@@ -2,11 +2,11 @@
 
 ## 当前发布策略
 
-用户要求 main 每次合并自动发一个新版本，直接程序化上传，不需要 Agent 执行上传。patch 按整数递增：`0.1.9 → 0.1.10`、`0.1.99 → 0.1.100 → 0.1.101`，不会自动跳到 0.2，也不再逐次询问版本。版本依据实际已发布 Release、已有 tag 与持久队列保留身份；同一合并失败重试仍使用同一版本/code。
+用户要求 main 每次合并自动发一个新版本，直接程序化上传，不需要 Agent 执行上传。patch 按整数递增：`0.1.9 → 0.1.10`、`0.1.99 → 0.1.100 → 0.1.101`，不会自动跳到 0.2，也不再逐次询问版本。版本依据实际已发布 Release、已有 tag 与持久队列保留身份；同一合并失败重试仍使用同一版本/code。构建后、远端写入前重新读取公开版本/code上限；排除本候选数值但仍核其tag与已有附件字节，发现其他版本越界则保留reservation停止。
 
-2026-11-12 只读核对：公开 [v0.1.14](https://github.com/leezzou/tanuki/releases/tag/v0.1.14) 已发布为 Pre-release，tag 指向 `3c56167b94efeff47a20bd609b389708ba080ce5`；`app-update.json` 为 0.1.14/code19/workspacecheck，六附件齐全。APK 13,073,258 字节，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`。这是本次初始化的已知基线，未来启用前仍须重新查证。下一次保留版本从实际公开/已保留上限分配，当前应为 0.1.15，code 至少20。
+2026-11-12 只读核对：公开 [v0.1.14](https://github.com/leezzou/tanuki/releases/tag/v0.1.14) 已发布为 Pre-release，tag 指向 `3c56167b94efeff47a20bd609b389708ba080ce5`；`app-update.json` 为 0.1.14/code19/workspacecheck，六附件齐全。APK 13,073,258 字节，SHA-256 `57c2038c22f206f62a2a3b8424bc435e2bb1c515de397620a024f95cf9b89fff`。这是启用前已核的历史基线，不是永久当前版本。实际当前版本以 GitHub Release、对应 `app-update.json` 和队列 `status` 为准；历史测试数字不作为每版验证结果。
 
-**合并前独立审查、当前 head 的 CI 和适用 QA 仍是前置条件。** 自动上传不等于允许跳过合并门禁，也不授权发布器代合、修改保护或直推 main。开发签名包一律 Pre-release；正式渠道不在自动发布范围。当前实现尚需独立审查、适用构建验证及集成方显式启用，不会因合入脚本就自行注册服务。初始化仍从已发布基线开始逐合并处理；目标 SHA 必须包含此发布协议，因此集成顺序需先合入本发布工具 PR，再合后续功能 PR。已核 main 尚为上述基线；若此前已合入不含协议的提交，执行器会在构建前明确停止，需集成方安排兼容方案，不能把较新工具混入旧树或挪游标跳过。
+**合并前独立审查、当前 head 的 CI 和适用 QA 仍是前置条件。** 自动上传不等于允许跳过合并门禁，也不授权发布器代合、修改保护或直推 main。开发签名包一律 Pre-release；正式渠道不在自动发布范围。当前实现尚需独立审查、适用构建验证及集成方显式启用，不会因合入脚本就自行注册服务。初始化从明确核实的已发布 tag 开始逐合并处理，不能用安装时 main 作为游标。本轮调度已先合 #109，main 为 `a35c6ba9dbe570dc61fee0d61509bf394d26a2c1`；由集成方按该原树交付 0.1.15/code20 后，须核实 v0.1.15 的 tag、清单和实际六附件，再以 v0.1.15/a35 初始化，随后发现包括本工具 PR 在内的每次后续合并。v15 未真实发布前不可先初始化该 tag；已发布 #109 作为明确基线记账，不遗漏或重新发布。目标 SHA 仍须包含发布协议，不把本工具混进旧产品树、不伪造旧 stamp、不自动跳过未知提交。
 
 ## 本机执行器与持久边界
 
@@ -37,10 +37,10 @@ export EXISTING_DEBUG_KEYSTORE="$HOME/.android/debug.keystore"
 python3 scripts/merge-release-service.py prepare --home "$SERVICE_HOME" \
   --jdk "$TANUKI_JDK" --sdk "$ANDROID_SDK_ROOT" \
   --keystore "$EXISTING_DEBUG_KEYSTORE" --build-slot "$BUILD_SLOT" \
-  --gate-receipts "$GATE_RECEIPTS" --installed-code-floor 19
+  --gate-receipts "$GATE_RECEIPTS" --installed-code-floor <当次已核同包安装code>
 
 # 只创建配置/代码快照/plist，不注册、不启动。明确已发布基线，避免重发全部历史。
-python3 "$SERVICE_HOME/bin/merge-release.py" --home "$SERVICE_HOME" init --baseline-tag v0.1.14
+python3 "$SERVICE_HOME/bin/merge-release.py" --home "$SERVICE_HOME" init --baseline-tag v0.1.15
 python3 "$SERVICE_HOME/bin/merge-release.py" --home "$SERVICE_HOME" plan
 python3 "$SERVICE_HOME/bin/merge-release.py" --home "$SERVICE_HOME" status
 
@@ -129,7 +129,7 @@ python3 scripts/build-slot.py --directory "$BUILD_SLOT" --priority development -
 
 自动源码 ZIP 内额外生成 `RELEASE-SOURCE.json`，不写入 Git 工作树、不刷新 CURRENT/AGENT-STATE。它声明为生成的来源证明，包含原始提交对象、Git tree 对象、first-parent 合并范围、本次改动与交接索引、逐公开文件 SHA-256，以及版本/code/证书/原 APK 散列。生成时要求干净精确 checkout，公开文件内容必须属于声明的 tree；包内 native 对应源码附件单独纳入文件散列。发布器还把包内身份与实际 APK/更新清单/合并基线交叉核对。
 
-解压后 [`release-source.py`](../scripts/release-source.py) 不调用 Git 或 AO 即可重算 commit/tree/blob 散列、验证全部公开文件和本次交接变更，拒绝未记录源码、额外文件、被改写的文件清单或伪造的 tree/交接索引。共享 CURRENT/AGENT-STATE 可以是对应合并原树中的较早状态，不能因此补章或篡改原源码。生成证明不表示设备/真实模型 QA，不是独立发布者签名；仍须通过 Release 外部校验清单、来源及 APK 实际签名确认分发身份。
+解压后 [`release-source.py`](../scripts/release-source.py) 不调用 Git 或 AO 即可重算 commit/tree/blob 散列、验证全部公开文件和本次交接变更，从已证明的最终 tree 按真实打包白名单推导应有公开文件集合，并与磁盘和清单双向核对；拒绝同时删源码及清单项、未记录源码、额外文件、被改写的文件清单或伪造的 tree/交接索引。共享 CURRENT/AGENT-STATE 可以是对应合并原树中的较早状态，不能因此补章或篡改原源码。生成证明不表示设备/真实模型 QA，不是独立发布者签名；仍须通过 Release 外部校验清单、来源及 APK 实际签名确认分发身份。
 
 在解压的 `Tanuki-<version>/` 中：
 

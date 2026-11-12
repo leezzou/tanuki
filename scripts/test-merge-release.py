@@ -544,6 +544,47 @@ class MergeReleaseTests(unittest.TestCase):
             executor.pin(first)
         self.assertEqual("local-edit", (checkout / "source.txt").read_text())
 
+    def test_remote_ceiling_raised_during_build_blocks_all_remote_writes(self):
+        for external_code in (21, 19):
+            with self.subTest(external_code=external_code):
+                state, executor, provider = self.state(), Executor(self.home), Provider()
+                executor.committed = [A, B]
+                original = executor.build
+                def build(job):
+                    result = original(job)
+                    provider.identities = lambda *_: (["0.1.14", "0.1.16"], [19, external_code])
+                    return result
+                executor.build = build
+                with self.assertRaisesRegex(r.ReleaseError, "外部发布"):
+                    r.run_once(state, lambda: None, executor, provider, self.home)
+                job = state["jobs"][0]
+                self.assertEqual(("0.1.15", 20, "prepared"), (job["version"], job["code"], job["status"]))
+                self.assertEqual((0, [], 0), (provider.creates, provider.uploads, provider.publishes))
+                self.assertIn("inventory", job)
+
+    def test_preupload_refresh_excludes_own_draft_but_still_verifies_its_identity(self):
+        for wrong_source in (False, True):
+            with self.subTest(wrong_source=wrong_source):
+                state, executor, provider = self.state(), Executor(self.home), Provider()
+                executor.committed = [A, B]
+                job = dict(self.job, status="prepared")
+                directory = fixture(self.home / "bundles" / B, job)
+                job["inventory"] = r.bundle_inventory(directory, job)
+                state["jobs"], state["cursor"] = [job], B
+                provider.create(job, None)
+                provider.content["app-update.json"] = (directory / "app-update.json").read_bytes()
+                provider.identities = lambda *_: (["0.1.14", "0.1.15"], [19])
+                if wrong_source:
+                    provider.target = C
+                    with self.assertRaisesRegex(r.ReleaseError, "tag"):
+                        r.run_once(state, lambda: None, executor, provider, self.home)
+                    self.assertEqual(([], 0), (provider.uploads, provider.publishes))
+                else:
+                    r.run_once(state, lambda: None, executor, provider, self.home)
+                    self.assertEqual("published", job["status"])
+                    self.assertEqual(1, provider.publishes)
+                self.assertEqual(("0.1.15", 20, 1), (job["version"], job["code"], provider.creates))
+
     def test_external_code_conflict_blocks_without_allocating_another_version(self):
         state = self.state()
         r.enqueue(state, [B])
