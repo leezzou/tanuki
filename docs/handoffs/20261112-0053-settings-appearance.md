@@ -21,6 +21,8 @@
 
 102明确收取最终增量退出0并释放后，106独占执行本功能产品/AndroidTest源码compile、11项定向JVM和lint。首轮退出1（3m37s）：产品Kotlin compile完成，AndroidTest因新增测试误导入assertDoesNotExist失败，该API实际为节点对象方法；移除无效import并保留原断言后，第二轮同配置命令已完成产品/AndroidTest/JVM源码compile与定向JVM，XML实核SettingsCatalogTest 5项、AppearancePreferencesTest 6项，共11项/2套件，0 failures/errors/skipped。最终整条命令正式收取退出0、BUILD SUCCESSFUL（6m36s，47任务/16执行/31增量）；lint XML独立实核0 errors/117 warnings/2 hints，106全部持有文件0告警，未降低规则。首轮JVM/lint尚未执行；未执行设备测试。不把此前环境准备或他人局部测试当作本功能通过。Git作者/提交者已实核为指定公开身份。首次普通交接检查因未包含检查器规定的明确未验证词而退出1；补充准确表述后重跑通过。git diff --check通过（新增未跟踪文件不在该命令检查范围内）；另以脚本检查8个新增Kotlin文件的尾部空白及末尾换行通过。提交收尾已执行实际索引/工作树公开边界检查863文件/863索引项/0 findings，唯一交接及git diff --check通过；源码候选863文件及ZIP公开边界检查0 findings。该候选未包含native对应源码附件且不分发二进制，不作为正式发布源码附件；外部校验清单随候选重新生成，不把ZIP自身hash写回归档。与105当前未提交接线草稿做联合静态覆盖检查：29个白名单目标均有真实SettingsSearchAnchor，搜索组件无业务命令回调；这不是compile或设备验证。只读检查发现设置根搜索页Back直接退出而未先清查询，已交105修正；再次只读确认其settingsBack已补根有查询先清再退出分支，子页返回仍保留查询。105报告已新增跨页定位/返回用例，106尚未编译或设备执行，不计通过；未越owner修改。
 
+后续提交入口修正：应用级scope改为Main.immediate，使UI连续选择按调用顺序进入控制器；文件IO仍由控制器的IO dispatcher执行，页面退出不取消提交的语义不变。上面的本地11项/compile/lint绑定首个模块提交b2b30c4060f825ee6bc0795b6c03f68fc93103ec，该head四条CI也已实际全部SUCCESS。最后这处内部调度修正不改变API，当前最终head验证绑定provider CI，不把旧head的本地数字当作新head本地重跑；Android快速连续选择仍待100组合候选验收。
+
 实际Host命令（先加载JDK17和本会话隔离环境；私有init仅引用仓库外既有debug密钥路径，无口令配置，不随源码分发）：
 
 ```bash

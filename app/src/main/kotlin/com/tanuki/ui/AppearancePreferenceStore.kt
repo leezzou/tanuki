@@ -49,7 +49,8 @@ private class AppearanceFileStorage(private val file: File) : AppearancePreferen
 
 /** 应用级持有提交，不因离开设置页中断已开始的保存。 */
 internal class AppearancePreferenceStore private constructor(context: Context) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // 按UI调用顺序进入控制器；文件读写仍由控制器切到IO，避免线程池调度颠倒选择。
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val controller = AppearancePreferenceController(
         AppearanceFileStorage(File(context.filesDir, "appearance/theme-mode")),
     )
