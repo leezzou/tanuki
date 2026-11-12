@@ -57,7 +57,7 @@ Ubuntu 与 Node 各提供八个下载源，DSH 归档提供五个源：
 - 默认 `0.2.1-rc.5` 随 APK 提供来自官方 npm 的完整依赖锁，内容由 APK 中固定的 SHA-256 绑定；不必在手机上逐个联网解析全部依赖。**包归档仍需下载**，不等于完整离线安装。
 - 其他版本优先复用持久依赖锁或同版本已安装程序中带有效 `.installed` 标记的锁。缓存绑定 DSH 版本、选定发布的 SHA-512、实际 Node/npm 版本和解析策略；命中后仍检查入口、必需依赖、平台、引擎与所有选中归档的完整性。
 - 缺少可信锁才运行官方 npm 解析，使用 `--prefer-offline` 优先采用已取得的公开元数据。完整依赖图检查通过后立即原子保存锁到 `filesDir/downloads/npm-locks`；后面的下载或候选安装失败不会使下一次重试丢失这份解析结果。失败解析时原有隔离 npm 缓存也不清除。
-- 请求仍有 60 秒超时与两次重试，整命令仍以 20 分钟为上限；没有仅靠延长超时冒充提速。命令自身到期现在作为失败报告，不再混同「用户取消」，用户主动取消及外层任务取消仍保持取消语义。
+- 无可信锁时仅运行一次官方元数据解析，不再预先生成一份最终不会安装的镜像候选锁。单请求超时15秒，npm内部不重试，解析命令总上限180秒；命令到期作为失败报告，不混同「用户取消」，用户主动取消及外层任务取消仍保持取消语义。失败后的公开缓存保留，下次优先复用。
 - 预置锁不是发布者签名；信任边界见 [SECURITY](SECURITY.md)。本次已实现并完成宿主/构建验证，手机弱网耗时与实际安装仍待专用设备测试，不承诺特定倍数。
 
 预置锁位于 [`app/src/main/assets/dsh-locks/0.2.1-rc.5.json`](../app/src/main/assets/dsh-locks/0.2.1-rc.5.json)，含 686 个非根包记录及跨平台可选依赖。2026-11-03 使用隔离 HOME/空 npm 配置、宿主 Node 26.13.0/npm 11.19.0 从 `https://registry.npmjs.org` 生成：在全新目录写入无脚本的 `tanuki-dsh-runtime@1.0.0`、`private:true` 与精确的 `@deepseek-ai/dsh:0.2.1-rc.5` 依赖，再执行 `npm install --package-lock-only --ignore-scripts --save-exact --engine-strict --no-audit --no-fund --registry=https://registry.npmjs.org --os=linux --cpu=arm64 --libc=glibc --fetch-timeout=60000 --fetch-retries=2`。更新锁时必须重新核对官方入口 SHA-512、全部官方 HTTPS 归档/SHA-512、平台与引擎，并同步 `BundledDshLock` 的版本/入口校验/全文件 SHA-256；不可只改摘要绕过审核。
@@ -73,12 +73,25 @@ python3 scripts/test-dsh-lock.py
 
 两类组件的下载工作量不同，不能只按总字节比较：
 
-- **Ubuntu / Node** 下载一个已知大小和 SHA-256 的归档，测速对象就是该归档。**DSH** 先准备或复用依赖锁，再逐包下载；当前归档下载最多四路并发，多个请求的首字节等待和尾部慢包都会影响总耗时。见 [`RuntimeComponents.kt`](../app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt)、[`NpmPackageDownloads.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt)。
-- **无可信锁时，镜像没有覆盖依赖解析**：需要运行 `npm install --package-lock-only` 时，registry 仍固定为 `https://registry.npmjs.org`。选择 npmmirror 等只改变归档地址；官方元数据链路慢时，换归档源不能消除这部分等待。npm 请求设置为 60 秒超时、两次重试；解析命令另有 20 分钟的整体上限。弱网可能先遇到单次请求失败，也可能因累积等待达到命令上限，具体需结合报错与耗时区分，不能仅靠延长总超时判断已经解决。见 [`NpmPackageDownloads.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt)、[`Launcher.kt`](../app/src/main/kotlin/com/tanuki/runtime/Launcher.kt)。
+- **Ubuntu / Node** 下载一个已知大小和 SHA-256 的归档，测速对象就是该归档。**DSH** 先准备或复用依赖锁，再逐包下载；归档默认8路、连续成功后最多16路，单host最多8路，温控/省电策略可降低并发。多个请求的首字节等待和尾部慢包都会影响总耗时。见 [`RuntimeComponents.kt`](../app/src/main/kotlin/com/tanuki/runtime/RuntimeComponents.kt)、[`NpmPackageDownloads.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt)、[`NpmDownloadPolicy.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmDownloadPolicy.kt)。
+- **并发下调在当前归档结束后生效**：下载worker的注册、退役判定/名额与退出计数共用短锁，避免活跃快照过期或提前归还名额导致多退；策略回调、下载、挂起与任务派发在锁外，剩余worker继续消费队列。仍遵守上述总并发和单host上限。见 [`NpmAdaptiveWorkerPool.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmAdaptiveWorkerPool.kt)。
+- **无可信锁时，镜像没有覆盖依赖解析**：需要运行 `npm install --package-lock-only` 时，registry 固定为 `https://registry.npmjs.org`，只做一次官方解析。选择 npmmirror 等只改变归档地址；官方元数据链路慢时，换归档源不能消除这部分等待。npm请求15秒超时、不在npm内部重试；解析命令总上限180秒。弱网可能先遇到单请求失败，也可能因累积等待达到命令上限，需结合阶段与错误区分，不能仅靠延长总超时判断已经解决。见 [`NpmPackageDownloads.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt)、[`NpmDownloadPolicy.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmDownloadPolicy.kt)。
 - **短采样不代表全部依赖**：DSH 对所选版本的入口包最多采样 256 KiB，而非对整套依赖测速；结果可复用十分钟。正式下载出错才回退，没有按持续低吞吐自动切源；30 秒读取超时也不等于最低速度要求。见 [`NpmSources.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmSources.kt)、[`SourceSpeedTester.kt`](../app/src/main/kotlin/com/tanuki/runtime/SourceSpeedTester.kt)、[`Downloader.kt`](../app/src/main/kotlin/com/tanuki/download/Downloader.kt)。
 - **下载结束不等于安装结束**：归档逐包校验后，还会在 PRoot 中串行写入 npm 缓存，再运行 `npm ci --offline` 解包安装和检查。这些是本地 I/O 与安装耗时，不是下载带宽；保留归档可以省去再次传输，但目前仍需重新构建候选安装。见 [`NpmPackageDownloads.kt`](../app/src/main/kotlin/com/tanuki/runtime/NpmPackageDownloads.kt)、[`RuntimeManager.kt`](../app/src/main/kotlin/com/tanuki/runtime/RuntimeManager.kt)。
 
 上述是实现中的性能边界，不是特定手机的测速结论。定位时先记录界面的阶段、来源、已校验包数、字节/速度和阶段耗时，区分「解析 DSH 依赖」「下载 DSH 依赖」「写入已验证的 npm 缓存」「离线安装 DSH 依赖」。未知总大小本身不会阻止下载，不能据此判断卡死。优化仍须保留官方校验信息、TLS 与逐包完整性检查；不能为了提速跳过校验。
+
+## 本地检查与启动诊断
+
+应用首帧不等待中断组件目录的递归恢复清理：后台恢复先持有环境独占锁，安装、启动和DSH更新等待同一恢复屏障。恢复中只显示真实状态，不提供取消；恢复错误保持可见并阻止后续环境写入。不会因为离开或重建页面而重复安装。
+
+一键准备在同一独占事务内复用刚通过、且Ubuntu标记仍匹配的工具检查，避免Node安装再次执行完整工具与必要库检查；独立Node安装或标记不匹配时仍检查，候选Node实际启动与兼容性验证保留。
+
+初始化完成后只执行本地运行检查，不再为 npm 公网 HEAD 等待最多30秒。手动运行检查仍分别检查本地能力与公网连接：断网时保留具体网络错误，并明确“本地运行检查通过；公网连接未通过”，不把本地程序误判为损坏；未执行网络检查显示未检查，不冒充通过。
+
+每次接纳的DSH启动都记录独立代次与单调耗时，区分插件管理工具、工作区支持、Node/DSH兼容性、启动工具、进程创建、官方就绪信息、连接端点发布和HTTP检查。失败/取消冻结最后阶段与耗时；日志只记录固定阶段、代次和时间，不记录URL、token、Cookie或用户配置。官方就绪行与HTTP存活仍须同时通过；日志采集提前结束或失败时立即结束等待，不空等180秒。
+
+这不等于已修复历史QA-03的首次180秒超时；其真实原因仍需独立Android冷/热启动采样。阶段模型和限制见[接口契约](INTERFACES.md)。
 
 ## 重装、卸载与数据
 

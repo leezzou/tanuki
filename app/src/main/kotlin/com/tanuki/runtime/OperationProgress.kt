@@ -47,6 +47,7 @@ internal fun operationLabel(command: String): String = when (command) {
     "component-uninstall-dsh" -> "准备卸载 DSH"
     "initialize" -> "准备运行环境"
     "health" -> "检查运行环境"
+    "service-http-check" -> "检查助手连接"
     "background-probe" -> "正在检查后台运行"
     "ubuntu-cache" -> "整理 Ubuntu 缓存"
     else -> "准备执行操作"

@@ -34,12 +34,13 @@ import java.nio.file.FileVisitResult
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 
-class RuntimeManager(val context: Context) {
+class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) {
     val paths = Paths(context)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val log = EventLog(paths, scope)
     val launcher = Launcher(context, paths, log)
-    val state = MutableStateFlow(Snapshot())
+    val state = MutableStateFlow(if (backgroundRecovery) Snapshot(environment = EnvironmentState.CHECKING,
+        operation = "runtime-recovery", stage = "恢复运行环境状态") else Snapshot())
     private val remoteMachine = RemoteHostMachine()
     @Volatile var cookieSwitchGuard: DshCookieSwitchGuard? = null
         private set
@@ -86,7 +87,7 @@ class RuntimeManager(val context: Context) {
     /** 独立更新管理器（DSH 安装/备用/恢复、APK 更新）的忙碌信号，由 TanukiApp 注入。 */
     @Volatile private var externalBusy: () -> Boolean = { false }
     @Volatile private var stopping = false
-    private var runtimeGeneration = 0L
+    @Volatile private var runtimeGeneration = 0L
     @Volatile private var child: Child? = null
     val workspaceStorage = WorkspaceStorage(paths)
     val requiredTools = MutableStateFlow(RequiredToolsStatus())
@@ -98,10 +99,22 @@ class RuntimeManager(val context: Context) {
     val hasActiveOperation: Boolean get() = job?.isActive == true || serverJob?.isActive == true || mutation.isLocked
     val authenticatedUrl: String? get() = remoteMachine.authenticatedUrl
     val origin: String? get() = remoteMachine.origin
-    private data class RunAttempt(val mode: RecoveryMode) {
+    private data class RunAttempt(val mode: RecoveryMode, val trace: StartupTrace) {
         @Volatile var readyAtMillis: Long = 0L
     }
-    init {
+    private fun startupTrace(id: Long) = StartupTrace(id, { android.os.SystemClock.elapsedRealtime() }) { progress ->
+        state.update { current ->
+            if (current.startup?.attemptId == progress.attemptId) current.copy(startup = progress,
+                stage = if (progress.outcome == StartupOutcome.CANCELLED) current.stage else progress.stage.label)
+            else current
+        }
+        val last = progress.completedStages.lastOrNull()
+        log.append("startup attempt=${progress.attemptId} stage=${progress.stage.name} outcome=${progress.outcome.name} " +
+            "elapsed_ms=${progress.elapsedMillis(android.os.SystemClock.elapsedRealtime())} " +
+            "phase_ms=${progress.stageElapsedMillis(android.os.SystemClock.elapsedRealtime())} " +
+            "previous_stage=${last?.stage?.name ?: "NONE"} previous_ms=${last?.durationMillis ?: 0}")
+    }
+    private fun restoreInitialState() {
         val componentRecovery=runCatching { components.recover() }
         val restoreRecovery=runCatching { com.tanuki.storage.DataSnapshots.recoverPreparedRestore(paths) }
         val meta = paths.metadata()
@@ -118,13 +131,15 @@ class RuntimeManager(val context: Context) {
         recoveryState.value = restoredRecovery
         if (restoredRecovery != persistedRecovery) runCatching { paths.atomic("failure-state", failurePolicy.encode(restoredRecovery)) }
         val processLossNote = restoredRecovery.mode == RecoveryMode.SAFE && persistedRecovery.mode == RecoveryMode.PROBATION
-        state.value = Snapshot(environment = if (installed) EnvironmentState.READY else if (metadataExists || paths.stage.exists() || paths.read("transaction") != null) EnvironmentState.REPAIR else EnvironmentState.ABSENT,
+        val restoredSnapshot = Snapshot(environment = if (installed) EnvironmentState.READY else if (metadataExists || paths.stage.exists() || paths.read("transaction") != null) EnvironmentState.REPAIR else EnvironmentState.ABSENT,
             service = when(previous){"running","starting","interrupted"->ServiceState.INTERRUPTED;"failed"->ServiceState.FAILED;else->ServiceState.STOPPED},
             error = if (processLossNote) "上次正常模式试用期间进程中断，已回到安全模式" else paths.read("last-error") ?: "",
             confinement = runCatching { Confinement.valueOf(paths.read("confinement") ?: "UNKNOWN") }.getOrDefault(Confinement.UNKNOWN),
             stage = if (installed) "环境已安装，健康状态待检查" else "首次联网准备 Ubuntu、Node.js 和官方 DSH",
             ubuntu = components.installedUbuntuVersion() ?: meta.optString("ubuntu", "未安装"), node = components.installedNodeVersion() ?: meta.optString("node", "未安装"), dsh = meta.optString("dsh", "未安装"),
             recovery = restoredRecovery)
+        // 本地磁盘恢复不能覆盖期间已建立的远程连接或其渲染失败状态。
+        state.update { current -> restoredSnapshot.copy(remote = current.remote, web = current.web, events = current.events) }
         val updateJournal=paths.read("update-transaction")
         if(updateJournal!=null) {
             val phase=runCatching { JSONObject(updateJournal).optString("phase") }.getOrDefault("unknown")
@@ -147,7 +162,20 @@ class RuntimeManager(val context: Context) {
                 requiredTools.value = RequiredToolsStatus(true, List(missing?.length() ?: 0) { missing!!.getString(it) }, marker, saved.optLong("checkedAt"))
             }
         }
+    }
+    private val initialization = RuntimeInitialization(scope, mutation, backgroundRecovery, ::restoreInitialState) { error ->
+        state.update { it.copy(environment = EnvironmentState.REPAIR, update = UpdateState.RECOVERY_REQUIRED,
+            operation = null, stage = "运行环境恢复未完成", error = Redact.text(error.message ?: "恢复失败，已保留现有数据")) }
+    }
+    suspend fun awaitInitialized(): Boolean = try {
+        initialization.await()
+        true
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Throwable) { false }
+
+    init {
         scope.launch {
+            if (!awaitInitialized()) return@launch
             mutation.withLock {
                 try {
                     if (workspaceStorage.recoverInterruptedImport()) {
@@ -170,31 +198,21 @@ class RuntimeManager(val context: Context) {
     }
     fun event(text: String) { log.append(text); state.update { it.copy(events = (it.events + Redact.text(text)).takeLast(12)) } }
     fun fail(t: Throwable) = fail(t, null)
-    fun fail(t: Throwable, operation: String?) {
+    @Synchronized fun fail(t: Throwable, operation: String?) {
         val detail = when (t) {
             is AccessDeniedException -> "文件访问被拒绝；安装或恢复时无法读取目录：${t.file ?: t.message}"
             else -> t.message ?: t.javaClass.simpleName
         }
         val message = Redact.text(detail)
+        val before = state.value
+        val publication = runtimeFailureSnapshot(before, t, operation, runtimeGeneration, message, System.currentTimeMillis())
+        if (publication === before) {
+            log.append("ERROR 过期停止失败仅保留诊断：$message")
+            return
+        }
         log.append("ERROR ${t.javaClass.simpleName}: $message")
         runCatching { paths.atomic("last-error",message) }
-        state.update { current ->
-            // 分类只在这里做一次，各页面读取同一份标题、原因和动作。
-            val failure = FailureCatalog.describe(
-                FailureInput(
-                    message = message,
-                    operation = operation ?: current.operation,
-                    retry = current.operationRetry.takeIf { operation == null || operation == current.operation },
-                    stage = current.stage,
-                    environment = current.environment,
-                    update = current.update,
-                    service = current.service,
-                    recovery = current.recovery,
-                    occurredAtMillis = System.currentTimeMillis()
-                )
-            )
-            current.copy(error = message, failure = failure)
-        }
+        state.update { it.copy(error = publication.error, failure = publication.failure, failureRevision = it.failureRevision + 1) }
     }
     internal fun phase(label: String, env: EnvironmentState) { state.update { it.copy(stage = label, environment = env, bytes = 0, total = -1, download = null, phasePercent = null) }; event(label) }
     fun cancel() { job?.cancel() }
@@ -210,7 +228,8 @@ class RuntimeManager(val context: Context) {
         val elapsed = operationRetry.elapsedMillis(id)
         state.update { snapshot ->
             snapshot.copy(failedOperation = FailedOperation(id, snapshot.stage,
-                if (cancelled) "" else snapshot.error, elapsed, cancelled))
+                if (cancelled) "" else snapshot.error, elapsed, cancelled,
+                domain = FailureCatalog.operationDomain(snapshot.operation) ?: FailureDomain.UNKNOWN, operation = snapshot.operation))
         }
     }
 
@@ -232,6 +251,7 @@ class RuntimeManager(val context: Context) {
         synchronized(this) {
             if (job?.isActive == true) { event("已有环境操作正在进行"); return }
             job = scope.launch {
+                if (!awaitInitialized()) return@launch
                 if (!mutation.tryLock()) {
                     event("另一个操作占用环境，请稍后重试")
                     // 不能只写事件日志：版本按钮失败时用户需要看到中文原因。
@@ -246,7 +266,7 @@ class RuntimeManager(val context: Context) {
                 ))
                 state.update { it.copy(operation=label,operationRetry=retry,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
-                    check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
+                    check(child == null || label in setOf("background-probe", "service-http-check")) { "请先停止服务；可能中断正在执行的任务" }
                     paths.atomic("transaction", label)
                     block()
                     File(paths.state, "transaction").delete()
@@ -256,7 +276,7 @@ class RuntimeManager(val context: Context) {
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作已停止；当前安装状态已刷新",download=null,bytes=0,total=-1) }
-                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理已取消；已生效的精简策略保留") else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.UNKNOWN) else it.copy(environment = EnvironmentState.CANCELLED, stage = "已取消，可重试并复用完整下载") }
+                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理已取消；已生效的精简策略保留") else if (label == "service-http-check") it else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.UNKNOWN) else it.copy(environment = EnvironmentState.CANCELLED, stage = "已取消，可重试并复用完整下载") }
                     event("操作取消")
                 } catch (e: Throwable) {
                     fail(e)
@@ -264,7 +284,7 @@ class RuntimeManager(val context: Context) {
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作失败，请查看错误信息",download=null,bytes=0,total=-1) }
-                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理失败，详见错误记录") else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.FAILED) else it.copy(environment = EnvironmentState.FAILED) }
+                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理失败，详见错误记录") else if (label == "service-http-check") it.copy(webHealthy = false) else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.FAILED) else it.copy(environment = EnvironmentState.FAILED) }
                 } finally {
                     try { components.refresh(false) } finally {
                         state.update { it.copy(operation=null,operationRetry=null,download=null,bytes=0,total=-1,phasePercent=null) }
@@ -275,11 +295,9 @@ class RuntimeManager(val context: Context) {
         }
     }
     fun initialize(baseOnly: Boolean = false) = launchExclusive("initialize") {
-        if(File(paths.state,"installed.json").exists()) {
-            val known=paths.metadata()
-            check(known.optBoolean("ready") && known.has("dsh") && known.has("node") && known.has("ubuntu")) { "安装元数据损坏，已保留所有数据；请恢复匹配快照，不能自动选择旧程序读取现有会话" }
-            check(known.getString("dsh")==DSH) { "当前环境已独立选择其他 DSH 版本；请使用匹配版本的恢复流程，不能用 APK 默认版本覆盖现有会话" }
-        }
+        val selectedDsh = initializationDshVersion(
+            if (File(paths.state,"installed.json").exists()) paths.metadata() else null,
+            DshVersions.installedVersions(paths.engines), DSH)
         ensureBase()
         configureMinimalUbuntu()
         val probe = launcher.run(paths.root, listOf("/bin/bash", "-c", "cat /etc/os-release; uname -m; printf 'LINUX_APP_OK\\n'"))
@@ -288,15 +306,15 @@ class RuntimeManager(val context: Context) {
         ensureUbuntuTools()
         installNode()
         ensurePnpm()
-        phase("安装官方 DSH $DSH（锁定入口版本，保存依赖锁）", EnvironmentState.INSTALLING)
-        installEngine(DSH)
+        phase("准备官方 DSH $selectedDsh（保留选定版本，校验依赖锁）", EnvironmentState.INSTALLING)
+        installEngine(selectedDsh)
         phase("运行检查", EnvironmentState.VERIFYING)
         val result = diagnostics()
         check(result.exitCode == 0) { "健康检查失败: ${result.stderr}" }
         val ubuntuVersion=components.installedUbuntuVersion() ?: error("Ubuntu 镜像版本信息缺失")
         val nodeVersion=components.installedNodeVersion() ?: error("Node.js 版本信息缺失")
-        paths.atomic("installed.json", JSONObject().put("ready", true).put("ubuntu", ubuntuVersion).put("node", nodeVersion).put("dsh", DSH).toString())
-        state.update { it.copy(environment = EnvironmentState.READY, health = HealthState.HEALTHY, ubuntu = ubuntuVersion, node = nodeVersion, dsh = DSH, stage = "初始化完成，启动后可在官方设置中配置 API Key", error = "", failure = null) }
+        paths.atomic("installed.json", JSONObject().put("ready", true).put("ubuntu", ubuntuVersion).put("node", nodeVersion).put("dsh", selectedDsh).toString())
+        state.update { it.copy(environment = EnvironmentState.READY, health = HealthState.HEALTHY, ubuntu = ubuntuVersion, node = nodeVersion, dsh = selectedDsh, stage = "初始化完成，启动后可在官方设置中配置 API Key", error = "", failure = null) }
         start()
     }
     internal fun publishRequiredTools(missing: List<String>) {
@@ -409,6 +427,7 @@ class RuntimeManager(val context: Context) {
         event("Ubuntu Base 按需安装工具；保留版权，后续包不默认安装可选文档和翻译")
     }
     suspend fun ensureBase() {
+        check(awaitInitialized()) { "运行环境恢复未完成，请先处理恢复错误" }
         phase("设备检查", EnvironmentState.CHECKING)
         check(Build.SUPPORTED_ABIS.contains("arm64-v8a")) { "第一版仅支持 ARM64：${Build.SUPPORTED_ABIS.toList()}" }
         check(paths.base.usableSpace >= 1536L * 1024 * 1024) { "至少需要 1.5GB 可用空间，建议预留 4GB" }
@@ -487,8 +506,9 @@ class RuntimeManager(val context: Context) {
             if(component.isNotEmpty())state.update { it.copy(bytes=file.length(),total=file.length(),download=RuntimeDownloadProgress(component,source,file.length(),file.length(),0,reused)) }
         }
     }
-    private suspend fun installNode() = components.ensureNode()
+    private suspend fun installNode() = components.ensureNode(preparedTools = requiredTools.value)
     suspend fun ensurePnpm(nodeHome:File?=null) {
+        check(awaitInitialized()) { "运行环境恢复未完成，请先处理恢复错误" }
         components.migrateLegacyLayers()
         val destination=File(paths.pnpm,PNPM)
         val previous=File(paths.pnpm,"$PNPM.previous")
@@ -570,11 +590,32 @@ class RuntimeManager(val context: Context) {
         state.update { it.copy(health=HealthState.HEALTHY,stage="后台自检完成：60/60，详见诊断结果") }
         event("后台自检实际完成 60 次计时与文件写入，exit=0")
     }
-    fun healthCheck() = launchExclusive("health") {
-        ensurePnpm()
-        state.update { it.copy(health = HealthState.CHECKING) }
-        val r = diagnostics(); state.update { it.copy(health = if (r.exitCode == 0) HealthState.HEALTHY else HealthState.FAILED) }
-        check(r.exitCode == 0) { r.stderr }
+    fun healthCheck() {
+        val running = synchronized(this) { child?.takeIf { it.process.isAlive }?.let { it to runtimeGeneration } }
+        launchExclusive(if (running == null) "health" else "service-http-check") {
+            executeRuntimeHealthCheck(running != null, checkRunning = live@ {
+                val (expected, generation) = checkNotNull(running)
+                val endpoint = synchronized(this@RuntimeManager) {
+                    if (child !== expected || runtimeGeneration != generation || stopping) return@live
+                    state.update { it.copy(stage = "检查当前助手的本机连接") }
+                    remoteMachine.localOrigin
+                }
+                probeRunningService(this@RuntimeManager, generation, { runtimeGeneration },
+                    { child === expected && !stopping && expected.process.isAlive },
+                    probe = { httpReady(endpoint) }, publish = { healthy ->
+                        val detail = if (healthy) "助手本机连接正常" else "助手仍在运行，本机连接尚未就绪"
+                        state.update { it.copy(webHealthy = healthy, stage = detail,
+                            web = if (!healthy && !remoteMachine.remoteActive) WebState.DISCONNECTED else it.web) }
+                        event(detail)
+                    })
+            }, checkStopped = {
+                ensurePnpm()
+                state.update { it.copy(health = HealthState.CHECKING) }
+                val r = diagnostics(checkNetwork = true)
+                state.update { it.copy(health = if (r.exitCode == 0) HealthState.HEALTHY else HealthState.FAILED) }
+                check(r.exitCode == 0) { r.stderr }
+            })
+        }
     }
     private val sandboxProbeProgram = """
         import {createRequire} from 'node:module';
@@ -611,7 +652,8 @@ class RuntimeManager(val context: Context) {
             Confinement.UNKNOWN -> "命令沙箱能力尚未确认，可在运行检查中重试"
         })
     }
-    suspend fun diagnostics(): CommandResult {
+    suspend fun diagnostics(checkNetwork: Boolean = false): CommandResult {
+        check(awaitInitialized()) { "运行环境恢复未完成，请先处理恢复错误" }
         val script = """
             set -e
             cat /etc/os-release
@@ -623,19 +665,42 @@ class RuntimeManager(val context: Context) {
             python3 --version
             node -e 'console.log(JSON.stringify({platform:process.platform,arch:process.arch,execPath:process.execPath,cwd:process.cwd()}));const fs=require("fs");fs.writeFileSync(".tanuki-probe","persistent-file");if(fs.readFileSync(".tanuki-probe","utf8")!=="persistent-file")process.exit(2);const r=require("child_process").spawnSync("/bin/sh",["-c","exit 17"]);console.log("child_exit="+r.status);if(r.status!==17)process.exit(3)'
             node --input-type=module -e "${'$'}2" "${'$'}1"
-            curl --fail --max-time 30 --silent --show-error --head --output /dev/null --write-out 'HTTPS_STATUS=%{http_code}\n' https://registry.npmjs.org/
         """.trimIndent()
         val engine = paths.metadata().optString("dsh", DSH)
         require(engine.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")))
         val isolated=File(paths.runtime,"diagnostics-data")
-        val result = launcher.run(paths.root, listOf("/bin/bash", "-c", script, "diagnostics", "/opt/engines/$engine/node_modules/@deepseek-ai/dsh/lib/bin.js", sandboxProbeProgram),
-            home=File(isolated,"home"),dshHome=File(isolated,"dsh"),workspace=File(isolated,"workspace"))
-        check(result.exitCode == 0) { "健康检查失败 exit=${result.exitCode}: ${result.stderr}" }
+        val result = runRuntimeDiagnostics(
+            local = {
+                launcher.run(paths.root, listOf("/bin/bash", "-c", script, "diagnostics", "/opt/engines/$engine/node_modules/@deepseek-ai/dsh/lib/bin.js", sandboxProbeProgram),
+                    home=File(isolated,"home"),dshHome=File(isolated,"dsh"),workspace=File(isolated,"workspace"))
+            },
+            network = if (checkNetwork) suspend {
+                state.update { it.copy(stage = "本地运行检查通过，正在检查公网连接") }
+                launcher.run(paths.root, listOf("/usr/bin/curl", "--fail", "--max-time", "30", "--silent", "--show-error",
+                    "--head", "--output", "/dev/null", "--write-out", "HTTPS_STATUS=%{http_code}\\n", "https://registry.npmjs.org/"),
+                    timeoutMs=40000,home=File(isolated,"home"),dshHome=File(isolated,"dsh"),workspace=File(isolated,"workspace"))
+            } else null,
+            onNetwork = { diagnostic ->
+                state.update { it.copy(networkDiagnostic = diagnostic) }
+                when (diagnostic.state) {
+                    NetworkDiagnosticState.FAILED -> {
+                        state.update { it.copy(stage = "本地运行检查通过；公网连接未通过") }
+                        event("本地运行检查通过；${diagnostic.detail}")
+                    }
+                    NetworkDiagnosticState.REACHABLE -> {
+                        state.update { it.copy(stage = "本地运行与公网连接检查通过") }
+                        event(diagnostic.detail)
+                    }
+                    else -> Unit
+                }
+            },
+        )
         val confinement = sandboxCapability(result.stdout)
         state.update { it.copy(confinement = confinement) }
         return result.also {
             paths.atomic("confinement", confinement.name)
-            paths.atomic("diagnostics.json", JSONObject().put("device", deviceInfo()).put("uid", Process.myUid()).put("appPid", Process.myPid()).put("debuggable", BuildConfig.DEBUG).put("exit", it.exitCode).put("stdout", it.stdout).put("stderr", it.stderr).toString(2))
+            paths.atomic("diagnostics.json", JSONObject().put("device", deviceInfo()).put("uid", Process.myUid()).put("appPid", Process.myPid()).put("debuggable", BuildConfig.DEBUG).put("exit", it.exitCode).put("stdout", it.stdout).put("stderr", it.stderr)
+                .put("network", state.value.networkDiagnostic.state.name).put("networkDetail", state.value.networkDiagnostic.detail).toString(2))
         }
     }
     @Synchronized fun refreshWorkspaceStorage() {
@@ -654,10 +719,25 @@ class RuntimeManager(val context: Context) {
      * 只发起既有前台服务 START 动作，安装/密钥/用户数据仍走 [start] 的原有流程；
      * 条件不满足、重复调用或系统拒绝时返回 false，不改变当前状态。
      */
-    fun requestEarlyStart(enabled: Boolean): Boolean {
+    @Synchronized fun startRequestGeneration(): Long = runtimeGeneration
+    fun startServiceIntent(early: Boolean = false): Intent = startServiceIntent(early, startRequestGeneration())
+    private fun startServiceIntent(early: Boolean, generation: Long): Intent =
+        Intent(context, RuntimeService::class.java).setAction(if (early) "START_EARLY" else "START")
+            .putExtra(START_REQUEST_GENERATION, generation)
+
+    fun requestEarlyStart(enabled: Boolean): Boolean = requestEarlyStart(enabled, startRequestGeneration())
+    private fun requestEarlyStart(enabled: Boolean, expectedGeneration: Long): Boolean {
+        if (!initialization.isComplete) {
+            if (!enabled) return false
+            scope.launch {
+                if (awaitInitialized()) requestEarlyStart(enabled, expectedGeneration)
+            }
+            return true
+        }
+        if (!initialization.succeeded) return false
         return earlyStartGate.request(earlyConditions(enabled)) {
             try {
-                context.startForegroundService(Intent(context, RuntimeService::class.java).setAction("START_EARLY"))
+                context.startForegroundService(startServiceIntent(early = true, generation = expectedGeneration))
                 event("启动优化：已请求在首帧前提前拉起已就绪的 DSH")
             } catch (error: Throwable) {
                 event("提前启动未能发起，仍可手动启动：${Redact.text(error.message ?: error.javaClass.simpleName)}")
@@ -706,7 +786,7 @@ class RuntimeManager(val context: Context) {
     }
 
     /** 记录一次失败并按策略决定是否自动重启；不删除用户数据、不重放任务。 */
-    private fun applyFailure(kind: FailureKind, result: CommandResult?) {
+    @Synchronized private fun applyFailure(kind: FailureKind, result: CommandResult?) {
         val nowMillis = System.currentTimeMillis()
         val decision = failurePolicy.onFailure(recoveryState.value, kind, nowMillis, result?.exitCode)
         publishRecovery(decision.state)
@@ -720,7 +800,8 @@ class RuntimeManager(val context: Context) {
                 webHealthy = false,
                 web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
                 error = message,
-                failure = failure
+                failure = failure,
+                failureRevision = it.failureRevision + 1
             )
         }
         event(message)
@@ -740,7 +821,7 @@ class RuntimeManager(val context: Context) {
             val attempt = recoveryState.value.restartAttempts
             val suffix = if (expectedMode == RecoveryMode.SAFE) "，使用安全模式" else ""
             event("按失败策略自动重启（$attempt/${failurePolicy.maxRestartAttempts}）$suffix")
-            start(automatic = true)
+            start(automatic = true, expectedGeneration = generation)
         }
     }
 
@@ -784,8 +865,16 @@ class RuntimeManager(val context: Context) {
         start()
     }
 
-    fun start(early: Boolean = false, automatic: Boolean = false) {
-        synchronized(this) {
+    fun start(early: Boolean = false, automatic: Boolean = false, expectedGeneration: Long? = null) {
+        val generation = expectedGeneration ?: startRequestGeneration()
+        if (!initialization.isComplete) {
+            scope.launch {
+                if (awaitInitialized()) start(early, automatic, expectedGeneration = generation)
+            }
+            return
+        }
+        if (!initialization.succeeded) return
+        withStartAdmission(this, generation, { runtimeGeneration }, { stopping }) {
             // 服务端收到 START_EARLY 时重新校验，避免请求后环境变化或已被安装/手动启动占用。
             if (early && !EarlyRuntimeStart.shouldStart(earlyConditions(true))) return
             if(stopping || state.value.service==ServiceState.STOPPING){event("服务正在停止，请稍后启动");return}
@@ -795,26 +884,33 @@ class RuntimeManager(val context: Context) {
             val prepared = if (automatic) failurePolicy.prepareAutomaticStart(recoveryState.value, nowMillis)
             else failurePolicy.prepareManualStart(recoveryState.value, nowMillis)
             if (prepared != recoveryState.value) publishRecovery(prepared)
-            val attempt = RunAttempt(prepared.mode)
             runtimeGeneration++
-            state.update { it.copy(service=ServiceState.STARTING,error="",recovery=prepared,failedOperation=null) }
+            val attempt = RunAttempt(prepared.mode, startupTrace(runtimeGeneration))
+            state.update { it.copy(service=ServiceState.STARTING,error="",recovery=prepared,failedOperation=null,
+                startup=attempt.trace.snapshot(),stage=StartupStage.QUEUED.label,download=null,bytes=0,total=-1,phasePercent=null) }
             serverJob = scope.launch {
                 mutation.withLock {
                     var completion: Deferred<CommandResult>? = null
+                    var launchedChild: Child? = null
                     var launched = false
                     var timedOut = false
                     try {
+                        attempt.trace.phase(StartupStage.CHECKING)
                         check(state.value.environment == EnvironmentState.READY) { "请先完成初始化" }
                         check(state.value.update != UpdateState.RECOVERY_REQUIRED) { "请先恢复匹配快照或完成中断版本检查" }
                         workspaceStorage.requireCanStart()
                         state.update { it.copy(service = ServiceState.STARTING, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED, webHealthy = false, error = "") }; paths.atomic("service", "starting")
+                        attempt.trace.phase(StartupStage.PNPM)
                         ensurePnpm()
+                        attempt.trace.phase(StartupStage.WORKSPACE)
                         ensureWorkspaceSupport()
                         clearLocalEndpoint()
                         val v = paths.metadata().getString("dsh")
+                        attempt.trace.phase(StartupStage.COMPATIBILITY)
                         components.checkDshNodeCompatibility(v)
                         check(paths.base.usableSpace > WorkspaceCapacity.DISK_RESERVE) { "设备剩余空间不足 64 MiB，请先清理存储" }
                         // 启动期只读路径缓存只覆盖官方 web 启动；准备失败时按原生方式启动。
+                        attempt.trace.phase(StartupStage.TOOLS)
                         val startupTools = DshStartup.prepare(context, paths)
                         val startupConfig = DshStartupConfig.fromEnvironment()
                         val safe = attempt.mode == RecoveryMode.SAFE
@@ -823,6 +919,7 @@ class RuntimeManager(val context: Context) {
                         val dshArguments = failurePolicy.startArguments(v, safe, rescueProfileExists)
                         // 正常模式只给客体受控客户端；安全模式不加载用户插件/配置，也不挂载手机写入工具。
                         if (!safe) phoneFiles.start()
+                        attempt.trace.phase(StartupStage.PROCESS)
                         val c = launcher.start(
                             paths.root,
                             listOf("/opt/node/bin/node") + dshArguments,
@@ -833,35 +930,49 @@ class RuntimeManager(val context: Context) {
                             startupTools = startupTools,
                             startupConfig = startupConfig
                         )
-                        child = c
-                        launched = true
-                        monitorWorkspace(c)
-                        // Collection lives independently of the Activity and of the environment mutex.
+                        launchedChild = c
+                        synchronized(this@RuntimeManager) {
+                            if (runtimeGeneration != attempt.trace.snapshot().attemptId || stopping) {
+                                throw CancellationException("启动请求已停止，未登记旧进程")
+                            }
+                            child = c
+                            launched = true
+                            monitorWorkspace(c)
+                        }
+                        // 日志采集独立于 Activity；等待方同时观察其失败，不能空等就绪期限。
+                        attempt.trace.phase(StartupStage.OUTPUT)
                         val comp = scope.async {
                             launcher.collect(c) { raw ->
-                                captureUrl(raw)
-                                if (remoteMachine.localAuthenticatedUrl != null && attempt.readyAtMillis == 0L) {
-                                    attempt.readyAtMillis = System.currentTimeMillis()
+                                val accepted = captureUrl(raw, c, attempt.trace.snapshot().attemptId) { attempt.trace.phase(StartupStage.ENDPOINT) }
+                                synchronized(this@RuntimeManager) {
+                                    if (accepted && child === c && runtimeGeneration == attempt.trace.snapshot().attemptId &&
+                                        !stopping && attempt.readyAtMillis == 0L) {
+                                        attempt.readyAtMillis = System.currentTimeMillis()
+                                    }
                                 }
                             }
                         }
                         completion = comp
-                        withTimeout(180000) {
-                            while (attempt.readyAtMillis == 0L) {
-                                check(!cookieIsolationFailed) { "管理页 Cookie 隔离失败，已停止加载；请重启应用" }
-                                check(c.process.isAlive) { "DSH 在就绪前退出" }
-                                delay(200)
+                        awaitStartupReady(comp, alive = { c.process.isAlive },
+                            endpointPublished = { attempt.readyAtMillis != 0L },
+                            httpReady = { httpReady(remoteMachine.localOrigin) },
+                            onHttpWait = { attempt.trace.phase(StartupStage.HTTP) },
+                            checkEndpoint = { check(!cookieIsolationFailed) { "管理页 Cookie 隔离失败，已停止加载；请重启应用" } })
+                        val preparedReady = synchronized(this@RuntimeManager) {
+                            if (child !== c || runtimeGeneration != attempt.trace.snapshot().attemptId || stopping) {
+                                throw CancellationException("启动请求已停止，未发布就绪状态")
                             }
-                            while (!httpReady(remoteMachine.localOrigin)) { check(c.process.isAlive) { "DSH 在就绪后退出" }; delay(300) }
+                            val readyNow = System.currentTimeMillis()
+                            val readyRecovery = failurePolicy.onReady(recoveryState.value, readyNow)
+                            publishRecovery(readyRecovery)
+                            File(paths.engines, "$v/.web-verified").writeText("${Build.MODEL}; API ${Build.VERSION.SDK_INT}; target ${context.applicationInfo.targetSdkVersion}; debug ${BuildConfig.DEBUG}")
+                            state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true, recovery = readyRecovery, error = "", failure = null) }
+                            paths.atomic("service", "running"); paths.atomic("last-error", "")
+                            attempt.trace.finish(StartupOutcome.READY)
+                            event(if (readyRecovery.mode == RecoveryMode.SAFE) "DSH 已用安全模式启动：独立最小配置，未加载用户插件与配置" else "DSH 本机服务已就绪")
+                            scheduleStability(c)
+                            readyRecovery
                         }
-                        val readyNow = System.currentTimeMillis()
-                        if (attempt.readyAtMillis == 0L) attempt.readyAtMillis = readyNow
-                        val preparedReady = failurePolicy.onReady(recoveryState.value, readyNow)
-                        publishRecovery(preparedReady)
-                        File(paths.engines, "$v/.web-verified").writeText("${Build.MODEL}; API ${Build.VERSION.SDK_INT}; target ${context.applicationInfo.targetSdkVersion}; debug ${BuildConfig.DEBUG}")
-                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = true, recovery = preparedReady, error = "", failure = null) }; paths.atomic("service", "running"); paths.atomic("last-error","")
-                        event(if (preparedReady.mode == RecoveryMode.SAFE) "DSH 已用安全模式启动：独立最小配置，未加载用户插件与配置" else "DSH 本机服务已就绪")
-                        scheduleStability(c)
                         if(state.value.update==UpdateState.RESTORED_PENDING_CHECK) {
                             if (failurePolicy.canVerifyRestoredData(preparedReady.mode)) {
                                 val restored=JSONObject(paths.read("restore-transaction") ?: "{}")
@@ -877,51 +988,76 @@ class RuntimeManager(val context: Context) {
                                 delay(10000)
                                 if (child !== c || !c.process.isAlive) break
                                 val healthy = httpReady(remoteMachine.localOrigin)
-                                state.update { it.copy(webHealthy = healthy, web = if (!healthy && !remoteMachine.remoteActive) WebState.DISCONNECTED else it.web) }
+                                synchronized(this@RuntimeManager) {
+                                    if (child === c && runtimeGeneration == attempt.trace.snapshot().attemptId && !stopping) {
+                                        state.update { it.copy(webHealthy = healthy, web = if (!healthy && !remoteMachine.remoteActive) WebState.DISCONNECTED else it.web) }
+                                    }
+                                }
                             }
                         }
                         scope.launch {
                             val result = try { comp.await() } catch (t: Throwable) {
-                                fail(t); if (c.process.isAlive) c.stop()
+                                synchronized(this@RuntimeManager) {
+                                    if (child === c && runtimeGeneration == attempt.trace.snapshot().attemptId && !stopping) fail(t)
+                                }
+                                if (c.process.isAlive) c.stop()
                                 CommandResult(-1, "", Redact.text(t.message ?: "日志管道异常"))
                             }
-                            stabilityJob?.cancel()
-                            if (child === c && !stopping) {
-                                phoneFiles.stop()
-                                workspaceMonitor?.cancel()
-                                child = null; clearLocalEndpoint()
-                                val stopped = state.value.service == ServiceState.STOPPING
-                                if (stopped) {
-                                    state.update { it.copy(service = ServiceState.STOPPED, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED) }
-                                    paths.atomic("service", "stopped")
-                                } else {
-                                    val kind = failurePolicy.classify(failureEvidence(attempt, true, false, "", result))
-                                    applyFailure(kind, result)
+                            synchronized(this@RuntimeManager) {
+                                if (child === c && runtimeGeneration == attempt.trace.snapshot().attemptId && !stopping) {
+                                    stabilityJob?.cancel()
+                                    phoneFiles.stop()
+                                    workspaceMonitor?.cancel()
+                                    child = null; clearLocalEndpoint()
+                                    val stopped = state.value.service == ServiceState.STOPPING
+                                    if (stopped) {
+                                        state.update { it.copy(service = ServiceState.STOPPED, webHealthy = false, web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED) }
+                                        paths.atomic("service", "stopped")
+                                    } else {
+                                        val kind = failurePolicy.classify(failureEvidence(attempt, true, false, "", result))
+                                        applyFailure(kind, result)
+                                    }
                                 }
                             }
                         }
                     } catch (t: Throwable) {
                         val errorText = Redact.text(t.message ?: t.javaClass.simpleName)
                         timedOut = t is TimeoutCancellationException
+                        attempt.trace.finish(if (t is CancellationException && !timedOut) StartupOutcome.CANCELLED else StartupOutcome.FAILED)
                         val cleanup = runCatching {
                             withContext(NonCancellable) {
-                                child?.stop()
-                                phoneFiles.stop()
-                                child = null; clearLocalEndpoint()
-                                workspaceMonitor?.cancel(); workspaceMonitor = null
+                                launchedChild?.stop()
+                                synchronized(this@RuntimeManager) {
+                                    if (runtimeGeneration == attempt.trace.snapshot().attemptId && (child == null || child === launchedChild)) {
+                                        phoneFiles.stop()
+                                        child = null; clearLocalEndpoint()
+                                        workspaceMonitor?.cancel(); workspaceMonitor = null
+                                    }
+                                }
                             }
                         }.exceptionOrNull()
+                        if (runtimeGeneration != attempt.trace.snapshot().attemptId || stopping) {
+                            throw CancellationException("启动代次已失效，未发布旧失败").apply { initCause(t) }
+                        }
                         if (t is CancellationException && t !is TimeoutCancellationException) {
                             cleanup?.let(::fail)
-                            throw t // A requested stop owns the final state; cancellation is not a failure.
+                            throw t // 用户停止拥有最终状态，取消不作为运行失败。
                         }
                         cleanup?.let(t::addSuppressed)
                         val result = completion?.let { runCatching { withTimeoutOrNull(3000) { it.await() } }.getOrNull() }
                         val evidence = failureEvidence(attempt, launched, timedOut, errorText, result)
                         val kind = failurePolicy.classify(evidence)
-                        fail(t)
-                        applyFailure(kind, result)
+                        synchronized(this@RuntimeManager) {
+                            if (runtimeGeneration == attempt.trace.snapshot().attemptId && !stopping) {
+                                fail(t)
+                                applyFailure(kind, result)
+                            }
+                        }
                     }
+                }
+            }.also { startupJob ->
+                startupJob.invokeOnCompletion { cause ->
+                    if (cause is CancellationException) attempt.trace.finish(StartupOutcome.CANCELLED)
                 }
             }
         }
@@ -942,24 +1078,27 @@ class RuntimeManager(val context: Context) {
         remoteMachine.localCleared()
         state.update { it.copy(remote = remoteMachine.status) }
     }
-    private fun captureUrl(line: String) {
-        if (!line.contains("dsh web:")) return
-        val candidate = Regex("http://127\\.0\\.0\\.1:\\d+/[^\\s\\u001B]*").find(line)?.value ?: return
-        val uri = runCatching { URI(candidate) }.getOrNull() ?: return
-        if (uri.host == "127.0.0.1" && uri.port in 1..65535 && uri.userInfo == null && uri.rawQuery != null) {
-            if (!remoteMachine.remoteActive) {
-                // 先确认 Cookie 已切回本地，再发布可加载的本地端点；失败则不暴露 origin。
-                val switched = runCatching { cookieIsolation.switchTo(DshCookieIsolation.LOCAL_SCOPE) }.isSuccess
-                cookieIsolationFailed = !switched
-                if (!switched) {
-                    cookieIsolationFailed = true
-                    event("管理页 Cookie 隔离失败，已拒绝加载本地端点；请重启应用")
-                    state.update { it.copy(web = WebState.RENDER_ERROR, error = "管理页 Cookie 隔离失败，请重启应用") }
-                    return
-                }
+    private fun captureUrl(line: String, expected: Child, attemptId: Long, onEndpoint: () -> Unit): Boolean {
+        fun current() = child === expected && runtimeGeneration == attemptId && !stopping && !expected.stopping
+        if (!current() || !line.contains("dsh web:")) return false
+        val candidate = Regex("http://127\\.0\\.0\\.1:\\d+/[^\\s\\u001B]*").find(line)?.value ?: return false
+        val uri = runCatching { URI(candidate) }.getOrNull() ?: return false
+        if (uri.host != "127.0.0.1" || uri.port !in 1..65535 || uri.userInfo != null || uri.rawQuery == null) return false
+        onEndpoint()
+        // Cookie 切换可能等待主线程回调，不能在此持有停止入口的同步锁。
+        val switched = remoteMachine.remoteActive || runCatching { cookieIsolation.switchTo(DshCookieIsolation.LOCAL_SCOPE) }.isSuccess
+        return synchronized(this) {
+            // 与 stop 的代次失效共用同步边界；旧输出不能在清理后复活本地端点。
+            if (!current()) return@synchronized false
+            cookieIsolationFailed = !switched
+            if (!switched) {
+                event("管理页 Cookie 隔离失败，已拒绝加载本地端点；请重启应用")
+                state.update { it.copy(web = WebState.RENDER_ERROR, error = "管理页 Cookie 隔离失败，请重启应用") }
+                return@synchronized false
             }
             remoteMachine.localConnected("http://127.0.0.1:${uri.port}", candidate)
             state.update { it.copy(remote = remoteMachine.status) }
+            true
         }
     }
     /** 本地就绪检查必须绑定本地端点；远程模式不能拿远程 origin 冒充本地进程健康。 */
@@ -1000,10 +1139,10 @@ class RuntimeManager(val context: Context) {
     suspend fun stop(userRequested: Boolean = true) = stopRuntime(userRequested)
     private suspend fun stopRuntime(userRequested: Boolean, expected: Child? = null, reason: String? = null, expectedGeneration: Long? = null) = stopMutex.withLock {
         val caller = currentCoroutineContext()[Job]
-        // Publish STOPPING atomically with identity validation, before switching contexts.
-        val before = synchronized(this) {
+        // 先捕获当前错误身份并使旧代次失效，再发布 STOPPING；不能用停止后的文本猜归属。
+        val (stopState, stopGeneration) = synchronized(this) {
             if ((expected != null && child !== expected) || (expectedGeneration != null && runtimeGeneration != expectedGeneration)) return@withLock
-            val previous = state.value.service
+            val previous = UserStopState(state.value)
             stopping = true
             // 停止入口优先于自动重启/试用计时，避免用户停止后又被后台拉起。
             runtimeGeneration++
@@ -1011,10 +1150,15 @@ class RuntimeManager(val context: Context) {
             stabilityJob?.cancel(); stabilityJob = null
             phoneFiles.setWriteAllowed(false)
             state.update { it.copy(service = ServiceState.STOPPING) }
-            previous
+            previous to runtimeGeneration
         }
         withContext(NonCancellable) {
             try {
+                // 恢复不能取消；先等它发布完快照，避免成功停止后又被恢复结果覆盖。
+                awaitInitialized()
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) state.update { it.copy(service = ServiceState.STOPPING) }
+                }
                 val observer = workspaceMonitor
                 if (observer != caller) observer?.cancelAndJoin()
                 val stopWasRequested = userRequested || paths.read("service") == "stopping-user"
@@ -1026,11 +1170,10 @@ class RuntimeManager(val context: Context) {
                 child = null
                 workspaceMonitor = null
                 clearLocalEndpoint()
-                val final = if (stopWasRequested) ServiceState.STOPPED else when (before) {
+                val final = if (stopWasRequested) ServiceState.STOPPED else when (stopState.serviceBefore) {
                     ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING -> ServiceState.INTERRUPTED
-                    else -> before
+                    else -> stopState.serviceBefore
                 }
-                runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
                 val interrupted = reason?.let { "$it；DSH 已停止，任务可能中断，不会自动重放。请调整预算或清理空间后手动启动" }
                 val stopFailure = interrupted?.let { text ->
                     FailureCatalog.describe(
@@ -1046,26 +1189,49 @@ class RuntimeManager(val context: Context) {
                         )
                     )
                 }
-                state.update {
-                    it.copy(
-                        service = final,
-                        webHealthy = false,
-                        web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
-                        error = interrupted ?: it.error,
-                        // 用户主动停止时清掉旧失败；资源原因自动停止时给出可操作的错误。
-                        failure = if (stopWasRequested) null else stopFailure ?: it.failure
-                    )
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) {
+                        var persistedRuntimeError: String? = null
+                        state.update { current ->
+                            if (stopWasRequested) {
+                                val result = stopState.finish(current, confirmedStopped = true, userRequested = true,
+                                    sameGeneration = true, remoteActive = remoteMachine.remoteActive)
+                                persistedRuntimeError = result.persistedRuntimeError
+                                result.snapshot
+                            } else current.copy(service = final, webHealthy = false,
+                                web = if (remoteMachine.remoteActive) current.web else WebState.DISCONNECTED,
+                                error = interrupted ?: current.error, failure = stopFailure ?: current.failure,
+                                failureRevision = if (stopFailure != null) current.failureRevision + 1 else current.failureRevision)
+                        }
+                        runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
+                            .onFailure { error ->
+                                if (stopWasRequested) fail(IllegalStateException("助手已停止，但停止状态未能保存", error), "runtime-stop")
+                            }
+                        // 这里只清当前错误镜像，事件日志、恢复历史及诊断文件保持原样。
+                        persistedRuntimeError?.let { expectedError ->
+                            if (paths.read("last-error") == expectedError) {
+                                runCatching { paths.atomic("last-error", "") }.onFailure { error ->
+                                    fail(IllegalStateException("服务已停止，但当前错误状态未能保存", error), "runtime-stop")
+                                }
+                            }
+                        }
+                        if (interrupted != null && !stopWasRequested) {
+                            paths.atomic("last-error", interrupted)
+                            event(interrupted)
+                        } else if (stopWasRequested) event("用户停止服务；不自动恢复任务")
+                    }
                 }
-                if (interrupted != null) {
-                    paths.atomic("last-error", interrupted)
-                    event(interrupted)
-                } else if (stopWasRequested) event("用户停止服务；不自动恢复任务")
             } catch (error: Throwable) {
-                // Keep the stop action available if process termination could not be confirmed.
-                fail(IllegalStateException("${reason ?: "停止服务"}：未能确认进程已全部停止", error))
-                state.update { it.copy(service = ServiceState.RUNNING, webHealthy = false) }
-                throw error
-            } finally { synchronized(this@RuntimeManager) { stopping = false } }
+                // 进程终止未确认时保留停止入口，并发布本次真实停止失败，不能执行成功清理。
+                val stopError = RuntimeStopException("${reason ?: "停止服务"}：未能确认进程已全部停止", error, stopGeneration)
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) {
+                        fail(stopError, "runtime-stop")
+                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = false) }
+                    }
+                }
+                throw stopError
+            } finally { synchronized(this@RuntimeManager) { if (runtimeGeneration == stopGeneration) stopping = false } }
         }
     }
     fun verifyBrowserCookie(cookie: String?) {

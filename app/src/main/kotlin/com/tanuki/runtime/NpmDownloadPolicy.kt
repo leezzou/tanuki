@@ -50,13 +50,12 @@ internal class NpmHostLimiter(val perHostLimit: Int = 8) {
         permits.computeIfAbsent(host.lowercase()) { Semaphore(perHostLimit) }.withPermit { block() }
 }
 
-/** 无锁时国内镜像只生成候选；官方元数据必须逐项核验传递依赖版本、路径与 SRI。 */
+/** 无可信锁时只解析官方元数据；归档镜像仍由下载策略选择，不重复生成未使用的镜像锁。 */
 internal object NpmMetadataPolicy {
     const val FETCH_TIMEOUT_MS = 15_000L
     const val COMMAND_TIMEOUT_MS = 180_000L
 
     val SOURCES = listOf(
-        NpmArchiveSource("npmmirror", "npmmirror", "https://registry.npmmirror.com"),
         NpmArchiveSource("official", "npm 官方", NpmArchiveMapping.OFFICIAL_REGISTRY),
     )
 }

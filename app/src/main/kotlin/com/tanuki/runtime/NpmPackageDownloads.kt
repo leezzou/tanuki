@@ -103,40 +103,8 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                     return normalized
                 }
 
-                suspend fun resolveMetadata(): ByteArray {
-                    val mirror = NpmMetadataPolicy.SOURCES.first { it.id == "npmmirror" }
-                    val official = NpmMetadataPolicy.SOURCES.first { it.id == "official" }
-                    val candidate = try {
-                        resolveFrom(mirror)
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) {
-                        manager.event("npmmirror 元数据解析失败，改用官方元数据：" +
-                            Redact.text(error.message ?: "未知错误").take(200))
-                        null
-                    }
-                    // 镜像元数据只能生成候选；传递依赖的版本、官方路径与 SRI 必须由官方元数据独立确认。
-                    val trusted = try {
-                        resolveFrom(official)
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) {
-                        if (candidate != null) {
-                            throw IOException("无法用官方元数据核验镜像锁的传递依赖 SRI，已拒绝镜像锁；" +
-                                "请检查 npm 官方 registry 网络后重试", error)
-                        }
-                        throw error
-                    }
-                    if (candidate != null) {
-                        try {
-                            NpmLockTrust.requireSameArchives(trusted, candidate)
-                            manager.event("镜像锁的传递依赖版本、官方归档路径与 SRI 已与官方元数据逐项一致")
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) {
-                            manager.event("镜像锁的传递依赖与官方元数据不一致，已拒绝镜像锁并使用官方锁：" +
-                                Redact.text(error.message ?: "未知差异").take(240))
-                        }
-                    }
-                    return trusted
-                }
+                // 最终安装始终使用官方锁；不再先解析一份不会被采用的镜像候选。
+                suspend fun resolveMetadata(): ByteArray = resolveFrom(NpmMetadataPolicy.SOURCES.single())
 
                 NpmDependencyLocks(NpmLockCache(manager.paths.base)).prepare(identity,
                     reuse = {
@@ -159,7 +127,7 @@ internal class NpmPackageDownloads(private val manager: RuntimeManager) {
                             NpmLockOrigin.SAVED -> "复用已验证的 DSH 依赖锁"
                             NpmLockOrigin.INSTALLED -> "复用已安装 DSH 的依赖锁"
                             NpmLockOrigin.BUNDLED -> "使用 APK 预置 DSH 依赖锁"
-                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（官方元数据核验镜像锁）"
+                            NpmLockOrigin.OFFICIAL -> "解析 DSH 依赖（官方元数据）"
                         }, EnvironmentState.INSTALLING)
                     },
                     onCacheError = { manager.event("DSH 依赖锁缓存未能保存，本次继续安装；下次可能需要重新解析") },

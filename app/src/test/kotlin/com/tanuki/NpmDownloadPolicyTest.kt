@@ -38,10 +38,9 @@ class NpmDownloadPolicyTest {
         assertFalse(DownloadRetryPolicy.missing(429))
     }
 
-    @Test fun metadataUsesNpmmirrorFirstWithFifteenSecondFetchTimeout() {
-        assertEquals(listOf("npmmirror", "official"), NpmMetadataPolicy.SOURCES.map { it.id })
-        assertEquals("https://registry.npmmirror.com", NpmMetadataPolicy.SOURCES.first().registry)
-        assertEquals("https://registry.npmjs.org", NpmMetadataPolicy.SOURCES.last().registry)
+    @Test fun metadataResolvesOnlyOfficialLockWithFifteenSecondFetchTimeout() {
+        assertEquals(listOf("official"), NpmMetadataPolicy.SOURCES.map { it.id })
+        assertEquals("https://registry.npmjs.org", NpmMetadataPolicy.SOURCES.single().registry)
         assertTrue(NpmMetadataPolicy.FETCH_TIMEOUT_MS in 10_000..15_000)
         assertTrue(NpmMetadataPolicy.COMMAND_TIMEOUT_MS > NpmMetadataPolicy.FETCH_TIMEOUT_MS)
     }

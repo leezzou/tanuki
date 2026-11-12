@@ -234,6 +234,7 @@ fun TanukiUi(model: TanukiUiModel, callbacks: TanukiUiCallbacks, browserView: We
         OnboardingScreen(
             presentation = onboarding,
             snapshot = model.snapshot,
+            conversationReady = model.cookieReady,
             onContinue = callbacks.onboardingContinue,
             onBack = callbacks.onboardingBack,
             onSkip = callbacks.onboardingSkip,

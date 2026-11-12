@@ -28,6 +28,7 @@ class UpdateManager(
     fun check() {
         if (job?.isActive == true) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             // 与切换/卸载共用版本窄锁：检查期间不会改写 installed.json，也不会读到正在删除的 engines。
             // 锁顺序固定为先环境 mutation、后 versionGate；本检查只取 versionGate，不与启动/安装抢占。
             manager.versionGate.withLock {
@@ -80,8 +81,10 @@ class UpdateManager(
         return Release(version,dist.getString("integrity"),source,item.optJSONObject("engines")?.optString("node") ?: "未声明","官方 npm 发行版",false)
     }
     fun install(release: Release, reinstall: Boolean = false) {
+        val expectedGeneration = manager.startRequestGeneration()
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             val retryId = manager.beginOperationRetry { install(release, reinstall) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING) && !manager.hasLiveChild) { "请确认停止服务后再安装，可能中断任务" }
@@ -122,7 +125,7 @@ class UpdateManager(
                     manager.paths.atomic("installed.json",metadata.toString())
                     manager.components.refresh()
                 }
-                manager.start()
+                manager.start(expectedGeneration = expectedGeneration)
                 withTimeout(200000) { while (manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.FAILED, ServiceState.INTERRUPTED)) delay(250) }
                 check(manager.state.value.service == ServiceState.RUNNING) { "新版本使用正式数据启动失败；请恢复匹配快照" }
                 File(manager.paths.state, "update-transaction").delete()
@@ -147,6 +150,7 @@ class UpdateManager(
         if(job?.isActive==true || !keepForeground())return
         val previousUpdate=manager.state.value.update
         job=manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             val retryId = manager.beginOperationRetry { stage(release) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.STARTING,ServiceState.STOPPING) && !manager.hasLiveChild) { "请先停止 DSH" }
@@ -202,8 +206,10 @@ class UpdateManager(
         manager.probeSandbox(version,engineHome)
     }
     fun resumeInterrupted() {
+        val expectedGeneration = manager.startRequestGeneration()
         if(job?.isActive==true || !keepForeground())return
         job=manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             manager.state.update { it.copy(failedOperation = null) }
             try {
                 val journal=JSONObject(manager.paths.read("update-transaction") ?: error("没有中断的更新事务"))
@@ -211,7 +217,7 @@ class UpdateManager(
                 check(journal.getString("candidate")==manager.paths.metadata().getString("dsh")) { "当前版本尚未切换，请恢复匹配快照或重试安装" }
                 check(JSONObject(manager.paths.read("restore-transaction") ?: "{}").optString("phase")!="prepared") { "请先完成中断的数据恢复" }
                 manager.state.update { it.copy(update=UpdateState.TESTING) }
-                manager.start()
+                manager.start(expectedGeneration = expectedGeneration)
                 withTimeout(200000){while(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.FAILED,ServiceState.INTERRUPTED))delay(200)}
                 check(manager.state.value.service==ServiceState.RUNNING && manager.state.value.webHealthy) { "当前版本未通过 Web 启动检查，恢复入口已保留" }
                 File(manager.paths.state,"update-transaction").delete()
@@ -223,6 +229,7 @@ class UpdateManager(
     fun restore() {
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
+            if (!manager.awaitInitialized()) return@launch
             manager.state.update { it.copy(update=UpdateState.RESTORING,failedOperation=null) }
             try {
                 check(manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.STARTING)) { "请先停止服务" }

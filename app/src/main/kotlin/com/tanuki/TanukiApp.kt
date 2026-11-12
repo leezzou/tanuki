@@ -69,7 +69,8 @@ class TanukiApp : Application() {
         // full document dimensions but blank pixels outside the human window's viewport.
         android.webkit.WebView.enableSlowWholeDocumentDraw()
         cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("tanuki-blob-") }?.forEach { it.delete() }
-        runtime = RuntimeManager(this)
+        // 恢复可能递归清理中断组件；后台持独占锁完成，首帧不等待磁盘树遍历。
+        runtime = RuntimeManager(this, backgroundRecovery = true)
         // 先绑定恢复回调再开始采样：进程重启后若设备已恢复，会立即补跑被延后的后台检查。
         deviceConditions.onBackgroundWorkResumed = { checks ->
             com.tanuki.update.UpdateCheckScheduler.resumeDeferred(this, checks)

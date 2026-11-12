@@ -20,10 +20,13 @@ data class RequiredToolsStatus(
     val checkedAt: Long = 0
 ) {
     val passed: Boolean get() = checked && missing.isEmpty()
+    /** 只供同一独占准备事务复用刚完成的检查；持久化记录不能作为免检凭据。 */
+    fun passedFor(marker: String): Boolean = passed && marker.isNotEmpty() && ubuntuMarker == marker
 }
 data class Snapshot(
     val environment: EnvironmentState = EnvironmentState.ABSENT,
     val health: HealthState = HealthState.UNKNOWN,
+    val networkDiagnostic: NetworkDiagnostic = NetworkDiagnostic(),
     val confinement: Confinement = Confinement.UNKNOWN,
     val service: ServiceState = ServiceState.STOPPED,
     val web: WebState = WebState.DISCONNECTED,
@@ -37,11 +40,14 @@ data class Snapshot(
     val phasePercent: Int? = null,
     val operation: String? = null,
     val timing: OperationTiming = OperationTiming(),
+    val startup: StartupProgress? = null,
     val failedOperation: FailedOperation? = null,
     val remote: RemoteHostStatus = RemoteHostStatus(),
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),
     /** 最近一次失败的统一展示模型；原始异常仍在 error 字段，恢复后清空。 */
     val failure: AppFailure? = null,
+    /** 当前失败每次发布都递增，避免同文案同时间的事件被StateFlow按值合并。 */
+    val failureRevision: Long = 0,
     /** 仅当前操作持有；失败时复制到错误模型，结束后不污染下一次失败。 */
     val operationRetry: FailureRetry? = null
 )

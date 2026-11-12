@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * 自适应下载 worker 池。
  *
  * 目标并发提高时，调度协程只补到目标；目标降低时，已经完成当前归档的 worker
- * 在领取下一个归档前退出。退出名额用 CAS 限制为“活跃数 - 目标”，因此不会在
- * 同一时刻全部退出，队列仍由剩余 worker 继续消费。退出后的协程不会被重新拉起。
+ * 在领取下一个归档前退出。注册、退役判定与退出计数共用短锁，防止过期活跃快照
+ * 或提前归还名额导致多退；下载与挂起操作均在锁外。队列仍由剩余 worker 继续消费。
  */
 internal class NpmAdaptiveWorkerPool(
     private val taskCount: Int,
@@ -26,6 +26,7 @@ internal class NpmAdaptiveWorkerPool(
         require(pollMillis > 0) { "调度轮询间隔必须为正" }
     }
 
+    private val workerStateLock = Any()
     private val active = AtomicInteger()
     private val retiring = AtomicInteger()
     private val nextIndex = AtomicInteger()
@@ -50,7 +51,7 @@ internal class NpmAdaptiveWorkerPool(
     }
 
     private fun CoroutineScope.launchWorker(task: suspend (Int) -> Unit) {
-        active.incrementAndGet()
+        synchronized(workerStateLock) { active.incrementAndGet() }
         launch(dispatcher) { worker(task) }
     }
 
@@ -69,23 +70,24 @@ internal class NpmAdaptiveWorkerPool(
                 completed.incrementAndGet()
             }
         } finally {
-            if (claimedRetirement) retiring.decrementAndGet()
-            active.decrementAndGet()
+            synchronized(workerStateLock) {
+                active.decrementAndGet()
+                if (claimedRetirement) retiring.decrementAndGet()
+            }
         }
     }
 
-    /**
-     * 只有在“活跃数 - 已领取退休名额”仍高于目标时才领取一个退休名额。
-     * 多出的 worker 会竞争同一组名额，CAS 失败者继续领取任务。
-     */
+    /** 活跃数、退役名额和判定必须来自同一临界区，不能用过期快照申请新名额。 */
     private fun shouldRetire(): Boolean {
-        while (true) {
-            val running = active.get()
-            val target = policy.current()
-            if (running <= target) return false
-            val claimed = retiring.get()
-            if (claimed >= running - target) return false
-            if (retiring.compareAndSet(claimed, claimed + 1)) return true
+        // 外部上限回调在状态锁外读取，锁内只处理 worker 计数。
+        val target = policy.current()
+        return synchronized(workerStateLock) {
+            if (active.get() - retiring.get() <= target) {
+                false
+            } else {
+                retiring.incrementAndGet()
+                true
+            }
         }
     }
 }

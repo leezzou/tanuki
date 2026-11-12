@@ -11,6 +11,14 @@
 
 ## 1. 控制面：DSH 启动、就绪与 WebView
 
+### 1.0 进程恢复屏障
+
+产品 Application 使用 `RuntimeManager(backgroundRecovery=true)`：构造时先独占 `mutation`，在IO scope按原顺序恢复组件journal、已准备的数据恢复、安装元数据与工具状态。等待期间 `environment=CHECKING`、`operation=runtime-recovery`，没有可信百分比，也不提供取消。屏障只在释放环境锁后完成；失败保留 `REPAIR/RECOVERY_REQUIRED` 和错误，安装/启动/DSH更新不得越过。直接构造的测试fixture默认同步恢复，保持既有立即恢复语义。
+
+环境操作、DSH版本检查/安装/备用/恢复共用 `awaitInitialized()`。提前/手动启动可等待恢复，但恢复后重新校验运行状态与停止代次；等待期间停止不会在恢复后拉起旧请求。磁盘恢复只刷新本地状态，不覆盖期间已建立的远程连接。该机制不重放模型或项目任务。
+
+一键初始化在同一 `mutation` 内刚完成完整工具检查后，可向Node安装传入该检查结果；仅当Ubuntu标记匹配且无缺失项时复用。独立Node安装、缺标记、标记变化或失败检查仍执行原必要库/工具检查；Node候选实启、版本/引擎兼容性及提交校验保持必需。持久化工具记录不能单独作为免检凭据。
+
 ### 1.1 启动命令
 
 DSH 只在已初始化的私有 Ubuntu 中启动。命令由 `RuntimeManager.start()` 组装，`Launcher.start()` 通过 `libsupervisor.so` 进入 PRoot，再执行官方 DSH CLI：
@@ -37,6 +45,24 @@ libsupervisor.so
 - 启动前要求环境 `EnvironmentState.READY`、无 `UpdateState.RECOVERY_REQUIRED`、工作区容量可启动；否则不启动。
 - 每次运行都会启动新的 phone 文件连接代次（第 4 节），并在启动 DSH 前发布 `connection.json`。
 - 失败、DSH 退出或用户停止时，先撤销 phone 写权限并关闭连接，再清理子进程和 `authenticatedUrl`/`origin`；自动重启只拉起服务，不重放任务。
+
+#### 启动请求身份、运行中检查与旧引导入口
+
+START/START_EARLY内部前台服务请求携带 `runtime-start-generation`，缺少标识不接纳；MainActivity与提前启动统一由RuntimeManager生成请求。恢复等待、自动重试和更新安装/恢复的异步回调保留入口期望代次，最终接纳与stop使用同一同步边界校验代次/stopping，再登记启动作业，不能在锁外检查后调用无身份start。
+
+运行中HTTP未健康仍选HEALTH，但后端以 `service-http-check` 仅探测当时的存活child与本机endpoint，不执行pnpm准备、组件迁移、环境诊断或停止任务。探测在IO scope，开始与结果均校验实例/代次，结果发布与stop同锁，只更新当前webHealthy/连接说明，不把环境诊断改成成功。停止态HEALTH仍走原环境/可选公网诊断；原health入口的存活child保护保留。
+
+旧OnboardingScreen的READY环境卡与DONE页均有现有onPrepare实际入口，未就绪不能空点FIRST_MESSAGE；现有model.cookieReady透传conversationReady，与HTTP及当前服务共同决定按钮是否可用。远程已连接只等待会话，不要求本机准备。宿主仍重新校验完整组件/工具与Cookie作用域；这只是PR109独立可达补口，105新引导按语义整合，不复制未提交页面实现。
+
+#### 用户停止的成功收尾与失败
+
+停止先递增运行代次，取消待重启/稳定计时，并等待不可取消的初始化恢复完成；确认本次进程与工具停止后，才发布 `STOPPED`。后续收尾仍核对停止代次，旧收尾不得覆盖后继运行。
+
+成功用户停止只清停止前捕获且仍为同一事件的当前服务错误：来源为结构化 `FailureDomain.RUNTIME`（健康/后台诊断除外），同时核对 `failureRevision`、错误实例、原文、失败操作记录和操作身份。`FailedOperation.domain/operation` 由操作入口记录，默认UNKNOWN/null；未知来源不靠文案归类。明确runtime记录可证明相同原文归属，避免 `FailureCatalog.displayFailure()` 再从error重建旧卡。没有其他域的操作/问题且阶段未变化时，stage才收尾为“助手已停止”。
+
+未确认停止以携带所属代次的RuntimeStopException跨外层传播；通用fail不能把它改归关联安装/更新操作，过期异常只入诊断，不改后继快照或当前错误镜像。结构化失败发布递增 `Snapshot.failureRevision`，保证同文案同时间的新事件也能通过StateFlow发布。停止期间的新失败、替换重试记录、新操作与新代次不被清理。安装/更新错误、健康/网络诊断、`recovery`、启动终态耗时与事件日志保留；启动终态是该次历史，不能替代当前service。
+
+`last-error`仅为当前错误镜像，按本次已确认runtime原文匹配后清空，不删除历史或诊断。进程终止未确认时保留可停止状态并显示“停止助手未完成”；进程已停但停止状态/错误镜像保存失败时，保持STOPPED并显示新的“停止状态保存未完成”。两者的结构化runtime-stop重试走STOP，不改成启动或自动重放任务。新改动须单独验证，不能沿用旧head的Host结果。
 
 #### 1.1.1 安全模式与失败恢复
 
@@ -140,6 +166,16 @@ HTTP 200..399 或 401 → 存活
 - **Cookie 认证检查**要求精确 **200**，401/403 视为认证失效。
 
 启动成功后写 `.web-verified` 标记，状态置 `ServiceState.RUNNING`、`webHealthy=true`，并每 10 秒复查一次；复查失败只把 `webHealthy=false`、`web=DISCONNECTED`，不等同于 DSH 进程退出。DSH 真正退出时状态进入 `STOPPED` 或 `INTERRUPTED`，并关闭 phone 连接。
+
+#### 本地环境检查与公网诊断
+
+`RuntimeManager.diagnostics(checkNetwork=false)` 的返回值只表示私有 Ubuntu 内 Node/npm/pnpm、基础工具、进程/文件及沙箱能力检查。初始化默认不请求公网；手动 `healthCheck()` 额外请求官方 npm HTTPS HEAD（curl 最长30秒，外层命令40秒）。公网结果通过 `Snapshot.networkDiagnostic` 独立记录 `UNCHECKED/CHECKING/REACHABLE/FAILED`，失败保留脱敏原因并写事件；不能把本地已通过误报为环境损坏，也不能把未执行的公网检查标记通过。用户/父任务取消原样传播，不当成网络失败。
+
+#### 启动阶段观测
+
+`Snapshot.startup` 可空；每次实际接纳的启动都有独立 `attemptId`，记录 `StartupStage`、单调的操作与阶段起始时间、结束时间以及已完成阶段耗时。准备 pnpm、工作区、Node兼容性、启动工具、创建进程、等待官方行、发布端点与本地HTTP检查分别上报；成功/失败/取消会冻结计时。该观测不包含 URL、端口、token、Cookie、用户配置或输出内容，不代表百分比。180秒就绪等待仍从进程创建后开始；日志采集异常或结束必须立即退出等待，不继续空等期限。进程登记、就绪行发布、HTTP复查、稳定性计时器与退出处理均复核child身份和启动代次；停止失效后，旧回调不得发布端点/健康/失败或取消新运行的计时器。异常清理仅停止本次创建的child，不按全局引用误停后继进程。
+
+引导准备按钮在点击时按当前完整组件、工具标记、环境元数据和运行状态选择初始化/补工具/检查/启动，已有完整环境不重新初始化。页面重建不触发这些动作；跳转聊天前再次校验本地运行+HTTP健康，或已连接且Cookie作用域就绪的远程环境。远程入口不要求本地组件。初始化沿用完整元数据选定的已安装非默认DSH及其已校验锁；所选非默认程序缺失时先拒绝并指引修复该版本，不回落默认程序或猜测官方SRI。损坏元数据仍拒绝，恢复确认仍生效。
 
 ### 1.5 远程主机 SSH 隧道（直连切片）
 
