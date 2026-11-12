@@ -88,8 +88,12 @@ class RuntimeService : Service() {
         when (intent?.action) {
             "INIT" -> manager.initialize()
             "BASE" -> manager.initialize(true)
-            "START" -> manager.start()
-            "START_EARLY" -> manager.start(early = true)
+            "START", "START_EARLY" -> {
+                if (intent.hasExtra(START_REQUEST_GENERATION)) {
+                    manager.start(early = intent.action == "START_EARLY",
+                        expectedGeneration = intent.getLongExtra(START_REQUEST_GENERATION, -1L))
+                } else manager.event("启动请求缺少运行身份，已忽略；请从界面重新启动")
+            }
             "HEALTH" -> manager.healthCheck()
             "TOOLS" -> manager.installRequiredTools()
             "BACKGROUND" -> manager.backgroundProbe()

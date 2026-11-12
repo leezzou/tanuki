@@ -319,7 +319,8 @@ class MainActivity : ComponentActivity() {
         if (requestNotifications && (name in setOf("INIT", "START", "BASE", "HEALTH", "BACKGROUND", "SLIM", "RECOVERY_TRIAL", "RECOVERY_SAFE") || name.startsWith("UBUNTU_") || name.startsWith("NODE_") || name in setOf("DSH_UNINSTALL","DSH_SWITCH")) && android.os.Build.VERSION.SDK_INT >= 33 && applicationInfo.targetSdkVersion >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
-        startForegroundService(Intent(this, RuntimeService::class.java).setAction(name).apply { version?.let { putExtra("version",it) } })
+        val request = if (name == "START") manager.startServiceIntent() else Intent(this, RuntimeService::class.java).setAction(name)
+        startForegroundService(request.apply { version?.let { putExtra("version",it) } })
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

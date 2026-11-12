@@ -81,6 +81,7 @@ class UpdateManager(
         return Release(version,dist.getString("integrity"),source,item.optJSONObject("engines")?.optString("node") ?: "未声明","官方 npm 发行版",false)
     }
     fun install(release: Release, reinstall: Boolean = false) {
+        val expectedGeneration = manager.startRequestGeneration()
         if (job?.isActive == true || !keepForeground()) return
         job = manager.scope.launch {
             if (!manager.awaitInitialized()) return@launch
@@ -124,7 +125,7 @@ class UpdateManager(
                     manager.paths.atomic("installed.json",metadata.toString())
                     manager.components.refresh()
                 }
-                manager.start()
+                manager.start(expectedGeneration = expectedGeneration)
                 withTimeout(200000) { while (manager.state.value.service !in setOf(ServiceState.RUNNING, ServiceState.FAILED, ServiceState.INTERRUPTED)) delay(250) }
                 check(manager.state.value.service == ServiceState.RUNNING) { "新版本使用正式数据启动失败；请恢复匹配快照" }
                 File(manager.paths.state, "update-transaction").delete()
@@ -205,6 +206,7 @@ class UpdateManager(
         manager.probeSandbox(version,engineHome)
     }
     fun resumeInterrupted() {
+        val expectedGeneration = manager.startRequestGeneration()
         if(job?.isActive==true || !keepForeground())return
         job=manager.scope.launch {
             if (!manager.awaitInitialized()) return@launch
@@ -215,7 +217,7 @@ class UpdateManager(
                 check(journal.getString("candidate")==manager.paths.metadata().getString("dsh")) { "当前版本尚未切换，请恢复匹配快照或重试安装" }
                 check(JSONObject(manager.paths.read("restore-transaction") ?: "{}").optString("phase")!="prepared") { "请先完成中断的数据恢复" }
                 manager.state.update { it.copy(update=UpdateState.TESTING) }
-                manager.start()
+                manager.start(expectedGeneration = expectedGeneration)
                 withTimeout(200000){while(manager.state.value.service !in setOf(ServiceState.RUNNING,ServiceState.FAILED,ServiceState.INTERRUPTED))delay(200)}
                 check(manager.state.value.service==ServiceState.RUNNING && manager.state.value.webHealthy) { "当前版本未通过 Web 启动检查，恢复入口已保留" }
                 File(manager.paths.state,"update-transaction").delete()

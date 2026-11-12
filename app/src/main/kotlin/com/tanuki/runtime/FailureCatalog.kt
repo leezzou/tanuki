@@ -122,6 +122,14 @@ object FailureCatalog {
         "dsh-resume", "dsh-update", "dsh-check", "app-update", "component-switch-dsh"
     )
 
+    /** 仅按既定操作标识判定来源，供失败记录与收尾共用，不读取错误文案。 */
+    internal fun operationDomain(operation: String?): FailureDomain? = when {
+        operation in updateOperations -> FailureDomain.UPDATE
+        operation in installOperations || operation?.startsWith("component-") == true -> FailureDomain.INSTALL
+        operation in setOf("health", "background-probe", "service-http-check", "runtime-stop") -> FailureDomain.RUNTIME
+        else -> null
+    }
+
     private val networkMarkers = listOf(
         "超时", "timeout", "timed out", "网络", "断网", "连接中断", "连接失败",
         "无法连接", "连接被重置", "connection reset", "unknownhost", "unable to resolve host",
@@ -158,13 +166,21 @@ object FailureCatalog {
         val cause = resolveCause(input, message)
         val componentId = resolveComponentId(input)
         val mode = input.recovery.mode
+        val stoppingError = domain == FailureDomain.RUNTIME && input.operation == "runtime-stop" && input.service in setOf(ServiceState.STOPPING, ServiceState.RUNNING, ServiceState.STOPPED)
         val checkingVersions = domain == FailureDomain.UPDATE &&
             (input.operation == "dsh-check" || (input.operation == null && input.update in setOf(UpdateState.CHECKING, UpdateState.CHECK_FAILED)))
-        val actions = if (checkingVersions) action(FailureActionKind.RETRY, "刷新版本") to
+        val actions = if (stoppingError) action(FailureActionKind.RETRY,
+            if (input.service == ServiceState.STOPPED) "重试保存状态" else "重试停止") to null
+        else if (checkingVersions) action(FailureActionKind.RETRY, "刷新版本") to
             action(FailureActionKind.CLEAN_CACHE, "清理下载缓存") else resolveActions(domain, cause, componentId, mode)
-        val retry = input.retry ?: retryCommand(domain, cause, input.operation, componentId)?.let { FailureRetry(it) }
-        val title = titleFor(domain)
-        val reason = reasonFor(domain, cause)
+        val retry = if (stoppingError) FailureRetry("STOP") else input.retry ?:
+            retryCommand(domain, cause, input.operation, componentId)?.let { FailureRetry(it) }
+        val title = if (stoppingError) {
+            if (input.service == ServiceState.STOPPED) "停止状态保存未完成" else "停止助手未完成"
+        } else titleFor(domain)
+        val reason = if (stoppingError) {
+            if (input.service == ServiceState.STOPPED) "助手已停止，但状态未能保存；请重试。" else "未能确认助手已停止，请重试停止。"
+        } else reasonFor(domain, cause)
         return AppFailure(
             domain = domain,
             cause = cause,
@@ -204,11 +220,8 @@ object FailureCatalog {
     private fun resolveDomain(input: FailureInput, message: String): FailureDomain {
         input.domainHint?.let { return it }
         if (input.failureKind != null) return FailureDomain.RUNTIME
-        val operation = input.operation.orEmpty()
-        if (operation in updateOperations) return FailureDomain.UPDATE
         // 当前命令比上一次留下的状态更可靠，不能把组件失败误判为更新检查。
-        if (operation in installOperations || operation.startsWith("component-")) return FailureDomain.INSTALL
-        if (operation in setOf("health", "background-probe", "runtime-stop")) return FailureDomain.RUNTIME
+        operationDomain(input.operation)?.let { return it }
         if (input.update in setOf(
                 UpdateState.CHECKING, UpdateState.CHECK_FAILED, UpdateState.STAGING,
                 UpdateState.TESTING, UpdateState.WAITING, UpdateState.BACKUP,

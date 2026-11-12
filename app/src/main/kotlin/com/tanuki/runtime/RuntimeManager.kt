@@ -198,31 +198,21 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
     }
     fun event(text: String) { log.append(text); state.update { it.copy(events = (it.events + Redact.text(text)).takeLast(12)) } }
     fun fail(t: Throwable) = fail(t, null)
-    fun fail(t: Throwable, operation: String?) {
+    @Synchronized fun fail(t: Throwable, operation: String?) {
         val detail = when (t) {
             is AccessDeniedException -> "文件访问被拒绝；安装或恢复时无法读取目录：${t.file ?: t.message}"
             else -> t.message ?: t.javaClass.simpleName
         }
         val message = Redact.text(detail)
+        val before = state.value
+        val publication = runtimeFailureSnapshot(before, t, operation, runtimeGeneration, message, System.currentTimeMillis())
+        if (publication === before) {
+            log.append("ERROR 过期停止失败仅保留诊断：$message")
+            return
+        }
         log.append("ERROR ${t.javaClass.simpleName}: $message")
         runCatching { paths.atomic("last-error",message) }
-        state.update { current ->
-            // 分类只在这里做一次，各页面读取同一份标题、原因和动作。
-            val failure = FailureCatalog.describe(
-                FailureInput(
-                    message = message,
-                    operation = operation ?: current.operation,
-                    retry = current.operationRetry.takeIf { operation == null || operation == current.operation },
-                    stage = current.stage,
-                    environment = current.environment,
-                    update = current.update,
-                    service = current.service,
-                    recovery = current.recovery,
-                    occurredAtMillis = System.currentTimeMillis()
-                )
-            )
-            current.copy(error = message, failure = failure)
-        }
+        state.update { it.copy(error = publication.error, failure = publication.failure, failureRevision = it.failureRevision + 1) }
     }
     internal fun phase(label: String, env: EnvironmentState) { state.update { it.copy(stage = label, environment = env, bytes = 0, total = -1, download = null, phasePercent = null) }; event(label) }
     fun cancel() { job?.cancel() }
@@ -238,7 +228,8 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
         val elapsed = operationRetry.elapsedMillis(id)
         state.update { snapshot ->
             snapshot.copy(failedOperation = FailedOperation(id, snapshot.stage,
-                if (cancelled) "" else snapshot.error, elapsed, cancelled))
+                if (cancelled) "" else snapshot.error, elapsed, cancelled,
+                domain = FailureCatalog.operationDomain(snapshot.operation) ?: FailureDomain.UNKNOWN, operation = snapshot.operation))
         }
     }
 
@@ -275,7 +266,7 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                 ))
                 state.update { it.copy(operation=label,operationRetry=retry,stage=operationLabel(label),bytes=0,total=-1,download=null,phasePercent=null,error="",failure=null) }
                 try {
-                    check(child == null || label == "background-probe") { "请先停止服务；可能中断正在执行的任务" }
+                    check(child == null || label in setOf("background-probe", "service-http-check")) { "请先停止服务；可能中断正在执行的任务" }
                     paths.atomic("transaction", label)
                     block()
                     File(paths.state, "transaction").delete()
@@ -285,7 +276,7 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作已停止；当前安装状态已刷新",download=null,bytes=0,total=-1) }
-                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理已取消；已生效的精简策略保留") else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.UNKNOWN) else it.copy(environment = EnvironmentState.CANCELLED, stage = "已取消，可重试并复用完整下载") }
+                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理已取消；已生效的精简策略保留") else if (label == "service-http-check") it else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.UNKNOWN) else it.copy(environment = EnvironmentState.CANCELLED, stage = "已取消，可重试并复用完整下载") }
                     event("操作取消")
                 } catch (e: Throwable) {
                     fail(e)
@@ -293,7 +284,7 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                     if(label.startsWith("component-")) {
                         components.refresh()
                         state.update { it.copy(stage="组件操作失败，请查看错误信息",download=null,bytes=0,total=-1) }
-                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理失败，详见错误记录") else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.FAILED) else it.copy(environment = EnvironmentState.FAILED) }
+                    } else state.update { if(label=="ubuntu-cache")it.copy(environment=before.environment,stage="Ubuntu 缓存整理失败，详见错误记录") else if (label == "service-http-check") it.copy(webHealthy = false) else if (label in setOf("health", "background-probe")) it.copy(health = HealthState.FAILED) else it.copy(environment = EnvironmentState.FAILED) }
                 } finally {
                     try { components.refresh(false) } finally {
                         state.update { it.copy(operation=null,operationRetry=null,download=null,bytes=0,total=-1,phasePercent=null) }
@@ -599,11 +590,32 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
         state.update { it.copy(health=HealthState.HEALTHY,stage="后台自检完成：60/60，详见诊断结果") }
         event("后台自检实际完成 60 次计时与文件写入，exit=0")
     }
-    fun healthCheck() = launchExclusive("health") {
-        ensurePnpm()
-        state.update { it.copy(health = HealthState.CHECKING) }
-        val r = diagnostics(checkNetwork = true); state.update { it.copy(health = if (r.exitCode == 0) HealthState.HEALTHY else HealthState.FAILED) }
-        check(r.exitCode == 0) { r.stderr }
+    fun healthCheck() {
+        val running = synchronized(this) { child?.takeIf { it.process.isAlive }?.let { it to runtimeGeneration } }
+        launchExclusive(if (running == null) "health" else "service-http-check") {
+            executeRuntimeHealthCheck(running != null, checkRunning = live@ {
+                val (expected, generation) = checkNotNull(running)
+                val endpoint = synchronized(this@RuntimeManager) {
+                    if (child !== expected || runtimeGeneration != generation || stopping) return@live
+                    state.update { it.copy(stage = "检查当前助手的本机连接") }
+                    remoteMachine.localOrigin
+                }
+                probeRunningService(this@RuntimeManager, generation, { runtimeGeneration },
+                    { child === expected && !stopping && expected.process.isAlive },
+                    probe = { httpReady(endpoint) }, publish = { healthy ->
+                        val detail = if (healthy) "助手本机连接正常" else "助手仍在运行，本机连接尚未就绪"
+                        state.update { it.copy(webHealthy = healthy, stage = detail,
+                            web = if (!healthy && !remoteMachine.remoteActive) WebState.DISCONNECTED else it.web) }
+                        event(detail)
+                    })
+            }, checkStopped = {
+                ensurePnpm()
+                state.update { it.copy(health = HealthState.CHECKING) }
+                val r = diagnostics(checkNetwork = true)
+                state.update { it.copy(health = if (r.exitCode == 0) HealthState.HEALTHY else HealthState.FAILED) }
+                check(r.exitCode == 0) { r.stderr }
+            })
+        }
     }
     private val sandboxProbeProgram = """
         import {createRequire} from 'node:module';
@@ -707,19 +719,25 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
      * 只发起既有前台服务 START 动作，安装/密钥/用户数据仍走 [start] 的原有流程；
      * 条件不满足、重复调用或系统拒绝时返回 false，不改变当前状态。
      */
-    fun requestEarlyStart(enabled: Boolean): Boolean {
+    @Synchronized fun startRequestGeneration(): Long = runtimeGeneration
+    fun startServiceIntent(early: Boolean = false): Intent = startServiceIntent(early, startRequestGeneration())
+    private fun startServiceIntent(early: Boolean, generation: Long): Intent =
+        Intent(context, RuntimeService::class.java).setAction(if (early) "START_EARLY" else "START")
+            .putExtra(START_REQUEST_GENERATION, generation)
+
+    fun requestEarlyStart(enabled: Boolean): Boolean = requestEarlyStart(enabled, startRequestGeneration())
+    private fun requestEarlyStart(enabled: Boolean, expectedGeneration: Long): Boolean {
         if (!initialization.isComplete) {
             if (!enabled) return false
-            val generation = runtimeGeneration
             scope.launch {
-                if (awaitInitialized() && runtimeGeneration == generation && !stopping) requestEarlyStart(enabled)
+                if (awaitInitialized()) requestEarlyStart(enabled, expectedGeneration)
             }
             return true
         }
         if (!initialization.succeeded) return false
         return earlyStartGate.request(earlyConditions(enabled)) {
             try {
-                context.startForegroundService(Intent(context, RuntimeService::class.java).setAction("START_EARLY"))
+                context.startForegroundService(startServiceIntent(early = true, generation = expectedGeneration))
                 event("启动优化：已请求在首帧前提前拉起已就绪的 DSH")
             } catch (error: Throwable) {
                 event("提前启动未能发起，仍可手动启动：${Redact.text(error.message ?: error.javaClass.simpleName)}")
@@ -768,7 +786,7 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
     }
 
     /** 记录一次失败并按策略决定是否自动重启；不删除用户数据、不重放任务。 */
-    private fun applyFailure(kind: FailureKind, result: CommandResult?) {
+    @Synchronized private fun applyFailure(kind: FailureKind, result: CommandResult?) {
         val nowMillis = System.currentTimeMillis()
         val decision = failurePolicy.onFailure(recoveryState.value, kind, nowMillis, result?.exitCode)
         publishRecovery(decision.state)
@@ -782,7 +800,8 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                 webHealthy = false,
                 web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
                 error = message,
-                failure = failure
+                failure = failure,
+                failureRevision = it.failureRevision + 1
             )
         }
         event(message)
@@ -802,7 +821,7 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
             val attempt = recoveryState.value.restartAttempts
             val suffix = if (expectedMode == RecoveryMode.SAFE) "，使用安全模式" else ""
             event("按失败策略自动重启（$attempt/${failurePolicy.maxRestartAttempts}）$suffix")
-            start(automatic = true)
+            start(automatic = true, expectedGeneration = generation)
         }
     }
 
@@ -846,16 +865,16 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
         start()
     }
 
-    fun start(early: Boolean = false, automatic: Boolean = false) {
+    fun start(early: Boolean = false, automatic: Boolean = false, expectedGeneration: Long? = null) {
+        val generation = expectedGeneration ?: startRequestGeneration()
         if (!initialization.isComplete) {
-            val generation = runtimeGeneration
             scope.launch {
-                if (awaitInitialized() && runtimeGeneration == generation && !stopping) start(early, automatic)
+                if (awaitInitialized()) start(early, automatic, expectedGeneration = generation)
             }
             return
         }
         if (!initialization.succeeded) return
-        synchronized(this) {
+        withStartAdmission(this, generation, { runtimeGeneration }, { stopping }) {
             // 服务端收到 START_EARLY 时重新校验，避免请求后环境变化或已被安装/手动启动占用。
             if (early && !EarlyRuntimeStart.shouldStart(earlyConditions(true))) return
             if(stopping || state.value.service==ServiceState.STOPPING){event("服务正在停止，请稍后启动");return}
@@ -1120,10 +1139,10 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
     suspend fun stop(userRequested: Boolean = true) = stopRuntime(userRequested)
     private suspend fun stopRuntime(userRequested: Boolean, expected: Child? = null, reason: String? = null, expectedGeneration: Long? = null) = stopMutex.withLock {
         val caller = currentCoroutineContext()[Job]
-        // Publish STOPPING atomically with identity validation, before switching contexts.
-        val before = synchronized(this) {
+        // 先捕获当前错误身份并使旧代次失效，再发布 STOPPING；不能用停止后的文本猜归属。
+        val (stopState, stopGeneration) = synchronized(this) {
             if ((expected != null && child !== expected) || (expectedGeneration != null && runtimeGeneration != expectedGeneration)) return@withLock
-            val previous = state.value.service
+            val previous = UserStopState(state.value)
             stopping = true
             // 停止入口优先于自动重启/试用计时，避免用户停止后又被后台拉起。
             runtimeGeneration++
@@ -1131,10 +1150,15 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
             stabilityJob?.cancel(); stabilityJob = null
             phoneFiles.setWriteAllowed(false)
             state.update { it.copy(service = ServiceState.STOPPING) }
-            previous
+            previous to runtimeGeneration
         }
         withContext(NonCancellable) {
             try {
+                // 恢复不能取消；先等它发布完快照，避免成功停止后又被恢复结果覆盖。
+                awaitInitialized()
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) state.update { it.copy(service = ServiceState.STOPPING) }
+                }
                 val observer = workspaceMonitor
                 if (observer != caller) observer?.cancelAndJoin()
                 val stopWasRequested = userRequested || paths.read("service") == "stopping-user"
@@ -1146,11 +1170,10 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                 child = null
                 workspaceMonitor = null
                 clearLocalEndpoint()
-                val final = if (stopWasRequested) ServiceState.STOPPED else when (before) {
+                val final = if (stopWasRequested) ServiceState.STOPPED else when (stopState.serviceBefore) {
                     ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING -> ServiceState.INTERRUPTED
-                    else -> before
+                    else -> stopState.serviceBefore
                 }
-                runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
                 val interrupted = reason?.let { "$it；DSH 已停止，任务可能中断，不会自动重放。请调整预算或清理空间后手动启动" }
                 val stopFailure = interrupted?.let { text ->
                     FailureCatalog.describe(
@@ -1166,26 +1189,49 @@ class RuntimeManager(val context: Context, backgroundRecovery: Boolean = false) 
                         )
                     )
                 }
-                state.update {
-                    it.copy(
-                        service = final,
-                        webHealthy = false,
-                        web = if (remoteMachine.remoteActive) it.web else WebState.DISCONNECTED,
-                        error = interrupted ?: it.error,
-                        // 用户主动停止时清掉旧失败；资源原因自动停止时给出可操作的错误。
-                        failure = if (stopWasRequested) null else stopFailure ?: it.failure
-                    )
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) {
+                        var persistedRuntimeError: String? = null
+                        state.update { current ->
+                            if (stopWasRequested) {
+                                val result = stopState.finish(current, confirmedStopped = true, userRequested = true,
+                                    sameGeneration = true, remoteActive = remoteMachine.remoteActive)
+                                persistedRuntimeError = result.persistedRuntimeError
+                                result.snapshot
+                            } else current.copy(service = final, webHealthy = false,
+                                web = if (remoteMachine.remoteActive) current.web else WebState.DISCONNECTED,
+                                error = interrupted ?: current.error, failure = stopFailure ?: current.failure,
+                                failureRevision = if (stopFailure != null) current.failureRevision + 1 else current.failureRevision)
+                        }
+                        runCatching { paths.atomic("service", when (final) { ServiceState.STOPPED -> "stopped"; ServiceState.FAILED -> "failed"; else -> "interrupted" }) }
+                            .onFailure { error ->
+                                if (stopWasRequested) fail(IllegalStateException("助手已停止，但停止状态未能保存", error), "runtime-stop")
+                            }
+                        // 这里只清当前错误镜像，事件日志、恢复历史及诊断文件保持原样。
+                        persistedRuntimeError?.let { expectedError ->
+                            if (paths.read("last-error") == expectedError) {
+                                runCatching { paths.atomic("last-error", "") }.onFailure { error ->
+                                    fail(IllegalStateException("服务已停止，但当前错误状态未能保存", error), "runtime-stop")
+                                }
+                            }
+                        }
+                        if (interrupted != null && !stopWasRequested) {
+                            paths.atomic("last-error", interrupted)
+                            event(interrupted)
+                        } else if (stopWasRequested) event("用户停止服务；不自动恢复任务")
+                    }
                 }
-                if (interrupted != null) {
-                    paths.atomic("last-error", interrupted)
-                    event(interrupted)
-                } else if (stopWasRequested) event("用户停止服务；不自动恢复任务")
             } catch (error: Throwable) {
-                // Keep the stop action available if process termination could not be confirmed.
-                fail(IllegalStateException("${reason ?: "停止服务"}：未能确认进程已全部停止", error))
-                state.update { it.copy(service = ServiceState.RUNNING, webHealthy = false) }
-                throw error
-            } finally { synchronized(this@RuntimeManager) { stopping = false } }
+                // 进程终止未确认时保留停止入口，并发布本次真实停止失败，不能执行成功清理。
+                val stopError = RuntimeStopException("${reason ?: "停止服务"}：未能确认进程已全部停止", error, stopGeneration)
+                synchronized(this@RuntimeManager) {
+                    if (runtimeGeneration == stopGeneration) {
+                        fail(stopError, "runtime-stop")
+                        state.update { it.copy(service = ServiceState.RUNNING, webHealthy = false) }
+                    }
+                }
+                throw stopError
+            } finally { synchronized(this@RuntimeManager) { if (runtimeGeneration == stopGeneration) stopping = false } }
         }
     }
     fun verifyBrowserCookie(cookie: String?) {

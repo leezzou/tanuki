@@ -46,6 +46,24 @@ libsupervisor.so
 - 每次运行都会启动新的 phone 文件连接代次（第 4 节），并在启动 DSH 前发布 `connection.json`。
 - 失败、DSH 退出或用户停止时，先撤销 phone 写权限并关闭连接，再清理子进程和 `authenticatedUrl`/`origin`；自动重启只拉起服务，不重放任务。
 
+#### 启动请求身份、运行中检查与旧引导入口
+
+START/START_EARLY内部前台服务请求携带 `runtime-start-generation`，缺少标识不接纳；MainActivity与提前启动统一由RuntimeManager生成请求。恢复等待、自动重试和更新安装/恢复的异步回调保留入口期望代次，最终接纳与stop使用同一同步边界校验代次/stopping，再登记启动作业，不能在锁外检查后调用无身份start。
+
+运行中HTTP未健康仍选HEALTH，但后端以 `service-http-check` 仅探测当时的存活child与本机endpoint，不执行pnpm准备、组件迁移、环境诊断或停止任务。探测在IO scope，开始与结果均校验实例/代次，结果发布与stop同锁，只更新当前webHealthy/连接说明，不把环境诊断改成成功。停止态HEALTH仍走原环境/可选公网诊断；原health入口的存活child保护保留。
+
+旧OnboardingScreen的READY环境卡与DONE页均有现有onPrepare实际入口，未就绪不能空点FIRST_MESSAGE；现有model.cookieReady透传conversationReady，与HTTP及当前服务共同决定按钮是否可用。远程已连接只等待会话，不要求本机准备。宿主仍重新校验完整组件/工具与Cookie作用域；这只是PR109独立可达补口，105新引导按语义整合，不复制未提交页面实现。
+
+#### 用户停止的成功收尾与失败
+
+停止先递增运行代次，取消待重启/稳定计时，并等待不可取消的初始化恢复完成；确认本次进程与工具停止后，才发布 `STOPPED`。后续收尾仍核对停止代次，旧收尾不得覆盖后继运行。
+
+成功用户停止只清停止前捕获且仍为同一事件的当前服务错误：来源为结构化 `FailureDomain.RUNTIME`（健康/后台诊断除外），同时核对 `failureRevision`、错误实例、原文、失败操作记录和操作身份。`FailedOperation.domain/operation` 由操作入口记录，默认UNKNOWN/null；未知来源不靠文案归类。明确runtime记录可证明相同原文归属，避免 `FailureCatalog.displayFailure()` 再从error重建旧卡。没有其他域的操作/问题且阶段未变化时，stage才收尾为“助手已停止”。
+
+未确认停止以携带所属代次的RuntimeStopException跨外层传播；通用fail不能把它改归关联安装/更新操作，过期异常只入诊断，不改后继快照或当前错误镜像。结构化失败发布递增 `Snapshot.failureRevision`，保证同文案同时间的新事件也能通过StateFlow发布。停止期间的新失败、替换重试记录、新操作与新代次不被清理。安装/更新错误、健康/网络诊断、`recovery`、启动终态耗时与事件日志保留；启动终态是该次历史，不能替代当前service。
+
+`last-error`仅为当前错误镜像，按本次已确认runtime原文匹配后清空，不删除历史或诊断。进程终止未确认时保留可停止状态并显示“停止助手未完成”；进程已停但停止状态/错误镜像保存失败时，保持STOPPED并显示新的“停止状态保存未完成”。两者的结构化runtime-stop重试走STOP，不改成启动或自动重放任务。新改动须单独验证，不能沿用旧head的Host结果。
+
 #### 1.1.1 安全模式与失败恢复
 
 正常运行仍使用 `web --no-open --host 127.0.0.1 --port 0` 与用户 `$HOME`/`DSH_HOME`。用户显式试用正常模式失败，或 normal 模式连续两次启动失败后，`RuntimeManager` 可进入安全模式：

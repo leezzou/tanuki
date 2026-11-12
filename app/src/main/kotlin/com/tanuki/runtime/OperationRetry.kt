@@ -8,6 +8,9 @@ data class FailedOperation(
     val elapsedMillis: Long,
     val cancelled: Boolean = false,
     val retryAvailable: Boolean = true,
+    /** 由操作入口提供结构化来源，停止服务不能靠失败文案猜测重试记录归属。 */
+    val domain: FailureDomain = FailureDomain.UNKNOWN,
+    val operation: String? = null,
 )
 
 /** 组件安装必须重新走入口恢复失败任务的版本；其他操作继续重放原任务。 */

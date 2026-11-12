@@ -46,6 +46,8 @@ data class Snapshot(
     val recovery: RuntimeRecoveryState = RuntimeRecoveryState(),
     /** 最近一次失败的统一展示模型；原始异常仍在 error 字段，恢复后清空。 */
     val failure: AppFailure? = null,
+    /** 当前失败每次发布都递增，避免同文案同时间的事件被StateFlow按值合并。 */
+    val failureRevision: Long = 0,
     /** 仅当前操作持有；失败时复制到错误模型，结束后不污染下一次失败。 */
     val operationRetry: FailureRetry? = null
 )

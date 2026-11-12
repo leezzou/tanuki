@@ -67,6 +67,7 @@ import com.tanuki.runtime.operationActive
 internal fun OnboardingScreen(
     presentation: OnboardingPresentation,
     snapshot: Snapshot,
+    conversationReady: Boolean = false,
     onContinue: () -> Unit,
     onBack: () -> Unit,
     onSkip: () -> Unit,
@@ -113,7 +114,7 @@ internal fun OnboardingScreen(
                         nativeSelected = presentation.interfaceNative,
                         onSelect = onSelectInterface,
                     )
-                    OnboardingStep.DONE -> DoneStep(onComplete = onComplete)
+                    OnboardingStep.DONE -> DoneStep(snapshot, conversationReady, report.canContinue, onPrepare, onComplete)
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -267,7 +268,7 @@ private fun EnvironmentStep(
     }
     TextButton(onClick = onRefreshDevice, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新检测") }
     when {
-        snapshot.environment == EnvironmentState.READY -> ReadyCard(prepare)
+        snapshot.environment == EnvironmentState.READY -> ReadyCard(prepare, snapshot, report.canContinue, onPrepare)
         prepare.phase == OnboardingPreparePhase.FAILED -> FailureCard(prepare, report.canContinue, onPrepare)
         prepare.active || snapshot.operationActive -> PrepareProgressCard(prepare, onCancelPrepare)
         else -> PrepareStartCard(prepare, report.canContinue, onPrepare)
@@ -446,7 +447,7 @@ private fun FailureCard(prepare: OnboardingPrepareState, canRetry: Boolean, onRe
 }
 
 @Composable
-private fun ReadyCard(prepare: OnboardingPrepareState) {
+private fun ReadyCard(prepare: OnboardingPrepareState, snapshot: Snapshot, canPrepare: Boolean, onPrepare: () -> Unit) {
     OnboardingCard {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("环境已就绪", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -455,6 +456,12 @@ private fun ReadyCard(prepare: OnboardingPrepareState) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (snapshot.service != com.tanuki.runtime.ServiceState.RUNNING || !snapshot.webHealthy) {
+                Button(onClick = onPrepare, enabled = canPrepare && !snapshot.operationActive,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+                    Text(if (snapshot.service == com.tanuki.runtime.ServiceState.RUNNING) "检查助手连接" else "继续准备或启动助手")
+                }
+            }
         }
     }
 }
@@ -515,15 +522,27 @@ private fun InterfaceOption(title: String, detail: String, selected: Boolean, on
 }
 
 @Composable
-private fun DoneStep(onComplete: (OnboardingFinish) -> Unit) {
+private fun DoneStep(snapshot: Snapshot, conversationReady: Boolean, canPrepare: Boolean, onPrepare: () -> Unit, onComplete: (OnboardingFinish) -> Unit) {
     Text("设置完成", style = MaterialTheme.typography.headlineMedium)
     Text(
-        "可以马上开始；环境还没准备好时，进入后仍会看到准备入口。",
+        "本机助手就绪后即可开始对话；也可以选择连接远程电脑。",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    val serviceReady = (snapshot.service == com.tanuki.runtime.ServiceState.RUNNING && snapshot.webHealthy) || snapshot.remote.connected
+    val canMessage = serviceReady && conversationReady
+    if (!serviceReady) {
+        Button(onClick = onPrepare, enabled = canPrepare && !snapshot.operationActive,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+            Text(if (snapshot.service == com.tanuki.runtime.ServiceState.RUNNING) "检查助手连接" else "继续准备或启动助手")
+        }
+    }
+    if (serviceReady && !conversationReady) {
+        Text("对话连接尚未就绪，可以稍候或先返回首页。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     Button(
         onClick = { onComplete(OnboardingFinish.FIRST_MESSAGE) },
+        enabled = canMessage,
         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
     ) {
         Text("发第一条消息")
