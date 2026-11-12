@@ -99,7 +99,7 @@ class AppReleaseTests(unittest.TestCase):
             with release.verified_copy(self.apk, checksum):
                 self.fail("不应读取超出发布上限的文件")
 
-    def run_preparation(self, *, verified=True, metadata=None, replace_original=False):
+    def run_preparation(self, *, verified=True, metadata=None, replace_original=False, automatic=False):
         original = self.apk.read_bytes()
         root = self.apk.parent
         calls = []
@@ -107,12 +107,23 @@ class AppReleaseTests(unittest.TestCase):
         arguments = ["prepare-app-release.py", "--version", "0.1.1", "--version-code", "2", "--channel", "workspacecheck"]
         if verified:
             arguments += ["--verified-apk", str(self.apk), "--verified-apk-sha256", hashlib.sha256(original).hexdigest()]
+        if automatic:
+            arguments += ["--source-commit", "c" * 40, "--merge-base", "a" * 40]
 
         def run(command, label, **kwargs):
             calls.append(label)
+            if label == "核对合并父提交":
+                return "a" * 40
+            if label == "核对合并变更":
+                return "scripts/example.py\ndocs/handoffs/20261112-0100-synthetic.md\n"
+            if label == "确认本次合并交接":
+                self.assertIn("--pr", command)
+                self.assertIn("--changed-file", command)
+                self.assertNotIn("--release", command)
             if label == "确认最新交接":
                 # 发布入口必须使用只读严格模式，而不是普通 PR 模式。
                 self.assertIn("--release", command)
+                self.assertIn("--shared-stamp", command)
             if label == "构建指定渠道":
                 target = release.build_apk_path(root, "workspacecheck", "0.1.1")
                 target.parent.mkdir(parents=True)
@@ -133,10 +144,11 @@ class AppReleaseTests(unittest.TestCase):
             if replace_original:
                 self.apk.write_bytes(b"another-build-overwrote-the-original")
                 self.assertEqual(original, apk.read_bytes())
-            return metadata or self.metadata
+            return metadata or (self.metadata | {"certificate": "371dc301e7bb4d5cb2840510855f191eeb2f1ce4d058618361419409654cd84f"})
 
         with mock.patch.object(release, "ROOT", root), mock.patch.object(release, "run", side_effect=run), \
-                mock.patch.object(release, "inspect_archive", side_effect=inspect), mock.patch.object(sys, "argv", arguments), \
+                mock.patch.object(release, "inspect_archive", side_effect=inspect), mock.patch.object(release, "inspect_workspace_payload"), \
+                mock.patch.object(sys, "argv", arguments), mock.patch.object(release, "pinned_source", return_value="b" * 40), \
                 contextlib.redirect_stdout(io.StringIO()):
             release.main()
         return root / "artifacts/releases/0.1.1", original, calls, inspected
@@ -153,6 +165,46 @@ class AppReleaseTests(unittest.TestCase):
         self.assertEqual(6, len(list(bundle.iterdir())))
         checksums = (bundle / "RELEASE-SHA256SUMS").read_text()
         self.assertIn(hashlib.sha256(expected).hexdigest(), checksums)
+
+    def test_automatic_mode_binds_source_and_checks_pr_handoff_without_shared_restamp(self):
+        import json
+        bundle, _, calls, _ = self.run_preparation(automatic=True)
+        manifest = json.loads((bundle / "app-update.json").read_text())
+        self.assertEqual("c" * 40, manifest["sourceCommit"])
+        self.assertEqual("b" * 40, manifest["sourceTree"])
+        self.assertIn("确认本次合并交接", calls)
+        self.assertNotIn("确认最新交接", calls)
+
+    def test_merge_mode_without_source_binding_is_rejected_before_build(self):
+        arguments = ["prepare", "--version", "0.1.1", "--version-code", "2", "--channel", "workspacecheck", "--merge-base", "a" * 40]
+        with mock.patch.object(sys, "argv", arguments), mock.patch.object(release, "ROOT", self.apk.parent), \
+                mock.patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "绑定提交"):
+                release.main()
+            run.assert_not_called()
+
+    def test_force_native_flag_only_changes_native_task_cache_policy(self):
+        command = release.build_command("workspacecheck", "0.1.100", 100, True)
+        self.assertIn("-PtanukiForceNative=true", command)
+        self.assertIn("scripts/native-cache.init.gradle", command)
+        self.assertNotIn("--rerun-tasks", command)
+        self.assertNotIn("-PtanukiForceNative=true", release.build_command("workspacecheck", "0.1.100", 100))
+
+    def test_force_native_cannot_rebuild_fixed_apk_or_production(self):
+        for channel, extra in (("workspacecheck", ["--verified-apk", str(self.apk)]), ("production", [])):
+            arguments = ["prepare", "--version", "0.1.1", "--version-code", "2", "--channel", channel, "--force-native", *extra]
+            with mock.patch.object(sys, "argv", arguments), mock.patch.object(release, "run") as run:
+                with self.assertRaisesRegex(ValueError, "强制 native 仅用于"):
+                    release.main()
+                run.assert_not_called()
+
+    def test_production_cannot_use_automatic_merge_handoff_exception(self):
+        options = mock.Mock(version="0.1.1", version_code=2, channel="production", source_commit="c" * 40, merge_base="a" * 40)
+        with mock.patch.object(release, "ROOT", self.apk.parent), mock.patch.object(release, "pinned_source", return_value="b" * 40), \
+                mock.patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "production 仍需严格"):
+                release.prepare(options, None, None)
+            run.assert_not_called()
 
     def test_verified_mode_still_rejects_wrong_actual_identity(self):
         with self.assertRaises(ValueError):
@@ -223,6 +275,34 @@ class AppReleaseTests(unittest.TestCase):
         self.assertIn('artifacts/builds/production/$TANUKI_VERSION_NAME', (ROOT / "scripts/sign-release.sh").read_text())
         self.assertEqual(self.apk.parent / "app/build/outputs/apk/modern/release/app-modern-release.apk",
                          release.build_apk_path(self.apk.parent, "workspacecheck", "0.1.1"))
+
+    def test_workspace_payload_requires_sdk_non_debuggable_and_native_arm64(self):
+        def archive(libraries):
+            with zipfile.ZipFile(self.apk, "w") as output:
+                for name, content in libraries.items():
+                    output.writestr(name, content)
+        elf = b"\x7fELF\x02\x01" + b"\x00" * 12 + b"\xb7\x00"
+        required = {"lib/arm64-v8a/" + n: elf for n in ("libproot.so", "libproot-loader.so", "libsupervisor.so")}
+        archive(required)
+        def inspect(command, label, **kwargs):
+            return {"target-sdk": "34", "min-sdk": "26", "debuggable": "false"}[command[2]]
+        with mock.patch.object(release, "run", side_effect=inspect):
+            release.inspect_workspace_payload(self.apk, Path("/synthetic-sdk"))
+            for changes in ({}, {"lib/arm64-v8a/libproot.so": b""}, {"lib/x86/libother.so": b"synthetic"}):
+                archive(changes if not changes else required | changes)
+                with self.assertRaises(ValueError):
+                    release.inspect_workspace_payload(self.apk, Path("/synthetic-sdk"))
+        archive(required)
+        for values in (("35", "26", "false"), ("34", "27", "false"), ("34", "26", "true")):
+            with mock.patch.object(release, "run", side_effect=values), self.assertRaises(ValueError):
+                release.inspect_workspace_payload(self.apk, Path("/synthetic-sdk"))
+
+    def test_source_pin_requires_exact_clean_commit(self):
+        with mock.patch.object(release, "run", side_effect=["a" * 40, "", "b" * 40]):
+            self.assertEqual("b" * 40, release.pinned_source("a" * 40))
+        for output in (["c" * 40, ""], ["a" * 40, " M source.txt"]):
+            with mock.patch.object(release, "run", side_effect=output), self.assertRaises(ValueError):
+                release.pinned_source("a" * 40)
 
     def test_native_checksum_is_relative_to_the_published_bundle(self):
         native = self.apk.parent / "Tanuki-native-corresponding-sources.tar.gz"

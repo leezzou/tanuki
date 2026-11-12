@@ -4,6 +4,6 @@
 
 在手机上运行 Ubuntu、Node.js 与 DeepSeek Harness，提供文件管理和内置浏览器；开发环境在本地运行，模型通过 API 调用。
 
-项目处于早期开发阶段。当前开发候选为 0.1.14（workspacecheck，versionCode 19），候选已构建，尚未发布。
+项目处于早期开发阶段。当前公开测试版为 [0.1.14](https://github.com/leezzou/tanuki/releases/tag/v0.1.14)（workspacecheck，versionCode 19，开发签名 Pre-release）。
 
 [使用与构建](docs/AGENT-QUICKSTART.md) · [首次启动引导](docs/ONBOARDING.md) · [GPL-3.0-or-later](LICENSE) · [第三方声明](THIRD_PARTY_NOTICES)

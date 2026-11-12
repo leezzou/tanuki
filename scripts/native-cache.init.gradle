@@ -1,0 +1,8 @@
+// 后台发布只有在已核 native 源码/配置/NDK/ABI/输出身份不匹配时显式强制该任务。
+allprojects { candidate ->
+    candidate.tasks.matching { it.name == 'buildNativeRuntime' }.configureEach { nativeTask ->
+        nativeTask.outputs.upToDateWhen {
+            candidate.providers.gradleProperty('tanukiForceNative').getOrElse('false') != 'true'
+        }
+    }
+}

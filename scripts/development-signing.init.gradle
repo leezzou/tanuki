@@ -1,0 +1,17 @@
+// 仅引用仓库外既有开发证书；沿用 AGP debug 默认 alias/password，不生成或导出密钥。
+allprojects { candidate ->
+    candidate.plugins.withId('com.android.application') {
+        candidate.extensions.getByName('androidComponents').finalizeDsl { androidDsl ->
+            if (candidate.providers.gradleProperty('developmentReleaseSigning').getOrElse('false') == 'true') {
+                def location = System.getenv('TANUKI_WORKSPACECHECK_KEYSTORE')
+                if (!location) throw new GradleException('需要仓库外既有开发证书路径')
+                def keystore = new File(location).canonicalFile
+                def root = candidate.rootProject.projectDir.canonicalFile
+                if (!keystore.isFile() || keystore.toPath().startsWith(root.toPath())) {
+                    throw new GradleException('开发证书必须位于仓库外且已经存在')
+                }
+                androidDsl.signingConfigs.getByName('debug').storeFile = keystore
+            }
+        }
+    }
+}

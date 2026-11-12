@@ -31,6 +31,12 @@ class PublicationTests(unittest.TestCase):
         data = b"com.tanuki TanukiApp Theme.Tanuki TANUKI_IDENTITY /home/tanuki"
         self.assertEqual([], SCAN.content_findings(data, ()))
 
+    def test_generated_git_proof_allows_only_the_exact_public_github_committer(self):
+        self.assertEqual([], SCAN.content_findings(b"committer GitHub <noreply@github.com>", ()))
+        self.assertEqual([], SCAN.content_findings(b"committer GitHub <NoReply@GitHub.com>", ()))
+        for local in (b"personal", b"prefix-noreply"):
+            self.assertEqual([(1, "review-email")], SCAN.content_findings(local + b"@" + b"github.com", ()))
+
     def test_brand_consistency_covers_case_separators_paths_and_archive_members(self):
         first, second = b"har" + b"ness", b"po" + b"cket"
         for data in (first + second, (first + second).upper(), first + b"_" + second,

@@ -338,10 +338,25 @@ def main() -> int:
                         help="变更文件（可重复）；用于 PR 模式强制源码变化必须有交接记录")
     parser.add_argument("--changed-from", type=Path, metavar="FILE",
                         help="从文件读取变更清单（每行一个路径，- 表示标准输入）")
+    parser.add_argument("--shared-stamp", action="store_true", help="强制原人工共享印章检查；手工封装入口使用")
     args = parser.parse_args()
     try:
+        if args.shared_stamp and args.mode != "release":
+            raise ValueError("--shared-stamp requires --release")
         if args.mode == "release" and args.record:
             raise ValueError("--release is read-only; run --integrate --record first")
+        generated = ROOT / "RELEASE-SOURCE.json"
+        if generated.exists() and not (ROOT / ".git").exists() and not args.shared_stamp:
+            # 自动源码包使用包内生成证明；不改写或伪装为人工共享印章/设备QA。
+            spec = importlib.util.spec_from_file_location("generated_release_source", ROOT / "scripts/release-source.py")
+            proof = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(proof)
+            proof.verify(ROOT)
+            if args.mode == "integrate":
+                raise ValueError("Generated release source is read-only; do not restamp shared handoffs")
+            if args.mode == "release":
+                print("Generated release source proof passed (no Git required; not device QA)")
+                return 0
         if args.mode == "release":
             path, count = validate_current()
             print(f"Handoff release check passed: {path.relative_to(ROOT).as_posix()} ({count} public files)")
