@@ -40,15 +40,17 @@
 | git status、rev-parse、ls-remote；gh releases列表、v0.1.14/app-update.json与git ref查询 | 通过 | 只读公开身份/六附件名称大小摘要；tag/main完整SHA如上，code19已实核 |
 | python3 scripts/test-merge-release.py | 最终42项通过，约3.3秒 | 整数9→10/99→100→101；双进程互斥；多合并/失败重启不漏；同候选不加号；源SHA/tree和命令参数；部分上传/冲突/已公开缺件拒绝/丢失publish响应；无自动commit/push；初始化/只读plan/暂停恢复；共享slot优先与停止；launchd仅合成安装/启停；门禁回执及provider/CI拒绝 |
 | python3 scripts/test-app-release.py | 25项通过，约0.36秒 | 原18项保留并补来源/自动合并交接例外/缺SHA拒绝/production拒绝自动例外/SDK和ARM64原生ELF条件；APK及签名工具均合成，不是真实APK验证 |
-| python3 scripts/test-release-source.py | 最终12项通过，约14.2秒 | 无.git解压后验证来源、check-handoff两模式、默认verify-workspace合成构建、指定version/code的rebuild --plan与合成Gradle实际调用；源码篡改/漏交接/伪造tree/版本不符/缺证书拒绝；ZIP同输入字节一致 |
+| python3 scripts/test-release-source.py | 最终13项通过（含网页合并提交者归档与公开检查交叉回归） | 无.git解压后验证来源、check-handoff两模式、默认verify-workspace合成构建、指定version/code的rebuild --plan与合成Gradle实际调用；源码篡改/漏交接/伪造tree/版本不符/缺证书拒绝；ZIP同输入字节一致 |
 | python3 scripts/test-native-cache.py | 最终9项通过，约1.1秒（微型合成） | 全为临时合成NDK/上游Git/ELF输出；相同mtime工具字节改变仍失效，源码/锁/ABI配置/NDK路径与权限变化失效，首次依赖bootstrap后暖缓存可复用，实际APK库hash对应 |
 | python3 scripts/test-development-gates.py | 28项通过 | 未修改既有门禁逻辑；无真实PR/设备调用 |
 | python3 scripts/test-check-handoff.py | 11项通过 | PR容忍共享状态落后、集成/严格模式与来源篡改边界 |
 | python3 scripts/test-agent-workflow.py | 19项通过，69秒 | 合成ADB/Gradle/环境；既有两项device-lock测试输出文件句柄ResourceWarning，退出0；不是Android测试 |
-| python3 scripts/test-publication.py | 19项通过 | 源码边界、索引与嵌套归档/许可检查 |
+| python3 scripts/test-publication.py | 最终20项通过 | 源码边界、索引与嵌套归档/许可检查 |
 | git diff --check、check-handoff.py --pr --record 本记录、check-publication.py --git | 通过，公开扫描0 findings | 最终提交前复核实际索引及源码候选归档；不运行共享印章写入模式 |
 
-补充验收最终合计165项通过（42+12+9+25+11+28+19+19）。整轮163项通过后，补checkout/JNI链接输出的两项拒绝回归，最终重跑队列42/native-cache9/source12及diff检查全部通过；未改变的其余套件不无谓重复。源码包恢复包内实际对应上游源码，不需要前任.git/缓存；目录链接、不同字节缓存、归档路径越界明确拒绝。全部合成，不把命令runner或生成证明称为Android/设备QA。
+补充验收最终合计167项通过（42+13+9+25+11+28+19+20）。整轮163项通过后，补checkout/JNI链接输出的两项拒绝回归，最终重跑队列42/native-cache9/source12及diff检查全部通过；未改变的其余套件不无谓重复。源码包恢复包内实际对应上游源码，不需要前任.git/缓存；目录链接、不同字节缓存、归档路径越界明确拒绝。全部合成，不把命令runner或生成证明称为Android/设备QA。
+
+收尾兼容修正：推送补强后核对网页合并真实格式，确认GitHub公开系统提交者使用的精确noreply地址会被原邮箱规则误报。仅增加该精确地址例外，普通GitHub邮箱负例仍拒绝；新增真实临时Git网页提交者→生成元数据→无Git验证→嵌套归档公开扫描的交叉用例。公开检查20与源码包13项重跑通过，不扩大第一方或整个GitHub域名豁免。此必要修正补一轮提交，不沿用前一head批准。
 
 失败保留：扩展队列套件一次23项中有1项服务准备测试失败，原因是macOS `/var`规范化为`/private/var`，测试预期未resolve；修正测试临时根目录规范化后最终30项通过。实现检查同时修正首次clone的no-checkout状态拒绝、暂停命令与writer互锁、只bootstrap自定义plist不能跨登录恢复、固定候选拷贝未完成就记inventory等问题，并补相应回归。
 

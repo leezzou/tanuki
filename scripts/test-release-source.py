@@ -139,6 +139,18 @@ class ReleaseSourceTests(unittest.TestCase):
         self.assertEqual(0, workspace.returncode, workspace.stderr)
         self.assertIn("no APK was installed", workspace.stdout)
 
+    def test_web_merge_committer_proof_passes_publication_and_offline_verification(self):
+        self.git("-c", "core.hooksPath=/dev/null", "-c", "user.name=GitHub", "-c", "user.email=noreply@github.com",
+                 "commit", "--allow-empty", "-m", "test: synthetic web merge")
+        end = self.git("rev-parse", "HEAD").strip()
+        self.manifest.update(sourceCommit=end)
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        archive, root = self.package_and_extract()
+        document = json.loads((root / "RELEASE-SOURCE.json").read_text())
+        self.assertIn("noreply@github.com", document["commits"][end])
+        self.assertEqual(end, load(root / "scripts/release-source.py").verify(root)["commit"])
+        self.assertEqual([], load(ROOT / "scripts/check-publication.py").scan_blob(archive.name, archive.read_bytes(), ()))
+
     def test_multi_commit_merge_range_has_offline_first_parent_proof(self):
         first = self.end
         (self.root / "app/src/fixture.txt").write_text("second commit in the same synthetic PR")

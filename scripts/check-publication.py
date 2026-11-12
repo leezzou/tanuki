@@ -99,7 +99,8 @@ def content_findings(data: bytes, markers: tuple[bytes, ...], attribution: bool 
             domain = match.group(1).lower()
             if (domain in {b"example.com", b"example.org", b"example.net", b"invalid.example"}
                     or domain.endswith((b".example", b".invalid", b".localhost", b".users.noreply.github.com"))
-                    or domain == b"users.noreply.github.com"):
+                    or domain == b"users.noreply.github.com"
+                    or match.group(0).lower() == b"noreply@github.com"):
                 continue
             found.append((data.count(b"\n", 0, match.start()) + 1, "review-email"))
     return sorted(set(found))
