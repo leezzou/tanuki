@@ -10,7 +10,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -27,7 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -42,7 +41,7 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
 import kotlin.math.roundToInt
 
-/** 液态镜片只采样原生底图和导航自身；拖动预览与页面提交分离，避免途经页签时重建网页。 */
+/** 镜片只采样导航背板，真实标签始终在前景；拖动预览与页面提交分离，避免重建途经页。 */
 @Composable
 internal fun GlassNavigationBar(
     selectedIndex: Int,
@@ -58,7 +57,7 @@ internal fun GlassNavigationBar(
     if (labels.isEmpty()) return
     val tokens = com.tanuki.ui.design.TanukiDesign.tokens.colors
     val colors = MaterialTheme.colorScheme
-    val dark = isSystemInDarkTheme()
+    val dark = com.tanuki.ui.design.TanukiDesign.tokens.isDark
     val direction = LocalLayoutDirection.current
     val density = LocalDensity.current
     val select by rememberUpdatedState(onSelect)
@@ -86,7 +85,7 @@ internal fun GlassNavigationBar(
         dragging = false
         if (selected) lastSelectedSlot = slotForIndex(selectedIndex)
     }
-    val tabsBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberLayerBackdrop()
     // 网页靠原生叠放透显，不进入录制层；背板保留足够底色以保证明暗网页上的文字对比度。
     val fallback = rememberCanvasBackdrop { drawRect(colors.surface.copy(alpha = if (translucentBackground) 0.72f else 1f)) }
     val panelShape = RoundedCornerShape(36.dp)
@@ -142,10 +141,10 @@ internal fun GlassNavigationBar(
             }
         }
         Box(gesture) {
-            // 录制层仅含背板与真实标签，镜片在其同级绘制，避免递归捕获和重复无障碍节点。
-            Row(
-                Modifier.fillMaxWidth().height(IntrinsicSize.Min)
-                    .layerBackdrop(tabsBackdrop)
+            // 只录制背板，真实标签和图标不进入折射源，避免镜片形变时裁切文字。
+            Box(
+                Modifier.matchParentSize().clearAndSetSemantics {}
+                    .layerBackdrop(panelBackdrop)
                     .drawBackdrop(
                         backdrop = backdrop ?: fallback,
                         shape = { panelShape },
@@ -156,8 +155,35 @@ internal fun GlassNavigationBar(
                             if (backdrop != null) drawRect(colors.surface.copy(alpha = if (dark) 0.38f else 0.32f))
                         },
                     )
-                    .border(with(density) { 1.toDp() }, colors.outlineVariant, panelShape)
-                    .padding(4.dp).selectableGroup(),
+                    .border(with(density) { 1.toDp() }, colors.outlineVariant, panelShape),
+            )
+            Box(Modifier.matchParentSize().padding(4.dp).clearAndSetSemantics {}) {
+                Box(
+                    Modifier.align(AbsoluteAlignment.TopLeft).width(itemWidth).fillMaxHeight()
+                        .drawBackdrop(
+                            backdrop = panelBackdrop,
+                            shape = { lensShape },
+                            effects = {
+                                // API33+ 只折射背板，旧系统也保留同样的前景标签与手势。
+                                lens((8f + 8f * pressure).dp.toPx(), (12f + 10f * pressure).dp.toPx())
+                            },
+                            highlight = { Highlight.Default.copy(width = 0.8.dp, alpha = 0.65f + pressure * 0.35f) },
+                            shadow = { Shadow(radius = 6.dp, alpha = 0.65f) },
+                            layerBlock = {
+                                translationX = (if (direction == LayoutDirection.Rtl) lastSlot - position else position) * itemPixels
+                                alpha = visibility
+                                scaleX = 1f + 0.055f * pressure
+                                scaleY = 1f + 0.08f * pressure
+                            },
+                            onDrawSurface = {
+                                drawRect(Color(tokens.accent).copy(alpha = 0.09f - 0.035f * pressure))
+                            },
+                        ),
+                )
+            }
+            // 前景只绘制一次并位于光学效果上方，标签随系统字号完整换行。
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(4.dp).selectableGroup(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 labels.forEachIndexed { index, label ->
@@ -180,33 +206,9 @@ internal fun GlassNavigationBar(
                     ) {
                         Box(Modifier.clearAndSetSemantics {}) { icon(index, if (selectedIndex == index) Color(tokens.accentIcon) else colors.onSurfaceVariant) }
                         Text(label, color = if (selectedIndex == index) colors.primary else colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            textAlign = TextAlign.Center)
                     }
                 }
-            }
-            Box(Modifier.matchParentSize().padding(4.dp).clearAndSetSemantics {}) {
-                Box(
-                    Modifier.align(AbsoluteAlignment.TopLeft).width(itemWidth).fillMaxHeight()
-                        .drawBackdrop(
-                            backdrop = tabsBackdrop,
-                            shape = { lensShape },
-                            effects = {
-                                // API33+ 使用库提供的真实折射；旧系统保留同样的手势和高可读选中层。
-                                lens((8f + 8f * pressure).dp.toPx(), (12f + 10f * pressure).dp.toPx())
-                            },
-                            highlight = { Highlight.Default.copy(width = 0.8.dp, alpha = 0.65f + pressure * 0.35f) },
-                            shadow = { Shadow(radius = 6.dp, alpha = 0.65f) },
-                            layerBlock = {
-                                translationX = (if (direction == LayoutDirection.Rtl) lastSlot - position else position) * itemPixels
-                                alpha = visibility
-                                scaleX = 1f + 0.055f * pressure
-                                scaleY = 1f + 0.08f * pressure
-                            },
-                            onDrawSurface = {
-                                drawRect(Color(tokens.accent).copy(alpha = 0.09f - 0.035f * pressure))
-                            },
-                        ),
-                )
             }
             if (centerAction != null) {
                 Box(Modifier.matchParentSize().padding(4.dp), contentAlignment = Alignment.Center) {
