@@ -3,6 +3,8 @@ package com.tanuki.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.tanuki.ui.design.TanukiDesign
@@ -28,7 +30,7 @@ object TanukiSpacing {
 /**
  * 非 Compose 界面使用的调色板。
  *
- * 浏览器悬浮层等原生 View 通过它取得与根主题相同的颜色，浅色/深色跟随系统。
+ * 浏览器悬浮层等原生 View 共用这套调色板，但当前仍跟随系统，不消费应用内手动模式。
  */
 internal fun tanukiColorScheme(dark: Boolean): ColorScheme = tanukiDesignColorScheme(dark)
 
@@ -46,9 +48,11 @@ internal fun tanukiDisabledContentColor(): Color = Color(TanukiDesign.tokens.col
  *
  * 只保留一套颜色来源：直接使用 design 包的调色板、字体阶梯、圆角与动效令牌，
  * 同时安装 `LocalTanukiDesignTokens`，让 `com.tanuki.ui.design` 的基础组件
- * 能在页面里读取同一份令牌。深色/浅色默认跟随系统。
+ * 能在页面里读取同一份令牌。默认跟随系统，也消费已成功保存的手动明暗偏好。
  */
 @Composable
 fun TanukiTheme(content: @Composable () -> Unit) {
-    TanukiDesignTheme(dark = isSystemInDarkTheme(), content = content)
+    val appearance = rememberAppearancePreferenceStore()
+    val state by appearance.state.collectAsState()
+    TanukiDesignTheme(dark = state.mode.isDark(isSystemInDarkTheme()), content = content)
 }
