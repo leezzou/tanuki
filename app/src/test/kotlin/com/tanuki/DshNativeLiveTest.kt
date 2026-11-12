@@ -14,6 +14,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -187,6 +188,97 @@ class DshNativeLiveTest {
             assertEquals("dsh-session=abc", socket.cookie)
         }
     }
+
+    @Test fun acceptedPromptRestoresFollowEndWhileMuxRemainsOpen() = verifyAcceptedAfterFollowTermination("end")
+
+    @Test fun acceptedPromptRestoresFollowErrorWhileMuxRemainsOpen() = verifyAcceptedAfterFollowTermination("error")
+
+    private fun verifyAcceptedAfterFollowTermination(termination: String) = runBlocking {
+        TestServer { request -> when {
+            request.target.startsWith("/connect?") -> connectResponse()
+            request.target == "/api/session/prompt" -> TestResponse(200, emptyList(), accepted(request))
+            else -> TestResponse(404, emptyList(), "not found")
+        } }.use { server ->
+            val sockets = CopyOnWriteArrayList<ScriptedMuxSocket>()
+            val follows = java.util.concurrent.ConcurrentHashMap<ScriptedMuxSocket, String>()
+            val eventStreams = java.util.concurrent.ConcurrentHashMap<ScriptedMuxSocket, String>()
+            val client = DshNativeClient(socketFactory = {
+                val index = sockets.size
+                ScriptedMuxSocket { current, endpoint, id -> when (endpoint) {
+                    DshMuxProtocol.EVENTS_ENDPOINT -> {
+                        eventStreams[current] = id
+                        current.emit(item(id, JSONObject().put("type", "ready").put("clientId", "client-$index")))
+                    }
+                    DshMuxProtocol.FOLLOW_ENDPOINT -> {
+                        follows[current] = id
+                        val records = JSONArray()
+                        if (index == 0) records.put(record("user/message", 0, user("更早历史")))
+                        records.put(record("user/message", 1, user("当前消息")))
+                        current.emit(item(id, JSONObject().put("type", "snapshot").put("hasMore", index == 0).put("records", records)))
+                        if (index == 0) {
+                            current.emit(item(id, record("tool/call", 2, JSONObject().put("callId", "kept-tool").put("name", "Bash").put("arguments", "{\"command\":\"pwd\"}"))))
+                            current.emit(streamChunk(id, "断流前的前缀"))
+                        }
+                        // 不finish入站channel；只由客户端检测逻辑流终止后关闭物理Peer。
+                    }
+                } }.also { sockets += it }
+            }, endpointProvider = { DshEndpoint(server.origin, "${server.origin}/?token=top-secret") })
+            val source = object : com.tanuki.web.DshChatSource by client {
+                override suspend fun sessions() = Result.success(listOf(com.tanuki.web.DshSession(
+                    "s1", "合成会话", 0L, false, false, true, 1
+                )))
+                override suspend fun messages(sessionId: String) = Result.success(com.tanuki.web.DshSessionPage(
+                    listOf(com.tanuki.web.DshMessage(1, com.tanuki.web.DshMessageRole.USER, "当前消息", 1L)), false
+                ))
+            }
+            val scope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Unconfined)
+            val controller = com.tanuki.ui.DshNativeController(source, scope)
+            try {
+                controller.refresh()
+                val before = withTimeout(5_000) { controller.state.first {
+                    !it.loading && it.live && it.streamingText == "断流前的前缀" && it.tools.any { tool -> tool.callId == "kept-tool" }
+                } }
+                val first = sockets.single()
+                assertFalse(first.closed)
+                val terminal = JSONObject().put("type", termination).put("streamId", follows.getValue(first))
+                if (termination == "error") terminal.put("error", JSONObject().put("code", "gateway/protocol"))
+                first.emit(terminal.toString())
+                val disconnected = withTimeout(5_000) { controller.state.first { !it.live && it.liveError != null } }
+                assertTrue("逻辑follow终止必须释放仍开放的mux", first.closed)
+                assertEquals(before.messages, disconnected.messages)
+                assertEquals(before.tools, disconnected.tools)
+                assertEquals(before.streamingText, disconnected.streamingText)
+                assertEquals(DshConnectionState.FAILED, client.connection.value)
+                assertTrue(client.send("s1", "继续处理").isSuccess)
+                controller.onPromptAccepted("s1")
+                controller.onPromptAccepted("s1")
+                withTimeout(5_000) { controller.state.first { it.live && sockets.size == 2 && !it.loading } }
+                val second = sockets.last()
+                assertNotEquals(follows.getValue(first), follows.getValue(second))
+                assertFalse(second.closed)
+                val follow = follows.getValue(second)
+                val events = eventStreams.getValue(second)
+                second.emit(item(events, JSONObject().put("type", "emit").put("event", "api-session/status").put("args", JSONArray().put("s1").put(true))))
+                second.emit(item(follow, record("tool/call", 3, JSONObject().put("callId", "new-tool").put("name", "Bash").put("arguments", "{\"command\":\"pwd\"}"))))
+                second.emit(streamChunk(follow, "恢复后的流式文本"))
+                withTimeout(5_000) { controller.state.first { it.running && it.streamingText == "恢复后的流式文本" && it.tools.any { tool -> tool.callId == "new-tool" } } }
+                second.emit(item(follow, record("assistant/message", 4, assistant("恢复后的正文"))))
+                second.emit(item(events, JSONObject().put("type", "emit").put("event", "api-session/status").put("args", JSONArray().put("s1").put(false))))
+                val resumed = withTimeout(5_000) { controller.state.first { !it.running && it.messages.any { message -> message.text == "恢复后的正文" } } }
+                assertTrue(resumed.messages.any { it.seq == 0 })
+                assertTrue(resumed.hasMore)
+                assertTrue(resumed.tools.any { it.callId == "kept-tool" })
+                assertEquals(2, sockets.size)
+            } finally {
+                controller.close()
+                scope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
+            }
+        }
+    }
+
+    private fun streamChunk(id: String, text: String) = item(id, JSONObject().put("type", "assistant-stream")
+        .put("frame", JSONObject().put("type", "chunk").put("attemptId", "a1")
+            .put("chunk", JSONObject().put("type", "text-delta").put("index", 0).put("text", text))))
 
     @Test fun chatPeerForwardsWaterfallNextInsteadOfShowingApproval() = runBlocking {
         val requests = CopyOnWriteArrayList<TestRequest>()

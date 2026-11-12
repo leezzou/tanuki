@@ -178,6 +178,33 @@ class DshNativeControllerTest {
         controller.close()
     }
 
+    @Test fun terminalFailureRestoresFollowEvenWhileFlowIsStillOpen() = runBlocking {
+        val events = kotlinx.coroutines.channels.Channel<DshLiveEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        var starts = 0
+        val source = object : DshChatSource by FakeSource(listOf(session("A"))) {
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                starts++
+                emit(DshLiveEvent.Connected)
+                if (starts == 1) for (event in events) emit(event) else kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val controller = controller(source)
+        try {
+            controller.refresh()
+            awaitState(controller) { it.live && !it.loading }
+            events.send(DshLiveEvent.Failure("普通Agent业务错误"))
+            awaitState(controller) { it.liveError == "普通Agent业务错误" }
+            controller.onPromptAccepted("A")
+            assertEquals(1, starts)
+            assertTrue(controller.state.value.live)
+            events.send(DshLiveEvent.Failure("follow终止", terminal = true))
+            awaitState(controller) { !it.live && it.liveError == "follow终止" }
+            controller.onPromptAccepted("A")
+            awaitState(controller) { it.live && it.liveError == null }
+            assertEquals(2, starts)
+        } finally { controller.close(); events.close() }
+    }
+
     @Test fun composerAcceptanceRestoresFailedLiveWithoutClearingHistory() =
         verifyAcceptanceRestoresEndedLive(failFirstLive = true)
 

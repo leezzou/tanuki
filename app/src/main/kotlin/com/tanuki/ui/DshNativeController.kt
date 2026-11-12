@@ -103,6 +103,8 @@ class DshNativeController(
     private var liveJob: Job? = null
     /** 同一会话重建连接时，旧任务收尾不得覆盖新连接。 */
     private var liveAttempt = 0L
+    /** 终止性错误即使尚在任务收尾，也不能再被受理回调视为健康连接。 */
+    private var liveInvalidated = false
     private var generation = 0
     private var pendingSeq = 0
     /** 通知点击目标；会话列表尚未加载时先保存，加载完成后选中。 */
@@ -317,11 +319,11 @@ class DshNativeController(
         pageJob = scope.launch { loadMessages(sessionId, token) }
     }
 
-    /** 输入栏已受理：原位补读历史，复用健康 follow；旧实时任务结束时恢复连接。 */
+    /** 输入栏已受理：原位补读历史，复用健康follow；逻辑流失效或任务结束时恢复连接。 */
     fun onPromptAccepted(sessionId: String) {
         if (_state.value.selectedId != sessionId) return
         val token = generation
-        if (liveJob?.isActive != true) startLive(sessionId, token)
+        if (liveInvalidated || liveJob?.isActive != true) startLive(sessionId, token)
         refreshMessages(sessionId, token)
     }
 
@@ -480,6 +482,7 @@ class DshNativeController(
 
     private fun startLive(sessionId: String, token: Int) {
         val attempt = ++liveAttempt
+        liveInvalidated = false
         liveJob?.cancel()
         liveConnected = false
         // 先登记任务再启动，避免同步 ready 回调期间将健康连接误判为缺失。
@@ -494,10 +497,12 @@ class DshNativeController(
             } catch (error: Throwable) {
                 // 实时通道的建连/协议异常不能逃逸到 lifecycleScope 并取消整个页面协程域。
                 if (token == generation && attempt == liveAttempt) {
+                    liveInvalidated = true
                     _state.update { it.copy(live = false, liveError = messageOf(error)) }
                 }
             } finally {
                 if (token == generation && attempt == liveAttempt) {
+                    liveInvalidated = true
                     _state.update { it.copy(live = false) }
                 }
             }
@@ -509,6 +514,7 @@ class DshNativeController(
     private fun applyLive(event: DshLiveEvent, sessionId: String, token: Int) {
         when (event) {
             DshLiveEvent.Connected -> {
+                liveInvalidated = false
                 val reconnected = liveConnected
                 liveConnected = true
                 _state.update { it.copy(live = true, liveError = null) }
@@ -565,7 +571,10 @@ class DshNativeController(
                     )
                 }
             }
-            is DshLiveEvent.Failure -> _state.update { it.copy(liveError = event.message) }
+            is DshLiveEvent.Failure -> {
+                if (event.terminal) liveInvalidated = true
+                _state.update { it.copy(liveError = event.message, live = if (event.terminal) false else it.live) }
+            }
             is DshLiveEvent.Coordination -> _state.update { it.withCoordination(event.update) }
         }
     }

@@ -331,7 +331,7 @@ Android 13+ 首次申请 `NEARBY_WIFI_DEVICES`（`neverForLocation`），请求�
 - 输入区为胶囊：单行 48dp、圆角 28；1–6 行随文本布局平滑增高（`animateContentSize`），多行圆角收紧为 18 且左右 36dp 圆键贴底；超过 6 行在输入框内部滚动。输入框上方展示附件缩略/进度。组件自身 `imePadding()` 保证软键盘不遮挡，父级已消费的 IME inset 不重复叠加。
 - 输入主键按真实草稿/运行态选择：有草稿时空闲为发送、运行中为排队发送；运行中有草稿时另保留独立停止键，不需等待静默兜底。无草稿时运行中为停止、空闲为系统语音输入（系统无处理器时提示不可用）。点击默认使用官方 `queue`；运行中“发送方式”菜单还可选择官方 `steer`，说明为下一步补充要求，不把它宣称为立即中断。触控区域保持 48dp，图标过渡不重建输入框。
 - 发送回执只声明受理：运行中默认提示“已提交到队列，等待助手处理”，插话提示“已提交插话，等待助手下一步处理”；不把受理宣称为模型已执行。真正开始提交才递增会话内 `sendAttempt`；消息列表据此恢复跟随，快速回执不会丢掉主动贴底意图，普通输入/远端新消息不会触发。前置校验失败不递增，切会话重置。
-- 输入栏受理通知 `onPromptAccepted(sessionId)` 只对仍选中的会话原位补读历史。live Job 健康或正在连接时复用；已结束/取消时恢复实时 follow，保留历史、工具和流式前缀。重连使用独立尝试序号，旧连接的迟到事件、异常与 finally 不得覆盖新连接；其他会话迟到受理不触发读取或重连。notice 发布在 onSent 前，调用方测试必须等待回调自身完成信号，不能从 notice 推断它已执行。
+- 输入栏受理通知 `onPromptAccepted(sessionId)` 只对仍选中的会话原位补读历史。follow未失效且live Job活跃/正在连接时复用；逻辑流已失效或任务已结束/取消时恢复follow，保留历史、工具和流式前缀。任一必需follow/events流的mux end/error结束收集、关闭Peer并发出terminal Failure；控制器立即标记失效，不能只检查Job.isActive。普通api-session/error仍为非terminal业务错误，不使健康follow失效。重连使用独立尝试序号，旧连接的迟到事件、异常与 finally 不得覆盖新连接；其他会话迟到受理不触发读取或重连。notice 发布在 onSent 前，调用方测试必须等待回调自身完成信号，不能从 notice 推断它已执行。
 - `Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
 - `@`/斜杠候选支持上下键循环选择、Enter/Tab 插入、Esc 关闭；斜杠候选按命令名前缀、名称包含、描述/参数提示包含排序。插入只替换当前 `@` 查询或首行命令 token，保留后续参数与换行。
 - 停止生成由 `requestStop()` 调 `session/cancel`。停止回执处理前必须校验 `sessionId` 与 `generation` 代次；切会话后旧回执（即使被 `runCatching` 包装成失败）直接丢弃，不覆盖新会话状态或定时器。accepted 只进入 `DshStopOutcome.REQUESTED` 并保持“正在停止”，保留 `generationRunning` 与停止入口；超时仍未收到官方 idle 时降级为“停止请求已发送，仍在收尾”并重新开放停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。

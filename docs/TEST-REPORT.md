@@ -1,5 +1,10 @@
 # 测试现状
 
+## PR107最新main冲突修复（仅rebase，未重验）
+
+- 按用户立即合并要求，将公开ad0916三提交rebase到实际main af416b16f6247dd709b2744095314f334ec5fd94，保留106主题和108引导；冲突仅本文插入/标题，双方验证正文保留，代码补丁未变化。未混入受控帧/cursor取证/questions/HostActions WIP。
+- 仅轻量差异、源码字节、交接及公开检查，不重跑Gradle/设备，不用历史Host数字或独立G8 question通过推断新head通过。旧7e和G8冻结预检失败继续如实保留；用户明确要求不等待测试诊断，由parent接收新公开SHA后直接处理合并。
+
 ## PR108变基维护（main a35c6ba）
 
 - 按用户要求变基已发布UI草稿，保留main的conversationReady与启动接纳契约，保留两屏界面并迁移两条旧引导控件fixture；共用准备页的自动/手动入口等待连接和网页支持。后续未提交的大批UI实现另行保存，不混入这次历史维护。
@@ -11,6 +16,11 @@
 - 最终在 `source scripts/ao-worktree-env.sh` 后，以 `--console=plain --max-workers=2 -PtestBuildType=debug -I scripts/workspace-verification.init.gradle -x buildNativeRuntime` 执行 `:app:compileModernDebugKotlin :app:compileModernDebugAndroidTestKotlin :app:testModernDebugUnitTest :app:lintModernDebug`；过滤为 `com.tanuki.SetupJourneyPresentationTest`、`com.tanuki.Onboarding*`、`com.tanuki.OperationProgress*`、`com.tanuki.TanukiStartupPolicyTest`。BUILD SUCCESSFUL（6m3s），退出0。
 - XML独立实核 **8类81项、0 failures/errors/skipped**：OnboardingEnvironment 8、OnboardingFlow 14、OnboardingPrepare 11、OperationProgressLayout 7、OperationProgressPresentation 15、OperationProgress 7、SetupJourneyPresentation 15、TanukiStartupPolicy 4。lint **0 errors / 117 warnings / 2 hints**，新准备与引导文件无告警。首轮7类77项/compile通过仅属阶段结果，最终字节以本轮81项为准。
 - 新增5项Android点击用例已编译，**未执行**；没有生成或安装设备验收APK，未执行完整JVM/Android仪器/真实下载启动/权限/模型/真机。API Key保存暂停。独立draft PR先基于当前Snapshot交付，后端typed阶段契约合main后需接入并重新验证，不能用本次Host结果替代后续最终SHA的review/CI/设备QA。详情见[本次交接](handoffs/20261112-1050-onboarding-journey.md)。
+
+## PR #107 rebase到main/a35c6ba（仅冲突解决，未重验产品）
+
+- 按用户要求将完整7e3d的原三提交重放到main `a35c6ba9dbe570dc61fee0d61509bf394d26a2c1`。冲突仅本文文首插入，main安装启动验证与107各阶段记录均保留；代码补丁与原PR一致，MainActivity保留新main接线并使用onPromptAccepted。新head不继承旧review/84项Host结果，未启动Gradle或设备。
+- 原7e3d由100独立执行DshChatMotionPresentationTest五例4过1失败，单例复跑仍第120行失败；submitting后续断言未达，ADB0不是通过。独立受控帧测试候选、questions生产协议和HostActions均未带入本rebase，故设备阻断继续有效。后续集成候选并刷新基线后需正常native双包、新SHA审查及适用设备复验，不因Git冲突消除就放行。
 
 ## 安装与启动后端（android_agent-102，Host候选）
 
@@ -36,7 +46,14 @@
 - 完整命令 BUILD SUCCESSFUL（19m20s），退出0，47个任务实际执行；lint XML实核 **0 errors / 117 warnings / 2 hints**，本轮改动文件无lint告警。源码复扫无旧天蓝主题色值；DOCX/XLSX格式颜色不改。公开候选扫描0 findings；单一交接见[本轮记录](handoffs/20261112-0015-indigo-theme.md)。
 - 未执行完整本地JVM、Android仪器、设备安装/像素验收、TalkBack/个体色觉设备验收或真实运行链路；不生成设备/发布APK，不将跳过原生构建的Host结果当Android运行通过。后续独立QA须绑定最终SHA，对照深浅按钮/链接/选中/焦点/进度和系统首帧。API Key/真实模型/真机暂停项保留；不合并、tag或发布。
 
-## PR #107 审查修复（android_agent-104，Host复验通过）
+## PR #107 follow逻辑流终止追修（android_agent-104，Host复验通过）
+
+- 新行内P2指出641d518仍将外层Job存活当作follow健康；生产mux收到逻辑end/error时原先继续读socket，已有整个Flow结束/抛错回归未覆盖。
+- 修复：任一必需follow/events逻辑流end/error退出收集并释放Peer；连接终止Failure显式标terminal，控制器立即使follow失效，收尾窗口不依赖Job是否active；普通Agent业务错误保持健康follow。
+- 新增两组生产DshNativeClient回归：本地HTTP合成connect/prompt、受控mux保持入站开放，仅注入follow end/error；随后accepted恢复新follow，并验证历史、工具、流式、正文和running/idle。会话列表/历史读取为合成替身，不是官方Host或真实socket端到端。另补控制器普通/terminal错误与仍开放Flow的区别。
+- 按37明确接续授权，以1 worker串行完成产品/AndroidTest/JVM测试源码compile、三类定向JVM及lint；最终 **BUILD SUCCESSFUL，4m09s，退出0**。XML独立实核 **84 tests / 3 XML / 0 failures / 0 errors / 0 skipped**（NativeLive12、NativeController39、Composer33），lint **0 errors / 117 warnings / 2 hints**。最终job已收集且立即释放106，无全套重跑；下节71项仍仅为641d518历史结果。问答WIP隔离，未跑Android仪器或真实DSH/模型/设备端到端。
+
+## PR #107 前次审查修复（641d518，android_agent-104，Host复验通过）
 
 - 独立review绑定 `dfd0ea85fed47f50fa85c6aa4925c36db62543b6`，正文要求修改断流后accepted不恢复follow；旧SHA四条CI成功不抵消必改。问答WIP已完整隔离，未混入修复分支。
 - 修复：仅旧live Job失活时恢复连接，复用健康/在途follow，保留历史/工具/流式前缀，旧连接收尾受独立尝试序号约束。新增正常/异常断流两组回归，覆盖连续accepted、后续消息/工具/流式/running/idle、历史晚页和跨会话迟到回执。`onSentReceivesSessionId` 以CompletableDeferred同步真实回调，不再从先发布的notice推断回调已执行。
