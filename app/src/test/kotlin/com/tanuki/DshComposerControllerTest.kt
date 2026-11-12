@@ -404,14 +404,16 @@ class DshComposerControllerTest {
         assertEquals("保留", state.text)
     }
 
-    @Test fun onSentReceivesSessionId() {
-        var sent: String? = null
-        val controller = controller(FakeRemote(), onSent = { sent = it })
+    @Test fun onSentReceivesSessionId() = runBlocking {
+        // notice 在回调前发布；等待回调自己的完成信号，不能以状态更新推断回调已执行。
+        val sent = kotlinx.coroutines.CompletableDeferred<String>()
+        val controller = controller(FakeRemote(), onSent = { sent.complete(it) })
         controller.setSession("s1")
         controller.updateText("发送", 2)
         controller.send()
-        awaitState(controller) { it.notice == "已发送" }
-        assertEquals("s1", sent)
+        assertEquals("s1", withTimeout(2_000) { sent.await() })
+        assertEquals("已发送", controller.state.value.notice)
+        controller.close()
     }
 
     @Test fun failedSendCanBeResentWithoutLosingDraft() {

@@ -178,6 +178,91 @@ class DshNativeControllerTest {
         controller.close()
     }
 
+    @Test fun composerAcceptanceRestoresFailedLiveWithoutClearingHistory() =
+        verifyAcceptanceRestoresEndedLive(failFirstLive = true)
+
+    @Test fun composerAcceptanceRestoresNormallyEndedLiveWithoutClearingHistory() =
+        verifyAcceptanceRestoresEndedLive(failFirstLive = false)
+
+    private fun verifyAcceptanceRestoresEndedLive(failFirstLive: Boolean) = runBlocking {
+        val endFirst = CompletableDeferred<Unit>()
+        val connectAgain = CompletableDeferred<Unit>()
+        val historyGate = CompletableDeferred<Unit>()
+        val events = kotlinx.coroutines.channels.Channel<DshLiveEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val starts = mutableListOf<String>()
+        var holdHistory = false
+        var reads = 0
+        val runningTool = toolItem("kept-tool", DshToolStatus.RUNNING, 2)
+        val source = object : DshChatSource by FakeSource(listOf(session("A"), session("B"))) {
+            override suspend fun messages(sessionId: String): Result<DshSessionPage> {
+                reads++
+                if (holdHistory) historyGate.await()
+                return Result.success(DshSessionPage(listOf(DshMessage(1, DshMessageRole.USER, "当前消息", 1L)), false))
+            }
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                starts += sessionId
+                if (starts.size == 1) {
+                    emit(DshLiveEvent.Connected)
+                    emit(DshLiveEvent.Snapshot(listOf(
+                        DshMessage(0, DshMessageRole.USER, "已加载的更早历史", 0L),
+                        DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                    ), true, "断流前的前缀", listOf(runningTool)))
+                    endFirst.await()
+                    if (failFirstLive) throw IOException("合成连接中断")
+                } else if (sessionId == "B") {
+                    emit(DshLiveEvent.Connected)
+                    kotlinx.coroutines.awaitCancellation()
+                } else {
+                    // 刻意保持重连尚未 ready；连续受理也只能保留这一条在途连接。
+                    connectAgain.await()
+                    emit(DshLiveEvent.Connected)
+                    for (event in events) emit(event)
+                }
+            }
+        }
+        val controller = controller(source)
+        try {
+            controller.refresh()
+            val before = awaitState(controller) { !it.loading && it.live && it.streamingText.isNotEmpty() }
+            endFirst.complete(Unit)
+            assertFalse(controller.state.value.live)
+            if (failFirstLive) assertTrue(controller.state.value.liveError.orEmpty().contains("合成连接中断"))
+            holdHistory = true
+            controller.onPromptAccepted("A")
+            controller.onPromptAccepted("A")
+            assertEquals(listOf("A", "A"), starts)
+            assertEquals(before.messages, controller.state.value.messages)
+            assertEquals(before.tools, controller.state.value.tools)
+            assertEquals(before.streamingText, controller.state.value.streamingText)
+            connectAgain.complete(Unit)
+            val completedTool = toolItem("kept-tool", DshToolStatus.SUCCESS, 2, output = "完成")
+            events.send(DshLiveEvent.Running(true))
+            events.send(DshLiveEvent.Timeline(listOf(completedTool)))
+            events.send(DshLiveEvent.Message(DshMessage(3, DshMessageRole.ASSISTANT, "恢复后的正文", 3L)))
+            events.send(DshLiveEvent.Streaming("恢复后的流式文本"))
+            val resumed = awaitState(controller) { it.live && it.running && it.streamingText == "恢复后的流式文本" }
+            assertNull(resumed.liveError)
+            assertEquals(DshToolStatus.SUCCESS, resumed.tools.single().status)
+            assertTrue(resumed.messages.any { it.seq == 0 })
+            assertTrue(resumed.messages.any { it.text == "恢复后的正文" })
+            historyGate.complete(Unit)
+            awaitState(controller) { !it.loading }
+            assertTrue(controller.state.value.hasMore)
+            assertEquals(DshToolStatus.SUCCESS, controller.state.value.tools.single().status)
+            events.send(DshLiveEvent.Running(false))
+            awaitState(controller) { !it.running }
+            assertEquals(listOf("A", "A"), starts)
+            holdHistory = false
+            controller.select("B")
+            awaitSelection(controller, "B")
+            val readsBeforeLateAcceptance = reads
+            controller.onPromptAccepted("A")
+            assertEquals(listOf("A", "A", "B"), starts)
+            assertEquals(readsBeforeLateAcceptance, reads)
+            assertEquals("B", controller.state.value.selectedId)
+        } finally { controller.close(); events.close() }
+    }
+
     @Test fun sendKeepsPendingBubbleUntilOfficialMessageAndClearsOnSuccess() = runBlocking {
         val source = FakeSource(listOf(session("A")))
         val controller = controller(source)

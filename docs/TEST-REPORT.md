@@ -36,6 +36,13 @@
 - 完整命令 BUILD SUCCESSFUL（19m20s），退出0，47个任务实际执行；lint XML实核 **0 errors / 117 warnings / 2 hints**，本轮改动文件无lint告警。源码复扫无旧天蓝主题色值；DOCX/XLSX格式颜色不改。公开候选扫描0 findings；单一交接见[本轮记录](handoffs/20261112-0015-indigo-theme.md)。
 - 未执行完整本地JVM、Android仪器、设备安装/像素验收、TalkBack/个体色觉设备验收或真实运行链路；不生成设备/发布APK，不将跳过原生构建的Host结果当Android运行通过。后续独立QA须绑定最终SHA，对照深浅按钮/链接/选中/焦点/进度和系统首帧。API Key/真实模型/真机暂停项保留；不合并、tag或发布。
 
+## PR #107 审查修复（android_agent-104，Host复验通过）
+
+- 独立review绑定 `dfd0ea85fed47f50fa85c6aa4925c36db62543b6`，正文要求修改断流后accepted不恢复follow；旧SHA四条CI成功不抵消必改。问答WIP已完整隔离，未混入修复分支。
+- 修复：仅旧live Job失活时恢复连接，复用健康/在途follow，保留历史/工具/流式前缀，旧连接收尾受独立尝试序号约束。新增正常/异常断流两组回归，覆盖连续accepted、后续消息/工具/流式/running/idle、历史晚页和跨会话迟到回执。`onSentReceivesSessionId` 以CompletableDeferred同步真实回调，不再从先发布的notice推断回调已执行。
+- 按106稳定提交 `b2b30c4060f825ee6bc0795b6c03f68fc93103ec` 单文件引入 `TanukiSystemBars.kt` 并在独立管理Activity的TanukiTheme首行调用；helper来源验证不冒充本分支集成验证，最终手动主题设备效果未验。
+- 按编排接续授权，以 `--max-workers=1` 串行运行产品/AndroidTest/JVM测试源码compile、仅NativeController/ComposerController两类JVM及lint。最终退出0、BUILD SUCCESSFUL（4m48s）；XML独立实核 **71 tests / 2 XML / 0 failures / 0 errors / 0 skipped**（38+33），lint **0 errors / 117 warnings / 2 hints**。完成收集后立即释放时段给106；未重跑全套。完整命令在唯一交接。下列140项是旧head历史结果，不计作本次修复验证。未执行设备、真实DSH/模型或问答端到端。
+
 ## 原生聊天第一阶段（2026-11-12，android_agent-104，Host）
 
 - 基线：远端 main 与起始 HEAD 实核 `3c56167b94efeff47a20bd609b389708ba080ce5`，独立分支 `ao/tanuki-chat/chat-flow`。实现忙碌时排队/插话与独立停止、主动发送恢复跟随、accepted 原位补读而非清空历史重建 follow。

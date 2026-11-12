@@ -14,6 +14,7 @@ import com.tanuki.web.DshToolItem
 import com.tanuki.web.DshToolMerge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,6 +101,8 @@ class DshNativeController(
     val state: StateFlow<DshNativeState> = _state.asStateFlow()
     private var pageJob: Job? = null
     private var liveJob: Job? = null
+    /** 同一会话重建连接时，旧任务收尾不得覆盖新连接。 */
+    private var liveAttempt = 0L
     private var generation = 0
     private var pendingSeq = 0
     /** 通知点击目标；会话列表尚未加载时先保存，加载完成后选中。 */
@@ -314,10 +317,12 @@ class DshNativeController(
         pageJob = scope.launch { loadMessages(sessionId, token) }
     }
 
-    /** 输入栏已受理：原位补读官方历史，不清空分页、流式前缀或重启当前 follow。 */
+    /** 输入栏已受理：原位补读历史，复用健康 follow；旧实时任务结束时恢复连接。 */
     fun onPromptAccepted(sessionId: String) {
         if (_state.value.selectedId != sessionId) return
-        refreshMessages(sessionId, generation)
+        val token = generation
+        if (liveJob?.isActive != true) startLive(sessionId, token)
+        refreshMessages(sessionId, token)
     }
 
     /** 发送失败返回 false；成功只表示官方已接受，不代表回合已完成。 */
@@ -474,27 +479,31 @@ class DshNativeController(
     }
 
     private fun startLive(sessionId: String, token: Int) {
+        val attempt = ++liveAttempt
         liveJob?.cancel()
         liveConnected = false
-        liveJob = scope.launch {
+        // 先登记任务再启动，避免同步 ready 回调期间将健康连接误判为缺失。
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 client.live(sessionId).collect { event ->
-                    if (token != generation) return@collect
+                    if (token != generation || attempt != liveAttempt) return@collect
                     applyLive(event, sessionId, token)
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 // 实时通道的建连/协议异常不能逃逸到 lifecycleScope 并取消整个页面协程域。
-                if (token == generation) {
+                if (token == generation && attempt == liveAttempt) {
                     _state.update { it.copy(live = false, liveError = messageOf(error)) }
                 }
             } finally {
-                if (token == generation) {
+                if (token == generation && attempt == liveAttempt) {
                     _state.update { it.copy(live = false) }
                 }
             }
         }
+        liveJob = job
+        job.start()
     }
 
     private fun applyLive(event: DshLiveEvent, sessionId: String, token: Int) {
