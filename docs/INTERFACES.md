@@ -296,6 +296,17 @@ Android 13+ 首次申请 `NEARBY_WIFI_DEVICES`（`neverForLocation`），请求�
 - 用户提问：`DshQuestionParser.parse(eventId, sessionId, request)` 只解析 `questions[]` 的单选/多选/文本、选项、自定义与必填；`DshQuestionCard` 与 `DshQuestionDraft` 可独立测试。回答 RPC 未确认，`onSubmit` 可空，未接线时界面明确显示“回答入口待协议确认”，不伪造提交。
 - 缺口：目标暂停/恢复/编辑/清除 RPC、排队卡片、模型/推理强度、用户提问的完整回答、自动重连、工具卡与审批的实时关联仍未实现；计划与提问 UI 组件/解析已就绪，但 `DshNativePage`/状态接线由集成方完成；工具卡来自 page/follow 事件，不读取图片字节。
 
+#### 用户提问官方生产证据（0.2.1-rc.5，已查证但尚未接线）
+
+以下仅固定后续接线必须遵守的官方协议，不代表本次输入栏改动已实现提问提交：
+
+- 官方 [问题与答案类型](https://unpkg.com/@deepseek-ai/dsh-user-questions@0.2.1-rc.5/lib/types/types.d.ts) 声明 `questions[]` 的 `id/question/detail?/header?/options?/multiSelect?/intent?`；选项只有 `label/description?`，答案是 `{answers:[{id,selected:[选项标签],custom?}]}`，不能把客户端合成选项 id 当成标签发送。每题一项，包括 `selected:[]` 的跳过项。
+- 官方 [服务说明](https://unpkg.com/@deepseek-ai/dsh-user-questions@0.2.1-rc.5/README.md) 与 [生产实现](https://unpkg.com/@deepseek-ai/dsh-user-questions@0.2.1-rc.5/lib/index.js) 区分 `open` 和 `continued`：open 通过当前 waterfall 回答，沿用当前 Peer 的 `$events/result` 并以 `outcome.kind=result,value=<答案批次>` 回传；只有 continued 使用 `userQuestions/answer`，不得混用。单选 `custom` 覆盖选择，多选可同时带选择和补充文本。
+- 官方 [生成的 Remote 声明](https://unpkg.com/@deepseek-ai/dsh-user-questions@0.2.1-rc.5/lib/typert.remote-client.d.ts) 固定 `userQuestions/answer` args 为 `{agentId,callId,answer}`，返回 boolean；true 表示回答已排入接纳队列，不能宣称原工具调用已恢复或完成。`BAD_ANSWER` 表示答案未逐一对应所有题目，`REPLY_QUEUED` 表示该题已有待接纳回答。
+- `wait.timed=true` 的 open 请求需通过 `userQuestions/attachWait` 业务流（args `{agentId,callId}`）取得 Host `remainingMs`，不能本地猜倒计时。流关闭释放 claim，超时可转 continued；收起面板不发送取消或伪造答案。持久问题来自官方 `userQuestions.active/settled` projection，草稿不属于 Host 问题持久化。
+- 官方网关[客户端事件实现](https://unpkg.com/@deepseek-ai/dsh-api-gateway@0.2.1-rc.5/lib/types/client/remote-events.js) 确认拒绝使用 `{kind:"rejected",error:<投影后的错误>}`，不是审批的 `value:"rejected"`。timed 本地等待结束时回传 `UserQuestionError/ASK_TIMED_OUT`，由服务端映射为 pending；ready/clientId 必须属于仍有效的同一回答 Peer，断线退休后不得复用旧回答身份。
+- 现有 `DshQuestionParser` 是历史宽松展示解析，尚不能作为生产回答编码依据；下一阶段必须核对完整题目/标签、不截断后回传，不复用过期 eventId/clientId，分别验证断线、撤回、timed/continued 和跨会话结果。
+
 #### 1.9.1 原生输入与附件组件
 
 输入/附件组件只调用官方已声明的 Typert Remote 方法，不新增端点、不改官方 npm 包；页面接线由 android_agent-42 负责，本组件 PR 不包含 `DshNativePage`/`MainActivity`：
@@ -318,7 +329,9 @@ Android 13+ 首次申请 `NEARBY_WIFI_DEVICES`（`neverForLocation`），请求�
 - 批量读取在分配字节前执行 `DshAttachmentReadBudget` 的数量/总量/单文件预算；总附件名额与图片/文件类型名额分开，图片只扣总名额与共享字节，不占文件名额。拖入开始用 `mimeTypes()` 判定，`onDrop` 领取并在异步读取结束释放 `requestDragAndDropPermissions`；批次被预算阻断时返回中文提示，不静默丢弃。选择器结果缺少发起 token（含 Activity/进程恢复）直接丢弃并提示。
 - 发送成功只移除本次实际提交的文本/附件（发送时快照比对），发送期间的新编辑保留；失败保留草稿与附件并显示“重发”，用户可直接再次发送。
 - 输入区为胶囊：单行 48dp、圆角 28；1–6 行随文本布局平滑增高（`animateContentSize`），多行圆角收紧为 18 且左右 36dp 圆键贴底；超过 6 行在输入框内部滚动。输入框上方展示附件缩略/进度。组件自身 `imePadding()` 保证软键盘不遮挡，父级已消费的 IME inset 不重复叠加。
-- 发送/停止同键位形变：空闲为发送（↑），生成中为停止（■ 实心主色），同一 36dp 位置/尺寸；禁用态用低对比底色。只对图标做短促的淡入缩放/位移动画，不重建整条输入框。没有真实语音/听写能力，因此不放假入口。
+- 输入主键按真实草稿/运行态选择：有草稿时空闲为发送、运行中为排队发送；运行中有草稿时另保留独立停止键，不需等待静默兜底。无草稿时运行中为停止、空闲为系统语音输入（系统无处理器时提示不可用）。点击默认使用官方 `queue`；运行中“发送方式”菜单还可选择官方 `steer`，说明为下一步补充要求，不把它宣称为立即中断。触控区域保持 48dp，图标过渡不重建输入框。
+- 发送回执只声明受理：运行中默认提示“已提交到队列，等待助手处理”，插话提示“已提交插话，等待助手下一步处理”；不把受理宣称为模型已执行。真正开始提交才递增会话内 `sendAttempt`；消息列表据此恢复跟随，快速回执不会丢掉主动贴底意图，普通输入/远端新消息不会触发。前置校验失败不递增，切会话重置。
+- 输入栏受理通知 `onPromptAccepted(sessionId)` 只对仍选中的会话原位补读历史。follow未失效且live Job活跃/正在连接时复用；逻辑流已失效或任务已结束/取消时恢复follow，保留历史、工具和流式前缀。任一必需follow/events流的mux end/error结束收集、关闭Peer并发出terminal Failure；控制器立即标记失效，不能只检查Job.isActive。普通api-session/error仍为非terminal业务错误，不使健康follow失效。重连使用独立尝试序号，旧连接的迟到事件、异常与 finally 不得覆盖新连接；其他会话迟到受理不触发读取或重连。notice 发布在 onSent 前，调用方测试必须等待回调自身完成信号，不能从 notice 推断它已执行。
 - `Ctrl/⌘+Enter` 发送，普通 Enter 换行；发送/重发后焦点回到输入框。
 - `@`/斜杠候选支持上下键循环选择、Enter/Tab 插入、Esc 关闭；斜杠候选按命令名前缀、名称包含、描述/参数提示包含排序。插入只替换当前 `@` 查询或首行命令 token，保留后续参数与换行。
 - 停止生成由 `requestStop()` 调 `session/cancel`。停止回执处理前必须校验 `sessionId` 与 `generation` 代次；切会话后旧回执（即使被 `runCatching` 包装成失败）直接丢弃，不覆盖新会话状态或定时器。accepted 只进入 `DshStopOutcome.REQUESTED` 并保持“正在停止”，保留 `generationRunning` 与停止入口；超时仍未收到官方 idle 时降级为“停止请求已发送，仍在收尾”并重新开放停止入口；只有页面把官方 `running=false` 同步到 `setGenerationRunning(false)` 才进入 `STOPPED`，失败进入 `FAILED`。停止不取消在途 prompt 的提交回执，也不强制清 `sending`；因此在途提交的回执仍会正常完成。

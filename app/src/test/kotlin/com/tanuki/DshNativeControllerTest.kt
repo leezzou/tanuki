@@ -129,6 +129,167 @@ class DshNativeControllerTest {
     }
 
 
+    @Test fun composerAcceptanceReconcilesInPlaceWithoutRestartingLiveOrClearingHistory() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        var holdPage = false
+        var reads = 0
+        var liveStarts = 0
+        val tool = toolItem("kept-tool", DshToolStatus.RUNNING, 2)
+        val source = object : DshChatSource by FakeSource(listOf(session("A"), session("B"))) {
+            override suspend fun messages(sessionId: String): Result<DshSessionPage> {
+                reads++
+                if (holdPage) gate.await()
+                return Result.success(DshSessionPage(listOf(
+                    DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                ), false))
+            }
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                liveStarts++
+                emit(DshLiveEvent.Connected)
+                emit(DshLiveEvent.Snapshot(listOf(
+                    DshMessage(0, DshMessageRole.USER, "已加载的更早历史", 0L),
+                    DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                ), true, "正在生成的前缀", listOf(tool)))
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val controller = controller(source)
+        controller.refresh()
+        val before = awaitState(controller) { !it.loading && it.live && it.streamingText.isNotEmpty() }
+        holdPage = true
+        controller.onPromptAccepted("A")
+        assertTrue(controller.state.value.loading)
+        assertEquals(before.messages, controller.state.value.messages)
+        assertEquals(before.tools, controller.state.value.tools)
+        assertEquals(before.streamingText, controller.state.value.streamingText)
+        assertEquals(1, liveStarts)
+        gate.complete(Unit)
+        val reconciled = awaitState(controller) { !it.loading }
+        assertEquals(before.messages, reconciled.messages)
+        assertTrue(reconciled.hasMore)
+        assertEquals(before.tools, reconciled.tools)
+        assertEquals(1, liveStarts)
+        controller.select("B")
+        awaitSelection(controller, "B")
+        val readsBeforeStaleReceipt = reads
+        controller.onPromptAccepted("A")
+        assertEquals(readsBeforeStaleReceipt, reads)
+        assertEquals("B", controller.state.value.selectedId)
+        controller.close()
+    }
+
+    @Test fun terminalFailureRestoresFollowEvenWhileFlowIsStillOpen() = runBlocking {
+        val events = kotlinx.coroutines.channels.Channel<DshLiveEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        var starts = 0
+        val source = object : DshChatSource by FakeSource(listOf(session("A"))) {
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                starts++
+                emit(DshLiveEvent.Connected)
+                if (starts == 1) for (event in events) emit(event) else kotlinx.coroutines.awaitCancellation()
+            }
+        }
+        val controller = controller(source)
+        try {
+            controller.refresh()
+            awaitState(controller) { it.live && !it.loading }
+            events.send(DshLiveEvent.Failure("普通Agent业务错误"))
+            awaitState(controller) { it.liveError == "普通Agent业务错误" }
+            controller.onPromptAccepted("A")
+            assertEquals(1, starts)
+            assertTrue(controller.state.value.live)
+            events.send(DshLiveEvent.Failure("follow终止", terminal = true))
+            awaitState(controller) { !it.live && it.liveError == "follow终止" }
+            controller.onPromptAccepted("A")
+            awaitState(controller) { it.live && it.liveError == null }
+            assertEquals(2, starts)
+        } finally { controller.close(); events.close() }
+    }
+
+    @Test fun composerAcceptanceRestoresFailedLiveWithoutClearingHistory() =
+        verifyAcceptanceRestoresEndedLive(failFirstLive = true)
+
+    @Test fun composerAcceptanceRestoresNormallyEndedLiveWithoutClearingHistory() =
+        verifyAcceptanceRestoresEndedLive(failFirstLive = false)
+
+    private fun verifyAcceptanceRestoresEndedLive(failFirstLive: Boolean) = runBlocking {
+        val endFirst = CompletableDeferred<Unit>()
+        val connectAgain = CompletableDeferred<Unit>()
+        val historyGate = CompletableDeferred<Unit>()
+        val events = kotlinx.coroutines.channels.Channel<DshLiveEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        val starts = mutableListOf<String>()
+        var holdHistory = false
+        var reads = 0
+        val runningTool = toolItem("kept-tool", DshToolStatus.RUNNING, 2)
+        val source = object : DshChatSource by FakeSource(listOf(session("A"), session("B"))) {
+            override suspend fun messages(sessionId: String): Result<DshSessionPage> {
+                reads++
+                if (holdHistory) historyGate.await()
+                return Result.success(DshSessionPage(listOf(DshMessage(1, DshMessageRole.USER, "当前消息", 1L)), false))
+            }
+            override fun live(sessionId: String): Flow<DshLiveEvent> = kotlinx.coroutines.flow.flow {
+                starts += sessionId
+                if (starts.size == 1) {
+                    emit(DshLiveEvent.Connected)
+                    emit(DshLiveEvent.Snapshot(listOf(
+                        DshMessage(0, DshMessageRole.USER, "已加载的更早历史", 0L),
+                        DshMessage(1, DshMessageRole.USER, "当前消息", 1L)
+                    ), true, "断流前的前缀", listOf(runningTool)))
+                    endFirst.await()
+                    if (failFirstLive) throw IOException("合成连接中断")
+                } else if (sessionId == "B") {
+                    emit(DshLiveEvent.Connected)
+                    kotlinx.coroutines.awaitCancellation()
+                } else {
+                    // 刻意保持重连尚未 ready；连续受理也只能保留这一条在途连接。
+                    connectAgain.await()
+                    emit(DshLiveEvent.Connected)
+                    for (event in events) emit(event)
+                }
+            }
+        }
+        val controller = controller(source)
+        try {
+            controller.refresh()
+            val before = awaitState(controller) { !it.loading && it.live && it.streamingText.isNotEmpty() }
+            endFirst.complete(Unit)
+            assertFalse(controller.state.value.live)
+            if (failFirstLive) assertTrue(controller.state.value.liveError.orEmpty().contains("合成连接中断"))
+            holdHistory = true
+            controller.onPromptAccepted("A")
+            controller.onPromptAccepted("A")
+            assertEquals(listOf("A", "A"), starts)
+            assertEquals(before.messages, controller.state.value.messages)
+            assertEquals(before.tools, controller.state.value.tools)
+            assertEquals(before.streamingText, controller.state.value.streamingText)
+            connectAgain.complete(Unit)
+            val completedTool = toolItem("kept-tool", DshToolStatus.SUCCESS, 2, output = "完成")
+            events.send(DshLiveEvent.Running(true))
+            events.send(DshLiveEvent.Timeline(listOf(completedTool)))
+            events.send(DshLiveEvent.Message(DshMessage(3, DshMessageRole.ASSISTANT, "恢复后的正文", 3L)))
+            events.send(DshLiveEvent.Streaming("恢复后的流式文本"))
+            val resumed = awaitState(controller) { it.live && it.running && it.streamingText == "恢复后的流式文本" }
+            assertNull(resumed.liveError)
+            assertEquals(DshToolStatus.SUCCESS, resumed.tools.single().status)
+            assertTrue(resumed.messages.any { it.seq == 0 })
+            assertTrue(resumed.messages.any { it.text == "恢复后的正文" })
+            historyGate.complete(Unit)
+            awaitState(controller) { !it.loading }
+            assertTrue(controller.state.value.hasMore)
+            assertEquals(DshToolStatus.SUCCESS, controller.state.value.tools.single().status)
+            events.send(DshLiveEvent.Running(false))
+            awaitState(controller) { !it.running }
+            assertEquals(listOf("A", "A"), starts)
+            holdHistory = false
+            controller.select("B")
+            awaitSelection(controller, "B")
+            val readsBeforeLateAcceptance = reads
+            controller.onPromptAccepted("A")
+            assertEquals(listOf("A", "A", "B"), starts)
+            assertEquals(readsBeforeLateAcceptance, reads)
+            assertEquals("B", controller.state.value.selectedId)
+        } finally { controller.close(); events.close() }
+    }
+
     @Test fun sendKeepsPendingBubbleUntilOfficialMessageAndClearsOnSuccess() = runBlocking {
         val source = FakeSource(listOf(session("A")))
         val controller = controller(source)

@@ -124,6 +124,7 @@ fun DshComposerBar(
     val state by controller.state.collectAsState()
     var value by remember { mutableStateOf(TextFieldValue(state.text, TextRange(state.text.length))) }
     var attachMenu by remember { mutableStateOf(false) }
+    var sendMenu by remember(state.sessionId) { mutableStateOf(false) }
     var dragActive by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<DshDraftAttachment?>(null) }
     var imagePickerToken by remember { mutableStateOf<DshComposerSessionToken?>(null) }
@@ -420,8 +421,14 @@ fun DshComposerBar(
         animationSpec = TanukiDesign.motion.toggle(),
         label = "composer-corner"
     )
-    val showStop = state.generationRunning || state.stopping
-    val showMic = !showStop && state.text.isBlank() && state.attachments.isEmpty()
+    val showStop = state.primaryAction == DshComposerAction.STOP
+    val showMic = state.primaryAction == DshComposerAction.VOICE
+    val sendDescription = when (state.primaryAction) {
+        DshComposerAction.STOP -> if (state.stopping) "正在停止" else "停止生成"
+        DshComposerAction.VOICE -> "语音输入"
+        DshComposerAction.QUEUE -> "排队发送"
+        DshComposerAction.SEND -> "发送"
+    }
     val sendStopEnabled = if (showStop) !state.stopping else if (showMic) state.sessionId != null && !state.sending else state.canSend
     val sendStopContainer = if (sendStopEnabled) {
         Color(com.tanuki.ui.design.TanukiDesign.tokens.colors.primaryFill)
@@ -645,8 +652,20 @@ fun DshComposerBar(
                         }
                     )
                     ComposerContextUsage()
+                    if (state.showSeparateStop) {
+                        ComposerCircleButton(
+                            description = if (state.stopping) "正在停止" else "停止生成",
+                            enabled = !state.stopping,
+                            onClick = controller::requestStop,
+                            container = Color(TanukiDesign.tokens.colors.surface),
+                            contentColor = Color(TanukiDesign.tokens.colors.textPrimary)
+                        ) {
+                            if (state.stopping) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text("■", fontSize = 13.sp)
+                        }
+                    }
                     ComposerCircleButton(
-                        description = if (showStop) "停止生成" else if (showMic) "语音输入" else "发送",
+                        description = sendDescription,
                         enabled = sendStopEnabled,
                         onClick = {
                             if (showStop) controller.requestStop() else if (showMic) startSpeech() else submit()
@@ -664,9 +683,22 @@ fun DshComposerBar(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                // 运行态静默降级：只额外开放发送，不夺走主键上的停止能力。
-                if (state.runStateStale && state.generationRunning && !state.stopping) {
-                    TextButton(onClick = ::submit, enabled = state.canSend) { Text("继续发送") }
+                if (state.generationRunning && state.hasDraft) {
+                    Box {
+                        TextButton(onClick = { sendMenu = true }, enabled = !state.sending) { Text("发送方式 ▾") }
+                        DropdownMenu(expanded = sendMenu, onDismissRequest = { sendMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Column { Text("排队发送"); Text("本轮结束后处理", style = MaterialTheme.typography.bodySmall) } },
+                                enabled = state.canSend,
+                                onClick = { sendMenu = false; submit() }
+                            )
+                            DropdownMenuItem(
+                                text = { Column { Text("插话"); Text("保留当前回复，在下一步补充要求", style = MaterialTheme.typography.bodySmall) } },
+                                enabled = state.canSend,
+                                onClick = { sendMenu = false; controller.send(DshSendMode.STEER); focusInput() }
+                            )
+                        }
+                    }
                 }
                 if (readingAttachments > 0 || state.uploadBusy || state.stopping || state.sending) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -682,7 +714,7 @@ fun DshComposerBar(
                     state.sendFailed -> "发送失败，内容已保留，可重发"
                     state.sending -> "发送中…"
                     state.runStateStale -> "回复较久没有更新，可继续发送或结束本次回复"
-                    state.generationRunning -> "助手正在回复，可编辑下一条消息或结束本次回复"
+                    state.generationRunning -> "助手正在回复；可排队、插话或停止"
                     else -> "Ctrl/⌘+Enter 发送"
                 }
                 val statusFailed = state.sendFailed || state.stopOutcome == DshStopOutcome.FAILED

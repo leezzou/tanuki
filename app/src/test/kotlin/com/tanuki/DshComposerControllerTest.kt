@@ -120,6 +120,70 @@ class DshComposerControllerTest {
         assertEquals("第一行\n第二行", store.read("s1"))
     }
 
+    @Test fun runningDraftKeepsSendAndIndependentStopAvailable() {
+        val empty = DshComposerState(sessionId = "s1", generationRunning = true)
+        assertEquals(com.tanuki.ui.DshComposerAction.STOP, empty.primaryAction)
+        val draft = empty.copy(text = "补充约束")
+        assertEquals(com.tanuki.ui.DshComposerAction.QUEUE, draft.primaryAction)
+        assertTrue(draft.canSend)
+        assertTrue(draft.showSeparateStop)
+        assertFalse(draft.copy(sending = true).canSend)
+        assertEquals(com.tanuki.ui.DshComposerAction.SEND, draft.copy(generationRunning = false).primaryAction)
+        assertEquals(com.tanuki.ui.DshComposerAction.VOICE, empty.copy(generationRunning = false).primaryAction)
+    }
+
+    @Test fun busySendUsesChosenOfficialModeAndKeepsStopUntilOfficialIdle() {
+        val remote = FakeRemote()
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(true)
+        controller.updateText("补充约束")
+        controller.send(com.tanuki.ui.DshSendMode.STEER)
+        val state = awaitState(controller) { !it.sending && it.notice != null }
+        assertTrue(state.generationRunning)
+        assertEquals("已提交插话，等待助手下一步处理", state.notice)
+        assertEquals("steer", remote.calls.first { it.method == "session/prompt" }
+            .args.getJSONObject("request").getString("mode"))
+        controller.updateText("下一轮处理")
+        controller.send()
+        val queued = awaitState(controller) { !it.sending && it.text.isEmpty() }
+        assertEquals("已提交到队列，等待助手处理", queued.notice)
+        assertTrue(queued.generationRunning)
+        controller.close()
+    }
+
+    @Test fun sendIntentSurvivesFastReceiptButInvalidSubmissionAndTypingDoNotTriggerIt() {
+        val controller = controller(FakeRemote())
+        controller.setSession("s1")
+        controller.send()
+        assertEquals(0L, controller.state.value.sendAttempt)
+        controller.updateText("主动发送")
+        assertEquals(0L, controller.state.value.sendAttempt)
+        controller.send()
+        val sent = awaitState(controller) { it.notice == "已发送" }
+        assertFalse(sent.sending)
+        assertEquals(1L, sent.sendAttempt)
+        controller.updateText("只是编辑")
+        assertEquals(1L, controller.state.value.sendAttempt)
+        controller.setSession("s2")
+        assertEquals(0L, controller.state.value.sendAttempt)
+        controller.close()
+    }
+
+    @Test fun busySendFailureKeepsDraftAndDoesNotClaimQueued() {
+        val remote = FakeRemote().apply { promptFailure = IOException("网络中断") }
+        val controller = controller(remote)
+        controller.setSession("s1")
+        controller.setGenerationRunning(true)
+        controller.updateText("保留补充内容")
+        controller.send(com.tanuki.ui.DshSendMode.STEER)
+        val failed = awaitState(controller) { it.sendFailed }
+        assertEquals("保留补充内容", failed.text)
+        assertNull(failed.notice)
+        assertTrue(failed.generationRunning)
+        controller.close()
+    }
+
     @Test fun sendPromptCarriesImageThenTextAndClearsDraft() {
         val remote = FakeRemote()
         val store = MemoryDshDraftStore()
@@ -340,14 +404,16 @@ class DshComposerControllerTest {
         assertEquals("保留", state.text)
     }
 
-    @Test fun onSentReceivesSessionId() {
-        var sent: String? = null
-        val controller = controller(FakeRemote(), onSent = { sent = it })
+    @Test fun onSentReceivesSessionId() = runBlocking {
+        // notice 在回调前发布；等待回调自己的完成信号，不能以状态更新推断回调已执行。
+        val sent = kotlinx.coroutines.CompletableDeferred<String>()
+        val controller = controller(FakeRemote(), onSent = { sent.complete(it) })
         controller.setSession("s1")
         controller.updateText("发送", 2)
         controller.send()
-        awaitState(controller) { it.notice == "已发送" }
-        assertEquals("s1", sent)
+        assertEquals("s1", withTimeout(2_000) { sent.await() })
+        assertEquals("已发送", controller.state.value.notice)
+        controller.close()
     }
 
     @Test fun failedSendCanBeResentWithoutLosingDraft() {
@@ -560,9 +626,10 @@ class DshComposerControllerTest {
         controller.clearNotice()
         controller.updateText("B", 1)
         controller.send()
-        awaitState(controller) { it.notice == "已发送" && it.text.isEmpty() }
+        val queued = awaitState(controller) { !it.sending && it.text.isEmpty() }
+        assertEquals("已提交到队列，等待助手处理", queued.notice)
         assertEquals(2, remote.calls.count { it.method == "session/prompt" })
-        assertFalse(controller.state.value.runStateStale)
+        assertFalse(queued.runStateStale)
     }
 
     @Test fun silentTimeoutKeepsStopAvailable() {

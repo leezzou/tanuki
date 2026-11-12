@@ -33,6 +33,12 @@ import java.util.UUID
 
 enum class DshAttachmentStatus { READY, UPLOADING, UPLOADED, FAILED }
 
+/** 投递模式直接对应官方 session/prompt，不把排队回执当成已执行。 */
+enum class DshSendMode(val wireValue: String) { QUEUE("queue"), STEER("steer") }
+
+/** 有草稿时优先发送；生成中的停止保留为独立操作。 */
+enum class DshComposerAction { SEND, QUEUE, STOP, VOICE }
+
 /**
  * 停止生成的结果。
  *
@@ -103,6 +109,8 @@ data class DshComposerState(
     val mentionLoading: Boolean = false,
     val mentionError: String? = null,
     val sending: Boolean = false,
+    /** 真正开始提交才递增；快速回执也不能让界面漏掉用户主动发送的贴底意图。 */
+    val sendAttempt: Long = 0L,
     val sendFailed: Boolean = false,
     val uploadBusy: Boolean = false,
     /** 当前回合是否在运行；由发送成功置位，页面接入官方 running 状态后同步复位。 */
@@ -117,6 +125,16 @@ data class DshComposerState(
     val error: String? = null,
     val notice: String? = null
 ) {
+    val hasDraft: Boolean get() = text.isNotBlank() || attachments.isNotEmpty()
+
+    val primaryAction: DshComposerAction get() = when {
+        hasDraft -> if (generationRunning) DshComposerAction.QUEUE else DshComposerAction.SEND
+        generationRunning || stopping -> DshComposerAction.STOP
+        else -> DshComposerAction.VOICE
+    }
+
+    val showSeparateStop: Boolean get() = hasDraft && (generationRunning || stopping)
+
     val canSend: Boolean
         get() = sessionId != null && !sending && (text.isNotBlank() || attachments.isNotEmpty()) &&
             attachments.none { it.kind == DshAttachmentKind.FILE && it.status != DshAttachmentStatus.UPLOADED }
@@ -359,7 +377,7 @@ class DshComposerController(
         ensureUploadWorker()
     }
 
-    fun send() {
+    fun send(mode: DshSendMode = DshSendMode.QUEUE) {
         val current = _state.value
         val sessionId = current.sessionId ?: run {
             _state.update { it.copy(error = "请先选择对话") }
@@ -394,6 +412,7 @@ class DshComposerController(
         _state.update {
             it.copy(
                 sending = true,
+                sendAttempt = it.sendAttempt + 1L,
                 sendFailed = false,
                 error = null,
                 notice = null,
@@ -441,7 +460,7 @@ class DshComposerController(
                 client.sendPrompt(
                     sessionId = sessionId,
                     requestId = UUID.randomUUID().toString(),
-                    mode = "queue",
+                    mode = mode.wireValue,
                     parts = parts,
                     clientTimeZone = timeZoneProvider()
                 )
@@ -455,6 +474,11 @@ class DshComposerController(
                 if (keepText.isBlank() && keepAttachments.isEmpty()) drafts.clear(sessionId)
                 else drafts.write(sessionId, keepText)
                 val keptEdits = keepText.isNotBlank() || keepAttachments.isNotEmpty()
+                val submittedNotice = when {
+                    command != null || !current.generationRunning -> "已发送"
+                    mode == DshSendMode.STEER -> "已提交插话，等待助手下一步处理"
+                    else -> "已提交到队列，等待助手处理"
+                }
                 _state.update {
                     it.copy(
                         text = keepText,
@@ -480,7 +504,7 @@ class DshComposerController(
                         mentionQuery = null,
                         mentionCandidates = emptyList(),
                         commandCandidates = emptyList(),
-                        notice = if (keptEdits) "已发送；发送期间的新编辑已保留" else "已发送"
+                        notice = if (keptEdits) "$submittedNotice；发送期间的新编辑已保留" else submittedNotice
                     )
                 }
                 if (_state.value.generationRunning) scheduleRunningWatchdog()

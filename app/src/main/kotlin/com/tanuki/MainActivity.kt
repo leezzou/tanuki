@@ -463,7 +463,7 @@ class MainActivity : ComponentActivity() {
                         client = DshComposerClient(composerRecorder),
                         drafts = SharedPreferencesDshDraftStore(this@MainActivity),
                         scope = lifecycleScope,
-                        onSent = { id -> nativeController.select(id, force = true) }
+                        onSent = nativeController::onPromptAccepted
                     )
                 }
                 val nativeState by nativeController.state.collectAsState()

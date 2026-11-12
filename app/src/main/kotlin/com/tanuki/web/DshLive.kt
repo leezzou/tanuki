@@ -18,7 +18,8 @@ sealed interface DshLiveEvent {
     data class Streaming(val text: String) : DshLiveEvent
     data class Finished(val committed: Boolean) : DshLiveEvent
     data class Running(val running: Boolean) : DshLiveEvent
-    data class Failure(val message: String) : DshLiveEvent
+    /** terminal只用于连接/逻辑流不可继续，普通Agent业务错误不使follow失效。 */
+    data class Failure(val message: String, val terminal: Boolean = false) : DshLiveEvent
     /** 真实目标/待办事件增量；只含本次事件解析出的字段，空值不会清空已有状态。 */
     data class Coordination(val update: DshCoordination) : DshLiveEvent
 }

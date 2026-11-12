@@ -474,13 +474,16 @@ class DshNativeClient(
                                 }
                             }
                         }
-                        is DshMuxDownlink.Failure -> emit(DshLiveEvent.Failure(liveFailure(DshApiException(downlink.code))))
+                        is DshMuxDownlink.Failure -> {
+                            if (downlink.streamId == followId || downlink.streamId == eventsId) {
+                                throw DshApiException(downlink.code)
+                            }
+                        }
                         is DshMuxDownlink.Ended -> {
-                            if (downlink.streamId == followId) {
-                                emit(DshLiveEvent.Failure("实时消息流已结束，可点刷新重连"))
-                                emit(DshLiveEvent.Finished(false))
-                            } else {
-                                emit(DshLiveEvent.Failure("实时事件流已结束，审批请到官方界面处理"))
+                            // 任一必需逻辑流终止就退休整个Peer，不能继续把开放socket当健康follow。
+                            when (downlink.streamId) {
+                                followId -> throw IOException("实时消息流已结束，可重新发送或刷新恢复")
+                                eventsId -> throw IOException("实时事件流已结束，可重新发送或刷新恢复")
                             }
                         }
                         null -> Unit
@@ -494,7 +497,7 @@ class DshNativeClient(
                 if (generation == 0L || generation == muxGeneration) {
                     _connection.value = DshConnectionState.FAILED
                 }
-                emit(DshLiveEvent.Failure(liveFailure(error)))
+                emit(DshLiveEvent.Failure(liveFailure(error), terminal = true))
             } finally {
                 runCatching { socket?.close() }
                 synchronized(stateLock) {

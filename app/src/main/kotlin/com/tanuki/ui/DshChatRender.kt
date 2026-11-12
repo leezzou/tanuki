@@ -49,7 +49,7 @@ object DshChatRenderPolicy {
         native.running && (native.selectedId != composer.sessionId || (!composer.generationRunning && !composer.stopping))
 
     fun composerPlaceholder(running: Boolean): String =
-        if (running) "生成中 · 可直接插话" else "发消息，@ 引用，/ 命令"
+        if (running) "补充消息，发送后排队处理" else "发消息，@ 引用，/ 命令"
 
     /** 用量只能由已确认的分子/分母产生；缺值不能当成 0%。 */
     fun contextPercent(used: Long?, limit: Long?): String {

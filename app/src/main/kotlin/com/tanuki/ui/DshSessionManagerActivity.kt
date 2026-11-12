@@ -53,6 +53,7 @@ class DshSessionManagerActivity : ComponentActivity() {
         val requestedSession = intent?.getStringExtra(EXTRA_SESSION_ID)
         setContent {
             TanukiTheme {
+                TanukiSystemBars(window)
                 val snapshot by runtime.state.collectAsState()
                 val remoteUi by runtime.remoteHost.ui.collectAsState()
                 // 远程 DSH 由 SSH 隧道提供 origin 时本地服务可以已停止，仍应可用。
